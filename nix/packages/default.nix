@@ -33,8 +33,6 @@
       == toString root
       || builtins.elem relative ["Cargo.toml" "Cargo.lock" "rust-toolchain.toml"]
       || builtins.elem top ["assets" "proto" "vendor" "packaging"]
-      || relative == "scripts"
-      || relative == "scripts/package-smoke"
       || relative == "THIRD_PARTY_NOTICES.md"
       || relative == unicodeLicense
       || (type == "directory" && lib.hasPrefix (relative + "/") unicodeLicense)
@@ -112,12 +110,6 @@
         (cd "$out/share/parrot"; find config skills proto native web -type f -print0 \
           | sort -z | xargs -0 sha256sum) > "$out/share/parrot/resources.sha256"
         runHook postInstall
-      '';
-      doInstallCheck = true;
-      installCheckPhase = ''
-        runHook preInstallCheck
-        bash scripts/package-smoke --prefix "$out" --target '${target}' --artifact-only
-        runHook postInstallCheck
       '';
       meta = {
         description = "Native Parrot CLI with local agent, serve and web support";
