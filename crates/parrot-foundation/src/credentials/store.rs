@@ -10,15 +10,11 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{
-    Arc, Mutex, OnceLock, Weak,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 pub const MAX_STORE_BYTES: u64 = 16 << 20;
 const DIRECTORY_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
-static TEMP_ID: AtomicU64 = AtomicU64::new(0);
 static LOCKS: OnceLock<Mutex<BTreeMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
 
 type Lease = Arc<tokio::sync::OwnedMutexGuard<()>>;
@@ -104,13 +100,6 @@ where
     }
 }
 
-struct TemporaryFile(PathBuf);
-impl Drop for TemporaryFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
 #[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WritePhase {
@@ -126,7 +115,7 @@ struct PreparedWrite {
     #[cfg(test)]
     phase_hook: Option<WritePhaseHook>,
     file: Option<std::fs::File>,
-    temporary: TemporaryFile,
+    temporary: tempfile::TempPath,
     target: PathBuf,
     parent: PathBuf,
     output: Option<Vec<u8>>,
@@ -510,23 +499,12 @@ fn prepare_write(path: PathBuf, entries: OrderedEntries) -> Result<PreparedWrite
     if output.len() as u64 > MAX_STORE_BYTES {
         return Err(CredentialError::StoreTooLarge);
     }
-    let (temporary, file) = loop {
-        let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
-        let temporary = parent.join(format!(".credentials-{}-{id}.tmp", std::process::id()));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(FILE_MODE);
-        }
-        match options.open(&temporary) {
-            Ok(file) => break (temporary, file),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(_) => return Err(CredentialError::Malformed),
-        }
-    };
-    let cleanup = TemporaryFile(temporary);
+    let (file, temporary) = tempfile::Builder::new()
+        .prefix(".credentials-")
+        .suffix(".tmp")
+        .tempfile_in(&parent)
+        .map_err(|_| CredentialError::Malformed)?
+        .into_parts();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -537,7 +515,7 @@ fn prepare_write(path: PathBuf, entries: OrderedEntries) -> Result<PreparedWrite
         #[cfg(test)]
         phase_hook: None,
         file: Some(file),
-        temporary: cleanup,
+        temporary,
         target: path,
         parent,
         output: Some(output),
@@ -550,7 +528,10 @@ fn commit_write(mut prepared: PreparedWrite) -> Result<(), CredentialError> {
         hook(WritePhase::Commit);
     }
     drop(prepared.file.take());
-    fs::rename(&prepared.temporary.0, &prepared.target).map_err(|_| CredentialError::Malformed)?;
+    prepared
+        .temporary
+        .persist(&prepared.target)
+        .map_err(|_| CredentialError::Malformed)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -758,6 +739,7 @@ fn parse_entry(raw: &str) -> Result<Option<Credential>, CredentialError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct NeverCancelled;
@@ -1145,6 +1127,50 @@ mod tests {
         release.send(()).unwrap();
         assert_eq!(value(second.await).unwrap(), ["new", "original"]);
         assert_eq!(temporary_count(&path), 0);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn prepared_temporary_is_private_same_directory_and_removed_on_drop() {
+        let path = path();
+        let prepared = prepare_write(path.clone(), OrderedEntries::default()).unwrap();
+        let temporary = prepared.temporary.to_path_buf();
+        assert_eq!(temporary.parent(), path.parent());
+        assert_eq!(temporary_count(&path), 1);
+        assert!(!path.exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&temporary).unwrap().permissions().mode() & 0o777,
+                FILE_MODE
+            );
+            assert_eq!(
+                fs::metadata(path.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                DIRECTORY_MODE
+            );
+        }
+        drop(prepared);
+        assert!(!temporary.exists());
+        assert_eq!(temporary_count(&path), 0);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn failed_commit_cleans_temporary_and_preserves_target() {
+        let path = path();
+        let prepared = prepare_write(path.clone(), OrderedEntries::default()).unwrap();
+        let temporary = prepared.temporary.to_path_buf();
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("sentinel"), b"unchanged").unwrap();
+        assert_eq!(commit_write(prepared), Err(CredentialError::Malformed));
+        assert!(!temporary.exists());
+        assert_eq!(temporary_count(&path), 0);
+        assert_eq!(fs::read(path.join("sentinel")).unwrap(), b"unchanged");
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
