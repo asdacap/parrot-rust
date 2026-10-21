@@ -1,0 +1,1 @@
+{"data":[{"id":"moonshot-v1-128k","display_name":"Moonshot v1 128K","context_length":131072,"supports_reasoning":false,"think_efforts":{"support":true,"valid_efforts":["low","medium","high"],"default_effort":"high"}},{"id":"moonshot-v1","context_length":-1,"supports_reasoning":true,"think_efforts":{"support":false,"valid_efforts":[]}}]}

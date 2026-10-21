@@ -1,0 +1,42 @@
+[
+  {
+    "id": "uri-whitespace-0",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://host \"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-whitespace-1",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \" https://host\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-whitespace-2",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"\\thttps://host\\n\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-whitespace-3",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://host/path \"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-whitespace-4",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://bad\\thost/\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  }
+]

@@ -1,0 +1,491 @@
+[
+  {
+    "id": "terminal.layout.word.677bbef68cb8",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "hello world",
+      "width": 7,
+      "source_assertion": "hello|world"
+    },
+    "expected": [
+      "hello",
+      "world"
+    ]
+  },
+  {
+    "id": "terminal.layout.word.5445ca258c6d",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "alpha beta gamma",
+      "width": 11,
+      "source_assertion": "alpha beta|gamma"
+    },
+    "expected": [
+      "alpha beta",
+      "gamma"
+    ]
+  },
+  {
+    "id": "terminal.layout.word.1de98e84129a",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "  lead",
+      "width": 10,
+      "source_assertion": "  lead"
+    },
+    "expected": [
+      "  lead"
+    ]
+  },
+  {
+    "id": "terminal.layout.word.a4d5775dcc48",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "one\ntwo",
+      "width": 80,
+      "source_assertion": "one|two"
+    },
+    "expected": [
+      "one",
+      "two"
+    ]
+  },
+  {
+    "id": "terminal.layout.word.9898fb632c9f",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "ab\ncd",
+      "width": 3,
+      "source_assertion": "ab|cd"
+    },
+    "expected": [
+      "ab",
+      "cd"
+    ]
+  },
+  {
+    "id": "terminal.layout.word.2063991d7380",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "ab cd",
+      "width": 5,
+      "source_assertion": "ab cd"
+    },
+    "expected": [
+      "ab cd"
+    ]
+  },
+  {
+    "id": "terminal.layout.word.3dc019a52906",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "ab cde",
+      "width": 5,
+      "source_assertion": "ab|cde"
+    },
+    "expected": [
+      "ab",
+      "cde"
+    ]
+  },
+  {
+    "id": "terminal.layout.grapheme.582e9f87df67",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "日本語 alpha",
+      "width": 7,
+      "source_assertion": "日本語|alpha"
+    },
+    "expected": [
+      "日本語",
+      "alpha"
+    ]
+  },
+  {
+    "id": "terminal.layout.grapheme.96919b058a6e",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "界界界",
+      "width": 5,
+      "source_assertion": "界界|界"
+    },
+    "expected": [
+      "界界",
+      "界"
+    ]
+  },
+  {
+    "id": "terminal.layout.grapheme.ac2e0711a568",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "a👨‍👩‍👧‍👦b",
+      "width": 3,
+      "source_assertion": "a👨‍👩‍👧‍👦|b"
+    },
+    "expected": [
+      "a👨‍👩‍👧‍👦",
+      "b"
+    ]
+  },
+  {
+    "id": "terminal.layout.grapheme.a36679a9b6dc",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "éx",
+      "width": 1,
+      "source_assertion": "é|x"
+    },
+    "expected": [
+      "é",
+      "x"
+    ]
+  },
+  {
+    "id": "terminal.unicode-category.113ce",
+    "api": "System.Text.Rune.GetUnicodeCategory+TerminalText.Width",
+    "input": {
+      "codepoint": "113CE",
+      "category": "NonSpacingMark",
+      "text": "𑏎x"
+    },
+    "expected": {
+      "category": "NonSpacingMark",
+      "cell_width": 1
+    }
+  },
+  {
+    "id": "terminal.unicode-category.113d0",
+    "api": "System.Text.Rune.GetUnicodeCategory+TerminalText.Width",
+    "input": {
+      "codepoint": "113D0",
+      "category": "NonSpacingMark",
+      "text": "𑏐x"
+    },
+    "expected": {
+      "category": "NonSpacingMark",
+      "cell_width": 1
+    }
+  },
+  {
+    "id": "terminal.unicode-category.1612f",
+    "api": "System.Text.Rune.GetUnicodeCategory+TerminalText.Width",
+    "input": {
+      "codepoint": "1612F",
+      "category": "NonSpacingMark",
+      "text": "𖄯x"
+    },
+    "expected": {
+      "category": "NonSpacingMark",
+      "cell_width": 1
+    }
+  },
+  {
+    "id": "terminal.unicode-category.1e5ee",
+    "api": "System.Text.Rune.GetUnicodeCategory+TerminalText.Width",
+    "input": {
+      "codepoint": "1E5EE",
+      "category": "NonSpacingMark",
+      "text": "𞗮x"
+    },
+    "expected": {
+      "category": "NonSpacingMark",
+      "cell_width": 1
+    }
+  },
+  {
+    "id": "terminal.unicode-category.1e5ef",
+    "api": "System.Text.Rune.GetUnicodeCategory+TerminalText.Width",
+    "input": {
+      "codepoint": "1E5EF",
+      "category": "NonSpacingMark",
+      "text": "𞗯x"
+    },
+    "expected": {
+      "category": "NonSpacingMark",
+      "cell_width": 1
+    }
+  },
+  {
+    "id": "terminal.layout.hard-break",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWords",
+    "input": {
+      "value": "abcdefgh; ab supercalifrag",
+      "widths": [
+        3,
+        5
+      ]
+    },
+    "expected": {
+      "hard": [
+        "abc",
+        "def",
+        "gh"
+      ],
+      "mixed": [
+        "ab su",
+        "perca",
+        "lifra",
+        "g"
+      ]
+    }
+  },
+  {
+    "id": "terminal.layout.hanging.453a2c97e2ad",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWordsHanging",
+    "input": {
+      "value": "alpha beta gamma",
+      "width": 11,
+      "indent": "  "
+    },
+    "expected": [
+      "alpha beta",
+      "  gamma"
+    ]
+  },
+  {
+    "id": "terminal.layout.hanging.edd2468d1440",
+    "api": "Parrot.Cli.Enhanced.TerminalText.LayoutWordsHanging",
+    "input": {
+      "value": "ab supercalifrag",
+      "width": 5,
+      "indent": "  "
+    },
+    "expected": [
+      "ab su",
+      "  per",
+      "  cal",
+      "  ifr",
+      "  ag"
+    ]
+  },
+  {
+    "id": "terminal.layout.cells",
+    "api": "Parrot.Cli.Enhanced.TerminalText.Layout",
+    "input": {
+      "value": "abcdef",
+      "width": 3
+    },
+    "expected": [
+      "abc",
+      "def"
+    ]
+  },
+  {
+    "id": "terminal.layout.sanitize",
+    "api": "Parrot.Cli.Enhanced.TerminalText.Sanitize",
+    "input": {
+      "input": "a\\tb\\u001b[2J\\u0007c",
+      "line": "a\\nb"
+    },
+    "expected": {
+      "sanitized": "a    b[2Jc",
+      "line": "a b"
+    }
+  },
+  {
+    "id": "markdown.blocks-inline",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "- ",
+      "source": "# Heading\n> quoted\n- item\n- [x] done\n1. ordered\n**bold** *italic* ~~gone~~ `code` [site](https://example.com)\n---",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "- Heading",
+      "  │ quoted",
+      "  • item",
+      "  • ☑ done",
+      "  1. ordered",
+      "  bold italic gone code site (https://example.com)",
+      "  ──────────────────────────────────────────────────────────────────────────────"
+    ]
+  },
+  {
+    "id": "markdown.blank.01ba4719c80b",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "● ",
+      "source": "\n",
+      "columns": 80,
+      "color": false
+    },
+    "expected": {
+      "blank": [],
+      "leading": [
+        "● def"
+      ]
+    }
+  },
+  {
+    "id": "markdown.blank.8855c6119660",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "● ",
+      "source": "  \n",
+      "columns": 80,
+      "color": false
+    },
+    "expected": {
+      "blank": [],
+      "leading": [
+        "● def"
+      ]
+    }
+  },
+  {
+    "id": "markdown.blank.7eb70257593d",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "● ",
+      "source": "\r\n",
+      "columns": 80,
+      "color": false
+    },
+    "expected": {
+      "blank": [],
+      "leading": [
+        "● def"
+      ]
+    }
+  },
+  {
+    "id": "markdown.table-fence",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "| Name | Status |\n| --- | --- |\n| Build | Done |\n\n```csharp\npublic var value = 42;\n```",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "┌───────┬────────┐",
+      "│ Name  │ Status │",
+      "├───────┼────────┤",
+      "│ Build │ Done   │",
+      "└───────┴────────┘",
+      "",
+      "public var value = 42;"
+    ]
+  },
+  {
+    "id": "markdown.ansi-no-color",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "- ",
+      "source": "# Heading\n```csharp\npublic string Value() => \"ok\"; // note\n```",
+      "columns": 80,
+      "color": true
+    },
+    "expected": {
+      "colored": [
+        "\u001b[38;5;195m- \u001b[0m\u001b[1;36mHeading\u001b[0m",
+        "\u001b[38;5;195m  \u001b[0m\u001b[1;35mpublic\u001b[0m\u001b[38;5;195m \u001b[0m\u001b[1;35mstring\u001b[0m\u001b[38;5;195m \u001b[0m\u001b[36mValue\u001b[0m\u001b[38;5;195m() \u001b[0m\u001b[36m=>\u001b[0m\u001b[38;5;195m \u001b[0m\u001b[32m\"ok\"\u001b[0m\u001b[38;5;195m; \u001b[0m\u001b[2;3;90m// note\u001b[0m"
+      ],
+      "plain": [
+        "- Heading",
+        "  public string Value() => \"ok\"; // note"
+      ]
+    }
+  },
+  {
+    "id": "markdown.sanitize-control",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "**safe\u001b[2J**",
+      "columns": 80,
+      "color": true
+    },
+    "expected": [
+      "\u001b[1;38;5;195msafe[2J\u001b[0m"
+    ]
+  },
+  {
+    "id": "markdown.live.promote-commit",
+    "api": "Parrot.Cli.Enhanced.MarkdownLiveRenderer.Append+Commit",
+    "input": {
+      "first": "# Head",
+      "second": "ing\\n**bold**",
+      "prefix": "- ",
+      "width": 80
+    },
+    "expected": {
+      "first_scrollback": null,
+      "first_preview": [
+        "# Head"
+      ],
+      "promoted_scrollback": [
+        "- Heading"
+      ],
+      "promotion_preview": [
+        "**bold**"
+      ],
+      "committed": [
+        "  bold"
+      ]
+    }
+  },
+  {
+    "id": "markdown.live.fence",
+    "api": "Parrot.Cli.Enhanced.MarkdownLiveRenderer.Append",
+    "input": {
+      "opening": "```csharp\\npublic var value = 1;\\n",
+      "closing": "```\\n"
+    },
+    "expected": {
+      "open_scrollback": null,
+      "open_preview": [
+        "```csharp\npublic var value = 1;\n"
+      ],
+      "close_scrollback": [
+        "public var value = 1;"
+      ],
+      "close_preview": []
+    }
+  },
+  {
+    "id": "markdown.live.table",
+    "api": "Parrot.Cli.Enhanced.MarkdownLiveRenderer.Append",
+    "input": {
+      "opening": "A | B\\n--- | ---\\nx | y\\n",
+      "boundary": "after\\n"
+    },
+    "expected": {
+      "open_scrollback": null,
+      "open_preview": [
+        "A | B\n--- | ---\nx | y\n"
+      ],
+      "boundary_scrollback": [
+        "┌───┬───┐",
+        "│ A │ B │",
+        "├───┼───┤",
+        "│ x │ y │",
+        "└───┴───┘"
+      ],
+      "boundary_preview": [
+        "after\n"
+      ]
+    }
+  },
+  {
+    "id": "markdown.live.leading-blank",
+    "api": "Parrot.Cli.Enhanced.MarkdownLiveRenderer.Append+Commit",
+    "input": {
+      "first": "\\n",
+      "second": "hello",
+      "prefix": "● "
+    },
+    "expected": {
+      "first_scrollback": null,
+      "first_preview": [],
+      "second_scrollback": null,
+      "second_preview": [
+        "hello"
+      ],
+      "committed": [
+        "● hello"
+      ]
+    }
+  }
+]

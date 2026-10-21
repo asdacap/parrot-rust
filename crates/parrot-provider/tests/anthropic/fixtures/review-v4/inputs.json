@@ -1,0 +1,996 @@
+{
+  "cases": [
+    {
+      "case_id": "supplemental.review-v4.invalid-root-key.after",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"visible\"},\"\\ud800\":\"ignored\"}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-block-key.after",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"visible\",\"\\ud800\":\"ignored\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-usage-key.after",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"input_tokens\":2,\"\\ud800\":1}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-root-key.before",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"\\ud800\":\"ignored\",\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"visible\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-block-key.before",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"\\ud800\":\"ignored\",\"type\":\"text\",\"text\":\"visible\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-usage-key.before",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"\\ud800\":1,\"input_tokens\":2}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-tool-input.parse.whole",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":\"\\ud800\"}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-tool-input.parse.one-byte",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":\"\\ud800\"}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [
+          1
+        ],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-tool-input.parse.adversarial",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":\"\\ud800\"}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [
+          1,
+          7,
+          2,
+          11
+        ],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-tool-input.call.whole",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":\"\\ud800\"}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-tool-input.call.one-byte",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":\"\\ud800\"}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [
+          1
+        ],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.invalid-tool-input.call.adversarial",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":\"\\ud800\"}}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [
+          1,
+          7,
+          2,
+          11
+        ],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.ordinary-tool-invalid-string",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "Assistant",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "fallback",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [
+                {
+                  "id": "a",
+                  "name": "t",
+                  "arguments_json": "{\"x\":\"\\ud800\"}"
+                }
+              ],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.signed-replay-invalid-tool-string",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "Assistant",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "fallback",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "custom",
+                "content": "[{\"type\":\"thinking\",\"thinking\":\"plan\",\"signature\":\"sig\"},{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":\"\\ud800\"}}]"
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.typed-duplicate-invalid-first",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "Assistant",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "fallback",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "custom",
+                "content": "[{\"type\":\"thinking\",\"signature\":42,\"signature\":\"sig\",\"thinking\":\"plan\"}]"
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.typed-duplicate-invalid-last",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "Assistant",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "fallback",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "custom",
+                "content": "[{\"type\":\"thinking\",\"signature\":\"sig\",\"signature\":42,\"thinking\":\"plan\"}]"
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.typed-duplicate-valid-last-wins",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "Assistant",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "fallback",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "custom",
+                "content": "[{\"type\":\"thinking\",\"signature\":\"old\",\"signature\":\"sig\",\"thinking\":\"old-plan\",\"thinking\":\"plan\"}]"
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.review-v4.opaque-input-duplicates",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "Assistant",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "fallback",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "custom",
+                "content": "[{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"t\",\"input\":{\"x\":1,\"x\":2}}]"
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,1694 @@
+{
+  "schema_version": 2,
+  "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+  "canonical_map_sha256": "8f142220f6bac7aac701c6cd0acf71245762dc8f106bcfae1ceee9dd423597d2",
+  "scenarios": [
+    {
+      "case_id": "default-http",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Websocket_is_disabled_by_default(System.Threading.CancellationToken).1.1.0",
+          "display_name": "Websocket_is_disabled_by_default",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Websocket_is_disabled_by_default@651"
+        }
+      ],
+      "assertion_scope": "Actual OpenSession default options select HTTP for both calls; synthetic HTTP turn-state capture is supplemental.",
+      "outcomes": [],
+      "http_turn_states": [
+        "http-state",
+        "ignored-later"
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "one"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "two"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "optin-websocket",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Configured_header_timeout_reaches_websocket_connector(System.Int32, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Configured_header_timeout_reaches_websocket_connector(1250)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Configured_header_timeout_reaches_websocket_connector@81"
+        }
+      ],
+      "assertion_scope": "Opt-in actual OpenSession chooses WebSocket; configured header timeout 1250ms reaches connector. Only canonical argument1250 is claimed.",
+      "disable_websocket": false,
+      "header_timeout_ms": 1250,
+      "outcomes": [
+        {
+          "socket_id": "optin",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "verified-suffix",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Compatible_calls_reuse_the_socket_and_send_only_the_verified_suffix(System.Threading.CancellationToken).1.1.0",
+          "display_name": "Compatible_calls_reuse_the_socket_and_send_only_the_verified_suffix",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Compatible_calls_reuse_the_socket_and_send_only_the_verified_suffix@274"
+        }
+      ],
+      "assertion_scope": "Actual same-socket lineage and strict verified suffix: initial input plus completed output are supplied in full next history.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "reuse",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "same-no-growth-and-mismatch",
+      "canonical_source_cases": [],
+      "assertion_scope": "Supplemental strict greater-than-prefix condition: identical initial, exact completed history with no new suffix, and divergent prefix all send full input.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "prefix",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-3\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-4\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "different",
+            "assistant:answer",
+            "next"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "settings-change",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Changed_non_input_properties_send_a_full_request(System.String, System.String, System.Int32, System.Threading.CancellationToken).1.1.0",
+          "display_name": "Changed_non_input_properties_send_a_full_request(changed-model, same, 1)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Changed_non_input_properties_send_a_full_request@524"
+        },
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Changed_non_input_properties_send_a_full_request(System.String, System.String, System.Int32, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Changed_non_input_properties_send_a_full_request(model, changed, 1)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Changed_non_input_properties_send_a_full_request@524"
+        },
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Changed_non_input_properties_send_a_full_request(System.String, System.String, System.Int32, System.Threading.CancellationToken).3.1.0",
+          "display_name": "Changed_non_input_properties_send_a_full_request(model, same, 2)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Changed_non_input_properties_send_a_full_request@524"
+        }
+      ],
+      "assertion_scope": "Same socket, model/instructions/max-output-token changes each invalidate incremental settings. Synthetic sequential variant of the three canonical rows.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "settings",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-3\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-4\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-6\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "instructions": "same",
+          "max_tokens": 1
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ],
+          "model": "changed-model",
+          "instructions": "same",
+          "max_tokens": 1
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "instructions": "same",
+          "max_tokens": 1
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ],
+          "instructions": "changed",
+          "max_tokens": 1
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "instructions": "same",
+          "max_tokens": 1
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ],
+          "instructions": "same",
+          "max_tokens": 2
+        }
+      ]
+    },
+    {
+      "case_id": "begin-turn-reset",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.New_turn_replaces_idle_socket_and_lineage_but_preserves_reuse_within_turn(System.String, System.Threading.CancellationToken).1.1.0",
+          "display_name": "New_turn_replaces_idle_socket_and_lineage_but_preserves_reuse_within_turn()",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.New_turn_replaces_idle_socket_and_lineage_but_preserves_reuse_within_turn@318"
+        },
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.New_turn_replaces_idle_socket_and_lineage_but_preserves_reuse_within_turn(System.String, System.Threading.CancellationToken).2.1.0",
+          "display_name": "New_turn_replaces_idle_socket_and_lineage_but_preserves_reuse_within_turn(new-upgrade-state)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.New_turn_replaces_idle_socket_and_lineage_but_preserves_reuse_within_turn@318"
+        }
+      ],
+      "assertion_scope": "Two BeginTurn calls are lazy/idempotent before next call; fresh socket/lineage; empty then nonempty new upgrade state; within-turn reuse.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "turn-one",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {
+            "X-Codex-Turn-State": "upgrade-state"
+          }
+        },
+        {
+          "socket_id": "turn-two",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-3\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-4\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {
+            "X-Codex-Turn-State": ""
+          }
+        },
+        {
+          "socket_id": "turn-three",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {
+            "X-Codex-Turn-State": "new-upgrade-state"
+          }
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        },
+        {
+          "action": "begin_turn"
+        },
+        {
+          "action": "begin_turn"
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next",
+            "assistant:answer",
+            "third"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next",
+            "assistant:answer",
+            "third",
+            "assistant:answer",
+            "fourth"
+          ]
+        },
+        {
+          "action": "begin_turn"
+        },
+        {
+          "action": "call",
+          "messages": [
+            "new-turn"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "stale-59-60",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Socket_idle_past_reuse_limit_is_replaced_with_a_full_request_without_retry(System.Int32, System.Boolean, System.Threading.CancellationToken).1.1.0",
+          "display_name": "Socket_idle_past_reuse_limit_is_replaced_with_a_full_request_without_retry(59, False)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Socket_idle_past_reuse_limit_is_replaced_with_a_full_request_without_retry@432"
+        },
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Socket_idle_past_reuse_limit_is_replaced_with_a_full_request_without_retry(System.Int32, System.Boolean, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Socket_idle_past_reuse_limit_is_replaced_with_a_full_request_without_retry(60, True)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Socket_idle_past_reuse_limit_is_replaced_with_a_full_request_without_retry@432"
+        }
+      ],
+      "assertion_scope": "Fake TimeProvider: advance59 seconds reuses; then advance60 seconds from last successful exchange reconnects full without Retry.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "age-one",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "age-two",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-3\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "advance_seconds",
+          "seconds": 59
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        },
+        {
+          "action": "advance_seconds",
+          "seconds": 60
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next",
+            "assistant:answer",
+            "third"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "turn-state-write-once",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Turn_state_from_metadata_is_case_insensitive_and_write_once(System.Threading.CancellationToken).1.1.0",
+          "display_name": "Turn_state_from_metadata_is_case_insensitive_and_write_once",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Turn_state_from_metadata_is_case_insensitive_and_write_once@477"
+        }
+      ],
+      "assertion_scope": "Upgrade header beats metadata; BeginTurn clears; first nonempty case-insensitive metadata wins over later metadata on fresh socket.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "header-wins",
+          "messages": [
+            "{\"type\":\"response.metadata\",\"headers\":{\"X-Codex-Turn-State\":\"metadata-loses\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {
+            "X-Codex-Turn-State": "upgrade-state"
+          }
+        },
+        {
+          "socket_id": "metadata-wins",
+          "messages": [
+            "{\"type\":\"response.metadata\",\"headers\":{\"X-Codex-Turn-State\":\"metadata-state\"}}",
+            "{\"type\":\"response.metadata\",\"headers\":{\"x-codex-turn-state\":\"later-state\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-3\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-4\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        },
+        {
+          "action": "begin_turn"
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "recover-previous_response_not_found",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Named_v2_errors_retry_once_on_a_fresh_socket_with_a_full_request(System.String, System.Threading.CancellationToken).1.1.0",
+          "display_name": "Named_v2_errors_retry_once_on_a_fresh_socket_with_a_full_request(previous_response_not_found)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Named_v2_errors_retry_once_on_a_fresh_socket_with_a_full_request@577"
+        }
+      ],
+      "assertion_scope": "Named recovery once, no visible output: first seed lineage; failing incremental request then fresh full replay with Retry1/zero delay.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "failed",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"error\",\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"scripted session error\"}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "recovered",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "recover-websocket_connection_limit_reached",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Named_v2_errors_retry_once_on_a_fresh_socket_with_a_full_request(System.String, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Named_v2_errors_retry_once_on_a_fresh_socket_with_a_full_request(websocket_connection_limit_reached)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Named_v2_errors_retry_once_on_a_fresh_socket_with_a_full_request@577"
+        }
+      ],
+      "assertion_scope": "Named recovery once, no visible output: first seed lineage; failing incremental request then fresh full replay with Retry1/zero delay.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "failed",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"error\",\"error\":{\"code\":\"websocket_connection_limit_reached\",\"message\":\"scripted session error\"}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "recovered",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "second-named-error-throws",
+      "canonical_source_cases": [],
+      "assertion_scope": "Supplemental: repeated named error after the single local recovery is thrown, not retried again; no HTTP selection before visible output.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "first-error",
+          "messages": [
+            "{\"type\":\"error\",\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"scripted session error\"}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "second-error",
+          "messages": [
+            "{\"type\":\"error\",\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"scripted session error\"}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "next-call",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-3\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "later"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "unsupported-upgrade-sticky",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Unsupported_upgrade_falls_back_to_http_and_is_sticky(System.Int32, System.Threading.CancellationToken).1.1.0",
+          "display_name": "Unsupported_upgrade_falls_back_to_http_and_is_sticky(404)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Unsupported_upgrade_falls_back_to_http_and_is_sticky@617"
+        },
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Unsupported_upgrade_falls_back_to_http_and_is_sticky(System.Int32, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Unsupported_upgrade_falls_back_to_http_and_is_sticky(405)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Unsupported_upgrade_falls_back_to_http_and_is_sticky@617"
+        },
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Unsupported_upgrade_falls_back_to_http_and_is_sticky(System.Int32, System.Threading.CancellationToken).3.1.0",
+          "display_name": "Unsupported_upgrade_falls_back_to_http_and_is_sticky(426)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Unsupported_upgrade_falls_back_to_http_and_is_sticky@617"
+        }
+      ],
+      "assertion_scope": "404/405/426 actual local fallback each emits one Retry and uses HTTP thereafter, including BeginTurn.",
+      "variants": [
+        {
+          "variant_id": "status-404",
+          "disable_websocket": false,
+          "outcomes": [
+            {
+              "upgrade_status": 404
+            }
+          ],
+          "actions": [
+            {
+              "action": "call",
+              "messages": [
+                "one"
+              ]
+            },
+            {
+              "action": "begin_turn"
+            },
+            {
+              "action": "call",
+              "messages": [
+                "two"
+              ]
+            }
+          ]
+        },
+        {
+          "variant_id": "status-405",
+          "disable_websocket": false,
+          "outcomes": [
+            {
+              "upgrade_status": 405
+            }
+          ],
+          "actions": [
+            {
+              "action": "call",
+              "messages": [
+                "one"
+              ]
+            },
+            {
+              "action": "begin_turn"
+            },
+            {
+              "action": "call",
+              "messages": [
+                "two"
+              ]
+            }
+          ]
+        },
+        {
+          "variant_id": "status-426",
+          "disable_websocket": false,
+          "outcomes": [
+            {
+              "upgrade_status": 426
+            }
+          ],
+          "actions": [
+            {
+              "action": "call",
+              "messages": [
+                "one"
+              ]
+            },
+            {
+              "action": "begin_turn"
+            },
+            {
+              "action": "call",
+              "messages": [
+                "two"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "oversized-websocket-local-http",
+      "canonical_source_cases": [],
+      "assertion_scope": "Supplemental actual >16MiB WS body rejection invokes immediate local HTTP fallback with no WS Send; subsequent calls stay HTTP. Selected actual HTTP JSON plus hashes avoid copying huge prompt into output.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "oversized",
+          "messages": [],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "message_text_bytes": 16777216
+        },
+        {
+          "action": "call",
+          "messages": [
+            "after-large"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "visible-failure-later-http",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.A_failure_after_visible_output_is_not_replayed_and_later_calls_use_http(System.Threading.CancellationToken).1.1.0",
+          "display_name": "A_failure_after_visible_output_is_not_replayed_and_later_calls_use_http",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.A_failure_after_visible_output_is_not_replayed_and_later_calls_use_http@859"
+        }
+      ],
+      "assertion_scope": "Only direct OpenAICompatibleProviderSession behavior: TextDelta then error throws without immediate HTTP replay; later call HTTP. No RetryingProvider budget claims.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "visible-failure",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}",
+            "{\"type\":\"error\",\"error\":{\"code\":\"broken\",\"message\":\"scripted session error\"}}"
+          ],
+          "headers": {
+            "X-Codex-Turn-State": "ws-state"
+          }
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "one"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "two"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "visible-cancellation-next-websocket",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Cancellation_after_visible_output_keeps_websocket_enabled_for_the_next_call(System.Threading.CancellationToken).1.1.0",
+          "display_name": "Cancellation_after_visible_output_keeps_websocket_enabled_for_the_next_call",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Cancellation_after_visible_output_keeps_websocket_enabled_for_the_next_call@789"
+        }
+      ],
+      "assertion_scope": "Cancel supplied token immediately after observed TextDelta; socket poisoned, no HTTP-only selection, next call fresh full WS.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "cancelled",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "after-cancel",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "one"
+          ],
+          "cancel_after_events": 1
+        },
+        {
+          "action": "call",
+          "messages": [
+            "two"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "abandonment-next-websocket",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Abandoned_response_is_poisoned_before_the_next_call(System.Threading.CancellationToken).1.1.0",
+          "display_name": "Abandoned_response_is_poisoned_before_the_next_call",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Abandoned_response_is_poisoned_before_the_next_call@752"
+        }
+      ],
+      "assertion_scope": "Dispose enumerator after actual TextDelta; unfinished socket poisoned and terminal unread; next call fresh WS.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "abandoned",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "after-abandon",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "one"
+          ],
+          "stop_after_events": 1
+        },
+        {
+          "action": "call",
+          "messages": [
+            "two"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "http-fallback-turn-state",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Http_fallback_sends_and_captures_turn_state_header(System.Threading.CancellationToken).1.1.0",
+          "display_name": "Http_fallback_sends_and_captures_turn_state_header",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Http_fallback_sends_and_captures_turn_state_header@677"
+        }
+      ],
+      "assertion_scope": "Unsupported upgrade selects HTTP; actual HTTP response header capture reaches next call; first nonempty write-once then BeginTurn clears.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "upgrade_status": 404
+        }
+      ],
+      "http_turn_states": [
+        "http-state",
+        "later-http-state",
+        "new-http-state"
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "one"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "two"
+          ]
+        },
+        {
+          "action": "begin_turn"
+        },
+        {
+          "action": "call",
+          "messages": [
+            "three"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "native-history-incremental",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Native_reasoning_preserves_incremental_and_full_transport_history(System.String, System.Threading.CancellationToken).1.1.0",
+          "display_name": "Native_reasoning_preserves_incremental_and_full_transport_history(incremental)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Native_reasoning_preserves_incremental_and_full_transport_history@901"
+        }
+      ],
+      "assertion_scope": "Exact upstream native input events and actual Completed outcome replay. Owned assertions: encrypted event count, ProviderContent identity/text, incremental suffix or full native item preservation, transport counts and local Retry. No outer retry budgets.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "native",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-native\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"},{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]},{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "replacement",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "append_previous_completion": true,
+          "tail_messages": [
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "text": "result"
+            },
+            {
+              "role": "user",
+              "text": "next"
+            }
+          ],
+          "model": "model"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            961,
+            963
+          ],
+          [
+            977,
+            1010
+          ]
+        ],
+        "scope": "All listed assertions in the direct actual session; incremental assertions982-986 apply incremental/recovery/partial-native; full-history assertions999-1004 apply reconnect/recovery/fallback/model-change."
+      }
+    },
+    {
+      "case_id": "native-history-partial-native",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Native_reasoning_preserves_incremental_and_full_transport_history(System.String, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Native_reasoning_preserves_incremental_and_full_transport_history(partial-native)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Native_reasoning_preserves_incremental_and_full_transport_history@901"
+        }
+      ],
+      "assertion_scope": "Exact upstream native input events and actual Completed outcome replay. Owned assertions: encrypted event count, ProviderContent identity/text, incremental suffix or full native item preservation, transport counts and local Retry. No outer retry budgets.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "native",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"}}",
+            "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\"}}",
+            "{\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_1\",\"call_id\":\"call_1\",\"arguments\":\"{}\"}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-native\",\"output\":[]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "replacement",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "append_previous_completion": true,
+          "tail_messages": [
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "text": "result"
+            },
+            {
+              "role": "user",
+              "text": "next"
+            }
+          ],
+          "model": "model"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            961,
+            963
+          ],
+          [
+            977,
+            1010
+          ]
+        ],
+        "scope": "All listed assertions in the direct actual session; incremental assertions982-986 apply incremental/recovery/partial-native; full-history assertions999-1004 apply reconnect/recovery/fallback/model-change."
+      }
+    },
+    {
+      "case_id": "native-history-reconnect",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Native_reasoning_preserves_incremental_and_full_transport_history(System.String, System.Threading.CancellationToken).3.1.0",
+          "display_name": "Native_reasoning_preserves_incremental_and_full_transport_history(reconnect)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Native_reasoning_preserves_incremental_and_full_transport_history@901"
+        }
+      ],
+      "assertion_scope": "Exact upstream native input events and actual Completed outcome replay. Owned assertions: encrypted event count, ProviderContent identity/text, incremental suffix or full native item preservation, transport counts and local Retry. No outer retry budgets.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "native",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-native\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"},{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]},{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "replacement",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "begin_turn"
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "append_previous_completion": true,
+          "tail_messages": [
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "text": "result"
+            },
+            {
+              "role": "user",
+              "text": "next"
+            }
+          ],
+          "model": "model"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            961,
+            963
+          ],
+          [
+            977,
+            1010
+          ]
+        ],
+        "scope": "All listed assertions in the direct actual session; incremental assertions982-986 apply incremental/recovery/partial-native; full-history assertions999-1004 apply reconnect/recovery/fallback/model-change."
+      }
+    },
+    {
+      "case_id": "native-history-recovery",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Native_reasoning_preserves_incremental_and_full_transport_history(System.String, System.Threading.CancellationToken).4.1.0",
+          "display_name": "Native_reasoning_preserves_incremental_and_full_transport_history(recovery)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Native_reasoning_preserves_incremental_and_full_transport_history@901"
+        }
+      ],
+      "assertion_scope": "Exact upstream native input events and actual Completed outcome replay. Owned assertions: encrypted event count, ProviderContent identity/text, incremental suffix or full native item preservation, transport counts and local Retry. No outer retry budgets.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "native",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-native\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"},{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]},{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}]}}",
+            "{\"type\":\"error\",\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"unavailable\"}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "replacement",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "append_previous_completion": true,
+          "tail_messages": [
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "text": "result"
+            },
+            {
+              "role": "user",
+              "text": "next"
+            }
+          ],
+          "model": "model"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            961,
+            963
+          ],
+          [
+            977,
+            1010
+          ]
+        ],
+        "scope": "All listed assertions in the direct actual session; incremental assertions982-986 apply incremental/recovery/partial-native; full-history assertions999-1004 apply reconnect/recovery/fallback/model-change."
+      }
+    },
+    {
+      "case_id": "native-history-fallback",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Native_reasoning_preserves_incremental_and_full_transport_history(System.String, System.Threading.CancellationToken).5.1.0",
+          "display_name": "Native_reasoning_preserves_incremental_and_full_transport_history(fallback)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Native_reasoning_preserves_incremental_and_full_transport_history@901"
+        }
+      ],
+      "assertion_scope": "Exact upstream native input events and actual Completed outcome replay. Owned assertions: encrypted event count, ProviderContent identity/text, incremental suffix or full native item preservation, transport counts and local Retry. No outer retry budgets.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "native",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-native\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"},{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]},{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        },
+        {
+          "upgrade_status": 426
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "begin_turn"
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "append_previous_completion": true,
+          "tail_messages": [
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "text": "result"
+            },
+            {
+              "role": "user",
+              "text": "next"
+            }
+          ],
+          "model": "model"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            961,
+            963
+          ],
+          [
+            977,
+            1010
+          ]
+        ],
+        "scope": "All listed assertions in the direct actual session; incremental assertions982-986 apply incremental/recovery/partial-native; full-history assertions999-1004 apply reconnect/recovery/fallback/model-change."
+      }
+    },
+    {
+      "case_id": "native-history-model-change",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Native_reasoning_preserves_incremental_and_full_transport_history(System.String, System.Threading.CancellationToken).6.1.0",
+          "display_name": "Native_reasoning_preserves_incremental_and_full_transport_history(model-change)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Native_reasoning_preserves_incremental_and_full_transport_history@901"
+        }
+      ],
+      "assertion_scope": "Exact upstream native input events and actual Completed outcome replay. Owned assertions: encrypted event count, ProviderContent identity/text, incremental suffix or full native item preservation, transport counts and local Retry. No outer retry budgets.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "native",
+          "messages": [
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]}}",
+            "{\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-native\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary\"}],\"encrypted_content\":\"opaque-reasoning\"},{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[]}]},{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        },
+        {
+          "socket_id": "replacement",
+          "messages": [
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "append_previous_completion": true,
+          "tail_messages": [
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "text": "result"
+            },
+            {
+              "role": "user",
+              "text": "next"
+            }
+          ],
+          "model": "other-model"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            961,
+            963
+          ],
+          [
+            977,
+            1010
+          ]
+        ],
+        "scope": "All listed assertions in the direct actual session; incremental assertions982-986 apply incremental/recovery/partial-native; full-history assertions999-1004 apply reconnect/recovery/fallback/model-change."
+      }
+    },
+    {
+      "case_id": "http-encrypted-false",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Http_and_websocket_fallback_emit_received_encrypted_reasoning(System.Boolean, System.Threading.CancellationToken).1.1.0",
+          "display_name": "Http_and_websocket_fallback_emit_received_encrypted_reasoning(False)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Http_and_websocket_fallback_emit_received_encrypted_reasoning@1012"
+        }
+      ],
+      "assertion_scope": "Actual HTTP parser and direct unsupported-WS fallback emit one received encrypted-reasoning event and terminal completion; direct local Retry/counts only.",
+      "provider_id": "configured",
+      "disable_websocket": true,
+      "outcomes": [],
+      "http_response_body": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}]}}\n\n",
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            1045,
+            1049
+          ]
+        ],
+        "scope": "All five event/retry/connector/HTTP-count assertions."
+      }
+    },
+    {
+      "case_id": "http-encrypted-true",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Http_and_websocket_fallback_emit_received_encrypted_reasoning(System.Boolean, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Http_and_websocket_fallback_emit_received_encrypted_reasoning(True)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Http_and_websocket_fallback_emit_received_encrypted_reasoning@1012"
+        }
+      ],
+      "assertion_scope": "Actual HTTP parser and direct unsupported-WS fallback emit one received encrypted-reasoning event and terminal completion; direct local Retry/counts only.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "upgrade_status": 426
+        }
+      ],
+      "http_response_body": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}]}}\n\n",
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            1045,
+            1049
+          ]
+        ],
+        "scope": "All five event/retry/connector/HTTP-count assertions."
+      }
+    },
+    {
+      "case_id": "chatgpt-streamed-empty-true",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ChatGptProviderWebSocketTests.1.1.Incremental_request_uses_streamed_output_items_when_completed_output_is_empty(System.Boolean, System.Threading.CancellationToken).1.1.0",
+          "display_name": "Incremental_request_uses_streamed_output_items_when_completed_output_is_empty(True)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/ChatGptProviderWebSocketTests.cs::ChatGptProviderWebSocketTests.Incremental_request_uses_streamed_output_items_when_completed_output_is_empty@208"
+        }
+      ],
+      "assertion_scope": "Actual ChatGptProvider.OpenSession with synthetic OAuth; streamed-output lineage when completed.output is empty. Own previous_response_id, suffix length/type assertions only; no broader OAuth routing claims.",
+      "provider_kind": "chatgpt",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "streamed",
+          "messages": [
+            "{\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"lookup\",\"arguments\":\"{}\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "model": "gpt-5.6-sol"
+        },
+        {
+          "action": "call",
+          "messages": [
+            {
+              "role": "user",
+              "text": "hello"
+            },
+            {
+              "role": "assistant",
+              "text": "",
+              "tool_calls": [
+                {
+                  "id": "call-1",
+                  "name": "lookup",
+                  "arguments": "{}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call-1",
+              "text": "result"
+            }
+          ],
+          "model": "gpt-5.6-sol"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/ChatGptProviderWebSocketTests.cs",
+        "lines": [
+          [
+            252,
+            257
+          ]
+        ],
+        "scope": "All three outgoing incremental previous-ID/count/type assertions; actual ChatGpt session construction and auth are setup, not blanket T26 acceptance."
+      }
+    },
+    {
+      "case_id": "chatgpt-streamed-empty-false",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ChatGptProviderWebSocketTests.1.1.Incremental_request_uses_streamed_output_items_when_completed_output_is_empty(System.Boolean, System.Threading.CancellationToken).2.1.0",
+          "display_name": "Incremental_request_uses_streamed_output_items_when_completed_output_is_empty(False)",
+          "source_declaration_id": "test/Parrot.Llm.Tests/ChatGptProviderWebSocketTests.cs::ChatGptProviderWebSocketTests.Incremental_request_uses_streamed_output_items_when_completed_output_is_empty@208"
+        }
+      ],
+      "assertion_scope": "Actual ChatGptProvider.OpenSession with synthetic OAuth; streamed-output lineage when completed.output is empty. Own previous_response_id, suffix length/type assertions only; no broader OAuth routing claims.",
+      "provider_kind": "chatgpt",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "streamed",
+          "messages": [
+            "{\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ],
+          "model": "gpt-5.6-sol"
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ],
+          "model": "gpt-5.6-sol"
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/ChatGptProviderWebSocketTests.cs",
+        "lines": [
+          [
+            252,
+            257
+          ]
+        ],
+        "scope": "All three outgoing incremental previous-ID/count/type assertions; actual ChatGpt session construction and auth are setup, not blanket T26 acceptance."
+      }
+    },
+    {
+      "case_id": "native-reasoning-rejection",
+      "canonical_source_cases": [
+        {
+          "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.OpenAICompatibleProviderWebSocketTests.1.1.Websocket_reasoning_rejection_is_not_retried_without_reasoning(System.Threading.CancellationToken).1.1.0",
+          "display_name": "Websocket_reasoning_rejection_is_not_retried_without_reasoning",
+          "source_declaration_id": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs::OpenAICompatibleProviderWebSocketTests.Websocket_reasoning_rejection_is_not_retried_without_reasoning@1051"
+        }
+      ],
+      "assertion_scope": "Exact explicit native ProviderContent input; actual invalid_reasoning error is not retried or stripped, and captured wire retains encrypted_content.",
+      "provider_id": "configured",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "rejected",
+          "messages": [
+            "{\"type\":\"error\",\"error\":{\"code\":\"invalid_reasoning\",\"message\":\"reasoning rejected\"}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            {
+              "role": "assistant",
+              "text": "answer",
+              "provider_content": {
+                "provider_id": "configured",
+                "content": "{\"Version\":1,\"Protocol\":\"responses\",\"Output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-reasoning\",\"summary\":[]},{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}"
+              }
+            },
+            {
+              "role": "user",
+              "text": "next"
+            }
+          ]
+        }
+      ],
+      "source_assertions": {
+        "path": "test/Parrot.Llm.Tests/OpenAICompatibleProviderWebSocketTests.cs",
+        "lines": [
+          [
+            1094,
+            1099
+          ]
+        ],
+        "scope": "All thrown-type, single-connect/send, no-Retry and preserved encrypted-content assertions."
+      }
+    },
+    {
+      "case_id": "metadata-duplicate-exact-name",
+      "canonical_source_cases": [],
+      "assertion_scope": "Supplemental actual source metadata traversal and next-request state. Raw metadata string deliberately preserves duplicate property order or opaque non-finite-double-range JSON number; no expected state is encoded.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "metadata-edge",
+          "messages": [
+            "{\"type\":\"response.metadata\",\"headers\":{\"x-codex-turn-state\":\"first\",\"x-codex-turn-state\":\"last\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        }
+      ],
+      "source_assertions": {
+        "path": "src/Parrot.Llm/Llm/Wire/ResponsesAdapter.cs",
+        "lines": [
+          [
+            213,
+            225
+          ]
+        ],
+        "scope": "Actual raw ordered headers traversal, first valid metadata capture and tolerance of unrelated opaque 1e999 numbers; observed outgoing next-request client_metadata and actual session turn state. Supplemental, no invented canonical test row."
+      }
+    },
+    {
+      "case_id": "metadata-opaque-large-number",
+      "canonical_source_cases": [],
+      "assertion_scope": "Supplemental actual source metadata traversal and next-request state. Raw metadata string deliberately preserves duplicate property order or opaque non-finite-double-range JSON number; no expected state is encoded.",
+      "disable_websocket": false,
+      "outcomes": [
+        {
+          "socket_id": "metadata-edge",
+          "messages": [
+            "{\"type\":\"response.metadata\",\"opaque\":1e999,\"headers\":{\"x-unrelated\":1e999,\"x-codex-turn-state\":\"opaque-state\"}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}",
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}"
+          ],
+          "headers": {}
+        }
+      ],
+      "actions": [
+        {
+          "action": "call",
+          "messages": [
+            "hello"
+          ]
+        },
+        {
+          "action": "call",
+          "messages": [
+            "hello",
+            "assistant:answer",
+            "next"
+          ]
+        }
+      ],
+      "source_assertions": {
+        "path": "src/Parrot.Llm/Llm/Wire/ResponsesAdapter.cs",
+        "lines": [
+          [
+            213,
+            225
+          ]
+        ],
+        "scope": "Actual raw ordered headers traversal, first valid metadata capture and tolerance of unrelated opaque 1e999 numbers; observed outgoing next-request client_metadata and actual session turn state. Supplemental, no invented canonical test row."
+      }
+    }
+  ]
+}

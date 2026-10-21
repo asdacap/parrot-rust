@@ -1,0 +1,21 @@
+[package]
+name = "parrot-contract-checks"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace]
+
+[dependencies]
+parrot-domain = { path = "../../crates/parrot-domain" }
+
+[patch.crates-io]
+protobuf = { path = "../../vendor/rust-protobuf-a001/protobuf" }
+protobuf-codegen = { path = "../../vendor/rust-protobuf-a001/protobuf-codegen" }
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+all = "deny"

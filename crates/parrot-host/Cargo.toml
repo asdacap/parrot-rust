@@ -1,0 +1,44 @@
+[package]
+name = "parrot-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono = { version = "=0.4.39", default-features = false, features = ["std"] }
+parrot-domain = { path = "../parrot-domain" }
+parrot-foundation = { path = "../parrot-foundation" }
+parrot-provider = { path = "../parrot-provider" }
+parrot-runtime = { path = "../parrot-runtime" }
+parrot-storage = { path = "../parrot-storage" }
+parrot-tools = { path = "../parrot-tools" }
+protobuf = "=3.7.2"
+serde_json = "=1.0.138"
+tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "time", "macros", "net", "io-util"] }
+tonic = { version = "=0.12.3", default-features = false, features = ["transport", "codegen", "tls", "tls-webpki-roots"] }
+tokio-stream = { version = "=0.1.19", default-features = false, features = ["net", "sync"] }
+tower = { version = "=0.4.13", default-features = false, features = ["util"] }
+http = "=1.5.0"
+http-body = "=1.1.0"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.12.0", features = ["client", "http2", "server", "http1"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = ["tokio"] }
+base64 = "=0.22.1"
+bytes = "=1.12.1"
+futures-core = "=0.3.34"
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+url = "=2.5.4"
+libc = "=0.2.191"
+subtle = "=2.6.1"
+getrandom = "=0.3.3"
+
+[[test]]
+name = "composition"
+path = "tests/composition/main.rs"
+
+[[test]]
+name = "web_assets"
+path = "tests/web_assets/main.rs"
+
+[lints]
+workspace = true

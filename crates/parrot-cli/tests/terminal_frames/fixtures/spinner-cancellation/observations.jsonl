@@ -1,0 +1,2 @@
+{"name":"spinner-cancellation-before","events":["draw:true","draw-complete","delay:true","lifetime","preserve-started","preserved"]}
+{"name":"spinner-cancellation-admitted","events":["draw:false","lifetime","preserve-started","draw-complete","delay:true","preserved"]}

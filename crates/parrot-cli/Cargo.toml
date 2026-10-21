@@ -1,0 +1,68 @@
+[package]
+name = "parrot-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "parrot"
+path = "src/main.rs"
+
+[dependencies]
+parrot-domain = { path = "../parrot-domain" }
+parrot-foundation = { path = "../parrot-foundation" }
+parrot-runtime = { path = "../parrot-runtime" }
+parrot-storage = { path = "../parrot-storage" }
+parrot-host = { path = "../parrot-host" }
+parrot-tools = { path = "../parrot-tools" }
+parrot-provider = { path = "../parrot-provider" }
+reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-tls"] }
+protobuf = "=3.7.2"
+tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "time", "macros", "net", "io-util"] }
+tonic = { version = "=0.12.3", default-features = false, features = ["transport", "codegen", "tls", "tls-webpki-roots"] }
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+tokio-stream = { version = "=0.1.19", default-features = false, features = ["net", "sync"] }
+chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
+tz-rs = { version = "=0.7.0", default-features = false, features = ["std"] }
+unicode-segmentation = "=1.12.0"
+serde_json = { version = "=1.0.138", features = ["arbitrary_precision"] }
+unicode-general-category = "=1.0.0"
+
+[[test]]
+name = "presenters"
+path = "tests/presenters/main.rs"
+
+[[test]]
+name = "attachments"
+path = "tests/attachments/main.rs"
+
+[[test]]
+name = "dispatch"
+path = "tests/dispatch/main.rs"
+
+[[test]]
+name = "slash_sessions"
+path = "tests/slash_sessions/main.rs"
+
+[[test]]
+name = "slash_settings"
+path = "tests/slash_settings/main.rs"
+
+[[test]]
+name = "terminal_dialogs"
+path = "tests/terminal_dialogs/main.rs"
+
+[[test]]
+name = "terminal_input"
+path = "tests/terminal_input/main.rs"
+
+[[test]]
+name = "terminal_layout"
+path = "tests/terminal_layout/main.rs"
+
+[[test]]
+name = "terminal_frames"
+path = "tests/terminal_frames/main.rs"
+
+[lints]
+workspace = true

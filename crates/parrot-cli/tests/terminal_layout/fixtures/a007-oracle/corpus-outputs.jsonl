@@ -1,0 +1,500 @@
+{"input":"\u0022true\u0022","ok":true,"value":"\u0022true\u0022"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"{\u0022a#b\u0022: {}, \u0022a\\n\\n\u0022: null, \u0022\\tx\u0022: {\u0022a\\n\\n\u0022: {\u0022?\u0022: [null, 0, 0, 1], \u0022null\u0022: [], \u0022...hello\u0022: {\u0022a\\tb\u0022: 0, \u0022a\\\u0022b\u0022: \u0022a\u0022, \u0022a:\\tb\u0022: null, \u0022a\\rb\u0022: 0}}, \u0022a\\u00a0b\u0022: [{\u0022{x}\u0022: null, \u0022a\\rb\u0022: null, \u0022a\\u007fb\u0022: true, \u0022\\ud83d\\ude00\u0022: \u0022a\u0022}, 1], \u0022a: b\u0022: \u0022\\uffff\u0022, \u0022a\\rb\u0022: false}, \u0022a\\tb\u0022: [[]]}","ok":true,"value":"a#b: {}\n? \u003E\u002B\n  a\n\n: null\n\tx:\n  ? \u003E\u002B\n    a\n\n  : \u0027?\u0027:\n    - null\n    - 0\n    - 0\n    - 1\n    \u0022null\u0022: []\n    \u0027...hello\u0027:\n      a\tb: 0\n      a\u0022b: \u0022a\u0022\n      \u0027a:\tb\u0027: null\n      ? \u003E-\n        a\n\n        b\n      : 0\n  a\u00A0b:\n  - \u0027{x}\u0027: null\n    ? \u003E-\n      a\n\n      b\n    : null\n    \u0022a\\x7Fb\u0022: true\n    \u0022\\U0001F600\u0022: \u0022a\u0022\n  - 1\n  \u0027a: b\u0027: \u0022\\uFFFF\u0022\n  ? \u003E-\n    a\n\n    b\n  : false\na\tb:\n- []"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"\u0022\\uffff\u0022","ok":true,"value":"\u0022\\uFFFF\u0022"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"[[null, {\u0022a\\rb\u0022: \u0022\\u65e5\u0022, \u0022{x}\u0022: \u0022\\u001b\u0022, \u0022\\ud83d\\ude00\u0022: 2e\u002B20, \u0022\\n\\n\u0022: {}}, \u0022\\uffff\u0022], {}]","ok":true,"value":"- - null\n  - ? \u003E-\n      a\n\n      b\n    : \u0022\u65E5\u0022\n    \u0027{x}\u0027: \u0022\\e\u0022\n    \u0022\\U0001F600\u0022: 2e\u002B20\n    ? \u003E2\u002B\n\n\n    : {}\n  - \u0022\\uFFFF\u0022\n- {}"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"false","ok":true,"value":"false"}
+{"input":"[{\u0022null\u0022: [[1], 2e\u002B20], \u0022\\ud83d\\ude00\u0022: {\u0022\\n\\n\u0022: 0}, \u0022x\\t\u0022: [false, false, true]}, [], [[{\u0022a\\\u0022b\u0022: 0, \u0022a:\\tb\u0022: false, \u0022a\\tb\u0022: null}]], [false, 0, \u0022true\u0022]]","ok":true,"value":"- \u0022null\u0022:\n  - - 1\n  - 2e\u002B20\n  \u0022\\U0001F600\u0022:\n    ? \u003E2\u002B\n\n\n    : 0\n  x\t:\n  - false\n  - false\n  - true\n- []\n- - - a\u0022b: 0\n      \u0027a:\tb\u0027: false\n      a\tb: null\n- - false\n  - 0\n  - \u0022true\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"{\u00222024-12-31\u0022: 1, \u0022a\\n\\nb\u0022: 1, \u0022?\u0022: -12.5}","ok":true,"value":"\u00222024-12-31\u0022: 1\n? \u003E-\n  a\n\n\n  b\n: 1\n\u0027?\u0027: -12.5"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"[[], \u0022\\u001b\u0022, {}]","ok":true,"value":"- []\n- \u0022\\e\u0022\n- {}"}
+{"input":"{\u0022:\u0022: null, \u0022a\\n b\u0022: null, \u0022-\u0022: [true, \u0022\\u65e5\u0022, false, null], \u0022?\u0022: 1}","ok":true,"value":"\u0027:\u0027: null\n? \u003E-\n  a\n   b\n: null\n\u0027-\u0027:\n- true\n- \u0022\u65E5\u0022\n- false\n- null\n\u0027?\u0027: 1"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"[{\u0022---hello\u0022: \u0022true\u0022}, null, false, {\u0022---hello\u0022: \u0022true\u0022, \u0022a\\n b\u0022: [2e\u002B20, false, [\u0022\\ud83d\\ude00\u0022, \u0022\\ud83d\\ude00\u0022, \u0022\\ud83d\\ude00\u0022, \u0022\\ud83d\\ude00\u0022], [\u0022\\ud83d\\ude00\u0022]]}]","ok":true,"value":"- \u0027---hello\u0027: \u0022true\u0022\n- null\n- false\n- \u0027---hello\u0027: \u0022true\u0022\n  ? \u003E-\n    a\n     b\n  : - 2e\u002B20\n    - false\n    - - \u0022\\U0001F600\u0022\n      - \u0022\\U0001F600\u0022\n      - \u0022\\U0001F600\u0022\n      - \u0022\\U0001F600\u0022\n    - - \u0022\\U0001F600\u0022"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"[1]","ok":true,"value":"- 1"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"{\u0022\\ud83d\\ude00\u0022: \u0022line\\nnext\u0022, \u0022{x}\u0022: false}","ok":true,"value":"\u0022\\U0001F600\u0022: \u0022line\\nnext\u0022\n\u0027{x}\u0027: false"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"\u0022\\u65e5\u0022","ok":true,"value":"\u0022\u65E5\u0022"}
+{"input":"{\u0022?\u0022: [[[0, 0, \u0022\\ud83d\\ude00\u0022], {\u0022January 2, 2024\u0022: \u0022a\u0022, \u0022a\\n b\u0022: \u0022\\ud83d\\ude00\u0022, \u0022a\\u00a0b\u0022: null}], {\u0022a\u0027b\u0022: 1, \u0022a\\u00a0b\u0022: \u0022ready\u0022}, -12.5]}","ok":true,"value":"\u0027?\u0027:\n- - - 0\n    - 0\n    - \u0022\\U0001F600\u0022\n  - \u0022January 2, 2024\u0022: \u0022a\u0022\n    ? \u003E-\n      a\n       b\n    : \u0022\\U0001F600\u0022\n    a\u00A0b: null\n- a\u0027b: 1\n  a\u00A0b: \u0022ready\u0022\n- -12.5"}
+{"input":"{\u0022a:\\tb\u0022: []}","ok":true,"value":"\u0027a:\tb\u0027: []"}
+{"input":"[2e\u002B20, [1, \u0022true\u0022, 0, []], {}, -12.5]","ok":true,"value":"- 2e\u002B20\n- - 1\n  - \u0022true\u0022\n  - 0\n  - []\n- {}\n- -12.5"}
+{"input":"[[{\u0022a#b\u0022: \u0022\\u00a0\u0022, \u0022\\tx\u0022: false}], \u0022\\u00a0\u0022, 2e\u002B20]","ok":true,"value":"- - a#b: \u0022\u00A0\u0022\n    \tx: false\n- \u0022\u00A0\u0022\n- 2e\u002B20"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022\\uffff\u0022","ok":true,"value":"\u0022\\uFFFF\u0022"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"{\u0022a: b\u0022: [{\u0022a:\\tb\u0022: [0, \u0022a\u0022, null]}, null, \u0022\\u00a0\u0022, 0], \u0022\\ud83d\\ude00\u0022: {\u0022null\u0022: [\u0022\u0022], \u0022a: b\u0022: {\u0022\\n\\n\u0022: null, \u0022a: b\u0022: {\u0022a\\nb\u0022: 0, \u0022---hello\u0022: true}, \u0022{x}\u0022: \u0022\\uffff\u0022, \u0022---hello\u0022: 2e\u002B20}, \u0022\\ud83d\\ude00\u0022: true, \u0022{x}\u0022: false}, \u0022January 2, 2024\u0022: true}","ok":true,"value":"\u0027a: b\u0027:\n- \u0027a:\tb\u0027:\n  - 0\n  - \u0022a\u0022\n  - null\n- null\n- \u0022\u00A0\u0022\n- 0\n\u0022\\U0001F600\u0022:\n  \u0022null\u0022:\n  - \u0022\u0022\n  \u0027a: b\u0027:\n    ? \u003E2\u002B\n\n\n    : null\n    \u0027a: b\u0027:\n      ? \u003E-\n        a\n\n        b\n      : 0\n      \u0027---hello\u0027: true\n    \u0027{x}\u0027: \u0022\\uFFFF\u0022\n    \u0027---hello\u0027: 2e\u002B20\n  \u0022\\U0001F600\u0022: true\n  \u0027{x}\u0027: false\n\u0022January 2, 2024\u0022: true"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"[{\u0022[x]\u0022: \u0022ready\u0022}, [[[true, \u0022a\u0022, null], 1], [[0, 1, false]]], true]","ok":true,"value":"- \u0027[x]\u0027: \u0022ready\u0022\n- - - - true\n      - \u0022a\u0022\n      - null\n    - 1\n  - - - 0\n      - 1\n      - false\n- true"}
+{"input":"\u0022\\u65e5\u0022","ok":true,"value":"\u0022\u65E5\u0022"}
+{"input":"{\u0022a\u0022: \u0022\\u00a0\u0022, \u0022\\n\\n\u0022: -12.5}","ok":true,"value":"a: \u0022\u00A0\u0022\n? \u003E2\u002B\n\n\n: -12.5"}
+{"input":"{\u0022a\\nb\u0022: 0, \u0022a\\tb\u0022: null, \u0022?\u0022: []}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: 0\na\tb: null\n\u0027?\u0027: []"}
+{"input":"{\u0022x\\t\u0022: {\u0022a\\n\\n\u0022: {\u0022a\u0022: {\u0022-\u0022: 0, \u0022false\u0022: true}, \u0022-\u0022: \u0022ready\u0022}}}","ok":true,"value":"x\t:\n  ? \u003E\u002B\n    a\n\n  : a:\n      \u0027-\u0027: 0\n      \u0022false\u0022: true\n    \u0027-\u0027: \u0022ready\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022\\u00a0\u0022","ok":true,"value":"\u0022\u00A0\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"{\u0022{x}\u0022: [], \u0022a:\\tb\u0022: [\u0022\\u00a0\u0022, [0, [false, \u0022\\ud83d\\ude00\u0022]]], \u0022a\u0022: \u0022\u0022}","ok":true,"value":"\u0027{x}\u0027: []\n\u0027a:\tb\u0027:\n- \u0022\u00A0\u0022\n- - 0\n  - - false\n    - \u0022\\U0001F600\u0022\na: \u0022\u0022"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"[true, null, -12.5, 0]","ok":true,"value":"- true\n- null\n- -12.5\n- 0"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"[[false], {\u0022a\u0022: {\u0022a\\n\\n\u0022: [], \u0022-\u0022: 2e\u002B20}}]","ok":true,"value":"- - false\n- a:\n    ? \u003E\u002B\n      a\n\n    : []\n    \u0027-\u0027: 2e\u002B20"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"[{\u0022a:\\tb\u0022: [null, \u0022\\u65e5\u0022], \u0022a\\nb\u0022: false, \u0022\\tx\u0022: {\u0022a#b\u0022: \u0022true\u0022, \u0022a\u0022: \u0022\\t\u0022}}, {\u0022x\\t\u0022: -12.5, \u0022a#b\u0022: [{}, \u0022ready\u0022, [0, null, 1], {\u0022a\\tb\u0022: \u0022a\u0022, \u0022\\tx\u0022: null}], \u0022a\\rb\u0022: 2e\u002B20}]","ok":true,"value":"- \u0027a:\tb\u0027:\n  - null\n  - \u0022\u65E5\u0022\n  ? \u003E-\n    a\n\n    b\n  : false\n  \tx:\n    a#b: \u0022true\u0022\n    a: \u0022\t\u0022\n- x\t: -12.5\n  a#b:\n  - {}\n  - \u0022ready\u0022\n  - - 0\n    - null\n    - 1\n  - a\tb: \u0022a\u0022\n    \tx: null\n  ? \u003E-\n    a\n\n    b\n  : 2e\u002B20"}
+{"input":"[2e\u002B20, \u0022\\uffff\u0022, [-12.5, []], -12.5]","ok":true,"value":"- 2e\u002B20\n- \u0022\\uFFFF\u0022\n- - -12.5\n  - []\n- -12.5"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"{\u0022a\u0027b\u0022: [], \u0022a\u0022: {\u0022a\\u00a0b\u0022: \u0022ready\u0022}, \u0022a\\n\\nb\u0022: 0, \u0022null\u0022: {\u0022[x]\u0022: [\u0022\u0022, 2e\u002B20, {\u00222024-12-31\u0022: 0, \u0022-\u0022: \u0022a\u0022, \u0022---hello\u0022: null, \u0022a:\u0022: \u0022a\u0022}], \u0022\\ud83d\\ude00\u0022: \u0022ready\u0022, \u0022false\u0022: \u0022line\\nnext\u0022, \u0022a:\u0022: [1]}}","ok":true,"value":"a\u0027b: []\na:\n  a\u00A0b: \u0022ready\u0022\n? \u003E-\n  a\n\n\n  b\n: 0\n\u0022null\u0022:\n  \u0027[x]\u0027:\n  - \u0022\u0022\n  - 2e\u002B20\n  - \u00222024-12-31\u0022: 0\n    \u0027-\u0027: \u0022a\u0022\n    \u0027---hello\u0027: null\n    \u0027a:\u0027: \u0022a\u0022\n  \u0022\\U0001F600\u0022: \u0022ready\u0022\n  \u0022false\u0022: \u0022line\\nnext\u0022\n  \u0027a:\u0027:\n  - 1"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"{\u0022null\u0022: false, \u0022[x]\u0022: {\u0022[x]\u0022: false}, \u0022{x}\u0022: false}","ok":true,"value":"\u0022null\u0022: false\n\u0027[x]\u0027:\n  \u0027[x]\u0027: false\n\u0027{x}\u0027: false"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"{\u0022a#b\u0022: \u0022ready\u0022, \u0022January 2, 2024\u0022: null, \u0022a\\tb\u0022: null, \u0022a\\\u0022b\u0022: 1}","ok":true,"value":"a#b: \u0022ready\u0022\n\u0022January 2, 2024\u0022: null\na\tb: null\na\u0022b: 1"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"[{\u0022-\u0022: [\u0022\\u65e5\u0022, [\u0022\\ud83d\\ude00\u0022, \u0022a\u0022, 0, false], {\u0022\\tx\u0022: 1, \u00222024-12-31\u0022: 1}, null], \u0022a:\\tb\u0022: {\u0022[x]\u0022: 1, \u0022a\\tb\u0022: [false, 1, false], \u0022?\u0022: \u0022\u0022}, \u0022a\\nb\u0022: \u0022\\t\u0022, \u0022?\u0022: []}]","ok":true,"value":"- \u0027-\u0027:\n  - \u0022\u65E5\u0022\n  - - \u0022\\U0001F600\u0022\n    - \u0022a\u0022\n    - 0\n    - false\n  - \tx: 1\n    \u00222024-12-31\u0022: 1\n  - null\n  \u0027a:\tb\u0027:\n    \u0027[x]\u0027: 1\n    a\tb:\n    - false\n    - 1\n    - false\n    \u0027?\u0027: \u0022\u0022\n  ? \u003E-\n    a\n\n    b\n  : \u0022\t\u0022\n  \u0027?\u0027: []"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"{\u0022a\\u00a0b\u0022: [\u0022\\t\u0022], \u0022---hello\u0022: \u0022line\\nnext\u0022}","ok":true,"value":"a\u00A0b:\n- \u0022\t\u0022\n\u0027---hello\u0027: \u0022line\\nnext\u0022"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"{\u0022January 2, 2024\u0022: 1, \u0022a#b\u0022: {}}","ok":true,"value":"\u0022January 2, 2024\u0022: 1\na#b: {}"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"[null, true]","ok":true,"value":"- null\n- true"}
+{"input":"[false, \u0022\\ud83d\\ude00\u0022, \u0022\\ud83d\\ude00\u0022]","ok":true,"value":"- false\n- \u0022\\U0001F600\u0022\n- \u0022\\U0001F600\u0022"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"[0, null]","ok":true,"value":"- 0\n- null"}
+{"input":"[{\u0022---hello\u0022: 0}]","ok":true,"value":"- \u0027---hello\u0027: 0"}
+{"input":"[\u0022\\uffff\u0022, true, true]","ok":true,"value":"- \u0022\\uFFFF\u0022\n- true\n- true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"[null, \u0022line\\nnext\u0022]","ok":true,"value":"- null\n- \u0022line\\nnext\u0022"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"{\u0022a\\n\\nb\u0022: -12.5, \u0022---hello\u0022: [\u0022\\u65e5\u0022, {\u0022x\\t\u0022: false, \u0022:\u0022: 0, \u0022a\\u00a0b\u0022: []}, \u0022line\\nnext\u0022]}","ok":true,"value":"? \u003E-\n  a\n\n\n  b\n: -12.5\n\u0027---hello\u0027:\n- \u0022\u65E5\u0022\n- x\t: false\n  \u0027:\u0027: 0\n  a\u00A0b: []\n- \u0022line\\nnext\u0022"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{\u0022January 2, 2024\u0022: 2e\u002B20, \u0022\\n\\n\u0022: true, \u0022a\u0027b\u0022: {\u0022:\u0022: [{\u0022-\u0022: 0, \u0022a: b\u0022: null, \u0022a\u0022: \u0022\\ud83d\\ude00\u0022}, [0], {\u0022:\u0022: \u0022a\u0022, \u0022x\\t\u0022: 0}, -12.5]}}","ok":true,"value":"\u0022January 2, 2024\u0022: 2e\u002B20\n? \u003E2\u002B\n\n\n: true\na\u0027b:\n  \u0027:\u0027:\n  - \u0027-\u0027: 0\n    \u0027a: b\u0027: null\n    a: \u0022\\U0001F600\u0022\n  - - 0\n  - \u0027:\u0027: \u0022a\u0022\n    x\t: 0\n  - -12.5"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"{\u0022---hello\u0022: true, \u0022a\\n\\nb\u0022: \u0022line\\nnext\u0022}","ok":true,"value":"\u0027---hello\u0027: true\n? \u003E-\n  a\n\n\n  b\n: \u0022line\\nnext\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{\u0022a\\tb\u0022: false, \u0022a\\nb\u0022: [true, true, {\u0022{x}\u0022: \u0022\u0022, \u0022a\u0022: [\u0022a\u0022, \u0022a\u0022, 1], \u0022-\u0022: \u0022line\\nnext\u0022}], \u0022[x]\u0022: false, \u0022\\tx\u0022: null}","ok":true,"value":"a\tb: false\n? \u003E-\n  a\n\n  b\n: - true\n  - true\n  - \u0027{x}\u0027: \u0022\u0022\n    a:\n    - \u0022a\u0022\n    - \u0022a\u0022\n    - 1\n    \u0027-\u0027: \u0022line\\nnext\u0022\n\u0027[x]\u0027: false\n\tx: null"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022\\u00a0\u0022","ok":true,"value":"\u0022\u00A0\u0022"}
+{"input":"{\u0022\\ud83d\\ude00\u0022: [[true], \u0022\\ud83d\\ude00\u0022]}","ok":true,"value":"\u0022\\U0001F600\u0022:\n- - true\n- \u0022\\U0001F600\u0022"}
+{"input":"{\u0022\\ud83d\\ude00\u0022: true, \u00222024-12-31\u0022: [-12.5, {\u0022:\u0022: null, \u0022a#b\u0022: {\u0022:\u0022: 1, \u0022null\u0022: true, \u0022a\\n\\nb\u0022: 1}, \u00222024-12-31\u0022: \u0022ready\u0022, \u0022-\u0022: [true, true]}, -12.5], \u0022\\n\\n\u0022: {\u0022[x]\u0022: 2e\u002B20, \u0022a\\n b\u0022: \u0022\\uffff\u0022}, \u0022a:\\tb\u0022: {}}","ok":true,"value":"\u0022\\U0001F600\u0022: true\n\u00222024-12-31\u0022:\n- -12.5\n- \u0027:\u0027: null\n  a#b:\n    \u0027:\u0027: 1\n    \u0022null\u0022: true\n    ? \u003E-\n      a\n\n\n      b\n    : 1\n  \u00222024-12-31\u0022: \u0022ready\u0022\n  \u0027-\u0027:\n  - true\n  - true\n- -12.5\n? \u003E2\u002B\n\n\n: \u0027[x]\u0027: 2e\u002B20\n  ? \u003E-\n    a\n     b\n  : \u0022\\uFFFF\u0022\n\u0027a:\tb\u0027: {}"}
+{"input":"{\u0022-\u0022: \u0022\\t\u0022, \u00222024-12-31\u0022: {\u0022a: b\u0022: [\u0022\\ud83d\\ude00\u0022, null, {\u0022a#b\u0022: false, \u0022...hello\u0022: 1}], \u0022a\\n b\u0022: null, \u0022a\\u00a0b\u0022: true, \u0022a\u0027b\u0022: null}}","ok":true,"value":"\u0027-\u0027: \u0022\t\u0022\n\u00222024-12-31\u0022:\n  \u0027a: b\u0027:\n  - \u0022\\U0001F600\u0022\n  - null\n  - a#b: false\n    \u0027...hello\u0027: 1\n  ? \u003E-\n    a\n     b\n  : null\n  a\u00A0b: true\n  a\u0027b: null"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{\u0022a#b\u0022: {\u0022a\\nb\u0022: null, \u0022x\\t\u0022: \u0022\\ud83d\\ude00\u0022, \u0022a\\tb\u0022: {\u0022January 2, 2024\u0022: {}, \u0022a\\\u0022b\u0022: [], \u0022\\ud83d\\ude00\u0022: 2e\u002B20, \u0022a\\n\\nb\u0022: \u0022\\t\u0022}}, \u0022a\\\u0022b\u0022: true}","ok":true,"value":"a#b:\n  ? \u003E-\n    a\n\n    b\n  : null\n  x\t: \u0022\\U0001F600\u0022\n  a\tb:\n    \u0022January 2, 2024\u0022: {}\n    a\u0022b: []\n    \u0022\\U0001F600\u0022: 2e\u002B20\n    ? \u003E-\n      a\n\n\n      b\n    : \u0022\t\u0022\na\u0022b: true"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"{\u0022a\\\u0022b\u0022: [[\u0022\\uffff\u0022, \u0022\\u001b\u0022], {\u0022a#b\u0022: 2e\u002B20, \u0022a:\\tb\u0022: [null, \u0022a\u0022, null], \u0022\\ud83d\\ude00\u0022: 0, \u0022a\\nb\u0022: [null, null, false]}, null, []], \u0022a\\n\\n\u0022: -12.5}","ok":true,"value":"a\u0022b:\n- - \u0022\\uFFFF\u0022\n  - \u0022\\e\u0022\n- a#b: 2e\u002B20\n  \u0027a:\tb\u0027:\n  - null\n  - \u0022a\u0022\n  - null\n  \u0022\\U0001F600\u0022: 0\n  ? \u003E-\n    a\n\n    b\n  : - null\n    - null\n    - false\n- null\n- []\n? \u003E\u002B\n  a\n\n: -12.5"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[1]","ok":true,"value":"- 1"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"[{\u0022a\\tb\u0022: \u0022\\u001b\u0022, \u0022x\\t\u0022: \u0022\\ud83d\\ude00\u0022}, \u0022line\\nnext\u0022, true, [[\u0022\\u001b\u0022]]]","ok":true,"value":"- a\tb: \u0022\\e\u0022\n  x\t: \u0022\\U0001F600\u0022\n- \u0022line\\nnext\u0022\n- true\n- - - \u0022\\e\u0022"}
+{"input":"[{\u0022x\\t\u0022: [true, {\u0022null\u0022: null, \u0022a\u0022: 1, \u00222024-12-31\u0022: \u0022\\ud83d\\ude00\u0022}, [false, null, false], []], \u0022null\u0022: [true, {\u0022---hello\u0022: \u0022\\ud83d\\ude00\u0022, \u0022a:\\tb\u0022: 1}, false, {}], \u0022a\\u00a0b\u0022: -12.5}, false]","ok":true,"value":"- x\t:\n  - true\n  - \u0022null\u0022: null\n    a: 1\n    \u00222024-12-31\u0022: \u0022\\U0001F600\u0022\n  - - false\n    - null\n    - false\n  - []\n  \u0022null\u0022:\n  - true\n  - \u0027---hello\u0027: \u0022\\U0001F600\u0022\n    \u0027a:\tb\u0027: 1\n  - false\n  - {}\n  a\u00A0b: -12.5\n- false"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022\\u65e5\u0022","ok":true,"value":"\u0022\u65E5\u0022"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"[{\u0022a:\u0022: [], \u0022a\\\u0022b\u0022: \u0022\\t\u0022, \u0022[x]\u0022: \u0022true\u0022, \u0022a\\u007fb\u0022: \u0022ready\u0022}, []]","ok":true,"value":"- \u0027a:\u0027: []\n  a\u0022b: \u0022\t\u0022\n  \u0027[x]\u0027: \u0022true\u0022\n  \u0022a\\x7Fb\u0022: \u0022ready\u0022\n- []"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"[\u0022\\t\u0022, \u0022\\ud83d\\ude00\u0022, null]","ok":true,"value":"- \u0022\t\u0022\n- \u0022\\U0001F600\u0022\n- null"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"{\u00222024-12-31\u0022: [{}, 0, \u0022\\uffff\u0022], \u0022a: b\u0022: [{}], \u0022...hello\u0022: [{\u0022a\\u007fb\u0022: \u0022\\u00a0\u0022, \u0022a:\\tb\u0022: [false, true], \u0022---hello\u0022: [], \u0022?\u0022: 1}, [[], false], {\u0022January 2, 2024\u0022: null, \u00222024-12-31\u0022: -12.5, \u0022a\\\u0022b\u0022: [0], \u0022a\\n\\nb\u0022: 2e\u002B20}]}","ok":true,"value":"\u00222024-12-31\u0022:\n- {}\n- 0\n- \u0022\\uFFFF\u0022\n\u0027a: b\u0027:\n- {}\n\u0027...hello\u0027:\n- \u0022a\\x7Fb\u0022: \u0022\u00A0\u0022\n  \u0027a:\tb\u0027:\n  - false\n  - true\n  \u0027---hello\u0027: []\n  \u0027?\u0027: 1\n- - []\n  - false\n- \u0022January 2, 2024\u0022: null\n  \u00222024-12-31\u0022: -12.5\n  a\u0022b:\n  - 0\n  ? \u003E-\n    a\n\n\n    b\n  : 2e\u002B20"}
+{"input":"[[[], 0, [\u0022ready\u0022, [\u0022a\u0022], []], 2e\u002B20], {\u0022?\u0022: 0, \u0022\\n\\n\u0022: 2e\u002B20}, \u0022\\t\u0022]","ok":true,"value":"- - []\n  - 0\n  - - \u0022ready\u0022\n    - - \u0022a\u0022\n    - []\n  - 2e\u002B20\n- \u0027?\u0027: 0\n  ? \u003E2\u002B\n\n\n  : 2e\u002B20\n- \u0022\t\u0022"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"[-12.5, \u0022\\uffff\u0022, 1]","ok":true,"value":"- -12.5\n- \u0022\\uFFFF\u0022\n- 1"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"{\u0022\\ud83d\\ude00\u0022: true, \u0022\\n\\n\u0022: 2e\u002B20, \u0022a\\\u0022b\u0022: 2e\u002B20, \u0022a:\\tb\u0022: 1}","ok":true,"value":"\u0022\\U0001F600\u0022: true\n? \u003E2\u002B\n\n\n: 2e\u002B20\na\u0022b: 2e\u002B20\n\u0027a:\tb\u0027: 1"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"[false, {\u0022---hello\u0022: -12.5, \u0022null\u0022: {\u0022-\u0022: \u0022\\u00a0\u0022}, \u0022-\u0022: {\u00222024-12-31\u0022: -12.5, \u0022a\u0027b\u0022: [], \u0022false\u0022: {\u0022a:\u0022: \u0022a\u0022, \u0022a\\\u0022b\u0022: null, \u0022a#b\u0022: true, \u00222024-12-31\u0022: 1}, \u0022a\\tb\u0022: [null]}}]","ok":true,"value":"- false\n- \u0027---hello\u0027: -12.5\n  \u0022null\u0022:\n    \u0027-\u0027: \u0022\u00A0\u0022\n  \u0027-\u0027:\n    \u00222024-12-31\u0022: -12.5\n    a\u0027b: []\n    \u0022false\u0022:\n      \u0027a:\u0027: \u0022a\u0022\n      a\u0022b: null\n      a#b: true\n      \u00222024-12-31\u0022: 1\n    a\tb:\n    - null"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"\u0022true\u0022","ok":true,"value":"\u0022true\u0022"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"\u0022\\uffff\u0022","ok":true,"value":"\u0022\\uFFFF\u0022"}
+{"input":"[1, [\u0022\\u001b\u0022, true, \u0022\\u65e5\u0022, {\u0022a:\\tb\u0022: true}]]","ok":true,"value":"- 1\n- - \u0022\\e\u0022\n  - true\n  - \u0022\u65E5\u0022\n  - \u0027a:\tb\u0027: true"}
+{"input":"\u0022\\u65e5\u0022","ok":true,"value":"\u0022\u65E5\u0022"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022\\uffff\u0022","ok":true,"value":"\u0022\\uFFFF\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"{\u0022...hello\u0022: -12.5, \u0022a\u0027b\u0022: \u0022\\ud83d\\ude00\u0022}","ok":true,"value":"\u0027...hello\u0027: -12.5\na\u0027b: \u0022\\U0001F600\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"\u0022\\u65e5\u0022","ok":true,"value":"\u0022\u65E5\u0022"}
+{"input":"{\u0022\\tx\u0022: [{\u0022a\\\u0022b\u0022: false, \u0022a\\tb\u0022: -12.5}, \u0022\u0022, {\u0022:\u0022: \u0022\\u001b\u0022}, 1], \u0022---hello\u0022: \u0022\u0022, \u0022:\u0022: true}","ok":true,"value":"\tx:\n- a\u0022b: false\n  a\tb: -12.5\n- \u0022\u0022\n- \u0027:\u0027: \u0022\\e\u0022\n- 1\n\u0027---hello\u0027: \u0022\u0022\n\u0027:\u0027: true"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"[\u0022\\u001b\u0022]","ok":true,"value":"- \u0022\\e\u0022"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"[null]","ok":true,"value":"- null"}
+{"input":"{\u0022false\u0022: \u0022\\t\u0022}","ok":true,"value":"\u0022false\u0022: \u0022\t\u0022"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"{\u00222024-12-31\u0022: \u0022\\u001b\u0022, \u0022a\\u00a0b\u0022: 1, \u0022a\\u007fb\u0022: -12.5, \u0022\\ud83d\\ude00\u0022: [{}]}","ok":true,"value":"\u00222024-12-31\u0022: \u0022\\e\u0022\na\u00A0b: 1\n\u0022a\\x7Fb\u0022: -12.5\n\u0022\\U0001F600\u0022:\n- {}"}
+{"input":"{\u0022a\u0022: true, \u0022\\tx\u0022: [], \u0022January 2, 2024\u0022: {}, \u0022a\\u007fb\u0022: -12.5}","ok":true,"value":"a: true\n\tx: []\n\u0022January 2, 2024\u0022: {}\n\u0022a\\x7Fb\u0022: -12.5"}
+{"input":"[true]","ok":true,"value":"- true"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022a\\u00a0b\u0022: {\u0022{x}\u0022: null, \u0022a\\n\\nb\u0022: -12.5, \u0022January 2, 2024\u0022: null}, \u0022a:\u0022: true}","ok":true,"value":"a\u00A0b:\n  \u0027{x}\u0027: null\n  ? \u003E-\n    a\n\n\n    b\n  : -12.5\n  \u0022January 2, 2024\u0022: null\n\u0027a:\u0027: true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"{\u0022a\\u00a0b\u0022: -12.5, \u0022a\\n\\n\u0022: false}","ok":true,"value":"a\u00A0b: -12.5\n? \u003E\u002B\n  a\n\n: false"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"{\u0022a\u0022: [[[true, 1]], \u0022\\u001b\u0022], \u0022\\tx\u0022: 2e\u002B20, \u0022a\\u00a0b\u0022: 1, \u0022\\ud83d\\ude00\u0022: -12.5}","ok":true,"value":"a:\n- - - true\n    - 1\n- \u0022\\e\u0022\n\tx: 2e\u002B20\na\u00A0b: 1\n\u0022\\U0001F600\u0022: -12.5"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"[\u0022line\\nnext\u0022, 0, null, true]","ok":true,"value":"- \u0022line\\nnext\u0022\n- 0\n- null\n- true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"{\u0022January 2, 2024\u0022: [[], {}], \u0022:\u0022: {}, \u0022a:\u0022: {}, \u0022false\u0022: 2e\u002B20}","ok":true,"value":"\u0022January 2, 2024\u0022:\n- []\n- {}\n\u0027:\u0027: {}\n\u0027a:\u0027: {}\n\u0022false\u0022: 2e\u002B20"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"{\u0022?\u0022: [[]], \u0022null\u0022: {}, \u0022a\\\u0022b\u0022: \u0022\\uffff\u0022}","ok":true,"value":"\u0027?\u0027:\n- []\n\u0022null\u0022: {}\na\u0022b: \u0022\\uFFFF\u0022"}
+{"input":"{\u0022?\u0022: [\u0022\\u65e5\u0022, false]}","ok":true,"value":"\u0027?\u0027:\n- \u0022\u65E5\u0022\n- false"}
+{"input":"{\u0022x\\t\u0022: \u0022\u0022, \u0022{x}\u0022: \u0022\\u65e5\u0022}","ok":true,"value":"x\t: \u0022\u0022\n\u0027{x}\u0027: \u0022\u65E5\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"{\u0022a\u0022: 0, \u0022a: b\u0022: {\u0022\\ud83d\\ude00\u0022: {\u0022a\\rb\u0022: \u0022true\u0022, \u0022a\\n\\n\u0022: {\u0022a#b\u0022: false, \u0022a: b\u0022: \u0022\\ud83d\\ude00\u0022, \u0022null\u0022: null, \u0022a\\n b\u0022: 1}, \u0022?\u0022: -12.5}, \u0022a\u0027b\u0022: [false, false, true]}, \u0022a\\tb\u0022: [true]}","ok":true,"value":"a: 0\n\u0027a: b\u0027:\n  \u0022\\U0001F600\u0022:\n    ? \u003E-\n      a\n\n      b\n    : \u0022true\u0022\n    ? \u003E\u002B\n      a\n\n    : a#b: false\n      \u0027a: b\u0027: \u0022\\U0001F600\u0022\n      \u0022null\u0022: null\n      ? \u003E-\n        a\n         b\n      : 1\n    \u0027?\u0027: -12.5\n  a\u0027b:\n  - false\n  - false\n  - true\na\tb:\n- true"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"{\u0022a\\n b\u0022: {\u0022January 2, 2024\u0022: -12.5, \u0022-\u0022: -12.5, \u0022a\u0022: \u0022line\\nnext\u0022}, \u0022a\\tb\u0022: \u0022\\t\u0022}","ok":true,"value":"? \u003E-\n  a\n   b\n: \u0022January 2, 2024\u0022: -12.5\n  \u0027-\u0027: -12.5\n  a: \u0022line\\nnext\u0022\na\tb: \u0022\t\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"[[[2e\u002B20, -12.5, {\u0022a\\rb\u0022: false, \u0022---hello\u0022: true}, -12.5], -12.5, \u0022true\u0022], 1, \u0022\\u001b\u0022]","ok":true,"value":"- - - 2e\u002B20\n    - -12.5\n    - ? \u003E-\n        a\n\n        b\n      : false\n      \u0027---hello\u0027: true\n    - -12.5\n  - -12.5\n  - \u0022true\u0022\n- 1\n- \u0022\\e\u0022"}
+{"input":"[\u0022\\uffff\u0022]","ok":true,"value":"- \u0022\\uFFFF\u0022"}
+{"input":"[[\u0022\\u001b\u0022, [[0, 0]]], \u0022true\u0022, [[{\u0022[x]\u0022: null}, [true, true, \u0022\\ud83d\\ude00\u0022]], \u0022\\ud83d\\ude00\u0022], false]","ok":true,"value":"- - \u0022\\e\u0022\n  - - - 0\n      - 0\n- \u0022true\u0022\n- - - \u0027[x]\u0027: null\n    - - true\n      - true\n      - \u0022\\U0001F600\u0022\n  - \u0022\\U0001F600\u0022\n- false"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"{\u0022a#b\u0022: 1, \u0022null\u0022: {\u0022false\u0022: -12.5, \u0022\\tx\u0022: -12.5, \u0022a\\tb\u0022: null}}","ok":true,"value":"a#b: 1\n\u0022null\u0022:\n  \u0022false\u0022: -12.5\n  \tx: -12.5\n  a\tb: null"}
+{"input":"[-12.5, null]","ok":true,"value":"- -12.5\n- null"}
+{"input":"[0, 2e\u002B20, [[{\u0022a\\n\\n\u0022: false, \u0022x\\t\u0022: \u0022a\u0022, \u0022{x}\u0022: null}], true, -12.5, [1, null]]]","ok":true,"value":"- 0\n- 2e\u002B20\n- - - ? \u003E\u002B\n        a\n\n      : false\n      x\t: \u0022a\u0022\n      \u0027{x}\u0027: null\n  - true\n  - -12.5\n  - - 1\n    - null"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"[{\u0022a\\\u0022b\u0022: null, \u0022null\u0022: \u0022\\u00a0\u0022, \u0022a#b\u0022: [false]}, {\u0022\\n\\n\u0022: true, \u0022{x}\u0022: 0, \u0022a\u0022: \u0022\\u00a0\u0022, \u0022a\\nb\u0022: -12.5}]","ok":true,"value":"- a\u0022b: null\n  \u0022null\u0022: \u0022\u00A0\u0022\n  a#b:\n  - false\n- ? \u003E2\u002B\n\n\n  : true\n  \u0027{x}\u0027: 0\n  a: \u0022\u00A0\u0022\n  ? \u003E-\n    a\n\n    b\n  : -12.5"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[2e\u002B20, {\u0022a\\n b\u0022: {\u0022x\\t\u0022: 1, \u0022null\u0022: {}}, \u0022a\\n\\n\u0022: -12.5, \u0022{x}\u0022: \u0022\\u001b\u0022, \u0022x\\t\u0022: {\u0022a\\tb\u0022: 0}}, [true, [{\u0022\\ud83d\\ude00\u0022: \u0022a\u0022}], -12.5]]","ok":true,"value":"- 2e\u002B20\n- ? \u003E-\n    a\n     b\n  : x\t: 1\n    \u0022null\u0022: {}\n  ? \u003E\u002B\n    a\n\n  : -12.5\n  \u0027{x}\u0027: \u0022\\e\u0022\n  x\t:\n    a\tb: 0\n- - true\n  - - \u0022\\U0001F600\u0022: \u0022a\u0022\n  - -12.5"}
+{"input":"[\u0022\\t\u0022]","ok":true,"value":"- \u0022\t\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"[\u0022line\\nnext\u0022, \u0022\\t\u0022, \u0022\\t\u0022]","ok":true,"value":"- \u0022line\\nnext\u0022\n- \u0022\t\u0022\n- \u0022\t\u0022"}
+{"input":"[{\u0022a\\n b\u0022: [\u0022\\uffff\u0022, 1], \u0022a\\u007fb\u0022: {\u0022:\u0022: \u0022\\t\u0022, \u0022null\u0022: {\u00222024-12-31\u0022: false, \u0022a\u0027b\u0022: true, \u0022---hello\u0022: \u0022\\ud83d\\ude00\u0022, \u0022a\\n b\u0022: \u0022a\u0022}}}, null, {\u0022-\u0022: \u0022\\ud83d\\ude00\u0022}]","ok":true,"value":"- ? \u003E-\n    a\n     b\n  : - \u0022\\uFFFF\u0022\n    - 1\n  \u0022a\\x7Fb\u0022:\n    \u0027:\u0027: \u0022\t\u0022\n    \u0022null\u0022:\n      \u00222024-12-31\u0022: false\n      a\u0027b: true\n      \u0027---hello\u0027: \u0022\\U0001F600\u0022\n      ? \u003E-\n        a\n         b\n      : \u0022a\u0022\n- null\n- \u0027-\u0027: \u0022\\U0001F600\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[false]","ok":true,"value":"- false"}
+{"input":"[2e\u002B20]","ok":true,"value":"- 2e\u002B20"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"{\u0022a\u0027b\u0022: \u0022line\\nnext\u0022, \u0022\\ud83d\\ude00\u0022: [{\u0022[x]\u0022: {\u0022?\u0022: false, \u0022a\\n\\n\u0022: true, \u0022a\\\u0022b\u0022: true, \u0022\\ud83d\\ude00\u0022: 1}, \u0022...hello\u0022: {\u0022\\n\\n\u0022: true, \u0022{x}\u0022: 1, \u0022\\tx\u0022: 1}, \u0022a:\\tb\u0022: 0}, {\u0022a\\\u0022b\u0022: \u0022\\uffff\u0022}, 1, \u0022\\uffff\u0022], \u0022a\\n b\u0022: 1, \u0022[x]\u0022: {\u0022a\\u00a0b\u0022: \u0022\u0022}}","ok":true,"value":"a\u0027b: \u0022line\\nnext\u0022\n\u0022\\U0001F600\u0022:\n- \u0027[x]\u0027:\n    \u0027?\u0027: false\n    ? \u003E\u002B\n      a\n\n    : true\n    a\u0022b: true\n    \u0022\\U0001F600\u0022: 1\n  \u0027...hello\u0027:\n    ? \u003E2\u002B\n\n\n    : true\n    \u0027{x}\u0027: 1\n    \tx: 1\n  \u0027a:\tb\u0027: 0\n- a\u0022b: \u0022\\uFFFF\u0022\n- 1\n- \u0022\\uFFFF\u0022\n? \u003E-\n  a\n   b\n: 1\n\u0027[x]\u0027:\n  a\u00A0b: \u0022\u0022"}
+{"input":"{\u0022null\u0022: \u0022ready\u0022, \u0022---hello\u0022: 1, \u0022a: b\u0022: [], \u0022a#b\u0022: -12.5}","ok":true,"value":"\u0022null\u0022: \u0022ready\u0022\n\u0027---hello\u0027: 1\n\u0027a: b\u0027: []\na#b: -12.5"}
+{"input":"[{\u0022a\\nb\u0022: 2e\u002B20, \u0022---hello\u0022: 2e\u002B20}, [false, false]]","ok":true,"value":"- ? \u003E-\n    a\n\n    b\n  : 2e\u002B20\n  \u0027---hello\u0027: 2e\u002B20\n- - false\n  - false"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"\u0022\\uffff\u0022","ok":true,"value":"\u0022\\uFFFF\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"[{\u0022a#b\u0022: \u0022\\ud83d\\ude00\u0022, \u0022:\u0022: -12.5}, {}, -12.5]","ok":true,"value":"- a#b: \u0022\\U0001F600\u0022\n  \u0027:\u0027: -12.5\n- {}\n- -12.5"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"{\u0022a\\tb\u0022: {}, \u0022null\u0022: [2e\u002B20, {\u0022January 2, 2024\u0022: 0, \u0022a\\n\\nb\u0022: true, \u0022a\\u00a0b\u0022: -12.5, \u0022-\u0022: []}, -12.5], \u0022a: b\u0022: []}","ok":true,"value":"a\tb: {}\n\u0022null\u0022:\n- 2e\u002B20\n- \u0022January 2, 2024\u0022: 0\n  ? \u003E-\n    a\n\n\n    b\n  : true\n  a\u00A0b: -12.5\n  \u0027-\u0027: []\n- -12.5\n\u0027a: b\u0027: []"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"\u0022true\u0022","ok":true,"value":"\u0022true\u0022"}
+{"input":"\u0022\\u00a0\u0022","ok":true,"value":"\u0022\u00A0\u0022"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"[{\u0022a\u0022: 0, \u0022a\\u00a0b\u0022: null}, 0, null]","ok":true,"value":"- a: 0\n  a\u00A0b: null\n- 0\n- null"}
+{"input":"{\u0022a\\rb\u0022: 1, \u0022-\u0022: true}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: 1\n\u0027-\u0027: true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"{\u0022false\u0022: {\u0022\\ud83d\\ude00\u0022: {\u0022a:\u0022: true, \u0022\\n\\n\u0022: []}}}","ok":true,"value":"\u0022false\u0022:\n  \u0022\\U0001F600\u0022:\n    \u0027a:\u0027: true\n    ? \u003E2\u002B\n\n\n    : []"}
+{"input":"\u0022true\u0022","ok":true,"value":"\u0022true\u0022"}
+{"input":"{\u0022a\\u00a0b\u0022: -12.5, \u0022\\ud83d\\ude00\u0022: -12.5}","ok":true,"value":"a\u00A0b: -12.5\n\u0022\\U0001F600\u0022: -12.5"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"[null, \u0022\\u65e5\u0022, -12.5]","ok":true,"value":"- null\n- \u0022\u65E5\u0022\n- -12.5"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"[{\u0022a\\u00a0b\u0022: [1, false, false], \u0022a\\tb\u0022: \u0022\u0022}]","ok":true,"value":"- a\u00A0b:\n  - 1\n  - false\n  - false\n  a\tb: \u0022\u0022"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"{\u0022a\\u007fb\u0022: \u0022\\u001b\u0022}","ok":true,"value":"\u0022a\\x7Fb\u0022: \u0022\\e\u0022"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"[\u0022\u0022, \u0022\\ud83d\\ude00\u0022, \u0022\\t\u0022]","ok":true,"value":"- \u0022\u0022\n- \u0022\\U0001F600\u0022\n- \u0022\t\u0022"}
+{"input":"[{\u0022a\\\u0022b\u0022: [[\u0022\\ud83d\\ude00\u0022, \u0022\\ud83d\\ude00\u0022], -12.5, false, null], \u0022...hello\u0022: 1}, true, [null, 1], [2e\u002B20, {\u0022\\n\\n\u0022: null, \u0022...hello\u0022: \u0022ready\u0022, \u0022\\tx\u0022: 0}]]","ok":true,"value":"- a\u0022b:\n  - - \u0022\\U0001F600\u0022\n    - \u0022\\U0001F600\u0022\n  - -12.5\n  - false\n  - null\n  \u0027...hello\u0027: 1\n- true\n- - null\n  - 1\n- - 2e\u002B20\n  - ? \u003E2\u002B\n\n\n    : null\n    \u0027...hello\u0027: \u0022ready\u0022\n    \tx: 0"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[[]]","ok":true,"value":"- []"}
+{"input":"[\u0022\\u001b\u0022, false]","ok":true,"value":"- \u0022\\e\u0022\n- false"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"[{\u0022a\\n b\u0022: \u0022\\u00a0\u0022, \u0022a\\u007fb\u0022: {}}]","ok":true,"value":"- ? \u003E-\n    a\n     b\n  : \u0022\u00A0\u0022\n  \u0022a\\x7Fb\u0022: {}"}
+{"input":"{\u0022false\u0022: 1}","ok":true,"value":"\u0022false\u0022: 1"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"[\u0022\\t\u0022, {\u0022a: b\u0022: 2e\u002B20, \u0022a\\u007fb\u0022: [{\u0022a#b\u0022: true, \u0022a\\n\\nb\u0022: null}, {}], \u0022null\u0022: false}]","ok":true,"value":"- \u0022\t\u0022\n- \u0027a: b\u0027: 2e\u002B20\n  \u0022a\\x7Fb\u0022:\n  - a#b: true\n    ? \u003E-\n      a\n\n\n      b\n    : null\n  - {}\n  \u0022null\u0022: false"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"{\u0022a\\u00a0b\u0022: null, \u0022{x}\u0022: {\u0022a\\nb\u0022: true, \u0022a\\u00a0b\u0022: {\u0022a\\n\\nb\u0022: [\u0022\\ud83d\\ude00\u0022, true, false], \u0022\\tx\u0022: [null], \u0022x\\t\u0022: \u0022\u0022, \u00222024-12-31\u0022: null}}, \u0022a\\\u0022b\u0022: {\u0022a\u0027b\u0022: -12.5, \u0022a:\u0022: null}, \u0022?\u0022: [{\u0022[x]\u0022: \u0022\\u001b\u0022}, 1]}","ok":true,"value":"a\u00A0b: null\n\u0027{x}\u0027:\n  ? \u003E-\n    a\n\n    b\n  : true\n  a\u00A0b:\n    ? \u003E-\n      a\n\n\n      b\n    : - \u0022\\U0001F600\u0022\n      - true\n      - false\n    \tx:\n    - null\n    x\t: \u0022\u0022\n    \u00222024-12-31\u0022: null\na\u0022b:\n  a\u0027b: -12.5\n  \u0027a:\u0027: null\n\u0027?\u0027:\n- \u0027[x]\u0027: \u0022\\e\u0022\n- 1"}
+{"input":"{\u0022a\\nb\u0022: \u0022\\ud83d\\ude00\u0022, \u0022a\\n\\nb\u0022: {\u0022\\ud83d\\ude00\u0022: true, \u0022\\n\\n\u0022: [{\u0022{x}\u0022: true, \u0022a\u0027b\u0022: null, \u0022a:\\tb\u0022: \u0022\\ud83d\\ude00\u0022}]}, \u0022\\tx\u0022: {\u0022false\u0022: \u0022true\u0022, \u0022a: b\u0022: null, \u0022January 2, 2024\u0022: 2e\u002B20, \u0022a\u0022: {\u0022a\\nb\u0022: \u0022line\\nnext\u0022, \u0022\\ud83d\\ude00\u0022: {\u0022:\u0022: false, \u0022\\tx\u0022: \u0022a\u0022}, \u0022null\u0022: [0, true, 1]}}}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: \u0022\\U0001F600\u0022\n? \u003E-\n  a\n\n\n  b\n: \u0022\\U0001F600\u0022: true\n  ? \u003E2\u002B\n\n\n  : - \u0027{x}\u0027: true\n      a\u0027b: null\n      \u0027a:\tb\u0027: \u0022\\U0001F600\u0022\n\tx:\n  \u0022false\u0022: \u0022true\u0022\n  \u0027a: b\u0027: null\n  \u0022January 2, 2024\u0022: 2e\u002B20\n  a:\n    ? \u003E-\n      a\n\n      b\n    : \u0022line\\nnext\u0022\n    \u0022\\U0001F600\u0022:\n      \u0027:\u0027: false\n      \tx: \u0022a\u0022\n    \u0022null\u0022:\n    - 0\n    - true\n    - 1"}
+{"input":"[1, [{\u0022a\\rb\u0022: \u0022\\u65e5\u0022, \u0022a\u0027b\u0022: [1, null]}]]","ok":true,"value":"- 1\n- - ? \u003E-\n      a\n\n      b\n    : \u0022\u65E5\u0022\n    a\u0027b:\n    - 1\n    - null"}
+{"input":"\u0022\\uffff\u0022","ok":true,"value":"\u0022\\uFFFF\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"[{\u0022...hello\u0022: 2e\u002B20}, \u0022ready\u0022, \u0022line\\nnext\u0022, \u0022\\t\u0022]","ok":true,"value":"- \u0027...hello\u0027: 2e\u002B20\n- \u0022ready\u0022\n- \u0022line\\nnext\u0022\n- \u0022\t\u0022"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"{\u0022:\u0022: {\u0022a\u0027b\u0022: false, \u0022---hello\u0022: [{\u0022a\\tb\u0022: true, \u0022a\\n b\u0022: 1, \u0022null\u0022: 1, \u0022a#b\u0022: false}, true, [0]], \u0022a: b\u0022: [[null, \u0022\\ud83d\\ude00\u0022, null, 0]]}, \u0022a:\u0022: 2e\u002B20}","ok":true,"value":"\u0027:\u0027:\n  a\u0027b: false\n  \u0027---hello\u0027:\n  - a\tb: true\n    ? \u003E-\n      a\n       b\n    : 1\n    \u0022null\u0022: 1\n    a#b: false\n  - true\n  - - 0\n  \u0027a: b\u0027:\n  - - null\n    - \u0022\\U0001F600\u0022\n    - null\n    - 0\n\u0027a:\u0027: 2e\u002B20"}
+{"input":"\u0022true\u0022","ok":true,"value":"\u0022true\u0022"}
+{"input":"[-12.5]","ok":true,"value":"- -12.5"}
+{"input":"[\u0022line\\nnext\u0022, {}, 1, {\u0022a\u0027b\u0022: \u0022\\u65e5\u0022, \u0022a\\tb\u0022: null, \u0022a\u0022: 2e\u002B20, \u0022\\ud83d\\ude00\u0022: [[0], \u0022\u0022]}]","ok":true,"value":"- \u0022line\\nnext\u0022\n- {}\n- 1\n- a\u0027b: \u0022\u65E5\u0022\n  a\tb: null\n  a: 2e\u002B20\n  \u0022\\U0001F600\u0022:\n  - - 0\n  - \u0022\u0022"}
+{"input":"[0, {\u0022---hello\u0022: 0, \u0022-\u0022: {\u0022{x}\u0022: [\u0022\\ud83d\\ude00\u0022, \u0022a\u0022], \u0022false\u0022: 0}}]","ok":true,"value":"- 0\n- \u0027---hello\u0027: 0\n  \u0027-\u0027:\n    \u0027{x}\u0027:\n    - \u0022\\U0001F600\u0022\n    - \u0022a\u0022\n    \u0022false\u0022: 0"}
+{"input":"{\u0022false\u0022: {\u0022\\n\\n\u0022: null, \u0022---hello\u0022: true, \u0022a\u0022: []}, \u0022\\tx\u0022: true}","ok":true,"value":"\u0022false\u0022:\n  ? \u003E2\u002B\n\n\n  : null\n  \u0027---hello\u0027: true\n  a: []\n\tx: true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"{\u0022x\\t\u0022: {\u0022a\\u00a0b\u0022: 1, \u0022---hello\u0022: [{\u0022false\u0022: null, \u0022{x}\u0022: true}, {\u0022?\u0022: 1, \u0022\\ud83d\\ude00\u0022: 0}, 2e\u002B20], \u0022x\\t\u0022: {}, \u0022?\u0022: true}}","ok":true,"value":"x\t:\n  a\u00A0b: 1\n  \u0027---hello\u0027:\n  - \u0022false\u0022: null\n    \u0027{x}\u0027: true\n  - \u0027?\u0027: 1\n    \u0022\\U0001F600\u0022: 0\n  - 2e\u002B20\n  x\t: {}\n  \u0027?\u0027: true"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"[[-12.5, true, {\u0022{x}\u0022: 0, \u0022a\\\u0022b\u0022: 0, \u0022null\u0022: null}, \u0022\\u65e5\u0022]]","ok":true,"value":"- - -12.5\n  - true\n  - \u0027{x}\u0027: 0\n    a\u0022b: 0\n    \u0022null\u0022: null\n  - \u0022\u65E5\u0022"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022\\u00a0\u0022","ok":true,"value":"\u0022\u00A0\u0022"}
+{"input":"[[{\u0022?\u0022: true, \u0022-\u0022: \u0022\\t\u0022}, [{\u0022:\u0022: 1}, 2e\u002B20, -12.5, {}], {\u0022x\\t\u0022: false, \u0022a\\u00a0b\u0022: 2e\u002B20, \u0022January 2, 2024\u0022: {\u0022?\u0022: 0, \u0022a\u0022: 1, \u0022\\tx\u0022: null}, \u0022a\\tb\u0022: {\u0022a\\n b\u0022: \u0022a\u0022, \u0022a:\\tb\u0022: null}}], {\u0022January 2, 2024\u0022: false, \u0022-\u0022: 0, \u0022...hello\u0022: \u0022\\uffff\u0022}]","ok":true,"value":"- - \u0027?\u0027: true\n    \u0027-\u0027: \u0022\t\u0022\n  - - \u0027:\u0027: 1\n    - 2e\u002B20\n    - -12.5\n    - {}\n  - x\t: false\n    a\u00A0b: 2e\u002B20\n    \u0022January 2, 2024\u0022:\n      \u0027?\u0027: 0\n      a: 1\n      \tx: null\n    a\tb:\n      ? \u003E-\n        a\n         b\n      : \u0022a\u0022\n      \u0027a:\tb\u0027: null\n- \u0022January 2, 2024\u0022: false\n  \u0027-\u0027: 0\n  \u0027...hello\u0027: \u0022\\uFFFF\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"[[0], 0]","ok":true,"value":"- - 0\n- 0"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022true\u0022","ok":true,"value":"\u0022true\u0022"}
+{"input":"[false, false]","ok":true,"value":"- false\n- false"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"{\u0022...hello\u0022: {\u0022false\u0022: \u0022\\uffff\u0022, \u0022[x]\u0022: {\u0022a\\n\\nb\u0022: false, \u0022a:\u0022: {\u0022\\tx\u0022: \u0022a\u0022, \u0022a:\u0022: true, \u0022a\\n\\n\u0022: false, \u0022[x]\u0022: false}, \u0022:\u0022: [0, \u0022\\ud83d\\ude00\u0022, false, \u0022\\ud83d\\ude00\u0022], \u0022a\\\u0022b\u0022: null}, \u0022a:\u0022: false, \u0022a\u0027b\u0022: [{}, 2e\u002B20, 0]}}","ok":true,"value":"\u0027...hello\u0027:\n  \u0022false\u0022: \u0022\\uFFFF\u0022\n  \u0027[x]\u0027:\n    ? \u003E-\n      a\n\n\n      b\n    : false\n    \u0027a:\u0027:\n      \tx: \u0022a\u0022\n      \u0027a:\u0027: true\n      ? \u003E\u002B\n        a\n\n      : false\n      \u0027[x]\u0027: false\n    \u0027:\u0027:\n    - 0\n    - \u0022\\U0001F600\u0022\n    - false\n    - \u0022\\U0001F600\u0022\n    a\u0022b: null\n  \u0027a:\u0027: false\n  a\u0027b:\n  - {}\n  - 2e\u002B20\n  - 0"}
+{"input":"{\u0022a\\n\\nb\u0022: true, \u0022a\\n\\n\u0022: \u0022\\u001b\u0022, \u0022a\\u007fb\u0022: {\u0022false\u0022: -12.5, \u0022\\n\\n\u0022: \u0022\\u65e5\u0022, \u0022a\\tb\u0022: \u0022\\t\u0022}}","ok":true,"value":"? \u003E-\n  a\n\n\n  b\n: true\n? \u003E\u002B\n  a\n\n: \u0022\\e\u0022\n\u0022a\\x7Fb\u0022:\n  \u0022false\u0022: -12.5\n  ? \u003E2\u002B\n\n\n  : \u0022\u65E5\u0022\n  a\tb: \u0022\t\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"1","ok":true,"value":"1"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"[\u0022true\u0022, 0, 0, []]","ok":true,"value":"- \u0022true\u0022\n- 0\n- 0\n- []"}
+{"input":"\u0022\\u65e5\u0022","ok":true,"value":"\u0022\u65E5\u0022"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"[[{}, {\u0022a\\rb\u0022: false, \u0022January 2, 2024\u0022: 2e\u002B20}, \u0022\\u00a0\u0022], 1]","ok":true,"value":"- - {}\n  - ? \u003E-\n      a\n\n      b\n    : false\n    \u0022January 2, 2024\u0022: 2e\u002B20\n  - \u0022\u00A0\u0022\n- 1"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022[x]\u0022: \u0022\\uffff\u0022, \u0022a\u0022: {\u0022\\tx\u0022: {\u0022a\\n b\u0022: 1, \u0022a\\u00a0b\u0022: 0, \u0022:\u0022: [1, 1, 1]}, \u0022a: b\u0022: 0, \u0022a\\nb\u0022: -12.5, \u0022a\\\u0022b\u0022: {\u0022a\\n b\u0022: \u0022\\u65e5\u0022}}, \u0022-\u0022: \u0022\\u00a0\u0022, \u0022a:\\tb\u0022: {\u0022{x}\u0022: \u0022\\u00a0\u0022, \u00222024-12-31\u0022: -12.5}}","ok":true,"value":"\u0027[x]\u0027: \u0022\\uFFFF\u0022\na:\n  \tx:\n    ? \u003E-\n      a\n       b\n    : 1\n    a\u00A0b: 0\n    \u0027:\u0027:\n    - 1\n    - 1\n    - 1\n  \u0027a: b\u0027: 0\n  ? \u003E-\n    a\n\n    b\n  : -12.5\n  a\u0022b:\n    ? \u003E-\n      a\n       b\n    : \u0022\u65E5\u0022\n\u0027-\u0027: \u0022\u00A0\u0022\n\u0027a:\tb\u0027:\n  \u0027{x}\u0027: \u0022\u00A0\u0022\n  \u00222024-12-31\u0022: -12.5"}
+{"input":"[\u0022\\u00a0\u0022, [[[], 0, {\u0022a\\rb\u0022: \u0022a\u0022, \u0022a\\u00a0b\u0022: \u0022a\u0022}], {\u0022a\u0022: {\u0022{x}\u0022: \u0022a\u0022, \u0022...hello\u0022: null}, \u0022January 2, 2024\u0022: \u0022\\t\u0022, \u0022a\\\u0022b\u0022: {\u0022a\u0022: true, \u0022a:\\tb\u0022: 1, \u0022a: b\u0022: 0}}, false, 0], [[null, [0], null], {}, {\u0022---hello\u0022: 2e\u002B20}, 0], 2e\u002B20]","ok":true,"value":"- \u0022\u00A0\u0022\n- - - []\n    - 0\n    - ? \u003E-\n        a\n\n        b\n      : \u0022a\u0022\n      a\u00A0b: \u0022a\u0022\n  - a:\n      \u0027{x}\u0027: \u0022a\u0022\n      \u0027...hello\u0027: null\n    \u0022January 2, 2024\u0022: \u0022\t\u0022\n    a\u0022b:\n      a: true\n      \u0027a:\tb\u0027: 1\n      \u0027a: b\u0027: 0\n  - false\n  - 0\n- - - null\n    - - 0\n    - null\n  - {}\n  - \u0027---hello\u0027: 2e\u002B20\n  - 0\n- 2e\u002B20"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"[\u0022\\ud83d\\ude00\u0022]","ok":true,"value":"- \u0022\\U0001F600\u0022"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{\u00222024-12-31\u0022: 0}","ok":true,"value":"\u00222024-12-31\u0022: 0"}
+{"input":"{\u0022null\u0022: true, \u0022\\tx\u0022: [], \u0022a:\\tb\u0022: 2e\u002B20}","ok":true,"value":"\u0022null\u0022: true\n\tx: []\n\u0027a:\tb\u0027: 2e\u002B20"}
+{"input":"[{\u0022a\\tb\u0022: 0, \u0022x\\t\u0022: null, \u0022\\tx\u0022: -12.5}, true]","ok":true,"value":"- a\tb: 0\n  x\t: null\n  \tx: -12.5\n- true"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"[\u0022\\t\u0022]","ok":true,"value":"- \u0022\t\u0022"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022...hello\u0022: false, \u0022a\\n\\nb\u0022: {}}","ok":true,"value":"\u0027...hello\u0027: false\n? \u003E-\n  a\n\n\n  b\n: {}"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"\u0022\\u00a0\u0022","ok":true,"value":"\u0022\u00A0\u0022"}
+{"input":"[[\u0022\\u65e5\u0022, [{\u0022[x]\u0022: null, \u0022a\\nb\u0022: \u0022\\ud83d\\ude00\u0022}, [\u0022a\u0022], []], [2e\u002B20, [1, 1, \u0022\\ud83d\\ude00\u0022, \u0022\\ud83d\\ude00\u0022]]], [\u0022\\u65e5\u0022], [-12.5, true, \u0022\\uffff\u0022]]","ok":true,"value":"- - \u0022\u65E5\u0022\n  - - \u0027[x]\u0027: null\n      ? \u003E-\n        a\n\n        b\n      : \u0022\\U0001F600\u0022\n    - - \u0022a\u0022\n    - []\n  - - 2e\u002B20\n    - - 1\n      - 1\n      - \u0022\\U0001F600\u0022\n      - \u0022\\U0001F600\u0022\n- - \u0022\u65E5\u0022\n- - -12.5\n  - true\n  - \u0022\\uFFFF\u0022"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[[1, false], true, 0]","ok":true,"value":"- - 1\n  - false\n- true\n- 0"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"{\u0022:\u0022: \u0022\u0022, \u0022a\\n\\nb\u0022: {\u0022a: b\u0022: [[], {\u0022January 2, 2024\u0022: false, \u0022a\u0027b\u0022: 0, \u0022a: b\u0022: false, \u0022a#b\u0022: null}]}, \u0022{x}\u0022: \u0022ready\u0022, \u0022\\tx\u0022: \u0022true\u0022}","ok":true,"value":"\u0027:\u0027: \u0022\u0022\n? \u003E-\n  a\n\n\n  b\n: \u0027a: b\u0027:\n  - []\n  - \u0022January 2, 2024\u0022: false\n    a\u0027b: 0\n    \u0027a: b\u0027: false\n    a#b: null\n\u0027{x}\u0027: \u0022ready\u0022\n\tx: \u0022true\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"[[], \u0022\\u65e5\u0022]","ok":true,"value":"- []\n- \u0022\u65E5\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022a\\tb\u0022: {\u0022January 2, 2024\u0022: -12.5, \u0022\\tx\u0022: {\u0022null\u0022: true, \u0022a\\n\\n\u0022: [true, 1], \u0022a:\u0022: {\u0022a\\tb\u0022: \u0022a\u0022, \u0022a\\u00a0b\u0022: true, \u0022a\\rb\u0022: \u0022\\ud83d\\ude00\u0022, \u0022\\tx\u0022: 0}}}}","ok":true,"value":"a\tb:\n  \u0022January 2, 2024\u0022: -12.5\n  \tx:\n    \u0022null\u0022: true\n    ? \u003E\u002B\n      a\n\n    : - true\n      - 1\n    \u0027a:\u0027:\n      a\tb: \u0022a\u0022\n      a\u00A0b: true\n      ? \u003E-\n        a\n\n        b\n      : \u0022\\U0001F600\u0022\n      \tx: 0"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"\u0022\u0022","ok":true,"value":""}
+{"input":"0","ok":true,"value":"0"}
+{"input":"{\u0022[x]\u0022: {}}","ok":true,"value":"\u0027[x]\u0027: {}"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"[null, \u0022\\t\u0022]","ok":true,"value":"- null\n- \u0022\t\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"{\u0022a\\n\\n\u0022: 2e\u002B20}","ok":true,"value":"? \u003E\u002B\n  a\n\n: 2e\u002B20"}
+{"input":"[[], false, [[false], [], [\u0022\\t\u0022, {\u0022a\\u00a0b\u0022: false}], [-12.5]]]","ok":true,"value":"- []\n- false\n- - - false\n  - []\n  - - \u0022\t\u0022\n    - a\u00A0b: false\n  - - -12.5"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"[]","ok":true,"value":"[]"}
+{"input":"-12.5","ok":true,"value":"-12.5"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"[0]","ok":true,"value":"- 0"}
+{"input":"[{\u0022a\\n\\n\u0022: [1], \u0022a\\\u0022b\u0022: 2e\u002B20, \u0022a#b\u0022: {\u0022a\u0022: \u0022\\uffff\u0022, \u0022a#b\u0022: {}}, \u00222024-12-31\u0022: \u0022\\ud83d\\ude00\u0022}, []]","ok":true,"value":"- ? \u003E\u002B\n    a\n\n  : - 1\n  a\u0022b: 2e\u002B20\n  a#b:\n    a: \u0022\\uFFFF\u0022\n    a#b: {}\n  \u00222024-12-31\u0022: \u0022\\U0001F600\u0022\n- []"}
+{"input":"\u0022\\uffff\u0022","ok":true,"value":"\u0022\\uFFFF\u0022"}
+{"input":"{\u0022a\\nb\u0022: 1}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: 1"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"\u0022true\u0022","ok":true,"value":"\u0022true\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"2e\u002B20","ok":true,"value":"2e\u002B20"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022January 2, 2024\u0022: {\u0022a\\u00a0b\u0022: \u0022line\\nnext\u0022}, \u0022-\u0022: []}","ok":true,"value":"\u0022January 2, 2024\u0022:\n  a\u00A0b: \u0022line\\nnext\u0022\n\u0027-\u0027: []"}
+{"input":"{\u0022a\\\u0022b\u0022: [\u0022true\u0022, 2e\u002B20], \u00222024-12-31\u0022: [], \u0022a\u0027b\u0022: \u0022\\u001b\u0022}","ok":true,"value":"a\u0022b:\n- \u0022true\u0022\n- 2e\u002B20\n\u00222024-12-31\u0022: []\na\u0027b: \u0022\\e\u0022"}
+{"input":"\u0022\\t\u0022","ok":true,"value":"\u0022\t\u0022"}
+{"input":"[\u0022line\\nnext\u0022, \u0022true\u0022]","ok":true,"value":"- \u0022line\\nnext\u0022\n- \u0022true\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"\u0022line\\nnext\u0022","ok":true,"value":"\u0022line\\nnext\u0022"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"{\u0022a\u0027b\u0022: null, \u0022a#b\u0022: 1, \u0022\\ud83d\\ude00\u0022: [0, {\u0022{x}\u0022: [true]}], \u0022\\n\\n\u0022: null}","ok":true,"value":"a\u0027b: null\na#b: 1\n\u0022\\U0001F600\u0022:\n- 0\n- \u0027{x}\u0027:\n  - true\n? \u003E2\u002B\n\n\n: null"}
+{"input":"{\u0022\\ud83d\\ude00\u0022: [\u0022\u0022], \u0022null\u0022: 2e\u002B20, \u0022a\\\u0022b\u0022: 1}","ok":true,"value":"\u0022\\U0001F600\u0022:\n- \u0022\u0022\n\u0022null\u0022: 2e\u002B20\na\u0022b: 1"}
+{"input":"[{}, -12.5]","ok":true,"value":"- {}\n- -12.5"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022a\u0022: 2e\u002B20, \u0022a\\rb\u0022: \u0022\\u001b\u0022}","ok":true,"value":"a: 2e\u002B20\n? \u003E-\n  a\n\n  b\n: \u0022\\e\u0022"}
+{"input":"[{\u0022a\\nb\u0022: 1, \u0022a\\n\\n\u0022: -12.5, \u0022false\u0022: [0, {}, \u0022\\u001b\u0022], \u0022[x]\u0022: \u0022\\u001b\u0022}, 1, \u0022\\uffff\u0022]","ok":true,"value":"- ? \u003E-\n    a\n\n    b\n  : 1\n  ? \u003E\u002B\n    a\n\n  : -12.5\n  \u0022false\u0022:\n  - 0\n  - {}\n  - \u0022\\e\u0022\n  \u0027[x]\u0027: \u0022\\e\u0022\n- 1\n- \u0022\\uFFFF\u0022"}
+{"input":"[\u0022\\u00a0\u0022, {\u0022\\tx\u0022: -12.5}]","ok":true,"value":"- \u0022\u00A0\u0022\n- \tx: -12.5"}
+{"input":"{\u0022[x]\u0022: false}","ok":true,"value":"\u0027[x]\u0027: false"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022a:\\tb\u0022: [{\u0022false\u0022: \u0022ready\u0022}, [\u0022\\uffff\u0022, [1, true, 0, 0], {\u0022January 2, 2024\u0022: 0, \u0022a\\rb\u0022: null, \u0022false\u0022: 1, \u0022[x]\u0022: null}, true], 0, -12.5]}","ok":true,"value":"\u0027a:\tb\u0027:\n- \u0022false\u0022: \u0022ready\u0022\n- - \u0022\\uFFFF\u0022\n  - - 1\n    - true\n    - 0\n    - 0\n  - \u0022January 2, 2024\u0022: 0\n    ? \u003E-\n      a\n\n      b\n    : null\n    \u0022false\u0022: 1\n    \u0027[x]\u0027: null\n  - true\n- 0\n- -12.5"}
+{"input":"{\u0022?\u0022: 2e\u002B20, \u0022[x]\u0022: 0, \u0022a:\\tb\u0022: \u0022\\u65e5\u0022}","ok":true,"value":"\u0027?\u0027: 2e\u002B20\n\u0027[x]\u0027: 0\n\u0027a:\tb\u0027: \u0022\u65E5\u0022"}
+{"input":"{\u0022?\u0022: [-12.5, false], \u0022a:\u0022: null}","ok":true,"value":"\u0027?\u0027:\n- -12.5\n- false\n\u0027a:\u0027: null"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"{\u0022...hello\u0022: \u0022\\u001b\u0022, \u0022?\u0022: {\u0022x\\t\u0022: \u0022line\\nnext\u0022}}","ok":true,"value":"\u0027...hello\u0027: \u0022\\e\u0022\n\u0027?\u0027:\n  x\t: \u0022line\\nnext\u0022"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"{}","ok":true,"value":"{}"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{\u0022a:\\tb\u0022: [\u0022\\t\u0022, [\u0022\\u00a0\u0022, \u0022\\uffff\u0022, {}, \u0022true\u0022], 0, 2e\u002B20], \u0022null\u0022: {}}","ok":true,"value":"\u0027a:\tb\u0027:\n- \u0022\t\u0022\n- - \u0022\u00A0\u0022\n  - \u0022\\uFFFF\u0022\n  - {}\n  - \u0022true\u0022\n- 0\n- 2e\u002B20\n\u0022null\u0022: {}"}
+{"input":"[1, true, 1, [null, \u0022\\u65e5\u0022, true, \u0022true\u0022]]","ok":true,"value":"- 1\n- true\n- 1\n- - null\n  - \u0022\u65E5\u0022\n  - true\n  - \u0022true\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"{\u0022a:\\tb\u0022: \u0022\\uffff\u0022}","ok":true,"value":"\u0027a:\tb\u0027: \u0022\\uFFFF\u0022"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"1","ok":true,"value":"1"}
+{"input":"\u0022\\u65e5\u0022","ok":true,"value":"\u0022\u65E5\u0022"}
+{"input":"{\u0022a\\rb\u0022: false, \u0022\\tx\u0022: {\u0022\\n\\n\u0022: null}}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: false\n\tx:\n  ? \u003E2\u002B\n\n\n  : null"}
+{"input":"[\u0022\\t\u0022]","ok":true,"value":"- \u0022\t\u0022"}
+{"input":"\u0022ready\u0022","ok":true,"value":"\u0022ready\u0022"}
+{"input":"false","ok":true,"value":"false"}
+{"input":"\u0022\\u001b\u0022","ok":true,"value":"\u0022\\e\u0022"}
+{"input":"0","ok":true,"value":"0"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"{\u00222024-12-31\u0022: {\u0022a: b\u0022: -12.5}, \u0022a\\rb\u0022: {\u0022a\u0027b\u0022: \u0022line\\nnext\u0022, \u0022false\u0022: []}, \u0022a\\tb\u0022: \u0022\\u65e5\u0022, \u0022---hello\u0022: [-12.5, false]}","ok":true,"value":"\u00222024-12-31\u0022:\n  \u0027a: b\u0027: -12.5\n? \u003E-\n  a\n\n  b\n: a\u0027b: \u0022line\\nnext\u0022\n  \u0022false\u0022: []\na\tb: \u0022\u65E5\u0022\n\u0027---hello\u0027:\n- -12.5\n- false"}
+{"input":"{\u0022[x]\u0022: \u0022\\uffff\u0022, \u0022---hello\u0022: \u0022line\\nnext\u0022}","ok":true,"value":"\u0027[x]\u0027: \u0022\\uFFFF\u0022\n\u0027---hello\u0027: \u0022line\\nnext\u0022"}
+{"input":"[[[]], 1]","ok":true,"value":"- - []\n- 1"}

@@ -1,0 +1,2832 @@
+{
+  "cases": [
+    {
+      "case_id": "t32-registry-selectors",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "selectors": [
+        "p/model",
+        "p/model/high",
+        "p/vendor/model",
+        "p/vendor/model/high",
+        "p/unlisted",
+        "p/unlisted/low",
+        "p/unlisted/high",
+        "p/unlisted/unknown",
+        "p",
+        "p/",
+        "/m",
+        "p//m",
+        "nope/m",
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-registry-empty",
+      "family": "registry",
+      "providers": [],
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-empty-models",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": []
+        }
+      ],
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-duplicate-id",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ]
+        }
+      ],
+      "selectors": []
+    },
+    {
+      "case_id": "t32-registry-unnamed",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "",
+          "models": [
+            {
+              "id": "model"
+            }
+          ]
+        }
+      ],
+      "selectors": []
+    },
+    {
+      "case_id": "t32-registry-ambiguous-exact-variant",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "high"
+                }
+              ]
+            },
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "selectors": [
+        "p/model/high",
+        "p/unknown/high"
+      ]
+    },
+    {
+      "case_id": "t32-registry-refresh-concurrent",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "live_models": [
+            {
+              "id": "z-live"
+            }
+          ]
+        },
+        {
+          "id": "a",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "live_models": [
+            {
+              "id": "a-live"
+            }
+          ]
+        }
+      ],
+      "refresh": true,
+      "concurrent": true,
+      "selectors": [
+        "a/a-live",
+        "z/z-live"
+      ]
+    },
+    {
+      "case_id": "t32-registry-refresh-no-credential",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "has_credential": false,
+          "live_models": [
+            {
+              "id": "hidden"
+            }
+          ]
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-provider",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "provider"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-http",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "http"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-header",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "header"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-wire",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "wire"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-auth",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "auth"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-io",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "io"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-transport",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "transport"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-cancelled",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "cancelled"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-credential_failure-unexpected",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "credential_failure": "unexpected"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-provider",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "provider"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-http",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "http"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-header",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "header"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-wire",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "wire"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-auth",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "auth"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-io",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "io"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-transport",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "transport"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-cancelled",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "cancelled"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-list_failure-unexpected",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "list_failure": "unexpected"
+        }
+      ],
+      "refresh": true,
+      "selectors": [
+        "p/model"
+      ]
+    },
+    {
+      "case_id": "t32-registry-caller-cancelled",
+      "family": "registry",
+      "providers": [
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model"
+            }
+          ],
+          "honor_cancellation": true
+        }
+      ],
+      "refresh": true,
+      "cancelled": true,
+      "selectors": []
+    },
+    {
+      "case_id": "t32-routing-alias-precedence",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/vendor/model/high",
+          "usage": "General purpose",
+          "augment": "source augment",
+          "context_limit": "64k"
+        },
+        {
+          "name": "disabled",
+          "target": "",
+          "usage": "Disabled"
+        }
+      ],
+      "configured_default": "high_llm",
+      "context_limit": "128k",
+      "selectors": [
+        "",
+        "high_llm",
+        "disabled",
+        "p/vendor/model",
+        "p/model/high"
+      ]
+    },
+    {
+      "case_id": "t32-routing-registry-default",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [],
+      "configured_default": "",
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-unlisted-target",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/unlisted/high",
+          "usage": "General purpose"
+        }
+      ],
+      "configured_default": "high_llm",
+      "selectors": [
+        "",
+        "high_llm"
+      ]
+    },
+    {
+      "case_id": "t32-routing-snapshot-replacement",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/vendor/model/high",
+          "usage": "General purpose",
+          "augment": "source augment",
+          "context_limit": "64k"
+        },
+        {
+          "name": "disabled",
+          "target": "",
+          "usage": "Disabled"
+        }
+      ],
+      "configured_default": "high_llm",
+      "selectors": [
+        "",
+        "high_llm"
+      ],
+      "replacement": {
+        "configured_default": "high_llm",
+        "aliases": [
+          {
+            "name": "high_llm",
+            "target": "p/model/low",
+            "usage": "replacement"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "t32-routing-invalid-name-31",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "",
+          "target": "p/model",
+          "usage": "valid"
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-invalid-name-32",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": " bad",
+          "target": "p/model",
+          "usage": "valid"
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-invalid-name-33",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "bad/alias",
+          "target": "p/model",
+          "usage": "valid"
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-invalid-name-34",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/model",
+          "usage": ""
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-duplicate",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "same",
+          "target": "",
+          "usage": "one"
+        },
+        {
+          "name": "same",
+          "target": "",
+          "usage": "two"
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-replacement-duplicate",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/vendor/model/high",
+          "usage": "General purpose",
+          "augment": "source augment",
+          "context_limit": "64k"
+        },
+        {
+          "name": "disabled",
+          "target": "",
+          "usage": "Disabled"
+        }
+      ],
+      "configured_default": "high_llm",
+      "selectors": [
+        "high_llm"
+      ],
+      "replacement": {
+        "configured_default": "high_llm",
+        "aliases": [
+          {
+            "name": "same",
+            "target": "",
+            "usage": "one"
+          },
+          {
+            "name": "same",
+            "target": "",
+            "usage": "two"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "t32-routing-self",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "self",
+          "target": "self",
+          "usage": "one"
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-replacement-self",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/vendor/model/high",
+          "usage": "General purpose",
+          "augment": "source augment",
+          "context_limit": "64k"
+        },
+        {
+          "name": "disabled",
+          "target": "",
+          "usage": "Disabled"
+        }
+      ],
+      "configured_default": "high_llm",
+      "selectors": [
+        "high_llm"
+      ],
+      "replacement": {
+        "configured_default": "high_llm",
+        "aliases": [
+          {
+            "name": "self",
+            "target": "self",
+            "usage": "one"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "t32-routing-chain",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "first",
+          "target": "second",
+          "usage": "one"
+        },
+        {
+          "name": "second",
+          "target": "p/model",
+          "usage": "two"
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-replacement-chain",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/vendor/model/high",
+          "usage": "General purpose",
+          "augment": "source augment",
+          "context_limit": "64k"
+        },
+        {
+          "name": "disabled",
+          "target": "",
+          "usage": "Disabled"
+        }
+      ],
+      "configured_default": "high_llm",
+      "selectors": [
+        "high_llm"
+      ],
+      "replacement": {
+        "configured_default": "high_llm",
+        "aliases": [
+          {
+            "name": "first",
+            "target": "second",
+            "usage": "one"
+          },
+          {
+            "name": "second",
+            "target": "p/model",
+            "usage": "two"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "t32-routing-unknown-provider",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "bad",
+          "target": "nope/model",
+          "usage": "one"
+        }
+      ],
+      "selectors": [
+        ""
+      ]
+    },
+    {
+      "case_id": "t32-routing-replacement-unknown-provider",
+      "family": "routing",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "aliases": [
+        {
+          "name": "high_llm",
+          "target": "p/vendor/model/high",
+          "usage": "General purpose",
+          "augment": "source augment",
+          "context_limit": "64k"
+        },
+        {
+          "name": "disabled",
+          "target": "",
+          "usage": "Disabled"
+        }
+      ],
+      "configured_default": "high_llm",
+      "selectors": [
+        "high_llm"
+      ],
+      "replacement": {
+        "configured_default": "high_llm",
+        "aliases": [
+          {
+            "name": "bad",
+            "target": "nope/model",
+            "usage": "one"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "t32-factory-openai",
+      "family": "factory",
+      "provider_id": "openai",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-chatgpt",
+      "family": "factory",
+      "provider_id": "chatgpt",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-openrouter",
+      "family": "factory",
+      "provider_id": "openrouter",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-opencode-go",
+      "family": "factory",
+      "provider_id": "opencode-go",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-opencode-zen",
+      "family": "factory",
+      "provider_id": "opencode-zen",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-kimi-code",
+      "family": "factory",
+      "provider_id": "kimi-code",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-kimi-api",
+      "family": "factory",
+      "provider_id": "kimi-api",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-generic",
+      "family": "factory",
+      "provider_id": "generic",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe",
+        "X-Source": "synthetic"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}",
+      "external_models": [
+        {
+          "id": "external-model"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-factory-type-empty",
+      "family": "factory",
+      "provider_id": "openai",
+      "type": "",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-type-compatible",
+      "family": "factory",
+      "provider_id": "openai",
+      "type": "compatible",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-type-openai-compatible",
+      "family": "factory",
+      "provider_id": "openai",
+      "type": "openai-compatible",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-type-anthropic",
+      "family": "factory",
+      "provider_id": "openai",
+      "type": "anthropic",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-type-unsupported",
+      "family": "factory",
+      "provider_id": "openai",
+      "type": "unsupported",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-protocol-responses",
+      "family": "factory",
+      "provider_id": "generic",
+      "protocol": "responses",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-protocol-chat-completions",
+      "family": "factory",
+      "provider_id": "generic",
+      "protocol": "chat-completions",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-protocol-unsupported",
+      "family": "factory",
+      "provider_id": "generic",
+      "protocol": "unsupported",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "User-Agent": "source-probe"
+      }
+    },
+    {
+      "case_id": "t32-factory-no-endpoint-chatgpt",
+      "family": "factory",
+      "provider_id": "chatgpt",
+      "base_url": "",
+      "call": false
+    },
+    {
+      "case_id": "t32-factory-no-endpoint-generic",
+      "family": "factory",
+      "provider_id": "generic",
+      "base_url": "",
+      "call": false
+    },
+    {
+      "case_id": "t32-factory-openrouter-limit-1",
+      "family": "factory",
+      "provider_id": "openrouter",
+      "base_url": "https://example.test/v1",
+      "maximum_request_bytes": 1,
+      "headers": {
+        "User-Agent": "source-probe"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}"
+    },
+    {
+      "case_id": "t32-factory-openrouter-limit-67108864",
+      "family": "factory",
+      "provider_id": "openrouter",
+      "base_url": "https://example.test/v1",
+      "maximum_request_bytes": 67108864,
+      "headers": {
+        "User-Agent": "source-probe"
+      },
+      "preferences": "{\"allow_fallbacks\":true,\"require_parameters\":true,\"data_collection\":\"deny\",\"zdr\":true}"
+    },
+    {
+      "case_id": "t32-factory-configured-authorization-rejected",
+      "family": "factory",
+      "provider_id": "generic",
+      "base_url": "https://example.test/v1",
+      "headers": {
+        "Authorization": "synthetic-disallowed"
+      }
+    },
+    {
+      "case_id": "t32-modelsdev-success",
+      "family": "modelsdev",
+      "failure": "",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-http",
+      "family": "modelsdev",
+      "failure": "http",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-json",
+      "family": "modelsdev",
+      "failure": "json",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-schema",
+      "family": "modelsdev",
+      "failure": "schema",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-oversized",
+      "family": "modelsdev",
+      "failure": "oversized",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-transport",
+      "family": "modelsdev",
+      "failure": "transport",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-cancelled",
+      "family": "modelsdev",
+      "failure": "cancelled",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-timeout",
+      "family": "modelsdev",
+      "failure": "timeout",
+      "body_raw": "{\"openai\":{\"id\":\"openai\",\"models\":{\"external\":{\"id\":\"external-model\",\"name\":\"External\"}}}}"
+    },
+    {
+      "case_id": "t32-modelsdev-caller-cancelled",
+      "family": "modelsdev",
+      "cancelled": true,
+      "body_raw": "{}"
+    },
+    {
+      "case_id": "t32-builder-external-membership-no-endpoint-invention",
+      "family": "builder",
+      "yaml": "providers:\n  first:\n    base_url: https://first.test/v1\n    api_key_env: \"\"\n    headers:\n      X-Provider: first-secret\n  second:\n    base_url: https://second.test/v1\n    api_key_env: \"\"\n",
+      "credentials": {
+        "first": "first-key",
+        "second": "second-key"
+      },
+      "catalogue_body": "{\"first\":{\"id\":\"first\",\"models\":{\"external\":{\"id\":\"external-first\"}}},\"second\":{\"id\":\"second\",\"models\":{\"external\":{\"id\":\"external-second\"}}},\"ghost\":{\"id\":\"ghost\",\"api\":\"https://ghost.invalid/v1\",\"models\":{\"external\":{\"id\":\"external-ghost\"}}}}",
+      "refresh_again": true
+    },
+    {
+      "case_id": "t32-builder-models-dev-id",
+      "family": "builder",
+      "yaml": "providers:\n  custom:\n    base_url: https://custom.test/v1\n    api_key_env: \"\"\n    models_dev_id: first\n",
+      "credentials": {
+        "custom": "custom-key"
+      },
+      "catalogue_body": "{\"first\":{\"id\":\"first\",\"models\":{\"external\":{\"id\":\"external-first\"}}},\"second\":{\"id\":\"second\",\"models\":{\"external\":{\"id\":\"external-second\"}}},\"ghost\":{\"id\":\"ghost\",\"api\":\"https://ghost.invalid/v1\",\"models\":{\"external\":{\"id\":\"external-ghost\"}}}}"
+    },
+    {
+      "case_id": "t32-configuration-preset-rollback-false",
+      "family": "configuration",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "yaml": "model: high_llm\ncontext_limit: 128k\nmodel_aliases:\n  high_llm:\n    model_string: p/vendor/model/high\n    usage: General purpose\n    context_limit: 64k\n  low_llm:\n    model_string: p/model/low\n    usage: Routine work\nmodel_presets:\n  saved:\n    model: high_llm\n    model_aliases:\n      high_llm: p/model/high\n",
+      "operations": [
+        {
+          "kind": "alias",
+          "name": "high_llm",
+          "target": "p/vendor/model"
+        },
+        {
+          "kind": "set_preset",
+          "name": "snapshot",
+          "selected": "high_llm"
+        },
+        {
+          "kind": "context",
+          "value": "96k"
+        },
+        {
+          "kind": "select_preset",
+          "name": "saved",
+          "selected": "high_llm",
+          "fail_apply": false
+        },
+        {
+          "kind": "refresh"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-configuration-preset-rollback-true",
+      "family": "configuration",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "yaml": "model: high_llm\ncontext_limit: 128k\nmodel_aliases:\n  high_llm:\n    model_string: p/vendor/model/high\n    usage: General purpose\n    context_limit: 64k\n  low_llm:\n    model_string: p/model/low\n    usage: Routine work\nmodel_presets:\n  saved:\n    model: high_llm\n    model_aliases:\n      high_llm: p/model/high\n",
+      "operations": [
+        {
+          "kind": "alias",
+          "name": "high_llm",
+          "target": "p/vendor/model"
+        },
+        {
+          "kind": "set_preset",
+          "name": "snapshot",
+          "selected": "high_llm"
+        },
+        {
+          "kind": "context",
+          "value": "96k"
+        },
+        {
+          "kind": "select_preset",
+          "name": "saved",
+          "selected": "high_llm",
+          "fail_apply": true
+        },
+        {
+          "kind": "refresh"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-configuration-invalid-edit-atomic",
+      "family": "configuration",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "yaml": "model: high_llm\ncontext_limit: 128k\nmodel_aliases:\n  high_llm:\n    model_string: p/vendor/model/high\n    usage: General purpose\n    context_limit: 64k\n  low_llm:\n    model_string: p/model/low\n    usage: Routine work\nmodel_presets:\n  saved:\n    model: high_llm\n    model_aliases:\n      high_llm: p/model/high\n",
+      "operations": [
+        {
+          "kind": "alias",
+          "name": "missing",
+          "target": "p/model"
+        },
+        {
+          "kind": "alias",
+          "name": "high_llm",
+          "target": "nope/model"
+        },
+        {
+          "kind": "refresh"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-configuration-rewrite-refresh",
+      "family": "configuration",
+      "providers": [
+        {
+          "id": "z",
+          "models": [
+            {
+              "id": "last"
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "models": [
+            {
+              "id": "model",
+              "variants": [
+                {
+                  "name": "low",
+                  "effort": "minimal"
+                },
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "vendor/model",
+              "variants": [
+                {
+                  "name": "high",
+                  "effort": "xhigh"
+                }
+              ]
+            },
+            {
+              "id": "model/high"
+            }
+          ]
+        }
+      ],
+      "yaml": "model: high_llm\ncontext_limit: 128k\nmodel_aliases:\n  high_llm:\n    model_string: p/vendor/model/high\n    usage: General purpose\n    context_limit: 64k\n  low_llm:\n    model_string: p/model/low\n    usage: Routine work\nmodel_presets:\n  saved:\n    model: high_llm\n    model_aliases:\n      high_llm: p/model/high\n",
+      "operations": [
+        {
+          "kind": "rewrite",
+          "yaml": "model: high_llm\ncontext_limit: 128k\nmodel_aliases:\n  high_llm:\n    model_string: p/model/low\n    usage: General purpose\n    context_limit: 64k\n  low_llm:\n    model_string: p/model/low\n    usage: Routine work\nmodel_presets:\n  saved:\n    model: high_llm\n    model_aliases:\n      high_llm: p/model/high\n"
+        },
+        {
+          "kind": "refresh"
+        }
+      ]
+    },
+    {
+      "case_id": "t32-usage-date-guard-0",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "mode": "factory",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"0000-01-01\"}}}"
+    },
+    {
+      "case_id": "t32-usage-date-guard-1",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "mode": "factory",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00+14:01\"}}}"
+    },
+    {
+      "case_id": "t32-usage-date-guard-2",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "mode": "factory",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2016-12-31T23:59:60Z\"}}}"
+    },
+    {
+      "case_id": "t32-usage-date-guard-3",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "mode": "factory",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00.12345678Z\"}}}"
+    },
+    {
+      "case_id": "usage.canonical.chatgpt.credential",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":25,\"reset_at\":1735689600,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":60,\"reset_at\":1736294400,\"limit_window_seconds\":604800}},\"credits\":{\"has_credits\":true,\"balance\":\"12.50\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.canonical.chatgpt.empty",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":25,\"reset_at\":1735689600,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":60,\"reset_at\":1736294400,\"limit_window_seconds\":604800}},\"credits\":{\"has_credits\":true,\"balance\":\"12.50\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.canonical.kimi.credential",
+      "family": "usage",
+      "provider_id": "kimi",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":12.50}}",
+      "mode": "direct_reporter"
+    },
+    {
+      "case_id": "usage.canonical.kimi.empty",
+      "family": "usage",
+      "provider_id": "kimi",
+      "credential": "",
+      "body_raw": "{\"data\":{\"available_balance\":12.50}}",
+      "mode": "direct_reporter"
+    },
+    {
+      "case_id": "usage.canonical.opencode-go.credential",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"weekly\":{\"percent\":60,\"resetsAt\":\"2025-01-08T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.canonical.opencode-go.empty",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"weekly\":{\"percent\":60,\"resetsAt\":\"2025-01-08T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.canonical.compatible.credential",
+      "family": "usage",
+      "provider_id": "compatible",
+      "credential": "usage-token",
+      "body_raw": "{}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.canonical.compatible.empty",
+      "family": "usage",
+      "provider_id": "compatible",
+      "credential": "",
+      "body_raw": "{}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.factory.kimi-api",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":12.50}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.factory.kimi-code",
+      "family": "usage",
+      "provider_id": "kimi-code",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":12.50}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.factory.generic",
+      "family": "usage",
+      "provider_id": "generic",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"weekly\":{\"percent\":60,\"resetsAt\":\"2025-01-08T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.factory.opencode-go",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"weekly\":{\"percent\":60,\"resetsAt\":\"2025-01-08T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.factory.openrouter",
+      "family": "usage",
+      "provider_id": "openrouter",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"weekly\":{\"percent\":60,\"resetsAt\":\"2025-01-08T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.numeric-scale",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":12.5000}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.numeric-exponent",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":1.250e+1}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.negative",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":-2.5}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.zero",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":0}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.string",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":\"12.50\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.escaped",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":\"\\u0031\\u0032.50\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.string-quote",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":\"\\\"12.50\\\"\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.string-nan",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":\"NaN\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.string-infinity",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":\"Infinity\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.missing",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.null",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":null}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.invalid-string",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":\"invalid\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.invalid-object",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":{}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.invalid-bool",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":true}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.duplicate",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":{\"available_balance\":1.00,\"available_balance\":\"2.500\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.missing-data",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.null-data",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":null}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.kimi.invalid-json",
+      "family": "usage",
+      "provider_id": "kimi-api",
+      "credential": "usage-token",
+      "body_raw": "{\"data\":",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.rolling-weekly-monthly",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"weekly\":{\"percent\":60,\"resetsAt\":\"2025-01-08T00:00:00Z\"},\"monthly\":{\"percent\":80,\"resetsAt\":\"2025-02-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.weekly",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"weekly\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.monthly",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"monthly\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.rolling-monthly",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"monthly\":{\"percent\":60,\"resetsAt\":\"2025-02-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.root-short",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.root-long-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{},\"rollingUsage\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"},\"weeklyUsage\":{\"percent\":60,\"resetsAt\":\"2025-01-08T00:00:00Z\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.root-monthly-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"monthlyUsage\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.root-invalid-usage-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":null,\"rollingUsage\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.invalid-nested-root-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":70,\"resetsAt\":\"invalid\",\"resetAt\":\"invalid\"}},\"rollingUsage\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.percent-priority",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":10,\"usedPercent\":20,\"remainingPercent\":30}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.percent-zero-used",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":0,\"usedPercent\":20,\"remainingPercent\":30}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.remaining-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":0,\"usedPercent\":0,\"remainingPercent\":30}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.remaining-clamp",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"remainingPercent\":140}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.remaining-negative",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"remainingPercent\":-10}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.remaining-zero",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"remainingPercent\":0}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.percent-negative",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":-5}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.percent-over-100",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":120}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.string-number",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":\"12.5\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.nan",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":\"NaN\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.infinity",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":\"Infinity\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.negative-infinity",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":\"-Infinity\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.used-nan",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"percent\":0,\"usedPercent\":\"NaN\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.remaining-infinity",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"resetsAt\":\"2025-01-01T00:00:00Z\",\"remainingPercent\":\"Infinity\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.invalid-primary-valid-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"invalid\",\"resetAt\":\"2025-01-02T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.invalid-primary-empty-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"invalid\",\"resetAt\":\"\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.empty-primary-valid-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"\",\"resetAt\":\"2025-01-02T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.epoch-primary-valid-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"1970-01-01T00:00:00Z\",\"resetAt\":\"2025-01-02T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.both-empty",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"\",\"resetAt\":\"\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.missing-resets",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.both-invalid",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"bad\",\"resetAt\":\"bad\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.valid-primary-invalid-fallback",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\",\"resetAt\":\"bad\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.iso-offset-fraction",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T03:04:05.1234567+05:30\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.rfc",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"Wed, 01 Jan 2025 00:00:00 GMT\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.invariant",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"01/02/2025 03:04:05\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.reset.no-offset",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T03:04:05.123\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.midpoint.25.5",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":25.5,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.chatgpt.percent.25.5",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":25.5,\"reset_at\":1735689600,\"limit_window_seconds\":18000}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.midpoint.24.5",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":24.5,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.chatgpt.percent.24.5",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":24.5,\"reset_at\":1735689600,\"limit_window_seconds\":18000}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.midpoint.99.5",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":99.5,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.chatgpt.percent.99.5",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":99.5,\"reset_at\":1735689600,\"limit_window_seconds\":18000}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.midpoint.98.5",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":98.5,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.chatgpt.percent.98.5",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":98.5,\"reset_at\":1735689600,\"limit_window_seconds\":18000}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.midpoint.NaN",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":\"NaN\",\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.chatgpt.percent.NaN",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":\"NaN\",\"reset_at\":1735689600,\"limit_window_seconds\":18000}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.midpoint.Infinity",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":\"Infinity\",\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.chatgpt.percent.Infinity",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":\"Infinity\",\"reset_at\":1735689600,\"limit_window_seconds\":18000}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.midpoint.-Infinity",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":true,\"usage\":{\"rolling\":{\"percent\":\"-Infinity\",\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.chatgpt.percent.-Infinity",
+      "family": "usage",
+      "provider_id": "chatgpt",
+      "credential": "usage-token",
+      "body_raw": "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":\"-Infinity\",\"reset_at\":1735689600,\"limit_window_seconds\":18000}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.balance-disabled",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{\"useBalance\":false,\"usage\":{\"rolling\":{\"percent\":25,\"resetsAt\":\"2025-01-01T00:00:00Z\"}}}",
+      "mode": "factory"
+    },
+    {
+      "case_id": "usage.opencode.empty",
+      "family": "usage",
+      "provider_id": "opencode-go",
+      "credential": "usage-token",
+      "body_raw": "{}",
+      "mode": "factory"
+    }
+  ]
+}

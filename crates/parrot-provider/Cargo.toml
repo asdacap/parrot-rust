@@ -1,0 +1,65 @@
+[package]
+name = "parrot-provider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+parrot-domain = { path = "../parrot-domain" }
+parrot-foundation = { path = "../parrot-foundation" }
+chrono = { version = "=0.4.39", default-features = false, features = ["std"] }
+reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "macros", "net", "io-util", "time"] }
+url = { version = "=2.5.4", default-features = false }
+serde_json = { version = "=1.0.138", features = ["preserve_order", "raw_value"] }
+
+tungstenite = { version = "=0.26.2", default-features = false, features = ["handshake"] }
+getrandom = "=0.2.17"
+sha2 = "=0.10.8"
+
+[dev-dependencies]
+tokio = { version = "=1.43.0", default-features = false, features = ["test-util"] }
+
+[[test]]
+name = "http_stream"
+path = "tests/http_stream/main.rs"
+
+[[test]]
+name = "catalogs"
+path = "tests/catalogs/main.rs"
+
+[[test]]
+name = "image_inspection"
+path = "tests/image_inspection/main.rs"
+
+[[test]]
+name = "chat_completions"
+path = "tests/chat_completions/main.rs"
+
+[[test]]
+name = "anthropic"
+path = "tests/anthropic/main.rs"
+
+[[test]]
+name = "responses"
+path = "tests/responses/main.rs"
+
+[[test]]
+name = "responses_websocket"
+path = "tests/responses_websocket/main.rs"
+
+[[test]]
+name = "sessions"
+path = "tests/sessions/main.rs"
+
+[[test]]
+name = "routing"
+path = "tests/routing/main.rs"
+
+[[test]]
+name = "image_generation"
+path = "tests/image_generation/main.rs"
+
+[lints]
+workspace = true

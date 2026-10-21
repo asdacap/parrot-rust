@@ -1,0 +1,78 @@
+name: Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parrot-check-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    name: ${{ matrix.profile }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - profile: linux
+            runner: '["self-hosted", "Linux", "X64", "parrot-offline", "parrot-linux"]'
+            package: parrot-linux
+            target: x86_64-linux
+          - profile: nixos
+            runner: '["self-hosted", "Linux", "X64", "parrot-offline", "parrot-nixos"]'
+            package: parrot-linux
+            target: x86_64-linux
+          - profile: darwin
+            runner: '["self-hosted", "macOS", "ARM64", "parrot-offline"]'
+            package: parrot-darwin
+            target: aarch64-darwin
+          - profile: musl
+            runner: '["self-hosted", "Linux", "X64", "parrot-offline", "parrot-linux"]'
+            package: parrot-musl
+            target: x86_64-linux-musl
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    env:
+      PARROT_CI_CHECKOUT: run-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          clean: false
+          path: ${{ env.PARROT_CI_CHECKOUT }}
+      - name: Tests and package smoke
+        working-directory: ${{ env.PARROT_CI_CHECKOUT }}
+        shell: bash
+        env:
+          PARROT_CI_CACHE_KEY: ${{ hashFiles(format('{0}/Cargo.lock', env.PARROT_CI_CHECKOUT), format('{0}/web/package-lock.json', env.PARROT_CI_CHECKOUT), format('{0}/flake.lock', env.PARROT_CI_CHECKOUT), format('{0}/rust-toolchain.toml', env.PARROT_CI_CHECKOUT)) }}
+        run: |
+          set -euo pipefail
+          export CARGO_HOME="${PARROT_CI_CACHE_ROOT:?runner must supply its dependency cache}/$PARROT_CI_CACHE_KEY/cargo-home"
+          export PARROT_CARGO_HOME="$CARGO_HOME"
+          export CARGO_TARGET_DIR="$PARROT_CI_CACHE_ROOT/$PARROT_CI_CACHE_KEY/target"
+          export npm_config_cache="$PARROT_CI_CACHE_ROOT/$PARROT_CI_CACHE_KEY/npm"
+          export CARGO_NET_OFFLINE=true npm_config_offline=true
+          export HOME="$RUNNER_TEMP/parrot-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.profile }}"
+          mkdir -p "$HOME"
+          nix develop --offline --no-write-lock-file --command npm --prefix web ci --offline --no-audit --no-fund
+          nix develop --offline --no-write-lock-file --command cargo fmt --all -- --check
+          nix develop --offline --no-write-lock-file --command cargo clippy --workspace --all-targets --locked -- -D warnings
+          nix develop --offline --no-write-lock-file --command cargo test --workspace --locked
+          nix develop --offline --no-write-lock-file --command cargo test --manifest-path tests/contracts/Cargo.toml --locked
+          nix develop --offline --no-write-lock-file --command npm --prefix web test
+          nix develop --offline --no-write-lock-file --command npm --prefix web run build
+          case "$(uname -s)" in
+            Linux)
+              nix develop --offline --no-write-lock-file --command cargo test --locked -p parrot-tools --test sandbox_linux -- --include-ignored
+              nix develop --offline --no-write-lock-file --command cargo test --locked -p parrot-cli --test terminal_input native::
+              ;;
+            Darwin)
+              nix develop --offline --no-write-lock-file --command bash crates/parrot-tools/tests/sandbox/macos/run-native.sh
+              nix develop --offline --no-write-lock-file --command bash crates/parrot-cli/tests/terminal_input/native_macos
+              ;;
+          esac
+          prefix="$(nix build --offline --no-write-lock-file --no-link --print-out-paths '.#${{ matrix.package }}')"
+          bash scripts/package-smoke --prefix "$prefix" --target '${{ matrix.target }}'

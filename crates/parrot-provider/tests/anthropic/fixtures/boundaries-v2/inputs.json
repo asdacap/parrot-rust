@@ -1,0 +1,790 @@
+{
+  "cases": [
+    {
+      "case_id": "supplemental.boundaries-v2.idle-negative",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": -1
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.idle-negative-small-request",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 1,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": -1
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.header-negative",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": -1,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.header-negative-small-request",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 1,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": -1,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.timeouts-zero",
+      "input": {
+        "operation": "call",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 0,
+          "stream_idle_timeout_ms": 0
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.property-oops.parse",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {oops\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.property-oops.tool-schema",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": [
+            {
+              "name": "bad",
+              "description": "",
+              "parameters_json": "{oops"
+            }
+          ]
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.property-multiline.parse",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\ndata:   broken\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.property-multiline.tool-schema",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": [
+            {
+              "name": "bad",
+              "description": "",
+              "parameters_json": "{\n  broken"
+            }
+          ]
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.property-after-comma.parse",
+      "input": {
+        "operation": "parse",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"ok\":1,x:2}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.property-after-comma.tool-schema",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "hello",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": [
+            {
+              "name": "bad",
+              "description": "",
+              "parameters_json": "{\"ok\":1,x:2}"
+            }
+          ]
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.escaping.ascii",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": [
+            {
+              "name": "escape",
+              "description": "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+              "parameters_json": "{\"type\":\"object\"}"
+            }
+          ]
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.escaping.unicode",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "é漢😀é ­​‌‍  ‮﻿�",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "User",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "é漢😀é ­​‌‍  ‮﻿�",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "",
+                "content": ""
+              }
+            }
+          ],
+          "tools": [
+            {
+              "name": "escape",
+              "description": "é漢😀é ­​‌‍  ‮﻿�",
+              "parameters_json": "{\"type\":\"object\"}"
+            }
+          ]
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    },
+    {
+      "case_id": "supplemental.boundaries-v2.replay-numeric-duplicates-unknown-properties",
+      "input": {
+        "operation": "encode",
+        "provider_id": "custom",
+        "request": {
+          "model": "claude-opus-5-5",
+          "max_output_tokens": 1000,
+          "instructions": "",
+          "reasoning": null,
+          "provider_preferences": "",
+          "include_router_metadata": false,
+          "messages": [
+            {
+              "role": "Assistant",
+              "contents": [
+                {
+                  "kind": "text",
+                  "text": "neutral fallback",
+                  "image_url": "",
+                  "image_hex": "",
+                  "media_type": "",
+                  "width": 0,
+                  "height": 0
+                }
+              ],
+              "tool_calls": [],
+              "tool_call_id": "",
+              "provider_content": {
+                "provider_id": "custom",
+                "content": "[{\"type\":\"tool_use\",\"id\":\"call\",\"name\":\"numeric\",\"unknown_block\":true,\"input\":{\"huge\":1e999,\"integer\":12345678901234567890,\"duplicate\":1,\"duplicate\":2}},{\"type\":\"text\",\"text\":\"kept\",\"unknown_text\":\"dropped\"}]"
+              }
+            }
+          ],
+          "tools": []
+        },
+        "sse": "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+        "chunks": [],
+        "cancel_after_events": -1,
+        "max_event_bytes": 1048576,
+        "options": {
+          "base_url": "https://example.test/v1",
+          "api_key": "key",
+          "headers": {},
+          "status": 200,
+          "content_type": "text/event-stream",
+          "maximum_request_bytes": 10485760,
+          "allow_insecure_localhost": false,
+          "allow_insecure_remote": false,
+          "header_timeout_ms": 60000,
+          "stream_idle_timeout_ms": 300000
+        }
+      }
+    }
+  ]
+}

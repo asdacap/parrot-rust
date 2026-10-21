@@ -1,0 +1,61 @@
+[package]
+name = "parrot-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+parrot-domain = { path = "../parrot-domain" }
+parrot-foundation = { path = "../parrot-foundation" }
+parrot-provider = { path = "../parrot-provider" }
+parrot-storage = { path = "../parrot-storage" }
+protobuf = "=3.7.2"
+serde_json = "=1.0.138"
+tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "time", "macros"] }
+
+[[test]]
+name = "active_work"
+path = "tests/active_work/main.rs"
+
+[[test]]
+name = "agent_queues"
+path = "tests/agent_queues/main.rs"
+
+[[test]]
+name = "agent_turn"
+path = "tests/agent_turn/main.rs"
+
+[[test]]
+name = "children"
+path = "tests/children/main.rs"
+
+[[test]]
+name = "compaction"
+path = "tests/compaction/main.rs"
+
+[[test]]
+name = "event_broker"
+path = "tests/event_broker/main.rs"
+
+[[test]]
+name = "interactions"
+path = "tests/interactions/main.rs"
+
+[[test]]
+name = "plan_mode"
+path = "tests/plan_mode/main.rs"
+
+[[test]]
+name = "prompt_context"
+path = "tests/prompt_context/main.rs"
+
+[[test]]
+name = "task_scheduler"
+path = "tests/task_scheduler/main.rs"
+
+[[test]]
+name = "tool_settlement"
+path = "tests/tool_settlement/main.rs"
+
+[lints]
+workspace = true

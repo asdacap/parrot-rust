@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+option csharp_namespace = "Parrot.Protocol";
+
+package parrot.v1;
+
+import "parrot.proto";
+
+message ActiveShellProcess {
+  string process_id              = 1;
+  string name                    = 2;
+  string command                 = 3;
+  string origin_tool_call_id     = 4;
+  string owner_agent_session_id  = 5;
+  string owner_agent_name        = 6;
+  string parent_agent_session_id = 7;
+  string parent_agent_name       = 8;
+  int32 depth                    = 9;
+  int64 elapsed_ms               = 10;
+  string description             = 11;
+  ShellProcessActivityKind activity_kind = 12;
+}
+
+message CompletedShellProcess {
+  string process_id         = 1;
+  optional int64 elapsed_ms = 2;
+}
+
+// The data of one "shell_process" ToolSnapshot chunk.
+message ShellProcessSnapshot {
+  repeated ActiveShellProcess processes              = 1;
+  repeated CompletedShellProcess completed_processes = 2;
+}

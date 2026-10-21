@@ -1,0 +1,276 @@
+{
+  "source": "src/Parrot.Composition/Agent/AgentSessionComposition.cs",
+  "kind": "STATIC_SOURCE_NOT_RUNTIME_EXECUTION",
+  "factories": [
+    {
+      "name": "exec_command",
+      "factory_type": "ExecCommandToolFactory",
+      "registration_line": 291,
+      "injection_line": 259,
+      "definition_source": "src/Parrot.Tool.Process/Tools/ExecCommandToolFactory.cs",
+      "definition_line": 25,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "write_stdin",
+      "factory_type": "WriteStdinToolFactory",
+      "registration_line": 292,
+      "injection_line": 260,
+      "definition_source": "src/Parrot.Tool.Process/Tools/WriteStdinToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "interrupt_process",
+      "factory_type": "InterruptProcessToolFactory",
+      "registration_line": 293,
+      "injection_line": 261,
+      "definition_source": "src/Parrot.Tool.Process/Tools/InterruptProcessToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "monitor",
+      "factory_type": "MonitorToolFactory",
+      "registration_line": 294,
+      "injection_line": 262,
+      "definition_source": "src/Parrot.Tool.Process/Tools/MonitorToolFactory.cs",
+      "definition_line": 16,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "question",
+      "factory_type": "QuestionToolFactory",
+      "registration_line": 295,
+      "injection_line": 263,
+      "definition_source": "src/Parrot.Tools/Tools/QuestionToolFactory.cs",
+      "definition_line": 11,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "answer",
+      "factory_type": "AnswerToolFactory",
+      "registration_line": 296,
+      "injection_line": 264,
+      "definition_source": "src/Parrot.Tools/Tools/AnswerToolFactory.cs",
+      "definition_line": 11,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "read",
+      "factory_type": "ReadToolFactory",
+      "registration_line": 297,
+      "injection_line": 265,
+      "definition_source": "src/Parrot.Tools/Tools/ReadToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "read_image",
+      "factory_type": "ReadImageToolFactory",
+      "registration_line": 298,
+      "injection_line": 266,
+      "definition_source": "src/Parrot.Tools/Tools/ReadImageToolFactory.cs",
+      "definition_line": 9,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "imagegen",
+      "factory_type": "ImageGenerationToolFactory",
+      "registration_line": 299,
+      "injection_line": 267,
+      "definition_source": "src/Parrot.Tools/Tools/ImageGenerationToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "glob",
+      "factory_type": "GlobToolFactory",
+      "registration_line": 300,
+      "injection_line": 268,
+      "definition_source": "src/Parrot.Tools/Tools/GlobToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "write",
+      "factory_type": "WriteToolFactory",
+      "registration_line": 301,
+      "injection_line": 269,
+      "definition_source": "src/Parrot.Tools/Tools/WriteToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "edit",
+      "factory_type": "EditToolFactory",
+      "registration_line": 302,
+      "injection_line": 270,
+      "definition_source": "src/Parrot.Tools/Tools/EditToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "web_fetch",
+      "factory_type": "WebFetchToolFactory",
+      "registration_line": 303,
+      "injection_line": 271,
+      "definition_source": "src/Parrot.Tools/Tools/WebFetchToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "agent_spawn",
+      "factory_type": "AgentSpawnToolFactory",
+      "registration_line": 304,
+      "injection_line": 272,
+      "definition_source": "src/Parrot.Tools/Tools/AgentSpawnToolFactory.cs",
+      "definition_line": 11,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "set_agent_tasks",
+      "factory_type": "SetAgentTasksToolFactory",
+      "registration_line": 305,
+      "injection_line": 273,
+      "definition_source": "src/Parrot.Tool.AgentTask/Tools/SetAgentTasksToolFactory.cs",
+      "definition_line": 13,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "get_agent_tasks",
+      "factory_type": "GetAgentTasksToolFactory",
+      "registration_line": 306,
+      "injection_line": 274,
+      "definition_source": "src/Parrot.Tool.AgentTask/Tools/GetAgentTasksToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "set_checkpoint",
+      "factory_type": "SetCheckpointToolFactory",
+      "registration_line": 307,
+      "injection_line": 275,
+      "definition_source": "src/Parrot.Tools/Tools/SetCheckpointToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "set_exit_reminder",
+      "factory_type": "SetExitReminderToolFactory",
+      "registration_line": 308,
+      "injection_line": 276,
+      "definition_source": "src/Parrot.Tools/Tools/SetExitReminderToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "clear_exit_reminder",
+      "factory_type": "ClearExitReminderToolFactory",
+      "registration_line": 309,
+      "injection_line": 277,
+      "definition_source": "src/Parrot.Tools/Tools/ClearExitReminderToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "agent_send",
+      "factory_type": "AgentSendToolFactory",
+      "registration_line": 310,
+      "injection_line": 278,
+      "definition_source": "src/Parrot.Tools/Tools/AgentSendToolFactory.cs",
+      "definition_line": 14,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "agent_interrupt",
+      "factory_type": "AgentInterruptToolFactory",
+      "registration_line": 311,
+      "injection_line": 279,
+      "definition_source": "src/Parrot.Tools/Tools/AgentInterruptToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "agent_status",
+      "factory_type": "AgentStatusToolFactory",
+      "registration_line": 312,
+      "injection_line": 280,
+      "definition_source": "src/Parrot.Tools/Tools/AgentStatusToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "wait",
+      "factory_type": "WaitToolFactory",
+      "registration_line": 313,
+      "injection_line": 281,
+      "definition_source": "src/Parrot.Tools/Tools/WaitToolFactory.cs",
+      "definition_line": 7,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "status",
+      "factory_type": "StatusToolFactory",
+      "registration_line": 314,
+      "injection_line": 282,
+      "definition_source": "src/Parrot.Tools/Tools/StatusToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "compact_context",
+      "factory_type": "CompactContextToolFactory",
+      "registration_line": 315,
+      "injection_line": 283,
+      "definition_source": "src/Parrot.Tools/Tools/CompactContextToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "queue_create",
+      "factory_type": "QueueCreateToolFactory",
+      "registration_line": 316,
+      "injection_line": 284,
+      "definition_source": "src/Parrot.Tool.Queue/Tools/QueueCreateToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "queue_info",
+      "factory_type": "QueueInfoToolFactory",
+      "registration_line": 317,
+      "injection_line": 285,
+      "definition_source": "src/Parrot.Tool.Queue/Tools/QueueInfoToolFactory.cs",
+      "definition_line": 8,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "queue_push",
+      "factory_type": "QueuePushToolFactory",
+      "registration_line": 318,
+      "injection_line": 286,
+      "definition_source": "src/Parrot.Tool.Queue/Tools/QueuePushToolFactory.cs",
+      "definition_line": 14,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "queue_take",
+      "factory_type": "QueueTakeToolFactory",
+      "registration_line": 319,
+      "injection_line": 287,
+      "definition_source": "src/Parrot.Tool.Queue/Tools/QueueTakeToolFactory.cs",
+      "definition_line": 9,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    },
+    {
+      "name": "request_write_permission",
+      "factory_type": "RequestWritePermissionToolFactory",
+      "registration_line": 320,
+      "injection_line": 288,
+      "definition_source": "src/Parrot.Tools/Tools/RequestWritePermissionToolFactory.cs",
+      "definition_line": 12,
+      "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781"
+    }
+  ]
+}

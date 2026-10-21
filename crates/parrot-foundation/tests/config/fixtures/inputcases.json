@@ -1,0 +1,887 @@
+[
+  {
+    "id": "emit-scalar-styles",
+    "kind": "emit",
+    "yaml": "single: 'true'\ndouble: \"true\"\nplain: true\nnull: null\ntilde: ~\nblank:\nquoted: ''\ncolon: 'a: b'\nhash: 'a # b'\n"
+  },
+  {
+    "id": "emit-multiline",
+    "kind": "emit",
+    "yaml": "literal: |-\n  first\n  second\nfolded: >-\n  first\n  second\nkeep: |+\n  line\n\n"
+  },
+  {
+    "id": "emit-nested",
+    "kind": "emit",
+    "yaml": "mapping:\n  sequence:\n    - first\n    - inner: value\n      empty: {}\nempty_sequence: []\nempty_mapping: {}\n"
+  },
+  {
+    "id": "emit-replace",
+    "kind": "emit",
+    "yaml": "sandbox_rules: !replace\n- path: /tmp/c/workspace\n  action: allow_write\n"
+  },
+  {
+    "id": "emit-anchor",
+    "kind": "emit",
+    "yaml": "first: &one\n  key: value\nsecond: *one\n"
+  },
+  {
+    "id": "emit-constructed-0",
+    "kind": "emit",
+    "constructed": "first\nsecond"
+  },
+  {
+    "id": "emit-constructed-1",
+    "kind": "emit",
+    "constructed": "first\nsecond\n"
+  },
+  {
+    "id": "emit-constructed-2",
+    "kind": "emit",
+    "constructed": "true"
+  },
+  {
+    "id": "emit-constructed-3",
+    "kind": "emit",
+    "constructed": ""
+  },
+  {
+    "id": "emit-constructed-4",
+    "kind": "emit",
+    "constructed": "a: b"
+  },
+  {
+    "id": "emit-constructed-5",
+    "kind": "emit",
+    "constructed": "a # b"
+  },
+  {
+    "id": "emit-constructed-6",
+    "kind": "emit",
+    "constructed": "é😀<&+`\"'"
+  },
+  {
+    "id": "yaml-json-scalar-inference",
+    "kind": "yaml_json",
+    "yaml": "quoted_true: 'true'\nquoted_false: \"false\"\nnull: null\ntilde: ~\nblank:\nquoted_empty: ''\nzero: 0\nnegative_zero: -0\nleading: 01\nfloat: 1.50\ncapital: True\n"
+  },
+  {
+    "id": "yaml-json-numbers",
+    "kind": "yaml_json",
+    "yaml": "long_max: 9223372036854775807\noverflow: 9223372036854775808\nexp: 1e100\nsmall: 1e-5\nsmall2: 1e-4\nbig: 1e17\nbig2: 1e16\nplus: '+12'\nspaced: ' 42 '\n"
+  },
+  {
+    "id": "yaml-json-escape",
+    "kind": "yaml_json",
+    "yaml": "value: \"quote\\\" apostrophe' & + < > ` é 😀 \\n\\t\"\n"
+  },
+  {
+    "id": "yaml-json-nested",
+    "kind": "yaml_json",
+    "yaml": "object:\n  array: [one, true, 'true', 0, null]\n  complex: {x: y}\n"
+  },
+  {
+    "id": "yaml-json-non-scalar-key",
+    "kind": "yaml_json",
+    "yaml": "? [one, two]\n: ignored\nscalar: kept\n"
+  },
+  {
+    "id": "yaml-json-nonfinite-nan",
+    "kind": "yaml_json",
+    "yaml": "value: NaN\n"
+  },
+  {
+    "id": "yaml-json-nonfinite-infinity",
+    "kind": "yaml_json",
+    "yaml": "value: Infinity\n"
+  },
+  {
+    "id": "compose-disjoint",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "first.yaml",
+        "content": "system_prompts:\n  base: |-\n    first\n    second\nprompt_templates:\n  one:\n    template: '{x}'\n"
+      },
+      {
+        "name": "second.yaml",
+        "content": "system_prompts:\n  other: second\nordered: [third, first, second]\nempty: {}\n"
+      }
+    ]
+  },
+  {
+    "id": "compose-duplicate-0",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "first.yaml",
+        "content": "model: one"
+      },
+      {
+        "name": "second.yaml",
+        "content": "model: two"
+      }
+    ]
+  },
+  {
+    "id": "compose-duplicate-1",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "first.yaml",
+        "content": "system_prompts:\n  x: one"
+      },
+      {
+        "name": "second.yaml",
+        "content": "system_prompts:\n  x: two"
+      }
+    ]
+  },
+  {
+    "id": "compose-duplicate-2",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "first.yaml",
+        "content": "tools:\n  x: {}"
+      },
+      {
+        "name": "second.yaml",
+        "content": "tools:\n  x: {}"
+      }
+    ]
+  },
+  {
+    "id": "compose-duplicate-3",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "first.yaml",
+        "content": "prompt_templates:\n  x: {}"
+      },
+      {
+        "name": "second.yaml",
+        "content": "prompt_templates:\n  x: {}"
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-0",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "model: ["
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-1",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "model: one\n---\nmodel: two"
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-2",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "- item"
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-3",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "scalar"
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-4",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": ""
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-5",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "prompt_templates: []"
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-6",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "system_prompts: []"
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-7",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "tools: []"
+      }
+    ]
+  },
+  {
+    "id": "compose-invalid-8",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "invalid.yaml",
+        "content": "tools:\n  ? [one, two]\n  : value"
+      }
+    ]
+  },
+  {
+    "id": "compose-missing",
+    "kind": "compose",
+    "sources": [
+      {
+        "name": "present.yaml",
+        "content": "model: one"
+      },
+      {
+        "name": "missing.yaml",
+        "content": null
+      }
+    ]
+  },
+  {
+    "id": "compose-shipped",
+    "kind": "compose_shipped"
+  },
+  {
+    "id": "defaults",
+    "kind": "config",
+    "yaml": "",
+    "paths": [
+      "model",
+      "modelAliases",
+      "providerModelAliasDefaults",
+      "requestLimits",
+      "compaction",
+      "agentTasks",
+      "agentSend",
+      "webFetch",
+      "imageUpload",
+      "skills",
+      "inlineDiff",
+      "defaultProfile",
+      "cliUtilities",
+      "readOnlyExecCommandPrefixes"
+    ]
+  },
+  {
+    "id": "recursive-override",
+    "kind": "config",
+    "yaml": "model: custom/model\nmodel_aliases:\n  low_llm:\n    model_string: custom/low\nproviders:\n  openai:\n    headers:\n      custom: value\n",
+    "paths": [
+      "model",
+      "modelAliases.low_llm",
+      "providers.openai"
+    ]
+  },
+  {
+    "id": "profile-resolution",
+    "kind": "config",
+    "yaml": "model_profiles:\n  p:\n    usage: prefix\n    system_prompt: root\n  p/m:\n    usage: ''\n    maximum_input_tokens: 4\n",
+    "paths": [
+      "modelProfileResolutions"
+    ],
+    "selectors": [
+      "p/m/fast",
+      "p/other",
+      "P/m",
+      ""
+    ]
+  },
+  {
+    "id": "opaque-provider",
+    "kind": "config",
+    "yaml": "providers:\n  custom:\n    provider_preferences:\n      quoted: 'true'\n      null_value: null\n      list: [1, 'false', x]\n      escaped: \"é😀<&+`\\\"'\"\n",
+    "paths": [
+      "providers.custom"
+    ]
+  },
+  {
+    "id": "append-sequences",
+    "kind": "config",
+    "yaml": "cli_utilities:\n  expected: [custom]\n  optional: [another]\nread_only_exec_command_prefixes: [custom-prefix]\n",
+    "paths": [
+      "cliUtilities",
+      "readOnlyExecCommandPrefixes"
+    ]
+  },
+  {
+    "id": "replace-sequences",
+    "kind": "config",
+    "yaml": "cli_utilities:\n  expected: !replace [custom]\n  optional: !replace []\nread_only_exec_command_prefixes: !replace [prefix]\nsandbox_rules: !replace []\n",
+    "paths": [
+      "cliUtilities",
+      "readOnlyExecCommandPrefixes",
+      "sandboxRules"
+    ]
+  },
+  {
+    "id": "invalid-replace-scalar",
+    "kind": "config",
+    "yaml": "model: !replace x\n",
+    "paths": [
+      "model"
+    ]
+  },
+  {
+    "id": "invalid-replace-sequence",
+    "kind": "config",
+    "yaml": "disabled_tools: !replace [read]\n",
+    "paths": [
+      "disabledTools"
+    ]
+  },
+  {
+    "id": "unknown-keys-persist",
+    "kind": "config",
+    "yaml": "theme: dark\nunknown:\n  quoted: 'true'\n  nested: [zero, 0, null]\n",
+    "paths": [
+      "model"
+    ],
+    "operations": [
+      {
+        "type": "set_model",
+        "value": "p/m"
+      }
+    ]
+  },
+  {
+    "id": "alias-writeback",
+    "kind": "config",
+    "yaml": "theme: dark\nmodel_aliases:\n  low_llm:\n    usage: keep usage\n    augment_system_prompt: Keep augmentation\n",
+    "paths": [
+      "modelAliases.low_llm"
+    ],
+    "operations": [
+      {
+        "type": "set_alias",
+        "name": "low_llm",
+        "value": "custom/low"
+      }
+    ]
+  },
+  {
+    "id": "context-writeback",
+    "kind": "config",
+    "yaml": "theme: dark\ncontext_limit: 100k\n",
+    "paths": [
+      "contextLimit"
+    ],
+    "operations": [
+      {
+        "type": "set_context",
+        "value": "20%"
+      }
+    ]
+  },
+  {
+    "id": "preset-writeback",
+    "kind": "config",
+    "yaml": "theme: dark\n",
+    "paths": [
+      "modelPresets.saved"
+    ],
+    "operations": [
+      {
+        "type": "set_preset",
+        "name": "saved",
+        "model": "p/m",
+        "aliases": {
+          "low_llm": "p/low"
+        }
+      }
+    ]
+  },
+  {
+    "id": "skill-writeback",
+    "kind": "config",
+    "yaml": "theme: dark\nskills:\n  entries:\n  - path: /tmp/c/workspace/skill/\n    enabled: true\n",
+    "paths": [
+      "skills"
+    ],
+    "operations": [
+      {
+        "type": "set_skill",
+        "path": "/tmp/c/workspace/skill",
+        "enabled": false
+      }
+    ]
+  },
+  {
+    "id": "icon-combining",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"é\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-zwj-family",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"👨‍👩‍👧‍👦\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-only-combining",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"́\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-only-zwj",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"‍\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-newline",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"\\n\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-two-letters",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"ab\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-control",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"\\u0001\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-flag",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"🇲🇾\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "icon-emoji-modifier",
+    "kind": "config",
+    "yaml": "model_aliases:\n  low_llm:\n    icon:\n      glyph: \"👍🏽\"\n      color: cyan\n",
+    "paths": [
+      "modelAliases.low_llm.icon"
+    ]
+  },
+  {
+    "id": "uri-0",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://example.com\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-1",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https:example.com\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-2",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https:/example.com\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-3",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https:///example.com\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-4",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"HTTPS://example.com\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-5",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://example.com/?\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-6",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://example.com/#\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-7",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://user@host\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-8",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-9",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://host:bad\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-10",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://bad host/\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-11",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://bad\\thost/\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-12",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://[::1]/\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "uri-13",
+    "kind": "config",
+    "yaml": "image_upload:\n  bucket: valid-bucket\n  endpoint: \"https://éxample.com/\"\n",
+    "paths": [
+      "imageUpload"
+    ]
+  },
+  {
+    "id": "schema-scalar-0",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: 1e100\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-1",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: -0\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-2",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: 01\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-3",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: .nan\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-4",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: 'true'\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-5",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: true\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-6",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: null\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-7",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: ~\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-8",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: ''\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-9",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: 0\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-10",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: 1.5\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-11",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: 9223372036854775808\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "schema-scalar-12",
+    "kind": "config",
+    "yaml": "tools:\n  probe:\n    description: probe\n    parameters:\n      type: object\n      default: \"quote\\\" apostrophe' & + < > ` é 😀\"\n",
+    "paths": [
+      "toolDefinitions.probe"
+    ]
+  },
+  {
+    "id": "request-limit-0",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: 0\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-1",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: -1\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-2",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: 1.5\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-3",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: 2147483648\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-4",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: null\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-5",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: [1]\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-6",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: '+1'\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-7",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: ' 1 '\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "request-limit-8",
+    "kind": "config",
+    "yaml": "request_limits:\n  image_bytes_per_tool_cycle: 1\n",
+    "paths": [
+      "requestLimits"
+    ]
+  },
+  {
+    "id": "context-limit-0",
+    "kind": "config",
+    "yaml": "context_limit: 0\n",
+    "paths": [
+      "contextLimit"
+    ]
+  },
+  {
+    "id": "context-limit-1",
+    "kind": "config",
+    "yaml": "context_limit: 1.5k\n",
+    "paths": [
+      "contextLimit"
+    ]
+  },
+  {
+    "id": "context-limit-2",
+    "kind": "config",
+    "yaml": "context_limit: null\n",
+    "paths": [
+      "contextLimit"
+    ]
+  },
+  {
+    "id": "context-limit-3",
+    "kind": "config",
+    "yaml": "context_limit: 20%\n",
+    "paths": [
+      "contextLimit"
+    ]
+  },
+  {
+    "id": "provider-booleans",
+    "kind": "config",
+    "yaml": "providers:\n  custom:\n    disable_websocket: false\n    image_urls: false\n    stream_idle_timeout_ms: 0\n",
+    "paths": [
+      "providers.custom"
+    ]
+  },
+  {
+    "id": "zero-timeout",
+    "kind": "config",
+    "yaml": "user_input_timeout_ms: 0\n",
+    "paths": [
+      "userInputTimeoutMs"
+    ]
+  },
+  {
+    "id": "legacy-timeout-alias",
+    "kind": "config",
+    "yaml": "permission_request_timeout_ms: 73\n",
+    "paths": [
+      "userInputTimeoutMs"
+    ]
+  },
+  {
+    "id": "new-timeout-precedence",
+    "kind": "config",
+    "yaml": "permission_request_timeout_ms: 73\nuser_input_timeout_ms: 99\n",
+    "paths": [
+      "userInputTimeoutMs"
+    ]
+  },
+  {
+    "id": "null-provider-value",
+    "kind": "config",
+    "yaml": "providers:\n  custom:\n    provider_preferences: null\n",
+    "paths": [
+      "providers.custom"
+    ]
+  },
+  {
+    "id": "null-scalar-model",
+    "kind": "config",
+    "yaml": "model: null\n",
+    "paths": [
+      "model"
+    ]
+  },
+  {
+    "id": "empty-model",
+    "kind": "config",
+    "yaml": "model: ''\n",
+    "paths": [
+      "model"
+    ]
+  }
+]

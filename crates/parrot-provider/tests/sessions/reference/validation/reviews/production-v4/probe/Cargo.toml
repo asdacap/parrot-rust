@@ -1,0 +1,12 @@
+[package]
+name = "t30-review-probe"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+parrot-provider = { path = "/mnt/workspace/repo/parrot-rust/crates/parrot-provider" }
+parrot-domain = { path = "/mnt/workspace/repo/parrot-rust/crates/parrot-domain" }
+tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "macros", "time"] }
+[workspace]
+[patch.crates-io]
+protobuf = { path = "/mnt/workspace/repo/parrot-rust/vendor/rust-protobuf-a001/protobuf" }
+protobuf-codegen = { path = "/mnt/workspace/repo/parrot-rust/vendor/rust-protobuf-a001/protobuf-codegen" }

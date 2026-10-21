@@ -1,0 +1,77 @@
+{
+  "contract": "t32-ws-auth-diagnostics-source-v1",
+  "cases": [
+    {
+      "case_id": "ws-retry_session-auth_six_then_key",
+      "mode": "retry_session",
+      "disable_websocket": false,
+      "key_script": "auth_six_then_key"
+    },
+    {
+      "case_id": "ws-retry_session-auth_always",
+      "mode": "retry_session",
+      "disable_websocket": false,
+      "key_script": "auth_always"
+    },
+    {
+      "case_id": "ws-retry_session-missing",
+      "mode": "retry_session",
+      "disable_websocket": false,
+      "key_script": "missing"
+    },
+    {
+      "case_id": "ws-retry_session-cancel",
+      "mode": "retry_session",
+      "disable_websocket": false,
+      "key_script": "cancel"
+    },
+    {
+      "case_id": "ws-raw_session-auth_always",
+      "mode": "raw_session",
+      "disable_websocket": false,
+      "key_script": "auth_always"
+    },
+    {
+      "case_id": "ws-raw_session-missing",
+      "mode": "raw_session",
+      "disable_websocket": false,
+      "key_script": "missing"
+    },
+    {
+      "case_id": "http-retry_session-auth_six_then_key",
+      "mode": "retry_session",
+      "disable_websocket": true,
+      "key_script": "auth_six_then_key"
+    },
+    {
+      "case_id": "http-retry_session-auth_always",
+      "mode": "retry_session",
+      "disable_websocket": true,
+      "key_script": "auth_always"
+    },
+    {
+      "case_id": "http-retry_session-missing",
+      "mode": "retry_session",
+      "disable_websocket": true,
+      "key_script": "missing"
+    },
+    {
+      "case_id": "http-retry_session-cancel",
+      "mode": "retry_session",
+      "disable_websocket": true,
+      "key_script": "cancel"
+    },
+    {
+      "case_id": "http-raw_session-auth_always",
+      "mode": "raw_session",
+      "disable_websocket": true,
+      "key_script": "auth_always"
+    },
+    {
+      "case_id": "http-raw_session-missing",
+      "mode": "raw_session",
+      "disable_websocket": true,
+      "key_script": "missing"
+    }
+  ]
+}

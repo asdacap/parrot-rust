@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+prefix=
+target=
+artifact_only=false
+while (($#)); do
+  case "$1" in
+    --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
+    --target) target=${2:?--target needs a target}; shift 2 ;;
+    --artifact-only) artifact_only=true; shift ;;
+    *) printf 'usage: package-smoke --prefix DIR --target {x86_64-linux,x86_64-linux-musl,aarch64-darwin} [--artifact-only]\n' >&2; exit 64 ;;
+  esac
+done
+case "$target:$(uname -s):$(uname -m)" in
+  x86_64-linux:Linux:x86_64|x86_64-linux-musl:Linux:x86_64|aarch64-darwin:Darwin:arm64) ;;
+  *) printf 'blocked_external: package %s requires its actual native target runner\n' "$target" >&2; exit 2 ;;
+esac
+[[ -n "$prefix" ]] || { echo 'missing --prefix' >&2; exit 64; }
+prefix=$(cd "$prefix" && pwd -P)
+[[ -x "$prefix/bin/parrot" ]]
+resources="$prefix/share/parrot"
+[[ $(cat "$resources/target") == "$target" ]]
+for required in config/predefined_config.runtime.yaml config/predefined_config.system_prompts.minijinja.yaml \
+  skills/domain-modeling/SKILL.md proto/parrot.proto proto/web.proto native/parrot-pty-attach.c \
+  web/index.html SOURCE-ATTRIBUTION.md PACKAGING.md licenses/cargo/cargo-notices.json licenses/web/npm-notices.json \
+  licenses/rust/COPYRIGHT licenses/rust/LICENSE-APACHE licenses/rust/LICENSE-MIT licenses/UNICODE-LICENSE.txt; do
+  [[ -s "$resources/$required" ]] || { printf 'missing package resource: %s\n' "$required" >&2; exit 1; }
+done
+(cd "$resources" && sha256sum -c resources.sha256)
+if find "$prefix" -type f \( -name '*.dll' -o -name '*.runtimeconfig.json' -o -name dotnet -o -name reference-dotnet \) -print | grep .; then
+  echo 'forbidden .NET/reference artifact in native package' >&2
+  exit 1
+fi
+if [[ "$target" == x86_64-linux* ]]; then
+  [[ -x "$prefix/bin/parrot-pty-attach" ]]
+  readelf -h "$prefix/bin/parrot" | grep -q 'Advanced Micro Devices X86-64'
+  if [[ "$target" == x86_64-linux-musl ]]; then
+    for binary in "$prefix/bin/parrot" "$prefix/bin/parrot-pty-attach"; do
+      if readelf -l "$binary" | grep -q INTERP || readelf -d "$binary" | grep -q NEEDED; then
+        printf 'standalone musl artifact has a runtime loader/library dependency: %s\n' "$binary" >&2
+        exit 1
+      fi
+    done
+  fi
+else
+  otool -hv "$prefix/bin/parrot" | tee /dev/stderr | grep -q ARM64
+fi
+smoke_dir=${PARROT_PACKAGE_SMOKE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/parrot-package-smoke.XXXXXX")}
+mkdir -p "$smoke_dir"/{home,config,data,state,cache,tmp}
+printf 'smoke evidence: %s\n' "$smoke_dir"
+run_cli() {
+  env -i PATH="$PATH" HOME="$smoke_dir/home" XDG_CONFIG_HOME="$smoke_dir/config" \
+    XDG_DATA_HOME="$smoke_dir/data" XDG_STATE_HOME="$smoke_dir/state" XDG_CACHE_HOME="$smoke_dir/cache" \
+    TMPDIR="$smoke_dir/tmp" NO_COLOR=1 TERM=dumb "$prefix/bin/parrot" "$@" </dev/null
+}
+run_cli --help >"$smoke_dir/help.stdout" 2>"$smoke_dir/help.stderr"
+run_cli --version >"$smoke_dir/version.stdout" 2>"$smoke_dir/version.stderr"
+run_cli sessions >"$smoke_dir/sessions.stdout" 2>"$smoke_dir/sessions.stderr"
+grep -q '^parrot ' "$smoke_dir/version.stdout"
+grep -q '^no sessions$' "$smoke_dir/sessions.stdout"
+printf 'artifact_smoke: passed (%s); local application startup not checked by artifact smoke\n' "$target"
+if ! "$artifact_only"; then
+  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+  (
+    cd "$repo_root"
+    PARROT_TEST_BINARY="$prefix/bin/parrot" cargo test --offline --locked \
+      -p parrot-cli --test local_production -- --nocapture --test-threads=1
+  ) 2>&1 | tee "$smoke_dir/local-production.log"
+  printf 'local_application_smoke: passed (%s)\n' "$target"
+fi

@@ -1,0 +1,4 @@
+(version 1)
+(allow default)
+(deny file-read* (subpath "$ROOT/tree"))
+(deny file-write*)

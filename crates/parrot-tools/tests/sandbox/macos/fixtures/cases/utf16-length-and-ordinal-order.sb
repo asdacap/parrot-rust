@@ -1,0 +1,3 @@
+(version 1)
+(allow default)
+(deny file-write* (require-not (require-any (subpath "$ROOT/z") (subpath "$ROOT/az") (subpath "$ROOT/😀") (subpath "$ROOT/x"))))

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "provenance": "Lexical path source-shaped fixtures plus independently specified approved legacy-fallback decision table from docs/port/decisions.md; no physical filesystem/security assertions or pretend .NET fallback baseline.",
+  "lexical": [
+    {"input":"a/../b", "base":"/synthetic/work", "platform":"Unix", "expected":"/synthetic/work/b"},
+    {"input":"/a//b/./c/../", "base":"/unused", "platform":"Unix", "expected":"/a/b/"},
+    {"input":"/../../leaf", "base":"/unused", "platform":"Unix", "expected":"/leaf"},
+    {"input":"a\\b", "base":"/synthetic", "platform":"Unix", "expected":"/synthetic/a\\b"},
+    {"input":"/var/cache", "base":"/unused", "platform":"MacOs", "expected":"/private/var/cache"},
+    {"input":"/tmp/", "base":"/unused", "platform":"MacOs", "expected":"/private/tmp/"},
+    {"input":"/etc", "base":"/unused", "platform":"MacOs", "expected":"/private/etc"},
+    {"input":"/variant", "base":"/unused", "platform":"MacOs", "expected":"/variant"},
+    {"input":"", "base":"/synthetic", "platform":"Unix", "error":"EmptyPath"},
+    {"input":"bad\u0000path", "base":"/synthetic", "platform":"Unix", "error":"NulByte"},
+    {"input":"relative", "base":"relative-base", "platform":"Unix", "error":"BaseMustBeAbsolute"}
+  ],
+  "fallback_table": {
+    "enabled": [false, true],
+    "purposes": ["ApplicationState", "ApplicationData", "SessionInternal", "Configuration", "Credentials", "UserFile"],
+    "failures": ["Absent", "PermissionDenied", "Corrupt", "Other"],
+    "expected": [
+      [[false,false,false,false],[false,false,false,false],[false,false,false,false],[false,false,false,false],[false,false,false,false],[false,false,false,false]],
+      [[true,false,false,false],[true,false,false,false],[false,false,false,false],[false,false,false,false],[false,false,false,false],[false,false,false,false]]
+    ]
+  }
+}

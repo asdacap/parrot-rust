@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "case_id": "auth-counterpart-direct-format",
+      "mode": "direct",
+      "failure": "format",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.FormatException",
+        "arguments": [],
+        "argument_names": []
+      }
+    },
+    {
+      "case_id": "auth-counterpart-direct-io",
+      "mode": "direct",
+      "failure": "io",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.IO.IOException",
+        "arguments": [
+          "auth: output failed"
+        ],
+        "argument_names": [
+          "message"
+        ]
+      }
+    },
+    {
+      "case_id": "auth-counterpart-direct-transport",
+      "mode": "direct",
+      "failure": "transport",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.Net.Http.HttpRequestException",
+        "arguments": [
+          "auth: HTTP request failed"
+        ],
+        "argument_names": [
+          "message"
+        ],
+        "status_code_argument": null
+      }
+    },
+    {
+      "case_id": "auth-counterpart-direct-argument_range",
+      "mode": "direct",
+      "failure": "argument_range",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.ArgumentOutOfRangeException",
+        "arguments": [
+          null,
+          "range test"
+        ],
+        "argument_names": [
+          "paramName",
+          "message"
+        ],
+        "actualValue": null
+      }
+    },
+    {
+      "case_id": "auth-counterpart-session-format",
+      "mode": "session",
+      "failure": "format",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.FormatException",
+        "arguments": [],
+        "argument_names": []
+      }
+    },
+    {
+      "case_id": "auth-counterpart-session-io",
+      "mode": "session",
+      "failure": "io",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.IO.IOException",
+        "arguments": [
+          "auth: output failed"
+        ],
+        "argument_names": [
+          "message"
+        ]
+      }
+    },
+    {
+      "case_id": "auth-counterpart-session-transport",
+      "mode": "session",
+      "failure": "transport",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.Net.Http.HttpRequestException",
+        "arguments": [
+          "auth: HTTP request failed"
+        ],
+        "argument_names": [
+          "message"
+        ],
+        "status_code_argument": null
+      }
+    },
+    {
+      "case_id": "auth-counterpart-session-argument_range",
+      "mode": "session",
+      "failure": "argument_range",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false,
+      "constructor": {
+        "clr_type": "System.ArgumentOutOfRangeException",
+        "arguments": [
+          null,
+          "range test"
+        ],
+        "argument_names": [
+          "paramName",
+          "message"
+        ],
+        "actualValue": null
+      }
+    }
+  ]
+}

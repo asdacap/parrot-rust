@@ -1,0 +1,62 @@
+[
+  {
+    "id": "skill-shared-sequence-anchor-before",
+    "kind": "config",
+    "yaml": "unknown: &entries []\nskills:\n  entries: *entries\n",
+    "operations": [
+      {
+        "type": "set_skill",
+        "path": "/tmp/c/workspace/skill",
+        "enabled": false
+      }
+    ],
+    "paths": [
+      "skills"
+    ]
+  },
+  {
+    "id": "skill-shared-sequence-anchor-after",
+    "kind": "config",
+    "yaml": "skills:\n  entries: &entries []\nunknown: *entries\n",
+    "operations": [
+      {
+        "type": "set_skill",
+        "path": "/tmp/c/workspace/skill",
+        "enabled": false
+      }
+    ],
+    "paths": [
+      "skills"
+    ]
+  },
+  {
+    "id": "skill-shared-sequence-flow-nonempty",
+    "kind": "config",
+    "yaml": "unknown: &entries [{path: /tmp/c/workspace/other, enabled: true}]\nskills:\n  entries: *entries\n",
+    "operations": [
+      {
+        "type": "set_skill",
+        "path": "/tmp/c/workspace/skill",
+        "enabled": false
+      }
+    ],
+    "paths": [
+      "skills"
+    ]
+  },
+  {
+    "id": "skill-shared-sequence-canonical-duplicates",
+    "kind": "config",
+    "yaml": "unknown: &entries\n- path: /tmp/c/workspace/skill/\n  enabled: true\n- path: /tmp/c/workspace/other\n  enabled: true\n- path: /tmp/c/workspace/skill/.\n  enabled: true\nskills:\n  entries: *entries\n",
+    "operations": [
+      {
+        "type": "set_skill",
+        "path": "/tmp/c/workspace/skill",
+        "enabled": false
+      }
+    ],
+    "paths": [
+      "skills"
+    ]
+  }
+]

@@ -1,0 +1,28 @@
+[package]
+name = "parrot-fuzz-regressions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+autotests = false
+publish = false
+
+[dependencies]
+parrot-domain = { path = "../../crates/parrot-domain" }
+parrot-foundation = { path = "../../crates/parrot-foundation" }
+parrot-storage = { path = "../../crates/parrot-storage" }
+parrot-provider = { path = "../../crates/parrot-provider" }
+parrot-runtime = { path = "../../crates/parrot-runtime" }
+parrot-tools = { path = "../../crates/parrot-tools" }
+parrot-host = { path = "../../crates/parrot-host" }
+parrot-cli = { path = "../../crates/parrot-cli" }
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+protobuf = "=3.7.2"
+serde_json = { version = "=1.0.138", features = ["arbitrary_precision"] }
+tokio = { version = "=1.43.0", default-features = false, features = ["rt-multi-thread", "sync", "time", "macros"] }
+
+[[test]]
+name = "bounded_fuzz"
+path = "campaign.rs"
+
+[lints]
+workspace = true

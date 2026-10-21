@@ -1,0 +1,5 @@
+(version 1)
+(allow default)
+(deny file-read* (subpath "$ROOT/static-dir"))
+(deny file-read* (literal "$ROOT/static-file"))
+(deny file-write*)

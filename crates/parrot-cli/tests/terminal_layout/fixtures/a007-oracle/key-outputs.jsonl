@@ -1,0 +1,16 @@
+{"input":"{\u0022a\\n\\n\u0022: 1}","ok":true,"value":"? \u003E\u002B\n  a\n\n: 1"}
+{"input":"{\u0022\\n\\n\u0022: 1}","ok":true,"value":"? \u003E2\u002B\n\n\n: 1"}
+{"input":"{\u0022\\na\u0022: 1}","ok":true,"value":"? \u003E2-\n\n  a\n: 1"}
+{"input":"{\u0022 a\\nb\u0022: 1}","ok":true,"value":"? \u003E2-\n   a\n  b\n: 1"}
+{"input":"{\u0022a\\n b\\nc\u0022: 1}","ok":true,"value":"? \u003E-\n  a\n   b\n  c\n: 1"}
+{"input":"{\u0022a\\u2028b\u0022: 1}","ok":true,"value":"? \u003E-\n  a\u2028  b\n: 1"}
+{"input":"{\u0022a\\t\u0022: 1}","ok":true,"value":"a\t: 1"}
+{"input":"{\u0022a:b:c\u0022: 1}","ok":true,"value":"a:b:c: 1"}
+{"input":"{\u0022a,b\u0022: 1}","ok":true,"value":"a,b: 1"}
+{"input":"{\u0022a{b\u0022: 1}","ok":true,"value":"a{b: 1"}
+{"input":"{\u0022a[b\u0022: 1}","ok":true,"value":"a[b: 1"}
+{"input":"{\u0022---x\u0022: 1}","ok":true,"value":"\u0027---x\u0027: 1"}
+{"input":"{\u0022...x\u0022: 1}","ok":true,"value":"\u0027...x\u0027: 1"}
+{"input":"{\u0022\\u0001\u0022: 1}","ok":true,"value":"\u0022\\x01\u0022: 1"}
+{"input":"{\u0022\\ud83d\\ude00\u0022: 1}","ok":true,"value":"\u0022\\U0001F600\u0022: 1"}
+{"input":"{\u0022a\\ufffeb\u0022: 1}","ok":true,"value":"\u0022a\\uFFFEb\u0022: 1"}

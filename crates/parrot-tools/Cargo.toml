@@ -1,0 +1,68 @@
+[package]
+name = "parrot-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-compression.workspace = true
+cookie_store.workspace = true
+libc = "=0.2.191"
+mime = "=0.3.17"
+parrot-domain = { path = "../parrot-domain" }
+parrot-foundation = { path = "../parrot-foundation" }
+parrot-provider = { path = "../parrot-provider" }
+parrot-storage = { path = "../parrot-storage" }
+protobuf = "=3.7.2"
+reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "=1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "=1.0.138", features = ["raw_value"] }
+tokio = { version = "=1.43.0", default-features = false, features = ["time", "rt", "macros", "sync", "net", "io-util"] }
+url = { version = "=2.5.4", default-features = false }
+
+[dev-dependencies]
+parrot-runtime = { path = "../parrot-runtime" }
+tokio = { version = "=1.43.0", default-features = false, features = ["test-util"] }
+
+[[test]]
+name = "sandbox_linux"
+path = "tests/sandbox/linux/main.rs"
+
+[[test]]
+name = "sandbox_macos"
+path = "tests/sandbox/macos/main.rs"
+
+[[test]]
+name = "task_artifacts"
+path = "tests/task_artifacts/main.rs"
+
+[[test]]
+name = "session"
+path = "tests/session/main.rs"
+
+[[test]]
+name = "process_tools"
+path = "tests/process/tools/main.rs"
+
+[[test]]
+name = "tasks_queues"
+path = "tests/tasks_queues/main.rs"
+
+[[test]]
+name = "agents"
+path = "tests/agents/main.rs"
+
+[[test]]
+name = "files"
+path = "tests/files/main.rs"
+
+[[test]]
+name = "web_fetch"
+path = "tests/web_fetch/main.rs"
+
+[[test]]
+name = "catalog"
+path = "tests/catalog/main.rs"
+
+[lints]
+workspace = true

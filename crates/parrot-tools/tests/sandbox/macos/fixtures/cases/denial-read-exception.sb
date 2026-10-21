@@ -1,0 +1,4 @@
+(version 1)
+(allow default)
+(deny file-read* (require-all (subpath "$ROOT/denied") (require-not (subpath "$ROOT/denied/readable"))))
+(deny file-write*)

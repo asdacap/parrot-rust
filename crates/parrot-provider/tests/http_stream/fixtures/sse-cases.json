@@ -1,0 +1,192 @@
+[
+  {
+    "case_id": "sse.basic",
+    "bytes_hex": "6576656E743A2064656C74610A646174613A20610A646174613A20620A69643A206F6E650A0A",
+    "max_event_bytes": 100,
+    "events": [
+      {
+        "event": "delta",
+        "data": "a\nb",
+        "id": "one"
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.crlf",
+    "bytes_hex": "646174613A20610D0A646174613A20620D0A0D0A646174613A20630D0D",
+    "max_event_bytes": 100,
+    "events": [
+      {
+        "event": "",
+        "data": "a\nb",
+        "id": ""
+      },
+      {
+        "event": "",
+        "data": "c",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.fields",
+    "bytes_hex": "3A636F6D6D656E740A72657472793A2031300A756E6B6E6F776E0A0A6576656E740A69643A20610A69643A206200630A646174613A2020780A0A69643A207A0A0A646174610A",
+    "max_event_bytes": 100,
+    "events": [
+      {
+        "event": "",
+        "data": " x",
+        "id": "a"
+      },
+      {
+        "event": "",
+        "data": "",
+        "id": "z"
+      },
+      {
+        "event": "",
+        "data": "",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.bom",
+    "bytes_hex": "EFBBBF646174613A2069676E6F7265640A0A646174613A206B6570740A",
+    "max_event_bytes": 100,
+    "events": [
+      {
+        "event": "",
+        "data": "ignored",
+        "id": ""
+      },
+      {
+        "event": "",
+        "data": "kept",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.eof",
+    "bytes_hex": "646174613A20756E66696E6973686564",
+    "max_event_bytes": 100,
+    "events": [
+      {
+        "event": "",
+        "data": "unfinished",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.no-fields",
+    "bytes_hex": "3A206F6E6C790A756E6B6E6F776E3A20780A0A",
+    "max_event_bytes": 100,
+    "events": [],
+    "error": null
+  },
+  {
+    "case_id": "sse.malformed",
+    "bytes_hex": "646174613A20F0288C280A0A",
+    "max_event_bytes": 100,
+    "events": [
+      {
+        "event": "",
+        "data": "�(�(",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.truncated-utf8",
+    "bytes_hex": "646174613A20E282",
+    "max_event_bytes": 100,
+    "events": [
+      {
+        "event": "",
+        "data": "�",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.utf16-at",
+    "bytes_hex": "646174613A20F09F98800A0A",
+    "max_event_bytes": 10,
+    "events": [
+      {
+        "event": "",
+        "data": "😀",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.utf16-over",
+    "bytes_hex": "646174613A20F09F98800A0A",
+    "max_event_bytes": 9,
+    "events": [],
+    "error": {
+      "category": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "sse: event exceeds maximum size 9"
+    }
+  },
+  {
+    "case_id": "sse.comment-size",
+    "bytes_hex": "3A313233340A0A646174613A780A0A",
+    "max_event_bytes": 6,
+    "events": [],
+    "error": {
+      "category": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "sse: event exceeds maximum size 6"
+    }
+  },
+  {
+    "case_id": "sse.empty-size",
+    "bytes_hex": "0A0A0A646174613A780A0A",
+    "max_event_bytes": 8,
+    "events": [
+      {
+        "event": "",
+        "data": "x",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.default-zero",
+    "bytes_hex": "646174613A780A0A",
+    "max_event_bytes": 0,
+    "events": [
+      {
+        "event": "",
+        "data": "x",
+        "id": ""
+      }
+    ],
+    "error": null
+  },
+  {
+    "case_id": "sse.default-negative",
+    "bytes_hex": "646174613A780A0A",
+    "max_event_bytes": -1,
+    "events": [
+      {
+        "event": "",
+        "data": "x",
+        "id": ""
+      }
+    ],
+    "error": null
+  }
+]

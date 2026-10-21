@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+option csharp_namespace = "Parrot.Web.Protocol";
+
+package parrot.web.v1;
+
+import "parrot.proto";
+
+// Runs the CLI's slash commands on behalf of a browser. gRPC-Web carries only
+// unary and server-streaming calls, so a command streams its dialog as frames
+// and the browser answers each prompt with a separate unary call.
+service ParrotWeb {
+  rpc DescribeHost(DescribeHostRequest) returns (DescribeHostResponse);
+  rpc OpenDefaultSession(OpenDefaultSessionRequest) returns (parrot.v1.UserSession);
+  rpc ListSlashCommands(ListSlashCommandsRequest) returns (ListSlashCommandsResponse);
+  rpc RunSlashCommand(RunSlashCommandRequest) returns (stream SlashFrame);
+  rpc AnswerSlashPrompt(AnswerSlashPromptRequest) returns (AnswerSlashPromptResponse);
+  rpc UploadAttachment(UploadAttachmentRequest) returns (parrot.v1.AttachmentUploadResponse);
+}
+
+message DescribeHostRequest {}
+
+// Session resume and attach are scoped to the working directory the host was
+// started in.
+message DescribeHostResponse {
+  string working_directory = 1;
+}
+
+// Opens the workspace's latest user session, as the terminal CLI does on
+// start: resumed here, attached where another process hosts it, or created.
+message OpenDefaultSessionRequest {}
+
+message ListSlashCommandsRequest {}
+
+message ListSlashCommandsResponse {
+  repeated SlashCommand commands = 1;
+}
+
+message SlashCommand {
+  string name    = 1;
+  string summary = 2;
+}
+
+message RunSlashCommandRequest {
+  string user_session_id = 1;
+  string text            = 2;
+}
+
+// The first frame of every run is started; the stream ends when the command
+// completes.
+message SlashFrame {
+  oneof payload {
+    SlashStarted started                  = 1;
+    SlashSelect select                    = 2;
+    SlashReadText read_text               = 3;
+    SlashConfirm confirm                  = 4;
+    SlashShow show                        = 5;
+    SlashPrint print                      = 6;
+    SlashError error                      = 7;
+    SlashLoading loading                  = 8;
+    SlashLoaded loaded                    = 9;
+    parrot.v1.UserSession session_replaced = 10;
+    // The session's model or mode after a command changed them.
+    parrot.v1.UserSession session_updated  = 11;
+  }
+}
+
+message SlashStarted {
+  string run_id = 1;
+}
+
+message SlashOption {
+  string id          = 1;
+  string label       = 2;
+  string description = 3;
+}
+
+message SlashSelect {
+  string prompt_id             = 1;
+  string title                 = 2;
+  repeated SlashOption options = 3;
+}
+
+message SlashReadText {
+  string prompt_id = 1;
+  string prompt    = 2;
+  bool secret      = 3;
+}
+
+message SlashConfirm {
+  string prompt_id      = 1;
+  repeated string lines = 2;
+}
+
+// Waits for the browser to dismiss it.
+message SlashShow {
+  string prompt_id      = 1;
+  repeated string lines = 2;
+}
+
+message SlashPrint {
+  repeated string lines = 1;
+}
+
+message SlashError {
+  string message = 1;
+}
+
+message SlashLoading {
+  string activity = 1;
+}
+
+message SlashLoaded {}
+
+message AnswerSlashPromptRequest {
+  string run_id    = 1;
+  string prompt_id = 2;
+  oneof answer {
+    string option_id = 3;
+    string text      = 4;
+    bool confirmed   = 5;
+    bool dismissed   = 6;
+  }
+}
+
+message AnswerSlashPromptResponse {}
+
+// The whole image in one message: gRPC-Web cannot stream a request, so the
+// host streams it on to the session.
+message UploadAttachmentRequest {
+  string user_session_id = 1;
+  string display_name    = 2;
+  string media_type      = 3;
+  bytes content          = 4;
+}

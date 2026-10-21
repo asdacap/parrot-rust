@@ -1,0 +1,275 @@
+// Exact source assertion translations; see assertion-map/ for runtime row identities.
+#[path = "cases/agent_send_to_parent_defaults_to_false_and_rejects_non_boolean_values.rs"]
+mod agent_send_to_parent_defaults_to_false_and_rejects_non_boolean_values;
+#[path = "cases/agent_task_configuration_defaults_to_dependency_history.rs"]
+mod agent_task_configuration_defaults_to_dependency_history;
+#[path = "cases/agent_task_configuration_must_be_a_mapping.rs"]
+mod agent_task_configuration_must_be_a_mapping;
+#[path = "cases/agent_task_configuration_overrides_maximum_attempts.rs"]
+mod agent_task_configuration_overrides_maximum_attempts;
+#[path = "cases/agent_task_configuration_parses_fork_history_mode.rs"]
+mod agent_task_configuration_parses_fork_history_mode;
+#[path = "cases/agent_task_configuration_partial_overrides_preserve_other_values.rs"]
+mod agent_task_configuration_partial_overrides_preserve_other_values;
+#[path = "cases/agent_task_configuration_rejects_the_legacy_fork_key.rs"]
+mod agent_task_configuration_rejects_the_legacy_fork_key;
+#[path = "cases/agent_task_configuration_rejects_unknown_keys.rs"]
+mod agent_task_configuration_rejects_unknown_keys;
+#[path = "cases/agent_task_configuration_requires_a_supported_fork_history_mode.rs"]
+mod agent_task_configuration_requires_a_supported_fork_history_mode;
+#[path = "cases/agent_task_configuration_requires_positive_integer_bounds.rs"]
+mod agent_task_configuration_requires_positive_integer_bounds;
+#[path = "cases/category_overrides_preserve_inherited_templates_profiles_and_runtime_settings.rs"]
+mod category_overrides_preserve_inherited_templates_profiles_and_runtime_settings;
+#[path = "cases/cli_utility_sequences_append_independently_and_expected_wins_across_lists.rs"]
+mod cli_utility_sequences_append_independently_and_expected_wins_across_lists;
+#[path = "cases/cli_utility_sequences_can_explicitly_replace_defaults.rs"]
+mod cli_utility_sequences_can_explicitly_replace_defaults;
+#[path = "cases/compaction_configuration_must_be_a_mapping.rs"]
+mod compaction_configuration_must_be_a_mapping;
+#[path = "cases/compaction_configuration_rejects_unknown_keys.rs"]
+mod compaction_configuration_rejects_unknown_keys;
+#[path = "cases/compaction_configuration_requires_positive_integer_fields.rs"]
+mod compaction_configuration_requires_positive_integer_fields;
+#[path = "cases/compaction_fields_partially_override_predefined_definitions.rs"]
+mod compaction_fields_partially_override_predefined_definitions;
+#[path = "cases/compaction_percentages_require_target_to_be_less_than_trigger_between_one_and_ninety_nine.rs"]
+mod compaction_percentages_require_target_to_be_less_than_trigger_between_one_and_ninety_nine;
+#[path = "cases/composer_disjoint_settings_and_template_ids_combine_deterministically.rs"]
+mod composer_disjoint_settings_and_template_ids_combine_deterministically;
+#[path = "cases/composer_duplicate_definitions_report_both_sources_and_path.rs"]
+mod composer_duplicate_definitions_report_both_sources_and_path;
+#[path = "cases/composer_invalid_sources_report_resource_and_reason.rs"]
+mod composer_invalid_sources_report_resource_and_reason;
+#[path = "cases/composer_missing_resource_reports_its_name.rs"]
+mod composer_missing_resource_reports_its_name;
+#[path = "cases/context_limit_snapshots_round_trip_and_clear_without_changing_alias_metadata.rs"]
+mod context_limit_snapshots_round_trip_and_clear_without_changing_alias_metadata;
+#[path = "cases/default_profile_accepts_any_profile_made_user_selectable.rs"]
+mod default_profile_accepts_any_profile_made_user_selectable;
+#[path = "cases/default_profile_accepts_only_canonical_foreground_mode_ids.rs"]
+mod default_profile_accepts_only_canonical_foreground_mode_ids;
+#[path = "cases/default_profile_rejects_profiles_that_are_not_user_selectable.rs"]
+mod default_profile_rejects_profiles_that_are_not_user_selectable;
+#[path = "cases/disabled_tools_contains_only_effective_true_entries.rs"]
+mod disabled_tools_contains_only_effective_true_entries;
+#[path = "cases/disabled_tools_rejects_invalid_configuration.rs"]
+mod disabled_tools_rejects_invalid_configuration;
+#[path = "cases/empty_user_sandbox_rules_retain_predefined_rules.rs"]
+mod empty_user_sandbox_rules_retain_predefined_rules;
+#[path = "cases/environment_values_are_not_recursively_expanded.rs"]
+mod environment_values_are_not_recursively_expanded;
+#[path = "cases/explicit_empty_profile_tool_allowlist_overrides_the_predefined_allowlist.rs"]
+mod explicit_empty_profile_tool_allowlist_overrides_the_predefined_allowlist;
+#[path = "cases/image_upload_is_absent_by_default_and_applies_defaults_when_configured.rs"]
+mod image_upload_is_absent_by_default_and_applies_defaults_when_configured;
+#[path = "cases/inline_diff_defaults_to_true_and_accepts_boolean_configuration.rs"]
+mod inline_diff_defaults_to_true_and_accepts_boolean_configuration;
+#[path = "cases/inline_diff_rejects_non_boolean_values.rs"]
+mod inline_diff_rejects_non_boolean_values;
+#[path = "cases/invalid_cli_utility_configuration_is_rejected.rs"]
+mod invalid_cli_utility_configuration_is_rejected;
+#[path = "cases/invalid_context_limits_are_rejected.rs"]
+mod invalid_context_limits_are_rejected;
+#[path = "cases/invalid_created_directory_path_is_reported_as_invalid_configuration.rs"]
+mod invalid_created_directory_path_is_reported_as_invalid_configuration;
+#[path = "cases/invalid_image_upload_sections_are_rejected.rs"]
+mod invalid_image_upload_sections_are_rejected;
+#[path = "cases/invalid_model_alias_configuration_is_rejected.rs"]
+mod invalid_model_alias_configuration_is_rejected;
+#[path = "cases/invalid_model_preset_configuration_is_rejected.rs"]
+mod invalid_model_preset_configuration_is_rejected;
+#[path = "cases/invalid_model_profile_sizes_are_rejected_with_field_diagnostics.rs"]
+mod invalid_model_profile_sizes_are_rejected_with_field_diagnostics;
+#[path = "cases/invalid_model_profiles_are_rejected_with_field_diagnostics.rs"]
+mod invalid_model_profiles_are_rejected_with_field_diagnostics;
+#[path = "cases/invalid_prompt_template_overrides_report_the_configuration_path.rs"]
+mod invalid_prompt_template_overrides_report_the_configuration_path;
+#[path = "cases/invalid_provider_model_alias_defaults_are_rejected.rs"]
+mod invalid_provider_model_alias_defaults_are_rejected;
+#[path = "cases/invalid_read_only_exec_command_prefixes_are_rejected.rs"]
+mod invalid_read_only_exec_command_prefixes_are_rejected;
+#[path = "cases/invalid_request_limit_sections_are_rejected.rs"]
+mod invalid_request_limit_sections_are_rejected;
+#[path = "cases/invalid_request_limit_values_are_rejected.rs"]
+mod invalid_request_limit_values_are_rejected;
+#[path = "cases/invalid_security_configuration_fails_closed.rs"]
+mod invalid_security_configuration_fails_closed;
+#[path = "cases/invalid_skills_configuration_is_rejected.rs"]
+mod invalid_skills_configuration_is_rejected;
+#[path = "cases/invalid_template_engines_and_syntax_report_configuration_path.rs"]
+mod invalid_template_engines_and_syntax_report_configuration_path;
+#[path = "cases/invalid_tool_definition_overrides_are_rejected.rs"]
+mod invalid_tool_definition_overrides_are_rejected;
+#[path = "cases/legacy_model_prompts_require_manual_migration.rs"]
+mod legacy_model_prompts_require_manual_migration;
+#[path = "cases/legacy_top_level_prompt_is_not_used.rs"]
+mod legacy_top_level_prompt_is_not_used;
+#[path = "cases/live_buffer_rows_accepts_positive_user_configuration.rs"]
+mod live_buffer_rows_accepts_positive_user_configuration;
+#[path = "cases/live_buffer_rows_requires_a_positive_integer.rs"]
+mod live_buffer_rows_requires_a_positive_integer;
+#[path = "cases/loading_replaces_the_predefined_reference_without_rewriting_the_user_configuration.rs"]
+mod loading_replaces_the_predefined_reference_without_rewriting_the_user_configuration;
+#[path = "cases/missing_allow_write_rules_are_omitted_unless_creation_is_requested.rs"]
+mod missing_allow_write_rules_are_omitted_unless_creation_is_requested;
+#[path = "cases/missing_non_write_rules_are_retained.rs"]
+mod missing_non_write_rules_are_retained;
+#[path = "cases/model_alias_augmentation_distinguishes_null_from_an_explicit_empty_string.rs"]
+mod model_alias_augmentation_distinguishes_null_from_an_explicit_empty_string;
+#[path = "cases/model_alias_icons_support_custom_graphemes_and_explicit_disabling.rs"]
+mod model_alias_icons_support_custom_graphemes_and_explicit_disabling;
+#[path = "cases/model_aliases_partially_override_defaults_and_add_custom_aliases.rs"]
+mod model_aliases_partially_override_defaults_and_add_custom_aliases;
+#[path = "cases/model_presets_round_trip_alias_and_variant_selectors_with_every_alias_target.rs"]
+mod model_presets_round_trip_alias_and_variant_selectors_with_every_alias_target;
+#[path = "cases/model_profile_quoted_null_is_a_string_and_missing_properties_contribute_nothing.rs"]
+mod model_profile_quoted_null_is_a_string_and_missing_properties_contribute_nothing;
+#[path = "cases/model_profile_sizes_inherit_independently_alongside_text_properties.rs"]
+mod model_profile_sizes_inherit_independently_alongside_text_properties;
+#[path = "cases/model_profile_sizes_resolve_independently_and_capture_entries.rs"]
+mod model_profile_sizes_resolve_independently_and_capture_entries;
+#[path = "cases/model_profile_yaml_null_properties_inherit.rs"]
+mod model_profile_yaml_null_properties_inherit;
+#[path = "cases/model_profile_yaml_null_sizes_inherit.rs"]
+mod model_profile_yaml_null_sizes_inherit;
+#[path = "cases/model_profiles_capture_entries_and_preserve_default_alias_guidance.rs"]
+mod model_profiles_capture_entries_and_preserve_default_alias_guidance;
+#[path = "cases/model_profiles_resolve_each_property_from_the_closest_prefix.rs"]
+mod model_profiles_resolve_each_property_from_the_closest_prefix;
+#[path = "cases/non_selected_sequences_continue_to_replace_defaults.rs"]
+mod non_selected_sequences_continue_to_replace_defaults;
+#[path = "cases/openai_provider_defaults_can_be_partially_overridden.rs"]
+mod openai_provider_defaults_can_be_partially_overridden;
+#[path = "cases/openrouter_provider_preferences_partially_override_predefined_privacy_defaults.rs"]
+mod openrouter_provider_preferences_partially_override_predefined_privacy_defaults;
+#[path = "cases/predefined_configuration_provisions_shared_write_directories.rs"]
+mod predefined_configuration_provisions_shared_write_directories;
+#[path = "cases/predefined_configuration_uses_the_home_cache_fallback_when_xdg_cache_is_missing.rs"]
+mod predefined_configuration_uses_the_home_cache_fallback_when_xdg_cache_is_missing;
+#[path = "cases/predefined_responses_providers_have_standard_defaults.rs"]
+mod predefined_responses_providers_have_standard_defaults;
+#[path = "cases/profile_configuration_rejects_invalid_required_fields.rs"]
+mod profile_configuration_rejects_invalid_required_fields;
+#[path = "cases/profile_configuration_rejects_the_removed_user_agent_classification.rs"]
+mod profile_configuration_rejects_the_removed_user_agent_classification;
+#[path = "cases/profile_configuration_rejects_unknown_profile_ids.rs"]
+mod profile_configuration_rejects_unknown_profile_ids;
+#[path = "cases/profile_fields_partially_override_predefined_definitions.rs"]
+mod profile_fields_partially_override_predefined_definitions;
+#[path = "cases/profile_selectability_flags_are_independent_and_partial_overrides_preserve_defaults.rs"]
+mod profile_selectability_flags_are_independent_and_partial_overrides_preserve_defaults;
+#[path = "cases/profile_selectability_flags_require_strict_booleans.rs"]
+mod profile_selectability_flags_require_strict_booleans;
+#[path = "cases/provider_disable_websocket_is_parsed_as_a_boolean.rs"]
+mod provider_disable_websocket_is_parsed_as_a_boolean;
+#[path = "cases/provider_disable_websocket_rejects_invalid_values.rs"]
+mod provider_disable_websocket_rejects_invalid_values;
+#[path = "cases/provider_header_settings_preserve_defaults_and_overrides.rs"]
+mod provider_header_settings_preserve_defaults_and_overrides;
+#[path = "cases/provider_header_settings_reject_invalid_values.rs"]
+mod provider_header_settings_reject_invalid_values;
+#[path = "cases/provider_image_urls_defaults_to_true_and_parses_booleans.rs"]
+mod provider_image_urls_defaults_to_true_and_parses_booleans;
+#[path = "cases/provider_model_alias_defaults_are_validated_after_layering.rs"]
+mod provider_model_alias_defaults_are_validated_after_layering;
+#[path = "cases/provider_model_defaults_are_separate_from_declared_models.rs"]
+mod provider_model_defaults_are_separate_from_declared_models;
+#[path = "cases/provider_model_maximum_input_tokens_are_read_as_non_negative_integers.rs"]
+mod provider_model_maximum_input_tokens_are_read_as_non_negative_integers;
+#[path = "cases/provider_model_maximum_input_tokens_must_be_non_negative_integers.rs"]
+mod provider_model_maximum_input_tokens_must_be_non_negative_integers;
+#[path = "cases/provider_model_prices_must_be_finite_non_negative_numbers.rs"]
+mod provider_model_prices_must_be_finite_non_negative_numbers;
+#[path = "cases/provider_stream_idle_timeout_preserves_defaults_and_overrides.rs"]
+mod provider_stream_idle_timeout_preserves_defaults_and_overrides;
+#[path = "cases/provider_stream_idle_timeout_rejects_invalid_values.rs"]
+mod provider_stream_idle_timeout_rejects_invalid_values;
+#[path = "cases/provider_transport_exceptions_are_strict_booleans.rs"]
+mod provider_transport_exceptions_are_strict_booleans;
+#[path = "cases/question_tools_have_strict_complete_schemas_and_thinker_exposes_both_tools.rs"]
+mod question_tools_have_strict_complete_schemas_and_thinker_exposes_both_tools;
+#[path = "cases/read_only_exec_command_prefixes_are_exposed_as_read_only_collection.rs"]
+mod read_only_exec_command_prefixes_are_exposed_as_read_only_collection;
+#[path = "cases/rejected_configuration_does_not_create_requested_sandbox_directories.rs"]
+mod rejected_configuration_does_not_create_requested_sandbox_directories;
+#[path = "cases/replace_tag_is_rejected_outside_append_enabled_sequences.rs"]
+mod replace_tag_is_rejected_outside_append_enabled_sequences;
+#[path = "cases/request_limits_layer_independent_overrides.rs"]
+mod request_limits_layer_independent_overrides;
+#[path = "cases/requested_allow_write_rule_creates_missing_directories_recursively.rs"]
+mod requested_allow_write_rule_creates_missing_directories_recursively;
+#[path = "cases/retired_profile_status_is_ignored_at_the_configuration_boundary.rs"]
+mod retired_profile_status_is_ignored_at_the_configuration_boundary;
+#[path = "cases/sandbox_configuration_rejects_invalid_values.rs"]
+mod sandbox_configuration_rejects_invalid_values;
+#[path = "cases/sandbox_dev_bind_defaults_to_empty_and_replaces_inherited_list.rs"]
+mod sandbox_dev_bind_defaults_to_empty_and_replaces_inherited_list;
+#[path = "cases/sandbox_dev_bind_rejects_invalid_paths_and_shapes.rs"]
+mod sandbox_dev_bind_rejects_invalid_paths_and_shapes;
+#[path = "cases/sandbox_enabled_defaults_to_true_and_accepts_boolean_configuration.rs"]
+mod sandbox_enabled_defaults_to_true_and_accepts_boolean_configuration;
+#[path = "cases/sandbox_rule_creation_is_allowed_only_for_allow_write.rs"]
+mod sandbox_rule_creation_is_allowed_only_for_allow_write;
+#[path = "cases/sandbox_rule_creation_rejects_a_path_that_is_an_existing_file.rs"]
+mod sandbox_rule_creation_rejects_a_path_that_is_an_existing_file;
+#[path = "cases/sandbox_rule_creation_requires_a_boolean.rs"]
+mod sandbox_rule_creation_requires_a_boolean;
+#[path = "cases/sandbox_rule_paths_expand_environment_templates_and_nested_fallbacks.rs"]
+mod sandbox_rule_paths_expand_environment_templates_and_nested_fallbacks;
+#[path = "cases/sandbox_rule_paths_reject_malformed_environment_templates.rs"]
+mod sandbox_rule_paths_reject_malformed_environment_templates;
+#[path = "cases/sandbox_rule_paths_reject_missing_empty_and_relative_environment_values.rs"]
+mod sandbox_rule_paths_reject_missing_empty_and_relative_environment_values;
+#[path = "cases/sandbox_rules_can_explicitly_replace_predefined_rules.rs"]
+mod sandbox_rules_can_explicitly_replace_predefined_rules;
+#[path = "cases/security_configuration_is_strict_and_ordered.rs"]
+mod security_configuration_is_strict_and_ordered;
+#[path = "cases/security_configuration_rejects_unknown_keys.rs"]
+mod security_configuration_rejects_unknown_keys;
+#[path = "cases/set_model_adds_the_key_when_absent.rs"]
+mod set_model_adds_the_key_when_absent;
+#[path = "cases/set_model_alias_persists_reload_and_unrelated_yaml.rs"]
+mod set_model_alias_persists_reload_and_unrelated_yaml;
+#[path = "cases/set_model_alias_rejects_an_undefined_alias.rs"]
+mod set_model_alias_rejects_an_undefined_alias;
+#[path = "cases/set_model_aliases_does_not_change_memory_when_persistence_fails.rs"]
+mod set_model_aliases_does_not_change_memory_when_persistence_fails;
+#[path = "cases/set_model_aliases_persists_all_standard_targets_once_and_preserves_other_yaml.rs"]
+mod set_model_aliases_persists_all_standard_targets_once_and_preserves_other_yaml;
+#[path = "cases/set_model_aliases_rejects_mismatched_provider_without_changing_memory_or_disk.rs"]
+mod set_model_aliases_rejects_mismatched_provider_without_changing_memory_or_disk;
+#[path = "cases/set_model_persists_and_survives_a_reload.rs"]
+mod set_model_persists_and_survives_a_reload;
+#[path = "cases/set_model_preset_overwrites_only_the_named_preset_and_preserves_other_yaml.rs"]
+mod set_model_preset_overwrites_only_the_named_preset_and_preserves_other_yaml;
+#[path = "cases/set_model_replaces_only_that_key_and_keeps_the_others.rs"]
+mod set_model_replaces_only_that_key_and_keeps_the_others;
+#[path = "cases/set_model_routing_persists_default_and_aliases_together_without_losing_metadata.rs"]
+mod set_model_routing_persists_default_and_aliases_together_without_losing_metadata;
+#[path = "cases/set_skill_enabled_does_not_update_runtime_state_when_persistence_fails.rs"]
+mod set_skill_enabled_does_not_update_runtime_state_when_persistence_fails;
+#[path = "cases/set_skill_enabled_replaces_only_the_canonical_path_and_preserves_other_yaml.rs"]
+mod set_skill_enabled_replaces_only_the_canonical_path_and_preserves_other_yaml;
+#[path = "cases/settings_preserve_replace_tags.rs"]
+mod settings_preserve_replace_tags;
+#[path = "cases/skills_configuration_is_path_only_and_last_canonical_duplicate_wins.rs"]
+mod skills_configuration_is_path_only_and_last_canonical_duplicate_wins;
+#[path = "cases/system_prompts_override_inherited_entries_and_add_namespaced_providers.rs"]
+mod system_prompts_override_inherited_entries_and_add_namespaced_providers;
+#[path = "cases/system_prompts_require_namespaced_keys_and_non_empty_string_values.rs"]
+mod system_prompts_require_namespaced_keys_and_non_empty_string_values;
+#[path = "cases/the_model_is_read_from_the_file.rs"]
+mod the_model_is_read_from_the_file;
+#[path = "cases/tool_definitions_are_loaded_and_user_overrides_replace_structure_and_prose.rs"]
+mod tool_definitions_are_loaded_and_user_overrides_replace_structure_and_prose;
+#[path = "cases/tool_schema_numbers_and_semantic_description_fields_are_preserved.rs"]
+mod tool_schema_numbers_and_semantic_description_fields_are_preserved;
+#[path = "cases/user_configuration_recursively_overrides_predefined_mappings.rs"]
+mod user_configuration_recursively_overrides_predefined_mappings;
+#[path = "cases/user_input_timeout_requires_positive_integer_milliseconds_or_the_infinite_sentinel.rs"]
+mod user_input_timeout_requires_positive_integer_milliseconds_or_the_infinite_sentinel;
+#[path = "cases/user_input_timeout_resolves_the_default_sentinel_and_deprecated_fallback.rs"]
+mod user_input_timeout_resolves_the_default_sentinel_and_deprecated_fallback;
+#[path = "cases/web_fetch_private_access_is_opt_in.rs"]
+mod web_fetch_private_access_is_opt_in;

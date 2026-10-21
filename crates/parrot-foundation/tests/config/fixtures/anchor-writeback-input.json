@@ -1,0 +1,6 @@
+[
+  {"id":"anchor-model-slot-replaced","kind":"config","yaml":"model: &chosen provider/old\nunknown: *chosen\n","operations":[{"type":"set_model","value":"provider/new"}],"paths":["model"]},
+  {"id":"anchor-multiple-flow-aliases","kind":"config","yaml":"model: &chosen provider/old\nunknown: [*chosen, *chosen]\n","operations":[{"type":"set_model","value":"provider/new"}],"paths":["model"]},
+  {"id":"anchor-nested-aliases","kind":"config","yaml":"model: &chosen provider/old\nunknown:\n  first: *chosen\n  second: *chosen\n","operations":[{"type":"set_model","value":"provider/new"}],"paths":["model"]},
+  {"id":"anchor-preset-slot-replaced","kind":"config","yaml":"model_presets:\n  saved: &preset\n    model: provider/old\n    model_aliases: {}\nunknown: *preset\n","operations":[{"type":"set_preset","name":"saved","model":"provider/new","aliases":{}}],"paths":["modelPresets.saved"]}
+]

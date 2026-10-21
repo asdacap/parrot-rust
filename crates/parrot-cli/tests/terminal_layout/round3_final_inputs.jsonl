@@ -1,0 +1,53 @@
+{"op":"date","source":"1 PM"}
+{"op":"date","source":"12AM"}
+{"op":"date","source":"12:30am"}
+{"op":"date","source":"Feb 29 00"}
+{"op":"date","source":"Jan 2024 2"}
+{"op":"date","source":"1-2-2024T01:00"}
+{"op":"date","source":"2024-01-02 1:00PM"}
+{"op":"date","source":"January 2 2024 +01:00"}
+{"op":"date","source":"Tue 1/2/2024"}
+{"op":"date","source":"Tue 2024-01-02"}
+{"op":"date","source":"2024-01-02 Tuesday"}
+{"op":"date","source":"1/2/2024T01:00"}
+{"op":"date","source":"2 January 00"}
+{"op":"date","source":"January 2024 2 12:00"}
+{"op":"yaml","source":"{\"x\\n \\ny\": 1}"}
+{"op":"yaml","source":"{\"a\\n \\n\\nb\": 1}"}
+{"op":"yaml","source":"{\"a\\n\\tbc\": 1}"}
+{"op":"yaml","source":"{\"\\ta\\nb\": 1}"}
+{"op":"yaml","source":"{\"\\r\\na\\r\\n\": 1}"}
+{"op":"yaml","source":"{\"a\\n  \\nb\": 1}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\tb\":1}}"}
+{"op":"yaml","source":"[{\"a\\n\\tb\":[1,[2],{\"x\":3}]}]"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\t\\nb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n \\nb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\" \\na\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\nb \":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a \\nb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n b\\nc\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\r\\nb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\r\\n\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\r\\n\\r\\n\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\r\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\r\\r\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a \":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a \":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\n\\tb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\n b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\nb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n \\t\\nb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"\\n \\na\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"\\n\\t\\na\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\u0000b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\u0007b\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n\\u000bb\":1}}"}
+{"op":"yaml","source":"{\"outer\":{\"a\\n😀b\":1}}"}
+{"op":"yaml","source":"[{\"a\\n😀b\":[1,[2],{\"x\":3}]}]"}

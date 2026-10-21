@@ -1,0 +1,2 @@
+System.InvalidOperationException
+Seatbelt paths cannot contain control characters.

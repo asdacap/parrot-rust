@@ -1,0 +1,8 @@
+[
+  {"id":"A008.M3.literal-unicode","template":"{{ value }}","arguments":{"value":"é😀 {{ hostile }} {% if bad %} {value}\nnext ${NAME} <b>&\""},"expected":"é😀 {{ hostile }} {% if bad %} {value}\nnext ${NAME} <b>&\""},
+  {"id":"A008.M3.whitespace","template":"A\n  {% if flag %}\nB\n  {% endif %}\n","arguments":{"flag":true},"expected":"A\n  \nB\n  \n"},
+  {"id":"A008.M3.no-auto-indent","template":"start\n  {{ value }}\n","arguments":{"value":"a\nb"},"expected":"start\n  a\nb\n"},
+  {"id":"A008.M3.owned-map-order","template":"{% for key in data %}{{ key }};{% endfor %}","arguments":{"data":{"z":1,"a":2}},"expected":"z;a;"},
+  {"id":"A008.M3.native-builtins-macros","template":"{% macro double(x) %}{{ x * 2 }}{% endmacro %}{{ double(3) }}|{{ values | join(',') }}|{{ word | upper }}","arguments":{"values":[1,2,3],"word":"native"},"expected":"6|1,2,3|NATIVE"},
+  {"id":"A008.M8.literal-dollar","template":"${NAME}|{{ value }}","arguments":{"value":"${HOME}"},"expected":"${NAME}|${HOME}"}
+]

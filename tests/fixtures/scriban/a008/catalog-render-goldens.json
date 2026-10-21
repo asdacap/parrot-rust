@@ -1,0 +1,1242 @@
+{
+  "schema_version": 1,
+  "source": {
+    "path": "tests/fixtures/scriban/a008/source-oracle.json",
+    "sha256": "07095d2ece1e70ffc4e5a26414f138ce05ae6159e86f44d94332d1c775adef23"
+  },
+  "source_kind": "independent_actual_original_scalar_Scriban_not_native_renderer",
+  "entries": [
+    {
+      "case_id": "A008.M6.system.agent-identity",
+      "template_id": "system.agent-identity",
+      "arguments": {
+        "session_id": "value:session_id {{ literal }}\nnext",
+        "parent_session_id": "value:parent_session_id {{ literal }}\nnext",
+        "parent_session_name": "value:parent_session_name {{ literal }}\nnext",
+        "agent_name": "value:agent_name {{ literal }}\nnext",
+        "depth": "value:depth {{ literal }}\nnext"
+      },
+      "expected": "Child agent session: value:session_id {{ literal }}\nnext\nParent agent session: value:parent_session_id {{ literal }}\nnext\nParent agent name: value:parent_session_name {{ literal }}\nnext\nChild agent name: value:agent_name {{ literal }}\nnext\nChild agent depth: value:depth {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/0/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.system.agent-scope",
+      "template_id": "system.agent-scope",
+      "arguments": {
+        "heading": "value:heading {{ literal }}\nnext",
+        "label": "value:label {{ literal }}\nnext",
+        "content": "value:content {{ literal }}\nnext"
+      },
+      "expected": "value:heading {{ literal }}\nnext\n\n### value:label {{ literal }}\nnext\nvalue:content {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/1/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.system.working-directory",
+      "template_id": "system.working-directory",
+      "arguments": {
+        "working_directory": "value:working_directory {{ literal }}\nnext"
+      },
+      "expected": "Working directory: $WORKDIR (initial shell working directory).",
+      "source_observation_pointer": "/cases/2/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.git-repository",
+      "template_id": "context.git-repository",
+      "arguments": {
+        "is_repository": "value:is_repository {{ literal }}\nnext"
+      },
+      "expected": "Git repository: value:is_repository {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/3/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.status.selection",
+      "template_id": "status.selection",
+      "arguments": {
+        "profile": "build",
+        "model": "local/model",
+        "parent_session_id": "root",
+        "parent_session_name": "parent",
+        "has_parent": true,
+        "has_parent_name": true
+      },
+      "expected": "Active profile: build\nModel: local/model\nParent session: root (parent)",
+      "source_observation_pointer": "/cases/4/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.status.generated-time",
+      "template_id": "status.generated-time",
+      "arguments": {
+        "time": "value:time {{ literal }}\nnext"
+      },
+      "expected": "Generated at: value:time {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/5/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.status.context",
+      "template_id": "status.context",
+      "arguments": {
+        "available": true,
+        "usage": 12,
+        "estimated_tokens": 123,
+        "context_limit": 1000,
+        "cadence": 10,
+        "trigger": 80
+      },
+      "expected": "Context: 12% used (123 estimated tokens / 1000 limit); reminders every 10%; automatic compaction at 80%.",
+      "source_observation_pointer": "/cases/6/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.status.context-limit",
+      "template_id": "status.context-limit",
+      "arguments": {
+        "available": true,
+        "usage": 12,
+        "estimated_tokens": 123,
+        "context_limit": 1000,
+        "cadence": 10,
+        "trigger": 80,
+        "trigger_tokens": 800
+      },
+      "expected": "Context: 12% (123 / 1000 tokens); auto-compact: >800 tokens.",
+      "source_observation_pointer": "/cases/7/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.status.statistics",
+      "template_id": "status.statistics",
+      "arguments": {
+        "session_id": "s",
+        "views": [
+          {
+            "cumulative": true,
+            "input_tokens": 10,
+            "cache_percentage": 20,
+            "output_tokens": 30,
+            "tool_calls": 4,
+            "total_cost": "0.50",
+            "input_cost": "0.20",
+            "output_cost": "0.30",
+            "models": [
+              {
+                "provider": "local",
+                "model": "example",
+                "legacy": false,
+                "has_effort": true,
+                "effort": "high",
+                "input_tokens": 10,
+                "cache_percentage": 20,
+                "output_tokens": 30,
+                "tool_calls": 4,
+                "total_cost": "0.50",
+                "input_cost": "0.20",
+                "output_cost": "0.30"
+              }
+            ]
+          }
+        ],
+        "incomplete_legacy_tool_counts": true
+      },
+      "expected": "Statistics (lifetime):\nCumulative (self + descendants): 10 (20% cache) / 30; 4 tool; cost $0.50 (input $0.20, output $0.30).\n  - local/example/high: 10 (20% cache) / 30; 4 tool; cost $0.50 (input $0.20, output $0.30).\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.",
+      "source_observation_pointer": "/cases/8/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.status.runtime",
+      "template_id": "status.runtime",
+      "arguments": {
+        "section": "agent-tasks",
+        "agents": [],
+        "runs": [
+          {
+            "run_id": "first",
+            "display_name": "graph {{ name }}",
+            "owner_session_id": "root",
+            "revision": "1234",
+            "nodes": [
+              {
+                "indent": "  ",
+                "name": "parent",
+                "status": "running",
+                "description": "Parent"
+              },
+              {
+                "indent": "    ",
+                "name": "child",
+                "status": "pending",
+                "description": "{{ hostile }}\nnext"
+              }
+            ]
+          },
+          {
+            "run_id": "second",
+            "display_name": "second",
+            "owner_session_id": "root",
+            "revision": "2",
+            "nodes": []
+          }
+        ]
+      },
+      "expected": "- AgentTask graph: first (name: graph {{ name }}, owner: root, revision: 1234)\n  - task: parent (running, description: Parent)\n    - task: child (pending, description: {{ hostile }}\nnext)\n- AgentTask graph: second (name: second, owner: root, revision: 2)",
+      "source_observation_pointer": "/cases/9/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.child-completion",
+      "template_id": "agent-session.child-completion",
+      "arguments": {
+        "agent_name": "value:agent_name {{ literal }}\nnext",
+        "result": "value:result {{ literal }}\nnext"
+      },
+      "expected": "Child agent value:agent_name {{ literal }}\nnext completed.\nvalue:result {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/10/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.child-question",
+      "template_id": "agent-session.child-question",
+      "arguments": {
+        "agent_name": "value:agent_name {{ literal }}\nnext",
+        "questions": "value:questions {{ literal }}\nnext"
+      },
+      "expected": "Child agent value:agent_name {{ literal }}\nnext is waiting for an answer to these structured questions:\nvalue:questions {{ literal }}\nnext\nUse answer with the agent_name shown above and one nonblank textual answer for every question in the order shown. Invalid or partial answers leave the request pending.",
+      "source_observation_pointer": "/cases/11/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.pending-child-question-reminder",
+      "template_id": "agent-session.pending-child-question-reminder",
+      "arguments": {
+        "children": "value:children {{ literal }}\nnext"
+      },
+      "expected": "This turn must not exit while direct child agents are waiting for answers.value:children {{ literal }}\nnext\nUse answer for every listed child before finishing this turn. Each request remains pending until one nonblank textual answer is submitted for every question in the order shown.",
+      "source_observation_pointer": "/cases/12/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.active-work-reminder",
+      "template_id": "agent-session.active-work-reminder",
+      "arguments": {
+        "active_work": "value:active_work {{ literal }}\nnext"
+      },
+      "expected": "This turn must not exit while direct subagents, AgentTask graphs, or processes are still running.value:active_work {{ literal }}\nnext\nUse the wait tool until no direct subagent, AgentTask graph, or process remains. To interrupt a direct subagent, use agent_send to instruct it to complete. To interrupt a process, use interrupt_process. Do not finish this turn until all listed work has completed or been interrupted.",
+      "source_observation_pointer": "/cases/13/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.nonempty-queues-reminder",
+      "template_id": "agent-session.nonempty-queues-reminder",
+      "arguments": {
+        "queues": "value:queues {{ literal }}\nnext"
+      },
+      "expected": "This turn must not exit while queues owned by this agent contain items.\nvalue:queues {{ literal }}\nnext\nDrain every listed queue before finishing, even when asked to stop. Use queue_take to consume items or coordinate consumers and wait until all owned queues are empty. Closing a queue does not drain it. There is no waiver or abandon action. Parent-owned queues do not block completion; an empty open queue does not block completion.",
+      "source_observation_pointer": "/cases/14/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.nonempty-queue-item",
+      "template_id": "agent-session.nonempty-queue-item",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "size": "value:size {{ literal }}\nnext"
+      },
+      "expected": "- value:name {{ literal }}\nnext (remaining items: value:size {{ literal }}\nnext)",
+      "source_observation_pointer": "/cases/15/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.active-work-agent-tasks-heading",
+      "template_id": "agent-session.active-work-agent-tasks-heading",
+      "arguments": {},
+      "expected": "Running AgentTask graphs",
+      "source_observation_pointer": "/cases/16/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.active-work-unresolved-agent-tasks-heading",
+      "template_id": "agent-session.active-work-unresolved-agent-tasks-heading",
+      "arguments": {},
+      "expected": "Unresolved AgentTasks (pending, running, or failed and awaiting your set_agent_tasks decision)",
+      "source_observation_pointer": "/cases/17/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.exit-reminder",
+      "template_id": "agent-session.exit-reminder",
+      "arguments": {
+        "reminders": "value:reminders {{ literal }}\nnext"
+      },
+      "expected": "Exit reminders are set. You cannot finish until every one is cleared with clear_exit_reminder:\nvalue:reminders {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/18/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.exit-reminder-nth",
+      "template_id": "agent-session.exit-reminder-nth",
+      "arguments": {
+        "reminders": "value:reminders {{ literal }}\nnext",
+        "ordinal": "value:ordinal {{ literal }}\nnext"
+      },
+      "expected": "This is the value:ordinal {{ literal }}\nnext exit reminder. Remaining exit reminders:\nvalue:reminders {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/19/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.context-reminder",
+      "template_id": "agent-session.context-reminder",
+      "arguments": {
+        "percentage": "value:percentage {{ literal }}\nnext",
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext"
+      },
+      "expected": "Context usage entered the value:percentage {{ literal }}\nnext% notification band (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext configured limit). Notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction triggers strictly above value:trigger {{ literal }}\nnext%.",
+      "source_observation_pointer": "/cases/20/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compact-context-tool.compacted",
+      "template_id": "compact-context-tool.compacted",
+      "arguments": {
+        "usage": "value:usage {{ literal }}\nnext",
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext"
+      },
+      "expected": "Compacted this calling agent session. Context is now value:usage {{ literal }}\nnext% used (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext limit); notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction triggers strictly above value:trigger {{ literal }}\nnext%.",
+      "source_observation_pointer": "/cases/21/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compact-context-tool.no-op",
+      "template_id": "compact-context-tool.no-op",
+      "arguments": {
+        "usage": "value:usage {{ literal }}\nnext",
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext"
+      },
+      "expected": "No eligible context was compacted in this calling agent session. Context is value:usage {{ literal }}\nnext% used (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext limit); notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction triggers strictly above value:trigger {{ literal }}\nnext%.",
+      "source_observation_pointer": "/cases/22/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compact-context-tool.unavailable",
+      "template_id": "compact-context-tool.unavailable",
+      "arguments": {
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext"
+      },
+      "expected": "Context compaction is unavailable for this calling agent session because the selected model has no positive context limit (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext limit); notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction triggers strictly above value:trigger {{ literal }}\nnext%.",
+      "source_observation_pointer": "/cases/23/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.context-limit-reminder",
+      "template_id": "agent-session.context-limit-reminder",
+      "arguments": {
+        "percentage": "value:percentage {{ literal }}\nnext",
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext",
+        "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+      },
+      "expected": "Context usage entered the value:percentage {{ literal }}\nnext% notification band (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext model context window). Notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction triggers strictly above value:trigger_tokens {{ literal }}\nnext tokens.",
+      "source_observation_pointer": "/cases/24/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compact-context-tool.compacted-with-limit",
+      "template_id": "compact-context-tool.compacted-with-limit",
+      "arguments": {
+        "usage": "value:usage {{ literal }}\nnext",
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext",
+        "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+      },
+      "expected": "Compacted this calling agent session. Context is now value:usage {{ literal }}\nnext% used (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext model context window); notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction triggers strictly above value:trigger_tokens {{ literal }}\nnext tokens.",
+      "source_observation_pointer": "/cases/25/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compact-context-tool.no-op-with-limit",
+      "template_id": "compact-context-tool.no-op-with-limit",
+      "arguments": {
+        "usage": "value:usage {{ literal }}\nnext",
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext",
+        "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+      },
+      "expected": "No eligible context was compacted in this calling agent session. Context is value:usage {{ literal }}\nnext% used (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext model context window); notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction triggers strictly above value:trigger_tokens {{ literal }}\nnext tokens.",
+      "source_observation_pointer": "/cases/26/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compact-context-tool.unavailable-with-limit",
+      "template_id": "compact-context-tool.unavailable-with-limit",
+      "arguments": {
+        "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+        "context_limit": "value:context_limit {{ literal }}\nnext",
+        "notification_interval": "value:notification_interval {{ literal }}\nnext",
+        "trigger": "value:trigger {{ literal }}\nnext",
+        "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+      },
+      "expected": "Context compaction is unavailable for this calling agent session because the selected model has no positive context window (value:estimated_tokens {{ literal }}\nnext estimated tokens / value:context_limit {{ literal }}\nnext model context window); notifications occur every value:notification_interval {{ literal }}\nnext%; automatic compaction trigger: value:trigger_tokens {{ literal }}\nnext tokens.",
+      "source_observation_pointer": "/cases/27/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.goal.root-reminder",
+      "template_id": "goal.root-reminder",
+      "arguments": {
+        "goal": "value:goal {{ literal }}\nnext"
+      },
+      "expected": "User set goal is value:goal {{ literal }}\nnext. Clear exit reminder \"goal\" if end condition met.",
+      "source_observation_pointer": "/cases/28/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.goal.root-reminder-notice",
+      "template_id": "goal.root-reminder-notice",
+      "arguments": {
+        "reminder": "value:reminder {{ literal }}\nnext"
+      },
+      "expected": "A new exit reminder was set: value:reminder {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/29/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.set-exit-reminder-tool.set",
+      "template_id": "set-exit-reminder-tool.set",
+      "arguments": {
+        "title": "value:title {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext"
+      },
+      "expected": "Exit reminder set: value:title {{ literal }}\nnext: value:description {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/30/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.clear-exit-reminder-tool.cleared",
+      "template_id": "clear-exit-reminder-tool.cleared",
+      "arguments": {
+        "title": "value:title {{ literal }}\nnext"
+      },
+      "expected": "Exit reminder cleared: value:title {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/31/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.clear-exit-reminder-tool.not-found",
+      "template_id": "clear-exit-reminder-tool.not-found",
+      "arguments": {
+        "title": "value:title {{ literal }}\nnext",
+        "titles": "value:titles {{ literal }}\nnext"
+      },
+      "expected": "No exit reminder titled value:title {{ literal }}\nnext. Active titles: value:titles {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/32/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.exec-command.metadata-reminder",
+      "template_id": "exec-command.metadata-reminder",
+      "arguments": {
+        "command_length": "value:command_length {{ literal }}\nnext"
+      },
+      "expected": "Reminder: include 'name' and 'description' for multiline commands or commands longer than value:command_length {{ literal }}\nnext characters.",
+      "source_observation_pointer": "/cases/33/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.monitor.started",
+      "template_id": "monitor.started",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "stderr_path": "value:stderr_path {{ literal }}\nnext"
+      },
+      "expected": "Monitor value:name {{ literal }}\nnext started. Each stdout line arrives as a notification while you keep working; a running monitor does not keep this turn open. Stop it early with interrupt_process.\nstderr does not produce events and is written to value:stderr_path {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/34/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.monitor.event",
+      "template_id": "monitor.event",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext",
+        "lines": "value:lines {{ literal }}\nnext"
+      },
+      "expected": "Monitor value:name {{ literal }}\nnext (value:description {{ literal }}\nnext):\nvalue:lines {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/35/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.monitor.ended",
+      "template_id": "monitor.ended",
+      "arguments": {
+        "name": "watch",
+        "description": "{{ literal }}\nnext",
+        "events": 2,
+        "reason": "exited",
+        "exit_code": 0,
+        "error": "",
+        "timeout_ms": 100
+      },
+      "expected": "Monitor watch ({{ literal }}\nnext) exited with code 0. Events delivered: 2.",
+      "source_observation_pointer": "/cases/36/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-send-tool.description-without-parent",
+      "template_id": "agent-send-tool.description-without-parent",
+      "arguments": {},
+      "expected": "Send a message to an agent in this user session using a direct name or a relative or absolute slash-separated agent path. Paths may traverse children, use parent segments to reach ancestors or siblings, or start with /root-name (for example child/grandchild, parent/sibling, or /root-name/child). Sending to any ancestor is disabled; report to the parent through the final message instead. Delegation to a more permissive agent is rejected.",
+      "source_observation_pointer": "/cases/37/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.runaway",
+      "template_id": "agent-session.runaway",
+      "arguments": {},
+      "expected": "the turn exceeded its provider-request limit",
+      "source_observation_pointer": "/cases/38/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.truncated-tool-call",
+      "template_id": "agent-session.truncated-tool-call",
+      "arguments": {},
+      "expected": "Your previous tool call was cut off by the output limit and was not executed. Reissue the complete tool call with shorter arguments.",
+      "source_observation_pointer": "/cases/39/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.invalid-tool-call",
+      "template_id": "agent-session.invalid-tool-call",
+      "arguments": {},
+      "expected": "Your previous response was discarded because a tool call argument was not valid JSON and was not executed. Reissue the complete response with well-formed JSON arguments.",
+      "source_observation_pointer": "/cases/40/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.final-request",
+      "template_id": "agent-session.final-request",
+      "arguments": {},
+      "expected": "This is the final provider request allowed for the current turn. Tools are unavailable except the settlement tools (wait, agent_send, interrupt_process, agent_status, answer, question). Do not start new work. Settle anything still running if needed, then provide the best possible final answer using the information already available.",
+      "source_observation_pointer": "/cases/41/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.final-request-interrupted",
+      "template_id": "agent-session.final-request-interrupted",
+      "arguments": {},
+      "expected": "This is the final provider request allowed for the current turn because the turn was interrupted. Tools are unavailable except the settlement tools (wait, agent_send, interrupt_process, agent_status, answer, question). Do not start new work. Settle anything still running if needed, then provide the best possible final answer using the information already available.",
+      "source_observation_pointer": "/cases/42/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.tools-restored",
+      "template_id": "agent-session.tools-restored",
+      "arguments": {},
+      "expected": "A new turn has started and its provider-request budget has reset. Tool access is restored to the tools permitted for this turn.",
+      "source_observation_pointer": "/cases/43/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.interrupted-result",
+      "template_id": "agent-session.interrupted-result",
+      "arguments": {},
+      "expected": "Error: tool execution interrupted",
+      "source_observation_pointer": "/cases/44/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-session.interrupted-note",
+      "template_id": "agent-session.interrupted-note",
+      "arguments": {},
+      "expected": "(interrupted)",
+      "source_observation_pointer": "/cases/45/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.tool-result.text",
+      "template_id": "tool-result.text",
+      "arguments": {
+        "value": "value:value {{ literal }}\nnext"
+      },
+      "expected": "value:value {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/46/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.tool-result.markdown-outline",
+      "template_id": "tool-result.markdown-outline",
+      "arguments": {
+        "outline": "value:outline {{ literal }}\nnext"
+      },
+      "expected": "markdown outline (line: heading):\nvalue:outline {{ literal }}\nnext\n",
+      "source_observation_pointer": "/cases/47/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.tool-result.output-blob-notice",
+      "template_id": "tool-result.output-blob-notice",
+      "arguments": {
+        "path": "value:path {{ literal }}\nnext"
+      },
+      "expected": "Full output is retained at value:path {{ literal }}\nnext; metadata: {literal}.",
+      "source_observation_pointer": "/cases/48/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.tool-result.question-answer",
+      "template_id": "tool-result.question-answer",
+      "arguments": {
+        "question": "value:question {{ literal }}\nnext",
+        "answer": "value:answer {{ literal }}\nnext"
+      },
+      "expected": "Question: value:question {{ literal }}\nnext\nAnswer: value:answer {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/49/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.tool-result.question-replied",
+      "template_id": "tool-result.question-replied",
+      "arguments": {
+        "agent_name": "value:agent_name {{ literal }}\nnext"
+      },
+      "expected": "Answered the pending question from child agent value:agent_name {{ literal }}\nnext.",
+      "source_observation_pointer": "/cases/50/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.tool-result.error",
+      "template_id": "tool-result.error",
+      "arguments": {
+        "message": "value:message {{ literal }}\nnext"
+      },
+      "expected": "error: value:message {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/51/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.tool-result.image-budget-exceeded",
+      "template_id": "tool-result.image-budget-exceeded",
+      "arguments": {
+        "limit_bytes": "value:limit_bytes {{ literal }}\nnext"
+      },
+      "expected": "The image upload budget of value:limit_bytes {{ literal }}\nnext original bytes for this tool-call cycle has been exceeded. This and all later image reads in this cycle are rejected. Retry in a new tool-call cycle.",
+      "source_observation_pointer": "/cases/52/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.mode.plan-workflow",
+      "template_id": "mode.plan-workflow",
+      "arguments": {
+        "profile_prompt": "value:profile_prompt {{ literal }}\nnext",
+        "plan_artifact": "value:plan_artifact {{ literal }}\nnext",
+        "task_artifact": "value:task_artifact {{ literal }}\nnext",
+        "plan_directory": "value:plan_directory {{ literal }}\nnext"
+      },
+      "expected": "value:profile_prompt {{ literal }}\nnext Write the canonical Markdown plan to this exact file: value:plan_artifact {{ literal }}\nnext. Write the required AgentTask v1 JSON artifact to this exact file: value:task_artifact {{ literal }}\nnext. The JSON must be a strict object with schema_version equal to 1 and a nonempty tasks array of top-level sibling tasks; each task requires nonblank name, description, payload, and acceptance_criteria; description must be at most 300 characters. Optional dependencies must be an array of distinct nonblank, case-sensitive names in the same sibling list; an optional model must be a nonblank string. Payload is either a nonblank string or a nonempty recursive task array. You may write optional supporting artifacts under this plan directory and reference them from the canonical plan: value:plan_directory {{ literal }}\nnext. Do not include the plan in your assistant response. Finish only after writing both canonical files.",
+      "source_observation_pointer": "/cases/53/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.mode.plan-repair-read",
+      "template_id": "mode.plan-repair-read",
+      "arguments": {
+        "plan_artifact": "value:plan_artifact {{ literal }}\nnext",
+        "task_artifact": "value:task_artifact {{ literal }}\nnext",
+        "error": "value:error {{ literal }}\nnext"
+      },
+      "expected": "Plan artifacts could not be read. Repair the exact Markdown path 'value:plan_artifact {{ literal }}\nnext' and task JSON path 'value:task_artifact {{ literal }}\nnext': value:error {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/54/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.mode.plan-repair-blank-plan",
+      "template_id": "mode.plan-repair-blank-plan",
+      "arguments": {
+        "plan_artifact": "value:plan_artifact {{ literal }}\nnext"
+      },
+      "expected": "The required Markdown plan artifact is blank. Write the complete plan to the exact path 'value:plan_artifact {{ literal }}\nnext', then finish again.",
+      "source_observation_pointer": "/cases/55/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.mode.plan-repair-blank-task",
+      "template_id": "mode.plan-repair-blank-task",
+      "arguments": {
+        "task_artifact": "value:task_artifact {{ literal }}\nnext"
+      },
+      "expected": "The required AgentTask JSON artifact is blank. Write valid schema_version 1 task JSON with a nonempty top-level tasks array to the exact path 'value:task_artifact {{ literal }}\nnext', then finish again.",
+      "source_observation_pointer": "/cases/56/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.mode.plan-repair-invalid-task",
+      "template_id": "mode.plan-repair-invalid-task",
+      "arguments": {
+        "task_artifact": "value:task_artifact {{ literal }}\nnext",
+        "error": "value:error {{ literal }}\nnext"
+      },
+      "expected": "The AgentTask JSON artifact at 'value:task_artifact {{ literal }}\nnext' is invalid: value:error {{ literal }}\nnext Repair that exact file, then finish again.",
+      "source_observation_pointer": "/cases/57/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.mode.plan-implementation",
+      "template_id": "mode.plan-implementation",
+      "arguments": {
+        "plan_artifact": "value:plan_artifact {{ literal }}\nnext",
+        "task_artifact": "value:task_artifact {{ literal }}\nnext"
+      },
+      "expected": "Implement the approved Markdown plan at value:plan_artifact {{ literal }}\nnext. Call set_agent_tasks with the approved task JSON path value:task_artifact {{ literal }}\nnext.",
+      "source_observation_pointer": "/cases/58/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compaction.summary-instructions",
+      "template_id": "compaction.summary-instructions",
+      "arguments": {},
+      "expected": "Summarise the following conversation so it can continue. Keep decisions, file paths, open tasks, and relevant evidence from images. Be terse.",
+      "source_observation_pointer": "/cases/59/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compaction.summary-prefix",
+      "template_id": "compaction.summary-prefix",
+      "arguments": {},
+      "expected": "Summary of the earlier conversation:\n",
+      "source_observation_pointer": "/cases/60/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.compaction.oversized-tool-group-notice",
+      "template_id": "compaction.oversized-tool-group-notice",
+      "arguments": {
+        "path": "value:path {{ literal }}\nnext"
+      },
+      "expected": "This tool-call group was too large for compaction and was written out in full as JSON at value:path {{ literal }}\nnext.",
+      "source_observation_pointer": "/cases/61/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.agent-path-environment",
+      "template_id": "context.agent-path-environment",
+      "arguments": {
+        "entries": [
+          {
+            "name": "WORKDIR",
+            "path": "/tmp/${NAME}"
+          },
+          {
+            "name": "ROOT",
+            "path": "{{ literal }}"
+          }
+        ]
+      },
+      "expected": "Shell path environment (defaults; references below describe absolute runtime values):\nWORKDIR = /tmp/${NAME}\nROOT = {{ literal }}\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "source_observation_pointer": "/cases/62/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.agent-scratch",
+      "template_id": "context.agent-scratch",
+      "arguments": {
+        "path": "value:path {{ literal }}\nnext"
+      },
+      "expected": "Persistent writable scratch directory for this agent: $AGENT_SCRATCH_DIR. Use this directory for temporary files and durable artifacts that should remain available when this user session resumes.",
+      "source_observation_pointer": "/cases/63/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.agent-history",
+      "template_id": "context.agent-history",
+      "arguments": {
+        "path": "value:path {{ literal }}\nnext"
+      },
+      "expected": "Your durable message and compaction history is projected to this JSONL file: \"$AGENT_HISTORY_DIR/history.jsonl\". SQLite remains authoritative, so Parrot may replace this file when the history changes.",
+      "source_observation_pointer": "/cases/64/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.standing-instruction",
+      "template_id": "context.standing-instruction",
+      "arguments": {
+        "instruction": "value:instruction {{ literal }}\nnext"
+      },
+      "expected": "Standing instruction from the user. Follow it until the user changes it: value:instruction {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/65/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.agents-file",
+      "template_id": "context.agents-file",
+      "arguments": {
+        "path": "value:path {{ literal }}\nnext",
+        "content": "value:content {{ literal }}\nnext"
+      },
+      "expected": "--- value:path {{ literal }}\nnext ---\nvalue:content {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/66/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.expected-cli-utilities",
+      "template_id": "context.expected-cli-utilities",
+      "arguments": {
+        "utilities": "value:utilities {{ literal }}\nnext"
+      },
+      "expected": "Available CLI utilities: value:utilities {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/67/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.optional-cli-utilities",
+      "template_id": "context.optional-cli-utilities",
+      "arguments": {
+        "utilities": "value:utilities {{ literal }}\nnext"
+      },
+      "expected": "Available optional CLI utilities: value:utilities {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/68/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.date",
+      "template_id": "context.date",
+      "arguments": {
+        "date": "value:date {{ literal }}\nnext"
+      },
+      "expected": "Date: value:date {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/69/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.platform",
+      "template_id": "context.platform",
+      "arguments": {
+        "platform": "value:platform {{ literal }}\nnext"
+      },
+      "expected": "Platform: value:platform {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/70/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.model-aliases",
+      "template_id": "context.model-aliases",
+      "arguments": {
+        "aliases": [
+          {
+            "name": "local",
+            "model": "local/model",
+            "usage": "{{ literal }}\nnext"
+          },
+          {
+            "name": "second",
+            "model": "local/second",
+            "usage": "second"
+          }
+        ]
+      },
+      "expected": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n- local: local/model — {{ literal }}\nnext\n- second: local/second — second",
+      "source_observation_pointer": "/cases/71/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.security-profile",
+      "template_id": "context.security-profile",
+      "arguments": {
+        "rules": [
+          {
+            "path": "/tmp",
+            "action": "AllowWrite"
+          },
+          {
+            "path": "{{ literal }}",
+            "action": "Deny"
+          }
+        ],
+        "sandbox_enabled": false
+      },
+      "expected": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:\n- Path: \"/tmp\"; Action: AllowWrite\n- Path: \"{{ literal }}\"; Action: Deny\nThe OS process sandbox is currently disabled; shell commands run unconfined.",
+      "source_observation_pointer": "/cases/72/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.subagents",
+      "template_id": "context.subagents",
+      "arguments": {
+        "subagents": [
+          {
+            "id": "one",
+            "usage": "{{ literal }}"
+          },
+          {
+            "id": "two",
+            "usage": "line\nnext"
+          }
+        ]
+      },
+      "expected": "Available subagents; delegate according to their configured usage:- one: {{ literal }}- two: line\nnext",
+      "source_observation_pointer": "/cases/73/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.skills",
+      "template_id": "context.skills",
+      "arguments": {
+        "skills": "value:skills {{ literal }}\nnext"
+      },
+      "expected": "Available Markdown skills:\nvalue:skills {{ literal }}\nnext\n\nSelect skills when the user names `$SkillName`, uses the plain skill name, or the task clearly matches a skill description. Multiple skills may apply. Read each selected `SKILL.md` completely before acting and resolve relative references, scripts, and assets from the skill directory. Use only the skills needed for this turn; they do not carry to later turns unless mentioned again.",
+      "source_observation_pointer": "/cases/74/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.skill-selected",
+      "template_id": "context.skill-selected",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "path": "value:path {{ literal }}\nnext",
+        "content": "value:content {{ literal }}\nnext"
+      },
+      "expected": "<skill>\n<name>value:name {{ literal }}\nnext</name>\n<path>value:path {{ literal }}\nnext</path>\nvalue:content {{ literal }}\nnext\n</skill>",
+      "source_observation_pointer": "/cases/75/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.skill-unavailable",
+      "template_id": "context.skill-unavailable",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "message": "value:message {{ literal }}\nnext"
+      },
+      "expected": "<skill-unavailable>\n<name>value:name {{ literal }}\nnext</name>\n<message>value:message {{ literal }}\nnext</message>\n</skill-unavailable>",
+      "source_observation_pointer": "/cases/76/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.context.skill-too-large",
+      "template_id": "context.skill-too-large",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "path": "value:path {{ literal }}\nnext",
+        "limit_bytes": "value:limit_bytes {{ literal }}\nnext"
+      },
+      "expected": "<skill-too-large>\n<name>value:name {{ literal }}\nnext</name>\n<path>value:path {{ literal }}\nnext</path>\n<message>The skill instructions exceed the value:limit_bytes {{ literal }}\nnext-byte injection limit and were not loaded. Read the file at the path above completely before using this skill.</message>\n</skill-too-large>",
+      "source_observation_pointer": "/cases/77/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.dependency-header",
+      "template_id": "agent-task.dependency-header",
+      "arguments": {},
+      "expected": "\nDirect dependency summaries:",
+      "source_observation_pointer": "/cases/78/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.dependency-item",
+      "template_id": "agent-task.dependency-item",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext",
+        "result": "value:result {{ literal }}\nnext"
+      },
+      "expected": "\n[value:name {{ literal }}\nnext] value:description {{ literal }}\nnext\nResult: value:result {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/79/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.sibling-scope",
+      "template_id": "agent-task.sibling-scope",
+      "arguments": {
+        "items": "value:items {{ literal }}\nnext"
+      },
+      "expected": "Sibling tasks (out of scope):\nThese tasks belong to other agents. Do not implement or duplicate their work. You may consume dependency results for your assigned task.value:items {{ literal }}\nnext\n",
+      "source_observation_pointer": "/cases/80/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.sibling-item",
+      "template_id": "agent-task.sibling-item",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext"
+      },
+      "expected": "\n[value:name {{ literal }}\nnext] value:description {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/81/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.header",
+      "template_id": "agent-task.header",
+      "arguments": {
+        "task_name": "value:task_name {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext",
+        "acceptance_criteria": "value:acceptance_criteria {{ literal }}\nnext",
+        "dependencies": "value:dependencies {{ literal }}\nnext"
+      },
+      "expected": "Task: value:task_name {{ literal }}\nnext\nDescription: value:description {{ literal }}\nnext\nAcceptance criteria: value:acceptance_criteria {{ literal }}\nnextvalue:dependencies {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/82/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.result",
+      "template_id": "agent-task.result",
+      "arguments": {
+        "result": "value:result {{ literal }}\nnext"
+      },
+      "expected": "Prior leaf result:\nvalue:result {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/83/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.feedback",
+      "template_id": "agent-task.feedback",
+      "arguments": {
+        "items": "value:items {{ literal }}\nnext"
+      },
+      "expected": "Retry feedback:value:items {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/84/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.child-scope",
+      "template_id": "agent-task.child-scope",
+      "arguments": {
+        "role": "value:role {{ literal }}\nnext",
+        "task_name": "value:task_name {{ literal }}\nnext"
+      },
+      "expected": "AgentTask value:role {{ literal }}\nnext for value:task_name {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/85/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.leaf",
+      "template_id": "agent-task.leaf",
+      "arguments": {
+        "header": "value:header {{ literal }}\nnext",
+        "feedback": "value:feedback {{ literal }}\nnext",
+        "instruction": "value:instruction {{ literal }}\nnext"
+      },
+      "expected": "AgentTask role: payload executorvalue:header {{ literal }}\nnextvalue:feedback {{ literal }}\nnext\nInspect, implement, and verify this instruction:\nvalue:instruction {{ literal }}\nnext\nReturn only one strict JSON object with no prose or code fence: {\"result\":\"nonblank\",\"verdict\":\"accept\"}, {\"result\":\"nonblank\",\"verdict\":\"reject_and_halt\",\"feedback\":\"nonblank\"}, or {\"result\":\"nonblank\",\"verdict\":\"reject_and_retry\",\"feedback\":\"nonblank\",\"payload\":\"optional replacement instruction\",\"replacement_result\":\"optional nonblank replacement result\"}.\nOmit replacement_result to carry the returned result into the next attempt.",
+      "source_observation_pointer": "/cases/86/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.composite",
+      "template_id": "agent-task.composite",
+      "arguments": {
+        "header": "value:header {{ literal }}\nnext",
+        "feedback": "value:feedback {{ literal }}\nnext",
+        "children": "value:children {{ literal }}\nnext"
+      },
+      "expected": "AgentTask role: composite ownervalue:header {{ literal }}\nnextvalue:feedback {{ literal }}\nnext\nThe following inner task list is provided:\nvalue:children {{ literal }}\nnext\nPrepare common resource or context, then use set_agent_tasks to declare and manage this work in your own graph. On retries or restarts, inspect your existing tasks and reconcile the supplied definitions yourself.\nWait for its notifications. When a child task fails, resolve it with set_agent_tasks: set its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents. You cannot finish while a child task is unresolved.\nWhen every child task is resolved, return only one strict JSON object with no prose or code fence: {\"result\":\"nonblank\",\"verdict\":\"accept\"}, {\"result\":\"nonblank\",\"verdict\":\"reject_and_halt\",\"feedback\":\"nonblank\"}, or {\"result\":\"nonblank\",\"verdict\":\"reject_and_retry\",\"feedback\":\"nonblank\"}.",
+      "source_observation_pointer": "/cases/87/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.composite-child",
+      "template_id": "agent-task.composite-child",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext"
+      },
+      "expected": "\n[value:name {{ literal }}\nnext] value:description {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/88/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.attempts-exhausted",
+      "template_id": "agent-task.attempts-exhausted",
+      "arguments": {
+        "attempts": "value:attempts {{ literal }}\nnext",
+        "feedback": "value:feedback {{ literal }}\nnext"
+      },
+      "expected": "rejected after value:attempts {{ literal }}\nnext attempts: value:feedback {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/89/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.set-accepted",
+      "template_id": "agent-task.set-accepted",
+      "arguments": {
+        "count": "value:count {{ literal }}\nnext"
+      },
+      "expected": "AgentTask update accepted (value:count {{ literal }}\nnext tasks). State changes are delivered as notifications.",
+      "source_observation_pointer": "/cases/90/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.notification-succeeded",
+      "template_id": "agent-task.notification-succeeded",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext",
+        "result": "value:result {{ literal }}\nnext"
+      },
+      "expected": "AgentTask succeeded: value:name {{ literal }}\nnext\nDescription: value:description {{ literal }}\nnext\n\nResult:\nvalue:result {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/91/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.notification-failed",
+      "template_id": "agent-task.notification-failed",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "description": "value:description {{ literal }}\nnext",
+        "failure": "value:failure {{ literal }}\nnext"
+      },
+      "expected": "AgentTask failed: value:name {{ literal }}\nnext\nDescription: value:description {{ literal }}\nnext\n\nFailure:\nvalue:failure {{ literal }}\nnext\n\nIts dependents wait until you resolve it with set_agent_tasks: set its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents.",
+      "source_observation_pointer": "/cases/92/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.notification-updated",
+      "template_id": "agent-task.notification-updated",
+      "arguments": {
+        "items": "value:items {{ literal }}\nnext"
+      },
+      "expected": "AgentTask states changed by your update:value:items {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/93/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.notification-all-complete",
+      "template_id": "agent-task.notification-all-complete",
+      "arguments": {
+        "items": "value:items {{ literal }}\nnext"
+      },
+      "expected": "All AgentTasks are complete:value:items {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/94/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.notification-item",
+      "template_id": "agent-task.notification-item",
+      "arguments": {
+        "name": "value:name {{ literal }}\nnext",
+        "state": "value:state {{ literal }}\nnext"
+      },
+      "expected": "\n- value:name {{ literal }}\nnext: value:state {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/95/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.force-stopped",
+      "template_id": "agent-task.force-stopped",
+      "arguments": {
+        "reason": "value:reason {{ literal }}\nnext"
+      },
+      "expected": "Your AgentTask turn was stopped: value:reason {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/96/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.stop-canceled",
+      "template_id": "agent-task.stop-canceled",
+      "arguments": {},
+      "expected": "the owner canceled this task.",
+      "source_observation_pointer": "/cases/97/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.stop-succeeded",
+      "template_id": "agent-task.stop-succeeded",
+      "arguments": {},
+      "expected": "the owner marked this task as succeeded.",
+      "source_observation_pointer": "/cases/98/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.stop-failed",
+      "template_id": "agent-task.stop-failed",
+      "arguments": {},
+      "expected": "the owner marked this task as failed.",
+      "source_observation_pointer": "/cases/99/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.stop-restarted",
+      "template_id": "agent-task.stop-restarted",
+      "arguments": {},
+      "expected": "the owner reset or changed this task; it restarts in this session.",
+      "source_observation_pointer": "/cases/100/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.stop-dependency-canceled",
+      "template_id": "agent-task.stop-dependency-canceled",
+      "arguments": {},
+      "expected": "a task this task depends on was canceled.",
+      "source_observation_pointer": "/cases/101/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.stop-dependency-reset",
+      "template_id": "agent-task.stop-dependency-reset",
+      "arguments": {},
+      "expected": "a task this task depends on was reset; it restarts in this session once that task succeeds again.",
+      "source_observation_pointer": "/cases/102/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.stop-shutdown",
+      "template_id": "agent-task.stop-shutdown",
+      "arguments": {},
+      "expected": "the agent session is shutting down.",
+      "source_observation_pointer": "/cases/103/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.response-repair",
+      "template_id": "agent-task.response-repair",
+      "arguments": {
+        "error": "value:error {{ literal }}\nnext"
+      },
+      "expected": "Your previous response was not accepted: value:error {{ literal }}\nnext Reply again with only the required strict JSON object for this role and nothing else.",
+      "source_observation_pointer": "/cases/104/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.role-failure",
+      "template_id": "agent-task.role-failure",
+      "arguments": {
+        "role": "value:role {{ literal }}\nnext",
+        "status": "value:status {{ literal }}\nnext",
+        "error": "value:error {{ literal }}\nnext"
+      },
+      "expected": "value:role {{ literal }}\nnext agent value:status {{ literal }}\nnext: value:error {{ literal }}\nnext",
+      "source_observation_pointer": "/cases/105/output/value",
+      "native_status": "pending_catalog_execution"
+    },
+    {
+      "case_id": "A008.M6.agent-task.truncated",
+      "template_id": "agent-task.truncated",
+      "arguments": {
+        "value": "value:value {{ literal }}\nnext"
+      },
+      "expected": "value:value {{ literal }}\nnext\n[truncated]",
+      "source_observation_pointer": "/cases/106/output/value",
+      "native_status": "pending_catalog_execution"
+    }
+  ],
+  "coverage": "all107 representative models; NOT substitute for M2 per-template empty/multiple/nested variants"
+}

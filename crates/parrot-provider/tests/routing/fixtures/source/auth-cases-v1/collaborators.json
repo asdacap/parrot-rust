@@ -1,0 +1,246 @@
+{
+  "contract": "t32-auth-source-v1-collaborator-inputs",
+  "scope": "Input constants and fixture mechanics only; no observed outputs, expected results, retry budgets, classifications or oracle data.",
+  "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+  "failure_constructors": {
+    "auth": {
+      "clr_type": "Parrot.Auth.AuthException",
+      "arguments": [
+        "synthetic auth failure"
+      ],
+      "source_ancestry": [
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "factory_auth": {
+      "clr_type": "Parrot.Auth.AuthException",
+      "arguments": [
+        "synthetic auth failure"
+      ],
+      "source_ancestry": [
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "missing_key": {
+      "clr_type": "Parrot.Llm.LLMProviderException",
+      "arguments": [
+        "provider: \"synthetic-provider\" has no API key"
+      ],
+      "source_ancestry": [
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "factory_missing_key": {
+      "mechanism": "Actual compatible provider resolves a null stored credential; the missing-key exception is produced by production code, not injected by the fixture.",
+      "classification_probe_constructor": {
+        "clr_type": "Parrot.Llm.LLMProviderException",
+        "arguments": [
+          "provider: \"synthetic-provider\" has no API key"
+        ],
+        "source_ancestry": [
+          "System.Exception",
+          "System.Object"
+        ]
+      }
+    },
+    "format": {
+      "clr_type": "System.FormatException",
+      "arguments": [
+        "synthetic format failure"
+      ],
+      "source_ancestry": [
+        "System.SystemException",
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "argument_range": {
+      "clr_type": "System.ArgumentOutOfRangeException",
+      "arguments": [
+        "source_value",
+        "synthetic range failure"
+      ],
+      "argument_names": [
+        "paramName",
+        "message"
+      ],
+      "actualValue": null,
+      "source_ancestry": [
+        "System.ArgumentException",
+        "System.SystemException",
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "not_supported": {
+      "clr_type": "System.NotSupportedException",
+      "arguments": [
+        "synthetic unsupported failure"
+      ],
+      "source_ancestry": [
+        "System.SystemException",
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "invalid_operation": {
+      "clr_type": "System.InvalidOperationException",
+      "arguments": [
+        "synthetic invalid operation failure"
+      ],
+      "source_ancestry": [
+        "System.SystemException",
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "io": {
+      "clr_type": "System.IO.IOException",
+      "arguments": [
+        "synthetic IO failure"
+      ],
+      "source_ancestry": [
+        "System.SystemException",
+        "System.Exception",
+        "System.Object"
+      ]
+    },
+    "transport": {
+      "clr_type": "System.Net.Http.HttpRequestException",
+      "arguments": [
+        "synthetic transport failure"
+      ],
+      "status_code_argument": null,
+      "source_ancestry": [
+        "System.Exception",
+        "System.Object"
+      ]
+    }
+  },
+  "request": {
+    "explicit": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "user",
+          "text": "source-input"
+        }
+      ]
+    },
+    "source_type_defaults_for_omitted_fields": {
+      "tools": [],
+      "max_output_tokens": 0,
+      "instructions": "",
+      "reasoning": null,
+      "provider_preferences": "",
+      "diagnostics": null,
+      "include_router_metadata": false
+    }
+  },
+  "script_provider": {
+    "id": "synthetic-provider",
+    "seed_models": [],
+    "has_credential_return": true,
+    "list_models_return": [],
+    "call_mechanics": [
+      "Await one scheduler yield.",
+      "If input visible is true, yield one TextDelta with text synthetic visible output.",
+      "Throw the exception instance constructed for the selected failure label."
+    ],
+    "visible_event": {
+      "kind": "TextDelta",
+      "text": "synthetic visible output"
+    },
+    "cancellation_mechanics": "The script deliberately does not check the caller token. The actual retry provider receives that token and decides admission. No fixture cancellation exception is added.",
+    "session_mechanics": "Use the production ILLMProvider default stateless session over the script Call."
+  },
+  "factory_provider": {
+    "implementation": "Actual OpenAICompatibleProvider",
+    "explicit_options": {
+      "id": "synthetic-provider",
+      "base_url": "https://source.invalid/v1",
+      "api_key_source": "Actual StoredApiKeySource(providerId=synthetic-provider, apiKeyEnv=empty string, injected store)"
+    },
+    "other_options": "Actual source OpenAICompatibleOptions defaults; no additional fixture overrides.",
+    "source_type_defaults_for_omitted_options": {
+      "protocol": "ChatCompletions",
+      "headers": {},
+      "allow_insecure_localhost": false,
+      "allow_insecure_remote": false,
+      "allow_invalid_tls_certificate": false,
+      "disable_websocket": true,
+      "models": [],
+      "model_defaults": [],
+      "external_models": [],
+      "decoder": "StandardModelDecoder.Instance",
+      "image_token_calculator": "FallbackImageTokenCalculator.Instance",
+      "stream_idle_timeout_ms": 300000,
+      "header_timeout_ms": 60000,
+      "time_provider": "TimeProvider.System",
+      "provider_preferences": "",
+      "session_header": "",
+      "maximum_request_bytes": 67108864
+    },
+    "store": {
+      "get_mechanics": [
+        "Increment credential_gets on entry.",
+        "Check the supplied cancellation token with ThrowIfCancellationRequested.",
+        "For factory_auth, throw a new AuthException with message synthetic auth failure.",
+        "Otherwise return null."
+      ],
+      "set_delete_mechanics": "Throw NotSupportedException without an explicit message; these operations are not invoked by this fixture.",
+      "list_return": []
+    },
+    "http_handler": {
+      "send_mechanics": [
+        "Increment http_sends on SendAsync entry.",
+        "Return a new HttpResponseMessage with status OK (200)."
+      ],
+      "explicit_content": null
+    }
+  },
+  "transparent_counting_wrapper": {
+    "physical_calls": "Increment before delegating each provider Call or session Call to the actual inner provider/session. This counts provider attempts, including attempts that fail before any HTTP send.",
+    "enumerator_disposals": "Increment in a finally surrounding await-foreach enumeration of each delegated stream. The wrapper forwards the supplied cancellation token via WithCancellation and does not independently throw or classify.",
+    "session_opens": "Increment before delegating OpenSession.",
+    "session_disposals": "Increment before awaiting the delegated session DisposeAsync.",
+    "begin_turn": "Delegate to the inner session.",
+    "fallback": "Delegate TryFallBackToHttp to the inner session.",
+    "unmodified_delegations": [
+      "Id",
+      "SeedModels",
+      "HasCredential",
+      "ListModels"
+    ]
+  },
+  "retry_wrapper": {
+    "implementation": "Actual RetryingProvider",
+    "explicit_overrides": [
+      "TimeProvider is the immediate fixture below."
+    ],
+    "other_settings": "Unmodified production defaults; budgets, delays, event contents and failure policy are not fixture inputs."
+  },
+  "immediate_time_provider": {
+    "utc_now": "1970-01-01T00:00:00+00:00",
+    "create_timer_mechanics": [
+      "Record the actual dueTime.TotalMilliseconds supplied by production as a signed integer.",
+      "Invoke the provided callback immediately when dueTime is not Timeout.InfiniteTimeSpan.",
+      "Return a fixture timer."
+    ],
+    "timer_change_return": true,
+    "timer_change_side_effects": [],
+    "timer_dispose_side_effects": [],
+    "timer_dispose_async": "Return completed ValueTask."
+  },
+  "per_case_observer": {
+    "cancellation": "Create a fresh CancellationTokenSource; cancel it before starting the call exactly when input caller_cancelled is true.",
+    "direct_mode": "Enumerate actual retry provider Call with the request and caller token, capturing yielded events and the terminal exception.",
+    "session_mode": "Open actual retry session; BeginTurn; enumerate its Call with the same request/token; await session disposal before projecting counters.",
+    "event_projection": "Actual Kind.ToString, Text, Attempt and RetryAfter.TotalMilliseconds only.",
+    "error_projection": "Actual terminal CLR FullName and unmodified Message.",
+    "diagnostic_probe": "Call actual DiagnosticEvent.ClassifyFailure on the constructed exception for the input failure category. This is separate from physical request tracing and does not invent classification values."
+  }
+}

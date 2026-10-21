@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/parrot-domain",
+    "crates/parrot-foundation",
+    "crates/parrot-storage",
+    "crates/parrot-provider",
+    "crates/parrot-runtime",
+    "crates/parrot-tools",
+    "crates/parrot-host",
+    "crates/parrot-cli",
+    "tests/fuzz",
+]
+default-members = ["crates/parrot-cli"]
+exclude = [
+    "vendor/rust-protobuf-a001/protobuf",
+    "vendor/rust-protobuf-a001/protobuf-codegen",
+]
+
+[patch.crates-io]
+protobuf = { path = "vendor/rust-protobuf-a001/protobuf" }
+protobuf-codegen = { path = "vendor/rust-protobuf-a001/protobuf-codegen" }
+tonic = { path = "vendor/tonic-0.12.3" }
+
+[workspace.dependencies]
+async-compression = { version = "=0.4.18", default-features = false, features = ["tokio", "gzip"] }
+cookie_store = { version = "=0.21.1", default-features = false }
+
+[workspace.package]
+version = "0.0.0-dev"
+edition = "2024"
+rust-version = "1.85"
+
+[workspace.lints.rust]
+warnings = "deny"
+
+[workspace.lints.clippy]
+all = "deny"

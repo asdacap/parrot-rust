@@ -1,0 +1,12 @@
+mod boundary_projection;
+mod boundary_tests;
+mod core_tests;
+mod differential_tests;
+mod family_projection;
+mod get_origin_projection;
+mod lifecycle_projection;
+mod lifecycle_tests;
+mod ready_cancel_projection;
+mod security_projection;
+mod sse_tests;
+mod transport_tests;

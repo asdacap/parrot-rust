@@ -1,0 +1,274 @@
+prompt_templates:
+  agent-task.dependency-header:
+    template: "\nDirect dependency summaries:"
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.dependency-item:
+    template: "\n[{name}] {description}\nResult: {result}"
+    allowed_arguments: [name, description, result]
+    required_arguments: [name, description, result]
+  agent-task.sibling-scope:
+    template: |
+      Sibling tasks (out of scope):
+      These tasks belong to other agents. Do not implement or duplicate their work. You may consume dependency results for your assigned task.{items}
+    allowed_arguments: [items]
+    required_arguments: [items]
+  agent-task.sibling-item:
+    template: "\n[{name}] {description}"
+    allowed_arguments: [name, description]
+    required_arguments: [name, description]
+  agent-task.header:
+    template: |-
+      Task: {task_name}
+      Description: {description}
+      Acceptance criteria: {acceptance_criteria}{dependencies}
+    allowed_arguments: [task_name, description, acceptance_criteria, dependencies]
+    required_arguments: [task_name, description, acceptance_criteria, dependencies]
+  agent-task.result:
+    template: |-
+      Prior leaf result:
+      {result}
+    allowed_arguments: [result]
+    required_arguments: [result]
+  agent-task.feedback:
+    template: |-
+      Retry feedback:{items}
+    allowed_arguments: [items]
+    required_arguments: [items]
+  agent-task.child-scope:
+    template: 'AgentTask {role} for {task_name}'
+    allowed_arguments: [role, task_name]
+    required_arguments: [role, task_name]
+  agent-task.leaf:
+    template: |-
+      AgentTask role: payload executor{header}{feedback}
+      Inspect, implement, and verify this instruction:
+      {instruction}
+      Return only one strict JSON object with no prose or code fence: {{"result":"nonblank","verdict":"accept"}}, {{"result":"nonblank","verdict":"reject_and_halt","feedback":"nonblank"}}, or {{"result":"nonblank","verdict":"reject_and_retry","feedback":"nonblank","payload":"optional replacement instruction","replacement_result":"optional nonblank replacement result"}}.
+      Omit replacement_result to carry the returned result into the next attempt.
+    allowed_arguments: [header, feedback, instruction]
+    required_arguments: [header, feedback, instruction]
+  agent-task.composite:
+    template: |-
+      AgentTask role: composite owner{header}{feedback}
+      The following inner task list is provided:
+      {children}
+      Prepare common resource or context, then use set_agent_tasks to declare and manage this work in your own graph. On retries or restarts, inspect your existing tasks and reconcile the supplied definitions yourself.
+      Wait for its notifications. When a child task fails, resolve it with set_agent_tasks: set its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents. You cannot finish while a child task is unresolved.
+      When every child task is resolved, return only one strict JSON object with no prose or code fence: {{"result":"nonblank","verdict":"accept"}}, {{"result":"nonblank","verdict":"reject_and_halt","feedback":"nonblank"}}, or {{"result":"nonblank","verdict":"reject_and_retry","feedback":"nonblank"}}.
+    allowed_arguments: [header, feedback, children]
+    required_arguments: [header, feedback, children]
+  agent-task.composite-child:
+    template: "\n[{name}] {description}"
+    allowed_arguments: [name, description]
+    required_arguments: [name, description]
+  agent-task.attempts-exhausted:
+    template: 'rejected after {attempts} attempts: {feedback}'
+    allowed_arguments: [attempts, feedback]
+    required_arguments: [attempts, feedback]
+  agent-task.set-accepted:
+    template: |-
+      AgentTask update accepted ({count} tasks). State changes are delivered as notifications.
+    allowed_arguments: [count]
+    required_arguments: [count]
+  agent-task.notification-succeeded:
+    template: |-
+      AgentTask succeeded: {name}
+      Description: {description}
+
+      Result:
+      {result}
+    allowed_arguments: [name, description, result]
+    required_arguments: [name, description, result]
+  agent-task.notification-failed:
+    template: |-
+      AgentTask failed: {name}
+      Description: {description}
+
+      Failure:
+      {failure}
+
+      Its dependents wait until you resolve it with set_agent_tasks: set its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents.
+    allowed_arguments: [name, description, failure]
+    required_arguments: [name, description, failure]
+  agent-task.notification-updated:
+    template: |-
+      AgentTask states changed by your update:{items}
+    allowed_arguments: [items]
+    required_arguments: [items]
+  agent-task.notification-all-complete:
+    template: |-
+      All AgentTasks are complete:{items}
+    allowed_arguments: [items]
+    required_arguments: [items]
+  agent-task.notification-item:
+    template: "\n- {name}: {state}"
+    allowed_arguments: [name, state]
+    required_arguments: [name, state]
+  agent-task.force-stopped:
+    template: 'Your AgentTask turn was stopped: {reason}'
+    allowed_arguments: [reason]
+    required_arguments: [reason]
+  agent-task.stop-canceled:
+    template: 'the owner canceled this task.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.stop-succeeded:
+    template: 'the owner marked this task as succeeded.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.stop-failed:
+    template: 'the owner marked this task as failed.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.stop-restarted:
+    template: 'the owner reset or changed this task; it restarts in this session.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.stop-dependency-canceled:
+    template: 'a task this task depends on was canceled.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.stop-dependency-reset:
+    template: 'a task this task depends on was reset; it restarts in this session once that task succeeds again.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.stop-shutdown:
+    template: 'the agent session is shutting down.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-task.response-repair:
+    template: >-
+      Your previous response was not accepted: {error} Reply again with only the required strict JSON object for this role and nothing else.
+    allowed_arguments: [error]
+    required_arguments: [error]
+  agent-task.role-failure:
+    template: '{role} agent {status}: {error}'
+    allowed_arguments: [role, status, error]
+    required_arguments: [role, status, error]
+  agent-task.truncated:
+    template: |-
+      {value}
+      [truncated]
+    allowed_arguments: [value]
+    required_arguments: [value]
+
+# Maximum payload execution attempts for each AgentTask invocation.
+agent_tasks:
+  maximum_attempts: 5
+  # Maximum re-prompts per role turn when the response is not the required strict JSON.
+  maximum_response_repairs: 3
+  # Fresh AgentTask history source: dependency (first dependency, otherwise parent), parent, or empty.
+  fork_history_mode: dependency
+
+system_prompts:
+  runtime:system-context:02a-agent-tasks: >-
+    ## Agent Tasks
+
+    Agent tasks is a graph of tasks meant to help agent keep track of planned tasks. A task may contain child tasks. A task that contains another task, we call it a composite tasks, if not its called a leaf task. A task receives its payload and results from its dependencies. A task needs to return a result to pass to its dependents or as the final task graph result.
+
+    A composite task passes its full inner task list to the child prompt rather than automatically registering it. The child is expected to double check the list of tasks uses set_agent_tasks to declare and manage its own graph, meaning the inner tasks is a suggestion. The composite task agent supervises the children, modifies child tasks if needed, and validates the outcome once they are resolved. If it is incomplete, the agent may retry with a modified payload, or break down the tasks further. Although most objective can be represented as flat list of tasks, it is better to group related tasks under composite tasks so that there is a parent agent that do common activity for the group such as research and verify. Generally all task in the same list should be of the same altitude.
+
+    A task is meant to be dynamic. On task failure, think about how to modify the graph to account for the failure rather than yielding to parent. This can be a change of instruction, cancellation of a subtask or breaking up tasks to composite tasks. Agent task should be authored and used even outside of plan mode when the workload is large enough that it should be broken up. Additional tasks may be added by the owning agent concurrently as the tasks is executed.
+
+    In general its usually better to spawn an agent task rather than spawning subagent.
+
+tools:
+  set_agent_tasks:
+    description: Upsert tasks by name into your own AgentTask graph. Each task whose dependencies all succeeded runs on a retained child agent named after the task, which implements and verifies it and retries internally on rejection; a restarted task continues in that same child session. You are notified when a task succeeds, when it fails, after each of your updates, and when every task is complete. A failed task holds its dependents until you resolve it by setting its state to pending to retry it, to succeeded with a result to accept it, or to canceled. Changing a running task's state or execution definition stops it. Updating only visibility with state running preserves its execution. A canceled task also cancels every task that depends on it until it is set back to pending, and resetting a succeeded task to pending resets its dependents too. Each agent sets hidden=true on all its tasks when its nonempty graph transitions to all-succeeded-or-canceled. A task whose payload is a task array passes the full inner task list to its child prompt. The child must use set_agent_tasks to declare and manage its own graph; the runtime does not register or synchronize that list.
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          minLength: 1
+          description: Path to an approved AgentTask v1 JSON artifact whose tasks are upserted. The path must resolve to a readable regular file without symbolic links.
+        tasks:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/$defs/task'
+          description: Full tasks to upsert, each including its state. Dependencies may name tasks set by earlier calls.
+      oneOf:
+      - required:
+        - path
+      - required:
+        - tasks
+      additionalProperties: false
+      $defs:
+        task:
+          type: object
+          description: A task in an AgentTask graph, including its state.
+          properties:
+            name:
+              type: string
+              minLength: 1
+              description: Unique task name in the graph; an existing task with this name is updated.
+            dependencies:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                description: Name of a task in the same graph that this task depends on.
+              uniqueItems: true
+              description: Optional distinct dependencies.
+            description:
+              type: string
+              minLength: 1
+              maxLength: 300
+              description: Work the task must perform.
+            hidden:
+              type: boolean
+              description: Hide this task and its subtree from task-specific CLI views. Defaults to false. The CLI temporarily shows it while its worker is active. Each agent automatically sets this true when all tasks in its nonempty graph succeed.
+            payload:
+              oneOf:
+              - type: string
+                minLength: 1
+                description: Direct task instruction.
+              - type: array
+                minItems: 1
+                items:
+                  $ref: '#/$defs/task'
+                description: Inner task definitions passed to the child prompt; the child declares and owns its own graph.
+              description: Direct instruction or a full inner task list passed to the child prompt for explicit registration with set_agent_tasks.
+            acceptance_criteria:
+              type: string
+              minLength: 1
+              description: Criteria used to accept the completed task.
+            model:
+              type: string
+              minLength: 1
+              description: Optional model selector for this task's child agent when it is first created.
+            state:
+              type: string
+              enum:
+              - pending
+              - running
+              - succeeded
+              - failed
+              - canceled
+              description: Desired state, pending when omitted. Pending retries or restarts the task, succeeded accepts it with the given result, canceled cancels it and its dependents, and running keeps a running task with an unchanged definition.
+            result:
+              type: string
+              minLength: 1
+              description: Result passed to dependents when setting the state to succeeded.
+            failure:
+              type: string
+              minLength: 1
+              description: Reason recorded when setting the state to failed.
+          required:
+          - name
+          - description
+          - payload
+          - acceptance_criteria
+          additionalProperties: false
+  get_agent_tasks:
+    description: Read your own AgentTask graph. Without a name, lists every task with its name, state, description, and hidden flag. With a name, returns that task in full, including its state, result, failure, and read-only agent_name for its retained worker, in the shape set_agent_tasks accepts plus execution metadata. Hidden tasks remain in the returned JSON. The CLI hides them from task-specific displays; live progress temporarily shows active workers and the paths to active descendants.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Name of the task to return in full; omit it to list every task.
+      additionalProperties: false

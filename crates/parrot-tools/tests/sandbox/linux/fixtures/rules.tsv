@@ -1,0 +1,4 @@
+$ROOT/file	false	false
+$ROOT/denied	false	false
+$ROOT/missing	false	false
+$ROOT/denied/open	true	true

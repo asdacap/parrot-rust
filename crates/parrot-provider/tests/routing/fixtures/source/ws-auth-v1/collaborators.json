@@ -1,0 +1,27 @@
+{
+  "contract": "t32-ws-auth-source-v1",
+  "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+  "scope": "OpenAICompatibleProvider, Responses protocol, raw or RetryingProvider session; no ChatGPT, live transport, credentials, or Rust inspected",
+  "provider": {"id":"synthetic-provider","base_url":"https://source.invalid/v1","protocol":"Responses","disable_websocket":"input.disable_websocket","all_other_options":"source defaults"},
+  "request": {"model":"synthetic-model","messages":[{"role":"user","text":"source-input"}],"all_other_fields":"source defaults"},
+  "api_key_source": {
+    "HasCredential":"returns true; not invoked by fixture",
+    "ApiKey":"increments Gets, checks caller cancellation, then executes script",
+    "scripts": {
+      "auth_six_then_key":"calls 1 through 6 throw new AuthException(\"synthetic auth failure\"); later calls return synthetic-key",
+      "auth_always":"every call throws new AuthException(\"synthetic auth failure\")",
+      "missing":"returns empty string",
+      "cancel":"cancels the shared caller CancellationTokenSource, then throws new OperationCanceledException(\"synthetic auth cancelled\", callerToken)"
+    }
+  },
+  "connector":"increments Calls then throws new InvalidOperationException(\"synthetic connector must not be reached\"); no socket/network is created",
+  "http_handler": {
+    "behavior":"increments Calls, records actual method/absolute URL/Authorization/raw request body, returns HTTP 200 with StringContent UTF8 text/event-stream",
+    "body":"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic-response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0,\"total_tokens\":1}}}\n\n"
+  },
+  "retry":"source RetryingProvider defaults, injected ImmediateTime",
+  "time":"GetUtcNow=DateTimeOffset.UnixEpoch; CreateTimer records due.TotalMilliseconds as long and immediately calls finite due callback; timer Change true, Dispose no-op",
+  "lifecycle":"one OpenSession, one BeginTurn, one Call enumeration, catch actual terminal exception, dispose session before projecting counters; raw_session omits RetryingProvider",
+  "error_projection":"recursive actual CLR FullName, complete Message, actual DiagnosticEvent.ClassifyFailure, InnerException; no normalization or exception rewriting",
+  "counting_wrapper":"delegates actual provider sessions; counts physical Calls, disposal in enumerator finally, opens, session disposals, BeginTurn, TryFallBackToHttp; records actual exceptions from each physical MoveNextAsync"
+}

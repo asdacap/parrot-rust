@@ -1,0 +1,1964 @@
+[
+  {
+    "name": "draw-clear",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "live\u001b[2J",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "⠋ thinking",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "model",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Fixed"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ab",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "  界x",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              3
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "clear"
+      },
+      {
+        "op": "clear"
+      }
+    ]
+  },
+  {
+    "name": "replace-diff",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "old",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "same",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "new",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "same",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "new",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "same",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "new",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "same",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              1
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "clear"
+      }
+    ]
+  },
+  {
+    "name": "grow-shrink",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "a",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "a",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "b",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "c",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "a",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "resize",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "abcdefgh界😀",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> abc",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              5
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "abcdefgh界😀",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> abc",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              5
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "columns": 7
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "one",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "two",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "three",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> abc",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              5
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "columns": 7,
+        "rows": 2
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "one",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "two",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "three",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> abc",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              5
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "columns": 20,
+        "rows": 100
+      }
+    ]
+  },
+  {
+    "name": "retention",
+    "columns": 12,
+    "rows": 4,
+    "max_live_rows": 2,
+    "max_input_rows": 2,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "a",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "b",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "c",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "d",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "e",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "fixed",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Fixed"
+          },
+          {
+            "lines": [
+              {
+                "text": "p0",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "p1",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "p2",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "p3",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              2,
+              99
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "a",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "b",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "c",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "d",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "e",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "fixed",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Fixed"
+          },
+          {
+            "lines": [
+              {
+                "text": "p0",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "p1",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "p2",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "p3",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              -5
+            ],
+            "retention": "Caret"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "style-false",
+    "columns": 9,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "界👨‍👩‍👧‍👦é",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "界👨‍👩‍👧‍👦é",
+                "style": "",
+                "spans": [
+                  {
+                    "start": 1,
+                    "length": 2,
+                    "style": ""
+                  }
+                ]
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "界👨‍👩‍👧‍👦é",
+                "style": "",
+                "spans": [
+                  {
+                    "start": 1,
+                    "length": 2,
+                    "style": ""
+                  }
+                ]
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "style-true",
+    "columns": 9,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": true,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "界👨‍👩‍👧‍👦é",
+                "style": "\u001b[48;5;236m\u001b[38;5;252m",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "界👨‍👩‍👧‍👦é",
+                "style": "\u001b[48;5;236m\u001b[38;5;252m",
+                "spans": [
+                  {
+                    "start": 1,
+                    "length": 2,
+                    "style": "\u001b[48;5;240m\u001b[38;5;231m"
+                  }
+                ]
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "界👨‍👩‍👧‍👦é",
+                "style": "\u001b[48;5;236m\u001b[38;5;252m",
+                "spans": [
+                  {
+                    "start": 1,
+                    "length": 2,
+                    "style": "\u001b[48;5;240m\u001b[38;5;231m"
+                  }
+                ]
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "layout-gaps",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "Compact"
+          ],
+          "layout": "Compact"
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "Block"
+          ],
+          "layout": "Block"
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "Compact"
+          ],
+          "layout": "Compact"
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "User"
+          ],
+          "layout": "User"
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "Assistant"
+          ],
+          "layout": "Assistant"
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "Compact"
+          ],
+          "layout": "Compact"
+        }
+      }
+    ]
+  },
+  {
+    "name": "sequences",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "A1"
+          ],
+          "sequence": "A",
+          "completed": false
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "B1"
+          ],
+          "sequence": "B",
+          "completed": false
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "C"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "B2"
+          ],
+          "sequence": "B",
+          "completed": true
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "A2"
+          ],
+          "sequence": "A",
+          "completed": true
+        }
+      }
+    ]
+  },
+  {
+    "name": "clear-pending",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "open"
+          ],
+          "sequence": "A",
+          "completed": false
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "pending"
+          ]
+        }
+      },
+      {
+        "op": "clear"
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [],
+          "sequence": "A",
+          "completed": true
+        }
+      }
+    ]
+  },
+  {
+    "name": "value-packing",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "heading-edit|a",
+            "body"
+          ],
+          "layout": "Block",
+          "ends": false,
+          "packing": "edit|a",
+          "pack_if": "edit",
+          "suppress_heading_if_same_packing": true
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "heading-edit|a",
+            "body"
+          ],
+          "layout": "Block",
+          "ends": false,
+          "packing": "edit|a",
+          "pack_if": "edit",
+          "suppress_heading_if_same_packing": true
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "heading-edit|b",
+            "body"
+          ],
+          "layout": "Block",
+          "ends": false,
+          "packing": "edit|b",
+          "pack_if": "edit",
+          "suppress_heading_if_same_packing": true
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "heading-write|b",
+            "body"
+          ],
+          "layout": "Block",
+          "ends": false,
+          "packing": "write|b",
+          "pack_if": "write",
+          "suppress_heading_if_same_packing": true
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "after"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "invalid-retention",
+    "columns": 12,
+    "rows": 100,
+    "max_live_rows": 1,
+    "max_input_rows": 1,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": []
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "x",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              -1,
+              0
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "x",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              1,
+              0
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "a",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "b",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "c",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Caret"
+          },
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "a",
+                "style": "",
+                "spans": []
+              },
+              {
+                "text": "b",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              0
+            ],
+            "retention": "Tail"
+          }
+        ]
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "screen-scrollback",
+    "columns": 12,
+    "rows": 4,
+    "max_live_rows": 10,
+    "max_input_rows": 12,
+    "color": false,
+    "inline_diff": true,
+    "ops": [
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-0"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-1"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-2"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-3"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-4"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-5"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-6"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-7"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-8"
+          ]
+        }
+      },
+      {
+        "op": "commit",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "> ",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              2
+            ],
+            "retention": "Caret"
+          }
+        ],
+        "scroll": {
+          "lines": [
+            "commit-9"
+          ]
+        }
+      },
+      {
+        "op": "draw",
+        "items": [
+          {
+            "lines": [
+              {
+                "text": "live",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": null,
+            "retention": "Tail"
+          },
+          {
+            "lines": [
+              {
+                "text": "> x",
+                "style": "",
+                "spans": []
+              }
+            ],
+            "caret": [
+              0,
+              3
+            ],
+            "retention": "Caret"
+          }
+        ]
+      },
+      {
+        "op": "clear"
+      }
+    ]
+  }
+]

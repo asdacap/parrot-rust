@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+  "generator": "SplitMix64, explicit wrapping u64 arithmetic; one independently reset stream per named domain and seed",
+  "seeds": ["0x0000000077a02026", "0x4f1bbcdc5a28d9e3", "0xd00df00d6a09e667"],
+  "cases_per_seed": {
+    "yaml": 64,
+    "task_json": 96,
+    "queue": 32,
+    "history": 64,
+    "protobuf": 256,
+    "sse": 96,
+    "websocket": 96,
+    "terminal": 128,
+    "path": 128,
+    "wake_race": 32,
+    "mutation_close_race": 32,
+    "replay_live_race": 32,
+    "queue_close_race": 32,
+    "task_replacement_race": 8
+  },
+  "budgets": {
+    "generated_binary_bytes_max": 512,
+    "generated_text_atoms_max": 48,
+    "scheduler_barrier_deadline_seconds": 5,
+    "stress_participants_max": 8,
+    "retries": 0,
+    "cleanup": "No fixture deletion; synthetic run roots are retained as evidence.",
+    "protocol_limits": "Harness generation budgets are not new protocol limits. Explicit source-limit boundary cases are identified individually in the coverage report."
+  },
+  "counterexample_policy": "Every behavioral failure must retain exact command/output/seed/index/input. Add the input and original expected policy as a deterministic regression before any justified correction; no automatic retries, skipped failure or assertion weakening. Component fixes are outside T77. Compilation/setup failures are retained separately, not behavioral counterexamples."
+}

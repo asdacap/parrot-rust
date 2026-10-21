@@ -1,0 +1,7343 @@
+[
+  {
+    "id": "A008.M6.system.agent-identity",
+    "kind": "catalog-default",
+    "template_id": "system.agent-identity",
+    "arguments": {
+      "session_id": "value:session_id {{ literal }}\nnext",
+      "parent_session_id": "value:parent_session_id {{ literal }}\nnext",
+      "parent_session_name": "value:parent_session_name {{ literal }}\nnext",
+      "agent_name": "value:agent_name {{ literal }}\nnext",
+      "depth": "value:depth {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.system.agent-scope",
+    "kind": "catalog-default",
+    "template_id": "system.agent-scope",
+    "arguments": {
+      "heading": "value:heading {{ literal }}\nnext",
+      "label": "value:label {{ literal }}\nnext",
+      "content": "value:content {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.system.working-directory",
+    "kind": "catalog-default",
+    "template_id": "system.working-directory",
+    "arguments": {
+      "working_directory": "value:working_directory {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.git-repository",
+    "kind": "catalog-default",
+    "template_id": "context.git-repository",
+    "arguments": {
+      "is_repository": "value:is_repository {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.status.selection",
+    "kind": "catalog-default",
+    "template_id": "status.selection",
+    "arguments": {
+      "profile": "build",
+      "model": "local/model",
+      "parent_session_id": "root",
+      "parent_session_name": "parent",
+      "has_parent": true,
+      "has_parent_name": true
+    }
+  },
+  {
+    "id": "A008.M6.status.generated-time",
+    "kind": "catalog-default",
+    "template_id": "status.generated-time",
+    "arguments": {
+      "time": "value:time {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.status.context",
+    "kind": "catalog-default",
+    "template_id": "status.context",
+    "arguments": {
+      "available": true,
+      "usage": 12,
+      "estimated_tokens": 123,
+      "context_limit": 1000,
+      "cadence": 10,
+      "trigger": 80
+    }
+  },
+  {
+    "id": "A008.M6.status.context-limit",
+    "kind": "catalog-default",
+    "template_id": "status.context-limit",
+    "arguments": {
+      "available": true,
+      "usage": 12,
+      "estimated_tokens": 123,
+      "context_limit": 1000,
+      "cadence": 10,
+      "trigger": 80,
+      "trigger_tokens": 800
+    }
+  },
+  {
+    "id": "A008.M6.status.statistics",
+    "kind": "catalog-default",
+    "template_id": "status.statistics",
+    "arguments": {
+      "session_id": "s",
+      "views": [
+        {
+          "cumulative": true,
+          "input_tokens": 10,
+          "cache_percentage": 20,
+          "output_tokens": 30,
+          "tool_calls": 4,
+          "total_cost": "0.50",
+          "input_cost": "0.20",
+          "output_cost": "0.30",
+          "models": [
+            {
+              "provider": "local",
+              "model": "example",
+              "legacy": false,
+              "has_effort": true,
+              "effort": "high",
+              "input_tokens": 10,
+              "cache_percentage": 20,
+              "output_tokens": 30,
+              "tool_calls": 4,
+              "total_cost": "0.50",
+              "input_cost": "0.20",
+              "output_cost": "0.30"
+            }
+          ]
+        }
+      ],
+      "incomplete_legacy_tool_counts": true
+    }
+  },
+  {
+    "id": "A008.M6.status.runtime",
+    "kind": "catalog-default",
+    "template_id": "status.runtime",
+    "arguments": {
+      "section": "agent-tasks",
+      "agents": [],
+      "runs": [
+        {
+          "run_id": "first",
+          "display_name": "graph {{ name }}",
+          "owner_session_id": "root",
+          "revision": "1234",
+          "nodes": [
+            {
+              "indent": "  ",
+              "name": "parent",
+              "status": "running",
+              "description": "Parent"
+            },
+            {
+              "indent": "    ",
+              "name": "child",
+              "status": "pending",
+              "description": "{{ hostile }}\nnext"
+            }
+          ]
+        },
+        {
+          "run_id": "second",
+          "display_name": "second",
+          "owner_session_id": "root",
+          "revision": "2",
+          "nodes": []
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.child-completion",
+    "kind": "catalog-default",
+    "template_id": "agent-session.child-completion",
+    "arguments": {
+      "agent_name": "value:agent_name {{ literal }}\nnext",
+      "result": "value:result {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.child-question",
+    "kind": "catalog-default",
+    "template_id": "agent-session.child-question",
+    "arguments": {
+      "agent_name": "value:agent_name {{ literal }}\nnext",
+      "questions": "value:questions {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.pending-child-question-reminder",
+    "kind": "catalog-default",
+    "template_id": "agent-session.pending-child-question-reminder",
+    "arguments": {
+      "children": "value:children {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.active-work-reminder",
+    "kind": "catalog-default",
+    "template_id": "agent-session.active-work-reminder",
+    "arguments": {
+      "active_work": "value:active_work {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.nonempty-queues-reminder",
+    "kind": "catalog-default",
+    "template_id": "agent-session.nonempty-queues-reminder",
+    "arguments": {
+      "queues": "value:queues {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.nonempty-queue-item",
+    "kind": "catalog-default",
+    "template_id": "agent-session.nonempty-queue-item",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "size": "value:size {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.active-work-agent-tasks-heading",
+    "kind": "catalog-default",
+    "template_id": "agent-session.active-work-agent-tasks-heading",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.active-work-unresolved-agent-tasks-heading",
+    "kind": "catalog-default",
+    "template_id": "agent-session.active-work-unresolved-agent-tasks-heading",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.exit-reminder",
+    "kind": "catalog-default",
+    "template_id": "agent-session.exit-reminder",
+    "arguments": {
+      "reminders": "value:reminders {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.exit-reminder-nth",
+    "kind": "catalog-default",
+    "template_id": "agent-session.exit-reminder-nth",
+    "arguments": {
+      "reminders": "value:reminders {{ literal }}\nnext",
+      "ordinal": "value:ordinal {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.context-reminder",
+    "kind": "catalog-default",
+    "template_id": "agent-session.context-reminder",
+    "arguments": {
+      "percentage": "value:percentage {{ literal }}\nnext",
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.compact-context-tool.compacted",
+    "kind": "catalog-default",
+    "template_id": "compact-context-tool.compacted",
+    "arguments": {
+      "usage": "value:usage {{ literal }}\nnext",
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.compact-context-tool.no-op",
+    "kind": "catalog-default",
+    "template_id": "compact-context-tool.no-op",
+    "arguments": {
+      "usage": "value:usage {{ literal }}\nnext",
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.compact-context-tool.unavailable",
+    "kind": "catalog-default",
+    "template_id": "compact-context-tool.unavailable",
+    "arguments": {
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-session.context-limit-reminder",
+    "kind": "catalog-default",
+    "template_id": "agent-session.context-limit-reminder",
+    "arguments": {
+      "percentage": "value:percentage {{ literal }}\nnext",
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext",
+      "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.compact-context-tool.compacted-with-limit",
+    "kind": "catalog-default",
+    "template_id": "compact-context-tool.compacted-with-limit",
+    "arguments": {
+      "usage": "value:usage {{ literal }}\nnext",
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext",
+      "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.compact-context-tool.no-op-with-limit",
+    "kind": "catalog-default",
+    "template_id": "compact-context-tool.no-op-with-limit",
+    "arguments": {
+      "usage": "value:usage {{ literal }}\nnext",
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext",
+      "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.compact-context-tool.unavailable-with-limit",
+    "kind": "catalog-default",
+    "template_id": "compact-context-tool.unavailable-with-limit",
+    "arguments": {
+      "estimated_tokens": "value:estimated_tokens {{ literal }}\nnext",
+      "context_limit": "value:context_limit {{ literal }}\nnext",
+      "notification_interval": "value:notification_interval {{ literal }}\nnext",
+      "trigger": "value:trigger {{ literal }}\nnext",
+      "trigger_tokens": "value:trigger_tokens {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.goal.root-reminder",
+    "kind": "catalog-default",
+    "template_id": "goal.root-reminder",
+    "arguments": {
+      "goal": "value:goal {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.goal.root-reminder-notice",
+    "kind": "catalog-default",
+    "template_id": "goal.root-reminder-notice",
+    "arguments": {
+      "reminder": "value:reminder {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.set-exit-reminder-tool.set",
+    "kind": "catalog-default",
+    "template_id": "set-exit-reminder-tool.set",
+    "arguments": {
+      "title": "value:title {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.clear-exit-reminder-tool.cleared",
+    "kind": "catalog-default",
+    "template_id": "clear-exit-reminder-tool.cleared",
+    "arguments": {
+      "title": "value:title {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.clear-exit-reminder-tool.not-found",
+    "kind": "catalog-default",
+    "template_id": "clear-exit-reminder-tool.not-found",
+    "arguments": {
+      "title": "value:title {{ literal }}\nnext",
+      "titles": "value:titles {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.exec-command.metadata-reminder",
+    "kind": "catalog-default",
+    "template_id": "exec-command.metadata-reminder",
+    "arguments": {
+      "command_length": "value:command_length {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.monitor.started",
+    "kind": "catalog-default",
+    "template_id": "monitor.started",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "stderr_path": "value:stderr_path {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.monitor.event",
+    "kind": "catalog-default",
+    "template_id": "monitor.event",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext",
+      "lines": "value:lines {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.monitor.ended",
+    "kind": "catalog-default",
+    "template_id": "monitor.ended",
+    "arguments": {
+      "name": "watch",
+      "description": "{{ literal }}\nnext",
+      "events": 2,
+      "reason": "exited",
+      "exit_code": 0,
+      "error": "",
+      "timeout_ms": 100
+    }
+  },
+  {
+    "id": "A008.M6.agent-send-tool.description-without-parent",
+    "kind": "catalog-default",
+    "template_id": "agent-send-tool.description-without-parent",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.runaway",
+    "kind": "catalog-default",
+    "template_id": "agent-session.runaway",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.truncated-tool-call",
+    "kind": "catalog-default",
+    "template_id": "agent-session.truncated-tool-call",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.invalid-tool-call",
+    "kind": "catalog-default",
+    "template_id": "agent-session.invalid-tool-call",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.final-request",
+    "kind": "catalog-default",
+    "template_id": "agent-session.final-request",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.final-request-interrupted",
+    "kind": "catalog-default",
+    "template_id": "agent-session.final-request-interrupted",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.tools-restored",
+    "kind": "catalog-default",
+    "template_id": "agent-session.tools-restored",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.interrupted-result",
+    "kind": "catalog-default",
+    "template_id": "agent-session.interrupted-result",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-session.interrupted-note",
+    "kind": "catalog-default",
+    "template_id": "agent-session.interrupted-note",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.tool-result.text",
+    "kind": "catalog-default",
+    "template_id": "tool-result.text",
+    "arguments": {
+      "value": "value:value {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.tool-result.markdown-outline",
+    "kind": "catalog-default",
+    "template_id": "tool-result.markdown-outline",
+    "arguments": {
+      "outline": "value:outline {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.tool-result.output-blob-notice",
+    "kind": "catalog-default",
+    "template_id": "tool-result.output-blob-notice",
+    "arguments": {
+      "path": "value:path {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.tool-result.question-answer",
+    "kind": "catalog-default",
+    "template_id": "tool-result.question-answer",
+    "arguments": {
+      "question": "value:question {{ literal }}\nnext",
+      "answer": "value:answer {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.tool-result.question-replied",
+    "kind": "catalog-default",
+    "template_id": "tool-result.question-replied",
+    "arguments": {
+      "agent_name": "value:agent_name {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.tool-result.error",
+    "kind": "catalog-default",
+    "template_id": "tool-result.error",
+    "arguments": {
+      "message": "value:message {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.tool-result.image-budget-exceeded",
+    "kind": "catalog-default",
+    "template_id": "tool-result.image-budget-exceeded",
+    "arguments": {
+      "limit_bytes": "value:limit_bytes {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.mode.plan-workflow",
+    "kind": "catalog-default",
+    "template_id": "mode.plan-workflow",
+    "arguments": {
+      "profile_prompt": "value:profile_prompt {{ literal }}\nnext",
+      "plan_artifact": "value:plan_artifact {{ literal }}\nnext",
+      "task_artifact": "value:task_artifact {{ literal }}\nnext",
+      "plan_directory": "value:plan_directory {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.mode.plan-repair-read",
+    "kind": "catalog-default",
+    "template_id": "mode.plan-repair-read",
+    "arguments": {
+      "plan_artifact": "value:plan_artifact {{ literal }}\nnext",
+      "task_artifact": "value:task_artifact {{ literal }}\nnext",
+      "error": "value:error {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.mode.plan-repair-blank-plan",
+    "kind": "catalog-default",
+    "template_id": "mode.plan-repair-blank-plan",
+    "arguments": {
+      "plan_artifact": "value:plan_artifact {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.mode.plan-repair-blank-task",
+    "kind": "catalog-default",
+    "template_id": "mode.plan-repair-blank-task",
+    "arguments": {
+      "task_artifact": "value:task_artifact {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.mode.plan-repair-invalid-task",
+    "kind": "catalog-default",
+    "template_id": "mode.plan-repair-invalid-task",
+    "arguments": {
+      "task_artifact": "value:task_artifact {{ literal }}\nnext",
+      "error": "value:error {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.mode.plan-implementation",
+    "kind": "catalog-default",
+    "template_id": "mode.plan-implementation",
+    "arguments": {
+      "plan_artifact": "value:plan_artifact {{ literal }}\nnext",
+      "task_artifact": "value:task_artifact {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.compaction.summary-instructions",
+    "kind": "catalog-default",
+    "template_id": "compaction.summary-instructions",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.compaction.summary-prefix",
+    "kind": "catalog-default",
+    "template_id": "compaction.summary-prefix",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.compaction.oversized-tool-group-notice",
+    "kind": "catalog-default",
+    "template_id": "compaction.oversized-tool-group-notice",
+    "arguments": {
+      "path": "value:path {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.agent-path-environment",
+    "kind": "catalog-default",
+    "template_id": "context.agent-path-environment",
+    "arguments": {
+      "entries": [
+        {
+          "name": "WORKDIR",
+          "path": "/tmp/${NAME}"
+        },
+        {
+          "name": "ROOT",
+          "path": "{{ literal }}"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M6.context.agent-scratch",
+    "kind": "catalog-default",
+    "template_id": "context.agent-scratch",
+    "arguments": {
+      "path": "value:path {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.agent-history",
+    "kind": "catalog-default",
+    "template_id": "context.agent-history",
+    "arguments": {
+      "path": "value:path {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.standing-instruction",
+    "kind": "catalog-default",
+    "template_id": "context.standing-instruction",
+    "arguments": {
+      "instruction": "value:instruction {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.agents-file",
+    "kind": "catalog-default",
+    "template_id": "context.agents-file",
+    "arguments": {
+      "path": "value:path {{ literal }}\nnext",
+      "content": "value:content {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.expected-cli-utilities",
+    "kind": "catalog-default",
+    "template_id": "context.expected-cli-utilities",
+    "arguments": {
+      "utilities": "value:utilities {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.optional-cli-utilities",
+    "kind": "catalog-default",
+    "template_id": "context.optional-cli-utilities",
+    "arguments": {
+      "utilities": "value:utilities {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.date",
+    "kind": "catalog-default",
+    "template_id": "context.date",
+    "arguments": {
+      "date": "value:date {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.platform",
+    "kind": "catalog-default",
+    "template_id": "context.platform",
+    "arguments": {
+      "platform": "value:platform {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.model-aliases",
+    "kind": "catalog-default",
+    "template_id": "context.model-aliases",
+    "arguments": {
+      "aliases": [
+        {
+          "name": "local",
+          "model": "local/model",
+          "usage": "{{ literal }}\nnext"
+        },
+        {
+          "name": "second",
+          "model": "local/second",
+          "usage": "second"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M6.context.security-profile",
+    "kind": "catalog-default",
+    "template_id": "context.security-profile",
+    "arguments": {
+      "rules": [
+        {
+          "path": "/tmp",
+          "action": "AllowWrite"
+        },
+        {
+          "path": "{{ literal }}",
+          "action": "Deny"
+        }
+      ],
+      "sandbox_enabled": false
+    }
+  },
+  {
+    "id": "A008.M6.context.subagents",
+    "kind": "catalog-default",
+    "template_id": "context.subagents",
+    "arguments": {
+      "subagents": [
+        {
+          "id": "one",
+          "usage": "{{ literal }}"
+        },
+        {
+          "id": "two",
+          "usage": "line\nnext"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M6.context.skills",
+    "kind": "catalog-default",
+    "template_id": "context.skills",
+    "arguments": {
+      "skills": "value:skills {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.skill-selected",
+    "kind": "catalog-default",
+    "template_id": "context.skill-selected",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "path": "value:path {{ literal }}\nnext",
+      "content": "value:content {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.skill-unavailable",
+    "kind": "catalog-default",
+    "template_id": "context.skill-unavailable",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "message": "value:message {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.context.skill-too-large",
+    "kind": "catalog-default",
+    "template_id": "context.skill-too-large",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "path": "value:path {{ literal }}\nnext",
+      "limit_bytes": "value:limit_bytes {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.dependency-header",
+    "kind": "catalog-default",
+    "template_id": "agent-task.dependency-header",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.dependency-item",
+    "kind": "catalog-default",
+    "template_id": "agent-task.dependency-item",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext",
+      "result": "value:result {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.sibling-scope",
+    "kind": "catalog-default",
+    "template_id": "agent-task.sibling-scope",
+    "arguments": {
+      "items": "value:items {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.sibling-item",
+    "kind": "catalog-default",
+    "template_id": "agent-task.sibling-item",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.header",
+    "kind": "catalog-default",
+    "template_id": "agent-task.header",
+    "arguments": {
+      "task_name": "value:task_name {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext",
+      "acceptance_criteria": "value:acceptance_criteria {{ literal }}\nnext",
+      "dependencies": "value:dependencies {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.result",
+    "kind": "catalog-default",
+    "template_id": "agent-task.result",
+    "arguments": {
+      "result": "value:result {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.feedback",
+    "kind": "catalog-default",
+    "template_id": "agent-task.feedback",
+    "arguments": {
+      "items": "value:items {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.child-scope",
+    "kind": "catalog-default",
+    "template_id": "agent-task.child-scope",
+    "arguments": {
+      "role": "value:role {{ literal }}\nnext",
+      "task_name": "value:task_name {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.leaf",
+    "kind": "catalog-default",
+    "template_id": "agent-task.leaf",
+    "arguments": {
+      "header": "value:header {{ literal }}\nnext",
+      "feedback": "value:feedback {{ literal }}\nnext",
+      "instruction": "value:instruction {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.composite",
+    "kind": "catalog-default",
+    "template_id": "agent-task.composite",
+    "arguments": {
+      "header": "value:header {{ literal }}\nnext",
+      "feedback": "value:feedback {{ literal }}\nnext",
+      "children": "value:children {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.composite-child",
+    "kind": "catalog-default",
+    "template_id": "agent-task.composite-child",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.attempts-exhausted",
+    "kind": "catalog-default",
+    "template_id": "agent-task.attempts-exhausted",
+    "arguments": {
+      "attempts": "value:attempts {{ literal }}\nnext",
+      "feedback": "value:feedback {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.set-accepted",
+    "kind": "catalog-default",
+    "template_id": "agent-task.set-accepted",
+    "arguments": {
+      "count": "value:count {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.notification-succeeded",
+    "kind": "catalog-default",
+    "template_id": "agent-task.notification-succeeded",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext",
+      "result": "value:result {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.notification-failed",
+    "kind": "catalog-default",
+    "template_id": "agent-task.notification-failed",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "description": "value:description {{ literal }}\nnext",
+      "failure": "value:failure {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.notification-updated",
+    "kind": "catalog-default",
+    "template_id": "agent-task.notification-updated",
+    "arguments": {
+      "items": "value:items {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.notification-all-complete",
+    "kind": "catalog-default",
+    "template_id": "agent-task.notification-all-complete",
+    "arguments": {
+      "items": "value:items {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.notification-item",
+    "kind": "catalog-default",
+    "template_id": "agent-task.notification-item",
+    "arguments": {
+      "name": "value:name {{ literal }}\nnext",
+      "state": "value:state {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.force-stopped",
+    "kind": "catalog-default",
+    "template_id": "agent-task.force-stopped",
+    "arguments": {
+      "reason": "value:reason {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.stop-canceled",
+    "kind": "catalog-default",
+    "template_id": "agent-task.stop-canceled",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.stop-succeeded",
+    "kind": "catalog-default",
+    "template_id": "agent-task.stop-succeeded",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.stop-failed",
+    "kind": "catalog-default",
+    "template_id": "agent-task.stop-failed",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.stop-restarted",
+    "kind": "catalog-default",
+    "template_id": "agent-task.stop-restarted",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.stop-dependency-canceled",
+    "kind": "catalog-default",
+    "template_id": "agent-task.stop-dependency-canceled",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.stop-dependency-reset",
+    "kind": "catalog-default",
+    "template_id": "agent-task.stop-dependency-reset",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.stop-shutdown",
+    "kind": "catalog-default",
+    "template_id": "agent-task.stop-shutdown",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M6.agent-task.response-repair",
+    "kind": "catalog-default",
+    "template_id": "agent-task.response-repair",
+    "arguments": {
+      "error": "value:error {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.role-failure",
+    "kind": "catalog-default",
+    "template_id": "agent-task.role-failure",
+    "arguments": {
+      "role": "value:role {{ literal }}\nnext",
+      "status": "value:status {{ literal }}\nnext",
+      "error": "value:error {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M6.agent-task.truncated",
+    "kind": "catalog-default",
+    "template_id": "agent-task.truncated",
+    "arguments": {
+      "value": "value:value {{ literal }}\nnext"
+    }
+  },
+  {
+    "id": "A008.M1.scalar.multiline",
+    "kind": "source-assertion",
+    "template_id": "agent-session.child-completion",
+    "yaml": "prompt_templates:\n  agent-session.child-completion:\n    template: |-\n      Agent {agent_name} says:\n      {result}\n",
+    "arguments": {
+      "agent_name": "worker",
+      "result": "value {not_a_placeholder}\nnext"
+    }
+  },
+  {
+    "id": "A008.M1.scalar.inherited",
+    "kind": "source-assertion",
+    "template_id": "tool-result.output-blob-notice",
+    "arguments": {
+      "path": "/tmp/{runtime}"
+    }
+  },
+  {
+    "id": "A008.M1.scalar.invalid.1",
+    "kind": "source-assertion",
+    "template_id": "tool-result.output-blob-notice",
+    "yaml": "prompt_templates:\n  tool-result.output-blob-notice:\n    template: '{unknown}'\n",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M1.scalar.invalid.2",
+    "kind": "source-assertion",
+    "template_id": "tool-result.output-blob-notice",
+    "yaml": "prompt_templates:\n  tool-result.output-blob-notice:\n    template: '{path} {path}'\n",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M1.scalar.invalid.3",
+    "kind": "source-assertion",
+    "template_id": "tool-result.output-blob-notice",
+    "yaml": "prompt_templates:\n  tool-result.output-blob-notice:\n    template: ''\n",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M1.scalar.invalid.4",
+    "kind": "source-assertion",
+    "template_id": "tool-result.output-blob-notice",
+    "yaml": "prompt_templates:\n  tool-result.output-blob-notice:\n    required_arguments: [path, absent]\n",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M1.arguments.missing",
+    "kind": "source-assertion",
+    "template_id": "system.working-directory",
+    "argument_list": []
+  },
+  {
+    "id": "A008.M1.arguments.extra",
+    "kind": "source-assertion",
+    "template_id": "system.working-directory",
+    "argument_list": [
+      {
+        "name": "other",
+        "value": "value"
+      }
+    ]
+  },
+  {
+    "id": "A008.M1.arguments.duplicate",
+    "kind": "source-assertion",
+    "template_id": "system.working-directory",
+    "argument_list": [
+      {
+        "name": "working_directory",
+        "value": "a"
+      },
+      {
+        "name": "working_directory",
+        "value": "b"
+      }
+    ]
+  },
+  {
+    "id": "A008.M1.custom.true.repeat1",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ if visible }}{{ for item in items }}{{ item.name }};{{ end }}{{ else }}hidden{{ end }}'\n    allowed_arguments: [visible, items]\n    required_arguments: [visible, items]\n",
+    "arguments": {
+      "visible": true,
+      "items": [
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        },
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M1.custom.true.repeat2",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ if visible }}{{ for item in items }}{{ item.name }};{{ end }}{{ else }}hidden{{ end }}'\n    allowed_arguments: [visible, items]\n    required_arguments: [visible, items]\n",
+    "arguments": {
+      "visible": true,
+      "items": [
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        },
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M1.custom.false.repeat1",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ if visible }}{{ for item in items }}{{ item.name }};{{ end }}{{ else }}hidden{{ end }}'\n    allowed_arguments: [visible, items]\n    required_arguments: [visible, items]\n",
+    "arguments": {
+      "visible": false,
+      "items": [
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        },
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M1.custom.false.repeat2",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ if visible }}{{ for item in items }}{{ item.name }};{{ end }}{{ else }}hidden{{ end }}'\n    allowed_arguments: [visible, items]\n    required_arguments: [visible, items]\n",
+    "arguments": {
+      "visible": false,
+      "items": [
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        },
+        {
+          "name": "{{ hostile }} {value}\nnext"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M1.custom.1001",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ if visible }}{{ for item in items }}{{ item.name }};{{ end }}{{ else }}hidden{{ end }}'\n    allowed_arguments: [visible, items]\n    required_arguments: [visible, items]\n",
+    "arguments": {
+      "visible": true,
+      "items": [
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        }
+      ]
+    },
+    "cancel": false
+  },
+  {
+    "id": "A008.M1.custom.cancel",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ if visible }}{{ for item in items }}{{ item.name }};{{ end }}{{ else }}hidden{{ end }}'\n    allowed_arguments: [visible, items]\n    required_arguments: [visible, items]\n",
+    "arguments": {
+      "visible": true,
+      "items": [
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "x"
+        }
+      ]
+    },
+    "cancel": true
+  },
+  {
+    "id": "A008.M1.runtime.nested",
+    "kind": "source-assertion",
+    "template_id": "status.runtime",
+    "arguments": {
+      "section": "agent-tasks",
+      "agents": [],
+      "runs": [
+        {
+          "run_id": "first",
+          "display_name": "graph {{ name }}",
+          "owner_session_id": "root",
+          "revision": "1234",
+          "nodes": [
+            {
+              "indent": "  ",
+              "name": "parent",
+              "status": "running",
+              "description": "Parent"
+            },
+            {
+              "indent": "    ",
+              "name": "child",
+              "status": "pending",
+              "description": "{{ hostile }}\nnext"
+            }
+          ]
+        },
+        {
+          "run_id": "second",
+          "display_name": "second",
+          "owner_session_id": "root",
+          "revision": "2",
+          "nodes": []
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M1.strict.1.missing",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ missing }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {
+      "items": [
+        {}
+      ]
+    },
+    "unsupported": false
+  },
+  {
+    "id": "A008.M1.strict.1.required",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ missing }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {},
+    "unsupported": false
+  },
+  {
+    "id": "A008.M1.strict.1.unsupported",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ missing }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {
+      "items": [
+        {}
+      ]
+    },
+    "unsupported": true
+  },
+  {
+    "id": "A008.M1.strict.2.missing",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ items[0].missing }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {
+      "items": [
+        {}
+      ]
+    },
+    "unsupported": false
+  },
+  {
+    "id": "A008.M1.strict.2.required",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ items[0].missing }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {},
+    "unsupported": false
+  },
+  {
+    "id": "A008.M1.strict.2.unsupported",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ items[0].missing }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {
+      "items": [
+        {}
+      ]
+    },
+    "unsupported": true
+  },
+  {
+    "id": "A008.M1.strict.3.missing",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ items[1] }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {
+      "items": [
+        {}
+      ]
+    },
+    "unsupported": false
+  },
+  {
+    "id": "A008.M1.strict.3.required",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ items[1] }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {},
+    "unsupported": false
+  },
+  {
+    "id": "A008.M1.strict.3.unsupported",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ items[1] }}'\n    allowed_arguments: [items]\n    required_arguments: [items]\n",
+    "arguments": {
+      "items": [
+        {}
+      ]
+    },
+    "unsupported": true
+  },
+  {
+    "id": "A008.M1.engine.1",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: scriban\n    template: '{{ for item in items }}'\n    allowed_arguments: []\n    required_arguments: []\n",
+    "arguments": {}
+  },
+  {
+    "id": "A008.M1.engine.2",
+    "kind": "source-assertion",
+    "template_id": "custom.structured",
+    "yaml": "prompt_templates:\n  custom.structured:\n    engine: unknown\n    template: 'text'\n    allowed_arguments: []\n    required_arguments: []\n",
+    "arguments": {}
+  }
+]

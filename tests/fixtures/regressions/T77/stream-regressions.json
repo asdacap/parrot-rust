@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "provenance": "Source-shaped authored regressions tied to pinned source policies in docs/port/reports/T77; not new original upstream test IDs or independent .NET runtime observations.",
+  "sse": [
+    {"name":"duplicate-fields-and-nul-id", "input":"event: old\nevent: new\nid: retained\nid: bad\u0000id\ndata: first\ndata:  second\n\n", "limit":512, "events":[{"event":"new","id":"retained","data":"first\n second"}]},
+    {"name":"unknown-only", "input":": ignored\nretry: 1\nunknown: value\n\n", "limit":128, "events":[]},
+    {"name":"empty-data", "input":"data:\n\n", "limit":128, "events":[{"event":"","id":"","data":""}]},
+    {"name":"unterminated-final-line", "input":"data: final", "limit":128, "events":[{"event":"","id":"","data":"final"}]},
+    {"name":"utf8-replacement", "hex":"646174613a20ff0a0a", "limit":128, "events":[{"event":"","id":"","data":"�"}]},
+    {"name":"first-line-bom", "hex":"efbbbf646174613a20780a0a", "limit":9, "events":[{"event":"","id":"","data":"x"}]},
+    {"name":"limit-includes-delimiter", "input":"data: x\n\n", "limit":8, "error":"sse: event exceeds maximum size 8"},
+    {"name":"exact-ascii-limit", "input":"data: x\n\n", "limit":9, "events":[{"event":"","id":"","data":"x"}]},
+    {"name":"supplementary-counts-two-utf16-units", "input":"data: 🦜\n\n", "limit":10, "events":[{"event":"","id":"","data":"🦜"}]},
+    {"name":"supplementary-one-over-limit", "input":"data: 🦜\n\n", "limit":9, "error":"sse: event exceeds maximum size 9"}
+  ],
+  "terminal": [
+    {"name":"unicode-csi-ss3", "input":"é🦜\u001b[A\u001bOD", "keys":[{"kind":"Character","text":"é"},{"kind":"Character","text":"🦜"},{"kind":"Up","text":""},{"kind":"Left","text":""}]},
+    {"name":"unknown-csi-recovery", "input":"\u001b[99~X", "keys":[{"kind":"Escape","text":""},{"kind":"Character","text":"X"}]},
+    {"name":"lone-escape-poll-tick", "hex":"1b", "keys":[{"kind":"Escape","text":""}]},
+    {"name":"malformed-utf8-group-is-discarded", "hex":"ff616263", "keys":[]},
+    {"name":"literal-replacement-rune-is-discarded", "input":"�", "keys":[]},
+    {"name":"incomplete-utf8-is-not-eof-flushed", "hex":"f09f", "keys":[]},
+    {"name":"paste-normalization-and-control-removal", "input":"\u001b[200~a\r\n\tb\u0000\u001b[201~", "keys":[{"kind":"Paste","text":"a\n    b"}]}
+  ]
+}

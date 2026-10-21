@@ -1,0 +1,928 @@
+syntax = "proto3";
+
+option csharp_namespace = "Parrot.Protocol";
+
+package parrot.v1;
+
+// The whole product is this service. Both CLIs are clients of it.
+//
+// Sending and listening are separate calls on purpose: a prompt is durable
+// before execution is requested (principle 1), so admitting one must not
+// depend on anyone listening, and a client that reconnects must be able to
+// resume the stream without re-sending the prompt.
+service Parrot {
+  rpc ListModels (ListModelsRequest) returns (ListModelsResponse);
+  rpc ListModelAliases (ListModelAliasesRequest) returns (ListModelAliasesResponse);
+  rpc ConfigureModelAlias (ConfigureModelAliasRequest) returns (ConfigureModelAliasResponse);
+  rpc ListProviderModelAliasDefaults (ListProviderModelAliasDefaultsRequest) returns (ListProviderModelAliasDefaultsResponse);
+  rpc ApplyProviderModelAliasDefaults (ApplyProviderModelAliasDefaultsRequest) returns (ApplyProviderModelAliasDefaultsResponse);
+  rpc SetModelPreset (SetModelPresetRequest) returns (SetModelPresetResponse);
+  rpc SelectModelPreset (SelectModelPresetRequest) returns (SelectModelPresetResponse);
+  rpc ListModelPresets (ListModelPresetsRequest) returns (ListModelPresetsResponse);
+  rpc ListModes (ListModesRequest) returns (ListModesResponse);
+  rpc ListSkills (ListSkillsRequest) returns (ListSkillsResponse);
+  rpc ConfigureSkill (ConfigureSkillRequest) returns (ConfigureSkillResponse);
+  rpc ListSessions (ListSessionsRequest) returns (ListSessionsResponse);
+  rpc CreateSession (CreateSessionRequest) returns (UserSession);
+  rpc ResumeSession (ResumeSessionRequest) returns (UserSession);
+  rpc AttachSession (AttachSessionRequest) returns (UserSession);
+  rpc UpdateSession (UpdateSessionRequest) returns (UserSession);
+  rpc SetGoal (SetGoalRequest) returns (SetGoalResponse);
+  rpc SetStandingInstruction (SetStandingInstructionRequest) returns (SetStandingInstructionResponse);
+  rpc SendMessage (SendMessageRequest) returns (SendMessageResponse);
+  rpc UploadAttachment (stream AttachmentUploadFrame) returns (AttachmentUploadResponse);
+  rpc Interrupt (InterruptRequest) returns (InterruptResponse);
+  rpc Compact (CompactRequest) returns (CompactResponse);
+  rpc SetContextLimit (SetContextLimitRequest) returns (SetContextLimitResponse);
+  rpc SandboxEnable (SandboxEnableRequest) returns (SandboxEnableResponse);
+  rpc SessionStatus (SessionStatusRequest) returns (SessionStatusResponse);
+  rpc ListPendingQuestions (ListPendingQuestionsRequest) returns (ListPendingQuestionsResponse);
+  rpc ReplyQuestion (ReplyQuestionRequest) returns (ReplyQuestionResponse);
+  rpc RejectQuestion (RejectQuestionRequest) returns (RejectQuestionResponse);
+  rpc ListPendingPermissions (ListPendingPermissionsRequest) returns (ListPendingPermissionsResponse);
+  rpc ReplyPermission (ReplyPermissionRequest) returns (ReplyPermissionResponse);
+  rpc Listen (ListenRequest) returns (stream Event);
+}
+
+// A UserSession, which is what the API deals in: one working directory's
+// session, owning its database and its event stream.
+//
+// AgentSessions live inside it and are not addressable here. A user never
+// spawns a subagent -- an agent does, into a background child session whose
+// events surface on this same stream -- so there is no parent id on this
+// message and no way to ask for one.
+//
+// The model is session state, not a property of a message, so changing it is
+// an explicit UpdateSession rather than a different value on the next prompt.
+message UserSession {
+  string id    = 1;
+  string model = 2;
+  string mode  = 3;
+  bool loaded  = 4;
+  string working_directory = 5;
+}
+
+message CreateSessionRequest {
+  string model = 1;
+  string mode  = 2;
+  bool interactive_permissions = 3;
+}
+
+message ResumeSessionRequest {
+  string user_session_id = 1;
+  string working_directory = 2;
+  bool interactive_permissions = 3;
+  bool take_over = 4;
+}
+
+message AttachSessionRequest {
+  string user_session_id = 1;
+  string working_directory = 2;
+}
+
+message UpdateSessionRequest {
+  string user_session_id = 1;
+  string model           = 2;
+  string mode            = 3;
+}
+
+message SetGoalRequest {
+  string user_session_id = 1;
+  oneof state {
+    string goal = 2;
+    ClearGoal clear = 3;
+  }
+}
+
+message ClearGoal {}
+
+message SetGoalResponse {}
+
+message SetStandingInstructionRequest {
+  string user_session_id = 1;
+  string instruction = 2;
+}
+
+message SetStandingInstructionResponse {}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated Model models = 1;
+}
+
+message Model {
+  string id                    = 1;
+  string provider_id           = 2;
+  repeated ModelVariant variants = 3;
+}
+
+message ModelVariant {
+  string name             = 1;
+  string reasoning_effort = 2;
+}
+
+message ListModelAliasesRequest {}
+
+message ListModelAliasesResponse {
+  repeated ModelAlias aliases = 1;
+}
+
+message ModelAlias {
+  string name         = 1;
+  string model_string = 2;
+  string usage        = 3;
+}
+
+message ConfigureModelAliasRequest {
+  string name         = 1;
+  string model_string = 2;
+}
+
+message ConfigureModelAliasResponse {
+  ModelAlias alias = 1;
+}
+
+message ListProviderModelAliasDefaultsRequest {}
+
+message ListProviderModelAliasDefaultsResponse {
+  repeated ProviderModelAliasDefaults providers = 1;
+}
+
+message ProviderModelAliasDefaults {
+  string provider_id = 1;
+}
+
+message ApplyProviderModelAliasDefaultsRequest {
+  string provider_id = 1;
+}
+
+message ApplyProviderModelAliasDefaultsResponse {
+  repeated ModelAlias aliases = 1;
+}
+
+message SetModelPresetRequest {
+  string user_session_id = 1;
+  string name = 2;
+}
+
+message SetModelPresetResponse {
+  ModelPreset preset = 1;
+}
+
+message SelectModelPresetRequest {
+  string user_session_id = 1;
+  string name = 2;
+}
+
+message SelectModelPresetResponse {
+  UserSession session = 1;
+  ModelPreset preset = 2;
+}
+
+message ListModelPresetsRequest {}
+
+message ListModelPresetsResponse {
+  repeated ModelPreset presets = 1;
+}
+
+message ModelPreset {
+  string name = 1;
+  string model = 2;
+  map<string, string> model_aliases = 3;
+  string context_limit = 4;
+  map<string, string> model_alias_context_limits = 5;
+}
+
+message ListModesRequest {}
+
+message ListModesResponse {
+  repeated Mode modes = 1;
+}
+
+message Mode {
+  string id = 1;
+}
+
+message ListSkillsRequest {
+  string user_session_id = 1;
+}
+
+message ListSkillsResponse {
+  repeated Skill skills = 1;
+  repeated SkillLoadError errors = 2;
+}
+
+message Skill {
+  string name = 1;
+  string description = 2;
+  string path = 3;
+  ListedSkillScope scope = 4;
+  bool enabled = 5;
+  optional string display_name = 6;
+  optional string short_description = 7;
+}
+
+enum ListedSkillScope {
+  SKILL_SCOPE_UNSPECIFIED = 0;
+  SKILL_SCOPE_REPO = 1;
+  SKILL_SCOPE_USER = 2;
+  SKILL_SCOPE_SYSTEM = 3;
+}
+
+message SkillLoadError {
+  string path = 1;
+  string message = 2;
+}
+
+message ConfigureSkillRequest {
+  string user_session_id = 1;
+  string path = 2;
+  bool enabled = 3;
+}
+
+message ConfigureSkillResponse {
+  Skill skill = 1;
+}
+
+// An empty working directory lists every session.
+message ListSessionsRequest {
+  string working_directory = 1;
+}
+
+message ListSessionsResponse {
+  repeated SessionSummary sessions = 1;
+}
+
+message SessionSummary {
+  string user_session_id = 1;
+  string model = 2;
+  string mode = 3;
+  string created_at = 4;
+  SessionState state = 5;
+  string root_agent_name = 6;
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_ACTIVE = 1;
+  SESSION_STATE_INACTIVE = 2;
+  SESSION_STATE_CORRUPT = 3;
+}
+
+// When an admitted prompt is promoted into the conversation.
+//
+// Unspecified is refused rather than defaulted. A default would decide, on the
+// sender's behalf and silently, whether their message interrupts the work in
+// flight or waits for it -- and those are different requests.
+enum Delivery {
+  DELIVERY_UNSPECIFIED = 0;
+  // At the next turn boundary, so it joins the turn already running.
+  DELIVERY_STEER       = 1;
+  // When the turn would otherwise stop, so it starts a turn of its own.
+  DELIVERY_QUEUE       = 2;
+}
+
+// The message id is the sender's, not the server's: re-sending after a dropped
+// connection must not admit the prompt twice, and only the sender knows that
+// the second send is the same prompt. One is minted when the field is empty.
+message SendMessageRequest {
+  string   user_session_id = 1;
+  string   text            = 2;
+  string   message_id      = 3;
+  Delivery delivery        = 4;
+  repeated MessageContentPart parts = 5;
+}
+
+// A prompt part preserves its position while distinguishing inline text from a
+// session-owned image artifact. The artifact id is opaque to clients.
+message MessageContentPart {
+  oneof content {
+    string text        = 1;
+    string artifact_id = 2;
+  }
+}
+
+// One header binds the upload to its session and retry id. One or more chunks
+// follow, then one terminal description followed by end-of-stream.
+message AttachmentUploadFrame {
+  oneof payload {
+    AttachmentUploadHeader      header      = 1;
+    bytes                       chunk       = 2;
+    AttachmentUploadDescription description = 3;
+  }
+}
+
+message AttachmentUploadHeader {
+  string user_session_id = 1;
+  string upload_id       = 2;
+}
+
+message AttachmentUploadDescription {
+  string display_name = 1;
+  string media_type   = 2;
+  int64  byte_length  = 3;
+}
+
+message AttachmentUploadResponse {
+  ArtifactReference artifact = 1;
+}
+
+// Immutable inspected metadata for an image stored in a user session.
+message ArtifactReference {
+  string artifact_id      = 1;
+  string sha256           = 2;
+  string media_type       = 3;
+  int64  byte_length      = 4;
+  int32  width            = 5;
+  int32  height           = 6;
+  int32  frame_count      = 7;
+  int64  aggregate_pixels = 8;
+  string display_name     = 9;
+  string origin           = 10;
+}
+
+// Created distinguishes an admission from a replay of one. Both are success:
+// the prompt is admitted either way, which is what the sender asked for.
+message SendMessageResponse {
+  string message_id = 1;
+  string input_id   = 2;
+  bool   created    = 3;
+}
+
+// Stops the turn in flight. It returns once the drain has unwound and every
+// tool call has settled, so a caller that immediately sends again cannot race
+// the turn it just stopped.
+//
+// Input admitted but not yet promoted survives: the drain resumes for it
+// rather than making the user ask twice.
+message InterruptRequest {
+  string user_session_id = 1;
+}
+
+message InterruptResponse {}
+
+message CompactRequest {
+  string user_session_id = 1;
+  string target_context_size = 2;
+}
+
+message CompactResponse {}
+
+message SetContextLimitRequest {
+  string user_session_id = 1;
+  string context_limit = 2;
+}
+
+message SetContextLimitResponse {
+  string context_limit = 1;
+  bool alias_override = 2;
+}
+
+message SandboxEnableRequest {
+  string user_session_id = 1;
+  bool enabled = 2;
+}
+
+message SandboxEnableResponse {
+  bool enabled = 1;
+}
+
+message SessionStatusRequest {
+  string user_session_id = 1;
+}
+
+message SessionStatusResponse {
+  string status = 1;
+  repeated string usage_lines = 2;
+}
+
+message ListPendingQuestionsRequest {
+  string user_session_id = 1;
+}
+
+message ListPendingQuestionsResponse {
+  repeated PendingQuestion questions = 1;
+}
+
+message PendingQuestion {
+  string id = 1;
+  repeated QuestionDefinition questions = 2;
+  optional int64 remaining_timeout_ms = 3;
+}
+
+message QuestionDefinition {
+  reserved 1;
+  string header = 2;
+  string prompt = 3;
+  repeated QuestionOption options = 4;
+  bool multiple = 5;
+  bool custom = 6;
+}
+
+message QuestionOption {
+  string label = 1;
+  string description = 2;
+}
+
+message QuestionAnswer {
+  reserved 1, 2;
+  string text = 3;
+}
+
+message ReplyQuestionRequest {
+  string user_session_id = 1;
+  string question_request_id = 2;
+  repeated QuestionAnswer answers = 3;
+}
+
+message ReplyQuestionResponse {}
+
+message RejectQuestionRequest {
+  string user_session_id = 1;
+  string question_request_id = 2;
+}
+
+message RejectQuestionResponse {}
+
+message ListPendingPermissionsRequest {
+  string user_session_id = 1;
+}
+
+message ListPendingPermissionsResponse {
+  repeated PendingPermission permissions = 1;
+}
+
+message PendingPermission {
+  string id = 1;
+  string agent_session_id = 2;
+  string reason = 3;
+  repeated PermissionTarget targets = 4;
+  repeated PermissionChoice choices = 5;
+}
+
+enum PermissionTargetKind {
+  PERMISSION_TARGET_KIND_UNSPECIFIED = 0;
+  PERMISSION_TARGET_KIND_FILE = 1;
+  PERMISSION_TARGET_KIND_DIRECTORY = 2;
+}
+
+enum PermissionTargetScope {
+  PERMISSION_TARGET_SCOPE_UNSPECIFIED = 0;
+  PERMISSION_TARGET_SCOPE_WRITE = 1;
+}
+
+message PermissionTarget {
+  PermissionTargetKind kind = 1;
+  PermissionTargetScope scope = 2;
+  string path = 3;
+}
+
+enum PermissionAction {
+  PERMISSION_ACTION_UNSPECIFIED = 0;
+  PERMISSION_ACTION_ALLOW = 1;
+  PERMISSION_ACTION_DENY = 2;
+}
+
+message PermissionChoice {
+  string value = 1;
+  string label = 2;
+  PermissionAction action = 3;
+  bool requires_reason = 4;
+}
+
+message ReplyPermissionRequest {
+  string user_session_id = 1;
+  string permission_request_id = 2;
+  string choice_value = 3;
+  string reason = 4;
+}
+
+message ReplyPermissionResponse {}
+
+message ListenRequest {
+  string user_session_id = 1;
+  // Replays the persisted events first: all of them, or only those after
+  // replay_after_event_id, so a reconnecting client resumes where it stopped.
+  bool replay                  = 2;
+  string replay_after_event_id = 3;
+}
+
+// Flat, and named by its session.
+//
+// The payload is the discriminator for core events, which carry only what they
+// mean and are rendered by the client. Feature-specific notices share the
+// generic AgentNotice payload instead, which carries a producer-defined kind
+// and its display text, so clients render them without knowing each feature.
+//
+// There is deliberately no task_id. Nothing starts a task yet -- no shell, no
+// subagents -- so the field would carry a fabricated id that no client could
+// use and no test could exercise. It arrives with tasks at M5, where a task
+// belongs to the session that started it and tasks do not nest.
+message Event {
+  string id              = 1;
+  // The agent session that produced it, which may be a background subagent.
+  string agent_session_id = 2;
+
+  reserved 19, 20, 24, 25, 26, 31, 32, 33, 34, 36, 37, 38, 39, 46;
+  reserved "todo_updated", "queue_snapshot", "shell_process_snapshot", "agent_task_progress_snapshot", "status_injected", "active_work_reminder_injected",
+    "final_provider_request_prompt_injected", "tool_availability_restored_prompt_injected",
+    "plan_validation_repair_injected", "pending_child_question_reminder_injected",
+    "exit_reminder_changed", "exit_reminder_injected", "context_reminder_injected",
+    "skill_context_injected";
+
+  oneof payload {
+    TurnStarted     turn_started     = 3;
+    TextChunk       text_chunk       = 4;
+    ReasoningChunk  reasoning_chunk  = 5;
+    ToolCallChunk   tool_call_chunk  = 6;
+    RetryNotice     retry_notice     = 7;
+    TurnEnded       turn_ended       = 8;
+    TurnFailed      turn_failed      = 9;
+    InputAdmitted   input_admitted   = 10;
+    InputPromoted   input_promoted   = 11;
+    ToolStarted     tool_started     = 12;
+    ToolFinished    tool_finished    = 13;
+    ToolCancelled   tool_cancelled   = 14;
+    ToolError       tool_error       = 15;
+    AgentStarted    agent_started    = 16;
+    AgentFinished   agent_finished   = 17;
+    AgentFailed     agent_failed     = 18;
+    AgentStatisticsUpdatedEvent agent_statistics_updated = 21;
+    PlanCompleted          plan_completed          = 22;
+    PendingPermission      permission_pending      = 23;
+    SessionUsageSnapshot session_usage_snapshot = 27;
+    CompactionStarted compaction_started = 28;
+    CompactionFinished compaction_finished = 29;
+    CompactionFailed compaction_failed = 30;
+    ProviderCallUsage provider_call_usage = 35;
+    SkillLoadedEvent skill_loaded = 40;
+    InputCanceled input_canceled = 41;
+    ProviderRequestPhaseChangedEvent provider_request_phase_changed = 42;
+    RequestUsageRecorded request_usage_recorded = 43;
+    ToolExecutionStarted tool_execution_started = 44;
+    ToolRequestReceived tool_request_received = 45;
+    ModeTurnCompleted mode_turn_completed = 47;
+    AgentNotice agent_notice = 48;
+    ToolSnapshot tool_snapshot = 49;
+    EncryptedReasoningReceivedEvent encrypted_reasoning_received = 50;
+  }
+}
+
+enum AgentTaskProgressStatus {
+  AGENT_TASK_PROGRESS_STATUS_UNSPECIFIED = 0;
+  AGENT_TASK_PROGRESS_STATUS_PENDING = 1;
+  AGENT_TASK_PROGRESS_STATUS_RUNNING = 2;
+  AGENT_TASK_PROGRESS_STATUS_SUCCEEDED = 3;
+  AGENT_TASK_PROGRESS_STATUS_FAILED = 4;
+  reserved 5;
+  AGENT_TASK_PROGRESS_STATUS_CANCELED = 6;
+}
+
+message AgentTaskProgressNode {
+  string name = 1;
+  AgentTaskProgressStatus status = 2;
+  repeated AgentTaskProgressNode children = 3;
+  string description = 4;
+  // Session of the task's retained child agent; that agent's own task graph nests under this node.
+  string agent_session_id = 5;
+  bool hidden = 6;
+}
+
+// The owning agent's whole task graph, keyed by the event's agent session.
+message AgentTaskProgressSnapshot {
+  reserved 1;
+  uint64 revision = 2;
+  repeated AgentTaskProgressNode root_nodes = 3;
+}
+
+enum ProviderRequestPhase {
+  PROVIDER_REQUEST_PHASE_UNSPECIFIED = 0;
+  PROVIDER_REQUEST_PHASE_REQUESTING = 1;
+  PROVIDER_REQUEST_PHASE_HEADERS_RECEIVED = 2;
+  PROVIDER_REQUEST_PHASE_IDLE = 3;
+}
+
+message ProviderRequestPhaseChangedEvent {
+  ProviderRequestPhase phase = 1;
+  uint32 attempt = 2;
+}
+
+// Durable facts, unlike the transient token-rate observation below.
+message RequestUsageRecorded {
+  string request_id = 1;
+  string parent_agent_session_id = 2;
+  string provider = 3;
+  string model = 4;
+  optional string effort = 5;
+  int64 input_tokens = 6;
+  int64 cached_input_tokens = 7;
+  int64 output_tokens = 8;
+  double input_cost = 9;
+  double output_cost = 10;
+  int64 context_size = 11;
+  int64 context_limit = 12;
+  repeated string tool_call_ids = 13;
+}
+
+message ToolExecutionStarted {
+  string request_id = 1;
+  int64 assistant_sequence = 2;
+  string tool_call_id = 3;
+  string tool_name = 4;
+  string parent_agent_session_id = 5;
+  string provider = 6;
+  string model = 7;
+  optional string effort = 8;
+}
+
+// The tool calls one assistant message asked for, counted before any of them
+// run. The tools themselves report start and finish separately, so a client
+// that wants to say how many were requested does not have to count them.
+// There is deliberately no correlation id: the count belongs to the message
+// that just arrived on this same stream, and sequencing on the stream is
+// already the correlation.
+message ToolRequestReceived {
+  int32 tool_call_count = 1;
+}
+
+message ProviderCallUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+}
+
+enum ShellProcessActivityKind {
+  SHELL_PROCESS_ACTIVITY_KIND_EXECUTION = 0;
+  SHELL_PROCESS_ACTIVITY_KIND_MONITOR = 1;
+}
+
+// A tool's snapshot. Chunks sharing a kind, owner, instance and revision are
+// applied only together and in order, ending at the final chunk; a removed
+// inventory stays removed. Data is the kind-defined message of one chunk, such
+// as AgentTaskProgressSnapshot for "agent_task_progress".
+message ToolSnapshot {
+  string kind                   = 1;
+  string owner_agent_session_id = 2;
+  string inventory_instance_id  = 3;
+  uint64 revision               = 4;
+  uint32 chunk_index            = 5;
+  bool final_chunk              = 6;
+  bool removed                  = 7;
+  bytes data                    = 8;
+}
+
+message AgentStarted {
+  string parent_agent_session_id = 1;
+  string name                    = 2;
+}
+
+message AgentFinished {
+  string parent_agent_session_id = 1;
+  string name                    = 2;
+  optional int64 elapsed_ms      = 3;
+}
+
+message AgentFailed {
+  string parent_agent_session_id = 1;
+  string name                    = 2;
+  string message                 = 3;
+}
+
+// A feature-specific notice. The kind names the producer's notice; the text is
+// shown as is and an empty text is not shown. Data is an optional kind-defined
+// message, such as ExitReminderChanged for "exit_reminder_changed".
+message AgentNotice {
+  string kind   = 1;
+  string notice = 2;
+  bytes data    = 3;
+}
+
+// The data of an "exit_reminder_changed" notice.
+message ExitReminderChanged {
+  oneof state {
+    string description = 1;
+    bool cleared = 2;
+  }
+  string title = 3;
+}
+
+message SkillLoadedEvent {
+  string path = 1;
+}
+
+message CompactionStarted {}
+
+message CompactionFinished {}
+
+message CompactionFailed {
+  string message = 1;
+}
+
+message AgentStatisticsUpdatedEvent {
+  int64  input_tokens        = 1;
+  int64  cached_input_tokens = 2;
+  int64  output_tokens       = 3;
+  int64  context_size        = 4;
+  int64  context_limit       = 5;
+  double input_cost          = 6;
+  double output_cost         = 7;
+}
+
+// Transient replacement state for all metered work in one user session.
+// Revision zero is the authoritative empty snapshot for a new session.
+message SessionUsageSnapshot {
+  uint64 revision            = 1;
+  int64  input_tokens        = 2;
+  int64  cached_input_tokens = 3;
+  int64  output_tokens       = 4;
+  int64  context_size        = 5;
+  int64  context_limit       = 6;
+  double input_cost          = 7;
+  double output_cost         = 8;
+}
+
+enum InputSource {
+  INPUT_SOURCE_UNSPECIFIED = 0;
+  INPUT_SOURCE_MONITOR = 1;
+}
+
+// Incoming input, accepted but not yet part of the conversation. It is on the
+// stream because more than one client can watch a session, and a client that
+// did not send the input has no other way to learn of it.
+message InputAdmitted {
+  string   input_id   = 1;
+  string   message_id = 2;
+  string   content    = 3;
+  Delivery delivery   = 4;
+  repeated MessageContentPart parts = 5;
+  InputSource source = 6;
+}
+
+// The same prompt, now in the conversation. The content is not repeated: the
+// admission carried it, and a second copy could disagree with the first.
+message InputPromoted {
+  string input_id   = 1;
+  string message_id = 2;
+}
+
+message InputCanceled {
+  string input_id = 1;
+}
+
+message TurnStarted {
+  string         model            = 1;
+  TurnModelAliasIcon model_alias_icon = 2;
+}
+
+message TurnModelAliasIcon {
+  reserved 3;
+  reserved "muted";
+
+  string                  glyph = 1;
+  TurnModelAliasIconColor color = 2;
+}
+
+enum TurnModelAliasIconColor {
+  TURN_MODEL_ALIAS_ICON_COLOR_BLACK   = 0;
+  TURN_MODEL_ALIAS_ICON_COLOR_RED     = 1;
+  TURN_MODEL_ALIAS_ICON_COLOR_GREEN   = 2;
+  TURN_MODEL_ALIAS_ICON_COLOR_YELLOW  = 3;
+  TURN_MODEL_ALIAS_ICON_COLOR_BLUE    = 4;
+  TURN_MODEL_ALIAS_ICON_COLOR_MAGENTA = 5;
+  TURN_MODEL_ALIAS_ICON_COLOR_CYAN    = 6;
+  TURN_MODEL_ALIAS_ICON_COLOR_WHITE   = 7;
+  TURN_MODEL_ALIAS_ICON_COLOR_GRAY    = 8;
+}
+
+message TextChunk {
+  string fragment = 1;
+}
+
+enum ReasoningKind {
+  REASONING_KIND_RAW     = 0;
+  REASONING_KIND_SUMMARY = 1;
+}
+
+message ReasoningChunk {
+  string        fragment  = 1;
+  ReasoningKind kind      = 2;
+  string        part_id   = 3;
+  bool          completed = 4;
+}
+
+message EncryptedReasoningReceivedEvent {}
+
+message ToolCallChunk {
+  string tool_call_id       = 1;
+  string tool_name          = 2;
+  string arguments_fragment = 3;
+}
+
+message ToolStarted {
+  string tool_call_id = 1;
+  string tool_name    = 2;
+}
+
+message ToolFinished {
+  string tool_call_id             = 1;
+  string tool_name                = 2;
+  optional string result          = 3;
+  YieldedShellProcess yielded_process = 4;
+  repeated ArtifactReference artifacts = 5;
+}
+
+message YieldedShellProcess {
+  string process_id            = 1;
+  string name                  = 2;
+  string inventory_instance_id = 3;
+  uint64 visible_revision      = 4;
+  optional string stdout_path  = 5;
+  optional string stderr_path  = 6;
+  ShellProcessActivityKind activity_kind = 7;
+}
+
+message ToolCancelled {
+  string tool_call_id = 1;
+  string tool_name    = 2;
+}
+
+message ToolError {
+  string tool_call_id = 1;
+  string tool_name    = 2;
+  string message      = 3;
+}
+
+message RetryNotice {
+  int32  attempt        = 1;
+  int32  retry_after_ms = 2;
+  string reason         = 3;
+}
+
+// An interrupted turn ends here too, with finish_reason "interrupted". It is
+// not a separate payload: the turn stopped, and a second way to say so is a
+// second thing every client must learn to read.
+message TurnEnded {
+  string finish_reason = 1;
+  int64  input_tokens  = 2;
+  int64  output_tokens = 3;
+}
+
+// A queued prompt's run is over: its turns, the mode's completion and any
+// repair turns. A client ends the main agent's turn here, not at TurnEnded.
+message ModeTurnCompleted {
+}
+
+message PlanCompleted {
+  string agent_session_id = 1;
+  string message_id = 2;
+  string markdown = 3;
+  TurnCompleteDialog dialog = 4;
+  AgentTaskProgressSnapshot task_tree = 5;
+  repeated PlanTaskDeclaration task_declarations = 6;
+}
+
+message PlanTaskDeclaration {
+  string name = 1;
+  AgentTaskProgressStatus status = 2;
+  repeated string dependencies = 3;
+  string description = 4;
+  string acceptance_criteria = 5;
+  optional string model = 6;
+
+  oneof payload {
+    string instruction = 7;
+    PlanTaskDeclarationChildren children = 8;
+  }
+  bool hidden = 9;
+}
+
+message PlanTaskDeclarationChildren {
+  repeated PlanTaskDeclaration tasks = 1;
+}
+
+message TurnCompleteDialog {
+  string prompt = 1;
+  repeated string context = 2;
+  repeated DialogChoice choices = 3;
+  string custom_choice = 4;
+  string custom_description = 5;
+  string custom_prompt = 6;
+  string empty_message = 7;
+}
+
+message DialogChoice {
+  string value = 1;
+  string description = 2;
+  repeated string aliases = 3;
+  ChoiceAction action = 4;
+}
+
+message ChoiceAction {
+  string mode = 1;
+  string prompt = 2;
+}
+
+message TurnFailed {
+  string message = 1;
+  string provider_response_body = 2;
+}

@@ -1,0 +1,646 @@
+{
+  "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+  "cases": [
+    {
+      "case_id": "frames-1",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Request_is_sent_as_one_message_split_into_frames(1,1)",
+      "kind": "send",
+      "request_bytes": 1,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "frames-1048576",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Request_is_sent_as_one_message_split_into_frames(1048576,1)",
+      "kind": "send",
+      "request_bytes": 1048576,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "frames-2097153",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Request_is_sent_as_one_message_split_into_frames(2097153,3)",
+      "kind": "send",
+      "request_bytes": 2097153,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "encoded-request-limit-3",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Request_limit_counts_encoded_bytes_before_sending(3,false)",
+      "kind": "send",
+      "request_text": "éé",
+      "maximum_request_bytes": 3,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "encoded-request-limit-4",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Request_limit_counts_encoded_bytes_before_sending(4,true)",
+      "kind": "send",
+      "request_text": "éé",
+      "maximum_request_bytes": 4,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "encoded-request-limit-5",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Request_limit_counts_encoded_bytes_before_sending(5,true)",
+      "kind": "send",
+      "request_text": "éé",
+      "maximum_request_bytes": 5,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-request-boundary-0",
+      "canonical_source_case": null,
+      "kind": "send",
+      "request_bytes": 0,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-request-boundary-1048575",
+      "canonical_source_case": null,
+      "kind": "send",
+      "request_bytes": 1048575,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-request-boundary-1048577",
+      "canonical_source_case": null,
+      "kind": "send",
+      "request_bytes": 1048577,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-request-boundary-16777216",
+      "canonical_source_case": null,
+      "kind": "send",
+      "request_bytes": 16777216,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-request-boundary-16777217",
+      "canonical_source_case": null,
+      "kind": "send",
+      "request_bytes": 16777217,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-config-limit-precedes-message-limit",
+      "canonical_source_case": null,
+      "kind": "send",
+      "request_bytes": 16777217,
+      "maximum_request_bytes": 16777216,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "attempt-completed",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Attempt_bytes_count_utf8_fragments_including_partial_messages(completed)",
+      "kind": "send",
+      "request_text": "éé",
+      "cancel_after_ms": 0,
+      "messages": [
+        {
+          "text": "{\"type\":\"re",
+          "end": false
+        },
+        {
+          "text": "sponse.completed\",\"response\":{\"output\":[],\"id\":\"é\"}}"
+        }
+      ]
+    },
+    {
+      "case_id": "attempt-partial_cancelled",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Attempt_bytes_count_utf8_fragments_including_partial_messages(partial_cancelled)",
+      "kind": "send",
+      "request_text": "éé",
+      "cancel_after_ms": 25,
+      "messages": [
+        {
+          "text": "{\"type\":\"re",
+          "end": false
+        }
+      ]
+    },
+    {
+      "case_id": "attempt-partial_failed",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Attempt_bytes_count_utf8_fragments_including_partial_messages(partial_failed)",
+      "kind": "send",
+      "request_text": "éé",
+      "cancel_after_ms": 0,
+      "messages": [
+        {
+          "text": "{\"type\":\"re",
+          "end": false
+        },
+        {
+          "type": "Close",
+          "close_status": 1009,
+          "close_description": "message too big"
+        }
+      ]
+    },
+    {
+      "case_id": "text-reassembly",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Text_frames_reassemble_and_share_responses_event_semantics",
+      "kind": "send",
+      "request_text": "{}",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.output_text.delta\",\"delta\":\"héllo\"}",
+          "split_at": 17
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"héllo\"}]}]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "invalid-binary",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Invalid_transport_messages_abort_the_socket(Binary,unexpected binary)",
+      "kind": "send",
+      "messages": [
+        {
+          "type": "Binary"
+        }
+      ]
+    },
+    {
+      "case_id": "invalid-close",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Invalid_transport_messages_abort_the_socket(Close,closed before)",
+      "kind": "send",
+      "messages": [
+        {
+          "type": "Close"
+        }
+      ]
+    },
+    {
+      "case_id": "pending-cancellation",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Cancellation_aborts_a_pending_receive",
+      "kind": "send",
+      "cancel_after_ms": 25,
+      "messages": []
+    },
+    {
+      "case_id": "supplemental-idle-timeout",
+      "canonical_source_case": null,
+      "kind": "send",
+      "idle_timeout_ms": 25,
+      "messages": []
+    },
+    {
+      "case_id": "supplemental-send-idle-timeout",
+      "canonical_source_case": null,
+      "kind": "send",
+      "idle_timeout_ms": 25,
+      "stall_send": true,
+      "messages": []
+    },
+    {
+      "case_id": "supplemental-send-cancellation",
+      "canonical_source_case": null,
+      "kind": "send",
+      "cancel_after_ms": 25,
+      "stall_send": true,
+      "messages": []
+    },
+    {
+      "case_id": "supplemental-pre-cancel",
+      "canonical_source_case": null,
+      "kind": "send",
+      "cancel_before": true,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-terminal-trailing-malformed-unread",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        },
+        {
+          "text": "{"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-terminal-trailing-close-unread",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        },
+        {
+          "type": "Close",
+          "close_status": 1000
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-terminal-trailing-second-terminal-unread",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-delta-malformed",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.output_text.delta\",\"delta\":\"héllo\"}"
+        },
+        {
+          "text": "{"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-delta-provider-error",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.output_text.delta\",\"delta\":\"héllo\"}"
+        },
+        {
+          "text": "{\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"code\":\"oracle_error\",\"message\":\"scripted error\"}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-delta-close",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.output_text.delta\",\"delta\":\"héllo\"}"
+        },
+        {
+          "type": "Close",
+          "close_status": 1011,
+          "close_description": "scripted close"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-delta-cancel-after-yield",
+      "canonical_source_case": null,
+      "kind": "send",
+      "cancel_after_events": 1,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.output_text.delta\",\"delta\":\"héllo\"}"
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-delta-dispose-enumerator",
+      "canonical_source_case": null,
+      "kind": "send",
+      "stop_after_events": 1,
+      "messages": [
+        {
+          "text": "{\"type\":\"response.output_text.delta\",\"delta\":\"héllo\"}"
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-split-utf8",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"response.output_text.delta\",\"delta\":\"héllo\"}",
+          "split_at": 48
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-event-size-4194304",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"oracle.unknown\"}",
+          "pad_to": 4194304
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-event-size-4194305",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"oracle.unknown\"}",
+          "pad_to": 4194305
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-stream-size-exact",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"oracle.unknown\"}",
+          "pad_to": 4194304,
+          "repeat": 15
+        },
+        {
+          "text": "{\"type\":\"oracle.unknown\"}",
+          "pad_to": 4194250
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-stream-size-over",
+      "canonical_source_case": null,
+      "kind": "send",
+      "messages": [
+        {
+          "text": "{\"type\":\"oracle.unknown\"}",
+          "pad_to": 4194304,
+          "repeat": 16
+        },
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "supplemental-stale-exact-boundary-and-reset",
+      "canonical_source_case": null,
+      "kind": "send",
+      "initial_tick": 0,
+      "stale_probe_ticks": [
+        599999999,
+        600000000,
+        600000001
+      ],
+      "exchange_tick": 700000000,
+      "after_probe_ticks": [
+        1299999999,
+        1300000000,
+        1300000001
+      ],
+      "messages": [
+        {
+          "text": "{\"type\":\"response.completed\",\"response\":{\"output\":[]}}"
+        }
+      ]
+    },
+    {
+      "case_id": "client-37",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Client_derives_secure_endpoint_and_adds_v2_and_auth_headers",
+      "kind": "client",
+      "endpoint": "https://api.example.test/v1/responses",
+      "headers": {
+        "Authorization": "Bearer synthetic-key",
+        "openai-beta": "old-value",
+        "X-Oracle": "synthetic"
+      },
+      "connect_timeout_ms": 10000
+    },
+    {
+      "case_id": "client-38",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Client_derives_plaintext_endpoint_and_certificate_exception_is_authority_scoped",
+      "kind": "client",
+      "endpoint": "http://api.example.test/v1/responses",
+      "headers": {
+        "Authorization": "Bearer synthetic-key",
+        "openai-beta": "old-value",
+        "X-Oracle": "synthetic"
+      },
+      "connect_timeout_ms": 10000
+    },
+    {
+      "case_id": "client-39",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "https://api.example.test:8443/v1/responses?q=one#fragment",
+      "headers": {
+        "Authorization": "Bearer synthetic-key",
+        "openai-beta": "old-value",
+        "X-Oracle": "synthetic"
+      },
+      "connect_timeout_ms": 10000
+    },
+    {
+      "case_id": "client-40",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "http://api.example.test:8080/v1/responses",
+      "headers": {
+        "Authorization": "Bearer synthetic-key",
+        "openai-beta": "old-value",
+        "X-Oracle": "synthetic"
+      },
+      "connect_timeout_ms": 10000
+    },
+    {
+      "case_id": "client-41",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "wss://api.example.test/v1/responses",
+      "headers": {
+        "Authorization": "Bearer synthetic-key",
+        "openai-beta": "old-value",
+        "X-Oracle": "synthetic"
+      },
+      "connect_timeout_ms": 10000
+    },
+    {
+      "case_id": "client-42",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "ftp://api.example.test/v1/responses",
+      "headers": {
+        "Authorization": "Bearer synthetic-key",
+        "openai-beta": "old-value",
+        "X-Oracle": "synthetic"
+      },
+      "connect_timeout_ms": 10000
+    },
+    {
+      "case_id": "supplemental-client-failure-NotAWebSocket",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "https://api.example.test/v1/responses",
+      "headers": {},
+      "failure": "NotAWebSocket",
+      "connect_timeout_ms": 10
+    },
+    {
+      "case_id": "supplemental-client-failure-ConnectionClosedPrematurely",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "https://api.example.test/v1/responses",
+      "headers": {},
+      "failure": "ConnectionClosedPrematurely",
+      "connect_timeout_ms": 10
+    },
+    {
+      "case_id": "supplemental-client-failure-upgrade-429",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "https://api.example.test/v1/responses",
+      "headers": {},
+      "failure": "upgrade-429",
+      "connect_timeout_ms": 10
+    },
+    {
+      "case_id": "supplemental-client-failure-transport",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "https://api.example.test/v1/responses",
+      "headers": {},
+      "failure": "transport",
+      "connect_timeout_ms": 10
+    },
+    {
+      "case_id": "supplemental-client-failure-cancelled",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "https://api.example.test/v1/responses",
+      "headers": {},
+      "failure": "cancelled",
+      "connect_timeout_ms": 10
+    },
+    {
+      "case_id": "supplemental-client-failure-invalid-operation",
+      "canonical_source_case": null,
+      "kind": "client",
+      "endpoint": "https://api.example.test/v1/responses",
+      "headers": {},
+      "failure": "invalid-operation",
+      "connect_timeout_ms": 10
+    },
+    {
+      "case_id": "authority-49",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Client_derives_plaintext_endpoint_and_certificate_exception_is_authority_scoped",
+      "kind": "authority",
+      "endpoint": "wss://api.example.test/v1/responses",
+      "authority": "https://api.example.test"
+    },
+    {
+      "case_id": "authority-50",
+      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Client_derives_plaintext_endpoint_and_certificate_exception_is_authority_scoped",
+      "kind": "authority",
+      "endpoint": "wss://other.example.test/v1/responses",
+      "authority": "https://api.example.test"
+    },
+    {
+      "case_id": "authority-51",
+      "canonical_source_case": null,
+      "kind": "authority",
+      "endpoint": "ws://api.example.test:80/path",
+      "authority": "http://api.example.test"
+    },
+    {
+      "case_id": "authority-52",
+      "canonical_source_case": null,
+      "kind": "authority",
+      "endpoint": "wss://api.example.test:8443/path",
+      "authority": "https://api.example.test"
+    },
+    {
+      "case_id": "authority-53",
+      "canonical_source_case": null,
+      "kind": "authority",
+      "endpoint": "https://API.EXAMPLE.TEST/path",
+      "authority": "HTTPS://api.example.test"
+    },
+    {
+      "case_id": "authority-54",
+      "canonical_source_case": null,
+      "kind": "authority",
+      "endpoint": "wss://api.example.test/path",
+      "authority": "http://api.example.test"
+    },
+    {
+      "case_id": "supplemental-authority-non-request",
+      "canonical_source_case": null,
+      "kind": "authority",
+      "endpoint": null,
+      "authority": "https://api.example.test"
+    }
+  ]
+}

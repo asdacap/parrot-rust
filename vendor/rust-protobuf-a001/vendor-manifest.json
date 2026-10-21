@@ -1,0 +1,1496 @@
+{
+  "files": [
+    {
+      "bytes": 7,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/.cargo-ok",
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/.cargo-ok",
+      "source_relative_path": "protobuf-codegen/.cargo-ok"
+    },
+    {
+      "bytes": 110,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/.cargo_vcs_info.json",
+      "sha256": "c71397539b034adf6d1a1a36d4769410d568377b238714dfc8fa6030f1ace89d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/.cargo_vcs_info.json",
+      "source_relative_path": "protobuf-codegen/.cargo_vcs_info.json"
+    },
+    {
+      "bytes": 10771,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/Cargo.lock",
+      "sha256": "72aef6785e9ecdb1e97d811c703bfddfd68df2e8a09f6a7b1d9c26f6300df00e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/Cargo.lock",
+      "source_relative_path": "protobuf-codegen/Cargo.lock"
+    },
+    {
+      "bytes": 1509,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/Cargo.toml",
+      "sha256": "f5257d49ec59af59233fcffa62a2fca01af442b8ee523e694be5fdf6b1374ad9",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/Cargo.toml",
+      "source_relative_path": "protobuf-codegen/Cargo.toml"
+    },
+    {
+      "bytes": 805,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/Cargo.toml.orig",
+      "sha256": "78bf8de99c13dd486d33a816d2f58b640c629cc994ccbbdb1fb5fe0de2edbfc1",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/Cargo.toml.orig",
+      "source_relative_path": "protobuf-codegen/Cargo.toml.orig"
+    },
+    {
+      "bytes": 1058,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/LICENSE.txt",
+      "sha256": "7f2fa80a60e84f8dc0747abb0e42342f83bded04a20461a636b47c0331b92ddf",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/LICENSE.txt",
+      "source_relative_path": "protobuf-codegen/LICENSE.txt"
+    },
+    {
+      "bytes": 4037,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/README.md",
+      "sha256": "2e43a3f881e6d0452c39cbe25f27b72363e81c6c9c2273131f207d199526acb7",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/README.md",
+      "source_relative_path": "protobuf-codegen/README.md"
+    },
+    {
+      "bytes": 75,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/bin/protoc-gen-rs.rs",
+      "sha256": "aa4af658cd9e159cf6095f2cd21bcb829569d75c042f5c42ea66835fae709252",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/bin/protoc-gen-rs.rs",
+      "source_relative_path": "protobuf-codegen/src/bin/protoc-gen-rs.rs"
+    },
+    {
+      "bytes": 8041,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/codegen/mod.rs",
+      "sha256": "13e466e47ed84ca519e08bfe3c223e32336b032d06913e808e4bd20185af941e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/codegen/mod.rs",
+      "source_relative_path": "protobuf-codegen/src/codegen/mod.rs"
+    },
+    {
+      "bytes": 1438,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/compiler_plugin.rs",
+      "sha256": "a382af7d0a2e3154c1cc4c0be8c9ff9b4091c8472b8e9904de94b193b89d7e04",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/compiler_plugin.rs",
+      "source_relative_path": "protobuf-codegen/src/compiler_plugin.rs"
+    },
+    {
+      "bytes": 2595,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/customize/ctx.rs",
+      "sha256": "a13a18e60a4c4144a8f6c5767b52d3fe442a2b264080f48b7fcd4414c32911f7",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/customize/ctx.rs",
+      "source_relative_path": "protobuf-codegen/src/customize/ctx.rs"
+    },
+    {
+      "bytes": 9293,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/customize/mod.rs",
+      "sha256": "31909cd82ca66a87326767deb0000f5e569cb26945a0606f5bb9832e2baae511",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/customize/mod.rs",
+      "source_relative_path": "protobuf-codegen/src/customize/mod.rs"
+    },
+    {
+      "bytes": 3134,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/customize/rustproto_proto.rs",
+      "sha256": "2f03e70bcaa7d28216bdda820def30ca9b1f291d5a3b5fa6f994f3b93fb61e95",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/customize/rustproto_proto.rs",
+      "source_relative_path": "protobuf-codegen/src/customize/rustproto_proto.rs"
+    },
+    {
+      "bytes": 2074,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/all.rs",
+      "sha256": "678db9729346aec3d42b810c622968549d91334ef3d1a1de36d038b1ea89e93c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/all.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/all.rs"
+    },
+    {
+      "bytes": 13615,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/code_writer.rs",
+      "sha256": "5a1714ae674b6d0dff2cb64802319a18024b5e6d666727580e9ff7614019b29a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/code_writer.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/code_writer.rs"
+    },
+    {
+      "bytes": 2031,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/descriptor.rs",
+      "sha256": "372422d02deba979838931229d912aa1b049806a0a9c2147167a0d9517501d4c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/descriptor.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/descriptor.rs"
+    },
+    {
+      "bytes": 14424,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/enums.rs",
+      "sha256": "8f3874860c90145932cc1b93be05dd33c011d0bea92139a912a0b5e145c0501b",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/enums.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/enums.rs"
+    },
+    {
+      "bytes": 4486,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/extensions.rs",
+      "sha256": "96247a04c42d9a5f4f7d840820f009d535fb5fa2e9296d9a5f190be1ca749f8d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/extensions.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/extensions.rs"
+    },
+    {
+      "bytes": 8680,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/accessor.rs",
+      "sha256": "92a4c56818e3a0c54b2505a09fa25e096770faae29b7d4c121b3b030ba52a939",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/accessor.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/accessor.rs"
+    },
+    {
+      "bytes": 11609,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/elem.rs",
+      "sha256": "794946f09deed102619476b04954156be8ad3ab6676e245e402fa89b3473ccc8",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/elem.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/elem.rs"
+    },
+    {
+      "bytes": 71783,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/mod.rs",
+      "sha256": "b236f8eae9e215c97045d68e795e96df136b79e4a20e3020a21bf01ef0d0bc64",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/mod.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/mod.rs"
+    },
+    {
+      "bytes": 1976,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/option_kind.rs",
+      "sha256": "8d73b49fdfdc2783d0eea222d64972a4e4ded3c619df18201f1e2a2bbce28a80",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/option_kind.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/option_kind.rs"
+    },
+    {
+      "bytes": 1177,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/repeated.rs",
+      "sha256": "26c9f8e4ec701a797c582fadd66e128d00eaf9eddc760b98f4b566464e62a0ac",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/repeated.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/repeated.rs"
+    },
+    {
+      "bytes": 1423,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/singular.rs",
+      "sha256": "8e31e61b931653f900e39d300f2ea271e2caf6eeb65bbe80238a527ac87e31dc",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/singular.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/singular.rs"
+    },
+    {
+      "bytes": 148,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/tag.rs",
+      "sha256": "026c209322c9225719eca2ec7bb59f9086f45c516f67861a0672ced4b862d2a0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/tag.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/tag.rs"
+    },
+    {
+      "bytes": 4278,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/field/type_ext.rs",
+      "sha256": "3f2fbb2a72c39efc3535fa196d25f315afe5498f87162f54473401a63b59d91c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/field/type_ext.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/field/type_ext.rs"
+    },
+    {
+      "bytes": 5158,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/file.rs",
+      "sha256": "ee60a8494249049fe8b7b57ec1ff2fedfba3b2b36e92d6ed555647830e35842a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/file.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/file.rs"
+    },
+    {
+      "bytes": 209,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/file_and_mod.rs",
+      "sha256": "b1a35aececabf39758ee5cdd417ca2be28de03690d4dabdfff227b3a8b08ce3a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/file_and_mod.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/file_and_mod.rs"
+    },
+    {
+      "bytes": 6762,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/file_descriptor.rs",
+      "sha256": "3fe9cb6ebf7cbf806a603431066307653edf88dd7f3f40cb6719a6084e08824d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/file_descriptor.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/file_descriptor.rs"
+    },
+    {
+      "bytes": 387,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/inside.rs",
+      "sha256": "5f5c660ac2a536e2cb26eb3cd3f0d17a933c45154041943db7f2c286bf2d11e0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/inside.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/inside.rs"
+    },
+    {
+      "bytes": 487,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/map.rs",
+      "sha256": "e33f37ff94a0b7a56ca326f940b3871b5189338deda6ef45fe9c635db3f45cdc",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/map.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/map.rs"
+    },
+    {
+      "bytes": 28039,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/message.rs",
+      "sha256": "8ee9cf8b8dfd1671036c0b6069e67532ee4e18b13adafcb72ea17b298303ec35",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/message.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/message.rs"
+    },
+    {
+      "bytes": 521,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/mod.rs",
+      "sha256": "38a3166bae830d47b9a49faa6d765072785ce7462a5d0c1c84d81bf41e1684ea",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/mod.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/mod.rs"
+    },
+    {
+      "bytes": 554,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/mod_rs.rs",
+      "sha256": "d4496ec6fbe82b724ca075d83c56cdd21f1458f98bdac74295018aba5d197105",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/mod_rs.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/mod_rs.rs"
+    },
+    {
+      "bytes": 12337,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/oneof.rs",
+      "sha256": "ff7a0fc724119b80a42caac482c2fb43f15460804b9d542c21d80478368b896c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/oneof.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/oneof.rs"
+    },
+    {
+      "bytes": 3098,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/paths.rs",
+      "sha256": "c6d4886042e7907039a4f8db427035232a43b095c833b6ba6eabc66ba5508d17",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/paths.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/paths.rs"
+    },
+    {
+      "bytes": 2443,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/protoc_insertion_point.rs",
+      "sha256": "1cec1f206e94d5165c23c200903eade39e979277f1a8746059bce04580400cc6",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/protoc_insertion_point.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/protoc_insertion_point.rs"
+    },
+    {
+      "bytes": 1007,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/component.rs",
+      "sha256": "6746e675bc844bd372c0efbaf880ae71c355d0e2f4be6fc398cf73cf211bf992",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/component.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/component.rs"
+    },
+    {
+      "bytes": 1629,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/ident.rs",
+      "sha256": "c11ba5ec049506f1deb62a97c60f91ad24cd0ecdfa11bbc0294f61261fd0920e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/ident.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/ident.rs"
+    },
+    {
+      "bytes": 1235,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/ident_with_path.rs",
+      "sha256": "f57c36ac2b66e4cafb4573f40ee9e40bafcc31c6098bd057441ce0e0a1daa3fb",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/ident_with_path.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/ident_with_path.rs"
+    },
+    {
+      "bytes": 1505,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/keywords.rs",
+      "sha256": "37217182c7ea33e90aa16742ea556c1bdcc78733d5fe3bbe0877e49f6e59a9cc",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/keywords.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/keywords.rs"
+    },
+    {
+      "bytes": 198,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/mod.rs",
+      "sha256": "d0fd39c4097530818adb06363a45665e81c7bdf327e7dcb6acc65e851a1984af",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/mod.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/mod.rs"
+    },
+    {
+      "bytes": 2466,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/path.rs",
+      "sha256": "34d437f5678f3c4ccad6a89b9317a688e29f75304dcd6ad34f09b81855fd08be",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/path.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/path.rs"
+    },
+    {
+      "bytes": 1541,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/quote.rs",
+      "sha256": "5feea9454c953717d00aacad629e976d305e7a8d2b0ab425408ceaf50999a3a2",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/quote.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/quote.rs"
+    },
+    {
+      "bytes": 2531,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/rel_path.rs",
+      "sha256": "fe9821d18f072c44f0b32397c417eab5d1bb53683242eca95c57d6abd69646ac",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/rel_path.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/rel_path.rs"
+    },
+    {
+      "bytes": 372,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust/snippets.rs",
+      "sha256": "22ec939d85c40e337cc59f8b9b32f4031b8aa21a07a145490ad2b3bbee22230c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust/snippets.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust/snippets.rs"
+    },
+    {
+      "bytes": 22787,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/rust_types_values.rs",
+      "sha256": "f1c2557caaf113b2fadbb9541655d27fcc6bf2bee481bfc22e33639f5d0f8539",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/rust_types_values.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/rust_types_values.rs"
+    },
+    {
+      "bytes": 14601,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/scope.rs",
+      "sha256": "ce1a43f04a7b02ea1ac6b3eb6a4582780e8b343fef2d9814e5e06bb3e43e7ce9",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/scope.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/scope.rs"
+    },
+    {
+      "bytes": 1342,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/strx.rs",
+      "sha256": "9afabb8372d33be7d55fec13ab98c87f531b70d332ab9df2dcb9cb7a5adc2222",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/strx.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/strx.rs"
+    },
+    {
+      "bytes": 3223,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen/well_known_types.rs",
+      "sha256": "91c77f39b7cf86a90434e6ca9691ccb1b034ed39590fdffb0eec81666e45d4a9",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen/well_known_types.rs",
+      "source_relative_path": "protobuf-codegen/src/gen/well_known_types.rs"
+    },
+    {
+      "bytes": 1666,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/gen_and_write.rs",
+      "sha256": "f8f9fd5191566e59b6759a3550a1a5aa48d2c3b1a6e5d4d109312bf944b1e397",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/gen_and_write.rs",
+      "source_relative_path": "protobuf-codegen/src/gen_and_write.rs"
+    },
+    {
+      "bytes": 4890,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/lib.rs",
+      "sha256": "10b921c02663c3bd5aa1e5ec93777bab08d3284a022a60178f889e3d2d11d91d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/lib.rs",
+      "source_relative_path": "protobuf-codegen/src/lib.rs"
+    },
+    {
+      "bytes": 555,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf-codegen/src/protoc_gen_rs.rs",
+      "sha256": "f7dcfbb609360f46d30a81eda98ed450bb23fac4029650d8bb8e2fcdf9923407",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf-codegen/src/protoc_gen_rs.rs",
+      "source_relative_path": "protobuf-codegen/src/protoc_gen_rs.rs"
+    },
+    {
+      "bytes": 7,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/.cargo-ok",
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/.cargo-ok",
+      "source_relative_path": "protobuf/.cargo-ok"
+    },
+    {
+      "bytes": 102,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/.cargo_vcs_info.json",
+      "sha256": "af3d214b920e741515f78fa97a25e5141b44bc450f36126baf830b4690689cff",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/.cargo_vcs_info.json",
+      "source_relative_path": "protobuf/.cargo_vcs_info.json"
+    },
+    {
+      "bytes": 1264,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/Cargo.toml",
+      "sha256": "7f0fbe814e08cbe48a48bdd80d008961bf4fd7073de0aec8c38402e3702f9b4d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/Cargo.toml",
+      "source_relative_path": "protobuf/Cargo.toml"
+    },
+    {
+      "bytes": 778,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/Cargo.toml.orig",
+      "sha256": "49ecdfed1ee4326b75644f8980130f6deaba859e139ba9b4f38128c9989574e2",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/Cargo.toml.orig",
+      "source_relative_path": "protobuf/Cargo.toml.orig"
+    },
+    {
+      "bytes": 1058,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/LICENSE.txt",
+      "sha256": "7f2fa80a60e84f8dc0747abb0e42342f83bded04a20461a636b47c0331b92ddf",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/LICENSE.txt",
+      "source_relative_path": "protobuf/LICENSE.txt"
+    },
+    {
+      "bytes": 1278,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/README.md",
+      "sha256": "14dbb3068c031afbd44010a4ff0c8146aa7e02f6051579177767f218fff9cd38",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/README.md",
+      "source_relative_path": "protobuf/README.md"
+    },
+    {
+      "bytes": 1484,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/build.rs",
+      "sha256": "347d9aa6d4b102b6e83c65aeef89b1e1752536bd8ef80fc834a2c78d5cb2ff80",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/build.rs",
+      "source_relative_path": "protobuf/build.rs"
+    },
+    {
+      "bytes": 1127,
+      "mode": "0755",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/regenerate.sh",
+      "sha256": "df3bc8537c038fd356367e5af433c284dd5b76505c35f6f89deab0f099a3e3e0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/regenerate.sh",
+      "source_relative_path": "protobuf/regenerate.sh"
+    },
+    {
+      "bytes": 137,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/byteorder.rs",
+      "sha256": "9e6b481be82182ac99ff9704468b4d64656fb922f90c54ca83a8d7ca1dfd2e3a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/byteorder.rs",
+      "source_relative_path": "protobuf/src/byteorder.rs"
+    },
+    {
+      "bytes": 1260,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/cached_size.rs",
+      "sha256": "895788d7356a1fcd0f2d7446996066f8c53a0f36032174a97273997e65440fa0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/cached_size.rs",
+      "source_relative_path": "protobuf/src/cached_size.rs"
+    },
+    {
+      "bytes": 2466,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/chars.rs",
+      "sha256": "816a0af0b830ecd43028e40295fe0bf9eb79263f00fee01678c75d4ac5b7e908",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/chars.rs",
+      "source_relative_path": "protobuf/src/chars.rs"
+    },
+    {
+      "bytes": 15068,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_input_stream/buf_read_iter.rs",
+      "sha256": "2cba31136e56dd63c9a17d1bf4627f430b2ed3ddb35abf4479f57bcb912cdb4e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_input_stream/buf_read_iter.rs",
+      "source_relative_path": "protobuf/src/coded_input_stream/buf_read_iter.rs"
+    },
+    {
+      "bytes": 3483,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_input_stream/buf_read_or_reader.rs",
+      "sha256": "2bf3befcfce8c97faae7563084a7d93931afc5b886419e491111c15b4139058e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_input_stream/buf_read_or_reader.rs",
+      "source_relative_path": "protobuf/src/coded_input_stream/buf_read_or_reader.rs"
+    },
+    {
+      "bytes": 2296,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_input_stream/input_buf.rs",
+      "sha256": "cf71e63d3aef90188c55b6d42aa7cad47bcba16b27e687e44a15bd45e65b8737",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_input_stream/input_buf.rs",
+      "source_relative_path": "protobuf/src/coded_input_stream/input_buf.rs"
+    },
+    {
+      "bytes": 408,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_input_stream/input_source.rs",
+      "sha256": "8ce41ec8d147d03adf2dbd27ae0fa0b6e33400b62a9c945ab7aa2224bf43a863",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_input_stream/input_source.rs",
+      "source_relative_path": "protobuf/src/coded_input_stream/input_source.rs"
+    },
+    {
+      "bytes": 32983,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_input_stream/mod.rs",
+      "sha256": "4ba537782e290c0bf8b725498e431f701ad051f12b936452c8f9f5bdff332a5c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_input_stream/mod.rs",
+      "source_relative_path": "protobuf/src/coded_input_stream/mod.rs"
+    },
+    {
+      "bytes": 3450,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_output_stream/buffer.rs",
+      "sha256": "cafbbb3f02df26c98a4e5556e99a5a2ce811ffea4c49ba982532a6d9a53ec7d8",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_output_stream/buffer.rs",
+      "source_relative_path": "protobuf/src/coded_output_stream/buffer.rs"
+    },
+    {
+      "bytes": 40942,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_output_stream/mod.rs",
+      "sha256": "803c4aadf850ff68159e553105ef5830b6444c50e8fda55e3de16846708d9f11",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_output_stream/mod.rs",
+      "source_relative_path": "protobuf/src/coded_output_stream/mod.rs"
+    },
+    {
+      "bytes": 1168,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_output_stream/output_target.rs",
+      "sha256": "ab28889b824b91688cb5c17cf79bdbec96aeeea59f22946b9f359b957cc40580",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_output_stream/output_target.rs",
+      "source_relative_path": "protobuf/src/coded_output_stream/output_target.rs"
+    },
+    {
+      "bytes": 913,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/coded_output_stream/with.rs",
+      "sha256": "47541db9f4f51cacd406571f02d6abe8f4837413c7cecbe511fc0c24ef2384f2",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/coded_output_stream/with.rs",
+      "source_relative_path": "protobuf/src/coded_output_stream/with.rs"
+    },
+    {
+      "bytes": 418837,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/descriptor.rs",
+      "sha256": "4b3f1a458d5e105c01c03671bce753b564fcddefabe36ab41f986ac070a33614",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/descriptor.rs",
+      "source_relative_path": "protobuf/src/descriptor.rs"
+    },
+    {
+      "bytes": 5406,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/doctest_pb.rs",
+      "sha256": "74ffeba6811126ab8ed076e8d3debbb634f8f9bba3bd77f9c288e88d7937591a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/doctest_pb.rs",
+      "source_relative_path": "protobuf/src/doctest_pb.rs"
+    },
+    {
+      "bytes": 426,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/enum_full.rs",
+      "sha256": "ca658951c42ef539ce6221d8f1b1e5005a1a14393460078c40611bb7091629d0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/enum_full.rs",
+      "source_relative_path": "protobuf/src/enum_full.rs"
+    },
+    {
+      "bytes": 3022,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/enum_or_unknown.rs",
+      "sha256": "3088b9d139f296284a44d4f9da9c75476dfa00168358328f46b1c52c73572521",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/enum_or_unknown.rs",
+      "source_relative_path": "protobuf/src/enum_or_unknown.rs"
+    },
+    {
+      "bytes": 962,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/enums.rs",
+      "sha256": "e0af03e21b48d3bb44d06a7971229e8e5ee6c8230323534f774f4874de3c9760",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/enums.rs",
+      "source_relative_path": "protobuf/src/enums.rs"
+    },
+    {
+      "bytes": 3771,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/error.rs",
+      "sha256": "1839b319f456b56e2bb3c59f119f4c0bec53a02d52c92619b887bfdb1656183b",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/error.rs",
+      "source_relative_path": "protobuf/src/error.rs"
+    },
+    {
+      "bytes": 2434,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/ext.rs",
+      "sha256": "b5c43e19ca56612e81560e520831da1746520be7944e506e44e07356b1415bbf",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/ext.rs",
+      "source_relative_path": "protobuf/src/ext.rs"
+    },
+    {
+      "bytes": 619,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/fixed.rs",
+      "sha256": "40b32b11dd53f0dc3de2c73f9003c6c0f762cf802e30e16beb5a22a18f8f2f50",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/fixed.rs",
+      "source_relative_path": "protobuf/src/fixed.rs"
+    },
+    {
+      "bytes": 507,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/lazy.rs",
+      "sha256": "b202a8cd252b11b013983f27c1ed5eac046674ed156a4e5e63357e15ead746df",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/lazy.rs",
+      "source_relative_path": "protobuf/src/lazy.rs"
+    },
+    {
+      "bytes": 3199,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/lib.rs",
+      "sha256": "f22f0d3c3372cc68450071bb2abf8a1542d0f3348f5ec1133e9b785445494f56",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/lib.rs",
+      "source_relative_path": "protobuf/src/lib.rs"
+    },
+    {
+      "bytes": 7764,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/message.rs",
+      "sha256": "a112b1d5c769d866a586a4c9af9245fa8029991563d2ff33c47e9d4c2b32fef7",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/message.rs",
+      "source_relative_path": "protobuf/src/message.rs"
+    },
+    {
+      "bytes": 10070,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/message_dyn.rs",
+      "sha256": "c2d06029139a1ef09409227c0c501dd361b485ff1e4fcbf1d2b0cb579cd80fba",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/message_dyn.rs",
+      "source_relative_path": "protobuf/src/message_dyn.rs"
+    },
+    {
+      "bytes": 5085,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/message_field.rs",
+      "sha256": "8456bcc3118a0f62d8eb3e5495be678ad75f5164e5dc67658667c7611e2099d9",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/message_field.rs",
+      "source_relative_path": "protobuf/src/message_field.rs"
+    },
+    {
+      "bytes": 1729,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/message_full.rs",
+      "sha256": "4bbbb917a86aa3b14f63e93db41522c78223036b6e7d219769927059ff70205e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/message_full.rs",
+      "source_relative_path": "protobuf/src/message_full.rs"
+    },
+    {
+      "bytes": 4168,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/misc.rs",
+      "sha256": "1679b6f8b5c2b4375e71835fb7ca83a4de6db498f092abf5ab3a9f5eaccf0d5a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/misc.rs",
+      "source_relative_path": "protobuf/src/misc.rs"
+    },
+    {
+      "bytes": 79,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/oneof.rs",
+      "sha256": "de5a694a56931308fc1a790678aaaf8b67d7c6b56c9f7b2fde36a14312863e05",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/oneof.rs",
+      "source_relative_path": "protobuf/src/oneof.rs"
+    },
+    {
+      "bytes": 238,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/oneof_full.rs",
+      "sha256": "b9d5d95db115b1ebf6e7c222373008d4f9f86e21347ddf50ef23f8cd11b8f777",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/oneof_full.rs",
+      "source_relative_path": "protobuf/src/oneof_full.rs"
+    },
+    {
+      "bytes": 2473,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/owning_ref.rs",
+      "sha256": "1face1307d85ef98f5b9752eb45de47884c3ce68d31cec315ebfac6559ab501f",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/owning_ref.rs",
+      "source_relative_path": "protobuf/src/owning_ref.rs"
+    },
+    {
+      "bytes": 64330,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/plugin.rs",
+      "sha256": "5bbb2aaecc59c590755e0fe972c4f231d506bbc1893d5f3e800d2e69ce805ec0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/plugin.rs",
+      "source_relative_path": "protobuf/src/plugin.rs"
+    },
+    {
+      "bytes": 1282,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/acc/mod.rs",
+      "sha256": "23500dd605f11f8def7d0f858a00cf1c85a7b95c293bc125ba0804a949b35162",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/acc/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/acc/mod.rs"
+    },
+    {
+      "bytes": 3920,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/acc/v2/map.rs",
+      "sha256": "46dab64d941e61fd61aa3794b2fab60bbd588a21ca9f1a378cdc022bbdfb60a1",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/acc/v2/map.rs",
+      "source_relative_path": "protobuf/src/reflect/acc/v2/map.rs"
+    },
+    {
+      "bytes": 433,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/acc/v2/mod.rs",
+      "sha256": "86639cfa45e3b2d08020c289001d87910fa972e9fb6a28a38880ccee51002a0c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/acc/v2/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/acc/v2/mod.rs"
+    },
+    {
+      "bytes": 3384,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/acc/v2/repeated.rs",
+      "sha256": "07b62beb3bb81d1fa1de486c7cdce20ae2f4f46c2e93ed6f104b41d3a3a5beba",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/acc/v2/repeated.rs",
+      "source_relative_path": "protobuf/src/reflect/acc/v2/repeated.rs"
+    },
+    {
+      "bytes": 10763,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/acc/v2/singular/mod.rs",
+      "sha256": "85bace3cf99fe0b05dce61bf19433077cf29506c6641b001935064fd37ab658f",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/acc/v2/singular/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/acc/v2/singular/mod.rs"
+    },
+    {
+      "bytes": 2265,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/acc/v2/singular/oneof.rs",
+      "sha256": "f70db73a0316185b8ae43b82cd29665d1140d920e7d28bb789a438eb06f9c62a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/acc/v2/singular/oneof.rs",
+      "source_relative_path": "protobuf/src/reflect/acc/v2/singular/oneof.rs"
+    },
+    {
+      "bytes": 6867,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/dynamic/map.rs",
+      "sha256": "565376a2db71cf607cb692b984acb41d16dfb04df59c9ad0eca8ba1fc85017cc",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/dynamic/map.rs",
+      "source_relative_path": "protobuf/src/reflect/dynamic/map.rs"
+    },
+    {
+      "bytes": 24965,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/dynamic/mod.rs",
+      "sha256": "3ee7a82dbd5410d10eee44fdf3ae8b5f198185d7ff4a608f10a668eba6af3a73",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/dynamic/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/dynamic/mod.rs"
+    },
+    {
+      "bytes": 1142,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/dynamic/optional.rs",
+      "sha256": "db923e3d343f869c2bf4f157559686251ff9744dfd0560ba1d1b1b46ae1b81fd",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/dynamic/optional.rs",
+      "source_relative_path": "protobuf/src/reflect/dynamic/optional.rs"
+    },
+    {
+      "bytes": 12431,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/dynamic/repeated.rs",
+      "sha256": "61a7c698b59280564a1deb7200884875a8844120058c3d69ea4d6aa5f6c4266e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/dynamic/repeated.rs",
+      "source_relative_path": "protobuf/src/reflect/dynamic/repeated.rs"
+    },
+    {
+      "bytes": 1435,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/enums/generated.rs",
+      "sha256": "44e5dbe08a1a15067744580c87c6d09f66dc364f2791fc1ecab919e1dacdec09",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/enums/generated.rs",
+      "source_relative_path": "protobuf/src/reflect/enums/generated.rs"
+    },
+    {
+      "bytes": 8820,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/enums/mod.rs",
+      "sha256": "aed1b29e4e42f34b26476a6013e64b7ec8876cfa53633583a751c344fd3ab34c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/enums/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/enums/mod.rs"
+    },
+    {
+      "bytes": 1101,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/error.rs",
+      "sha256": "532a9c117606e8597a40d60b3efebc9371c4f746919cc611aaaddf105cbb3608",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/error.rs",
+      "source_relative_path": "protobuf/src/reflect/error.rs"
+    },
+    {
+      "bytes": 1272,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/field/dynamic.rs",
+      "sha256": "8e81f7b6f684ed58287eb2de20f3abb8dabb062601715421d3d1e4c041101602",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/field/dynamic.rs",
+      "source_relative_path": "protobuf/src/reflect/field/dynamic.rs"
+    },
+    {
+      "bytes": 6821,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/field/index.rs",
+      "sha256": "4aeef75560e52bf865718f9323fc5b2b2318a6e4bb66fadc57f4875999cf15b3",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/field/index.rs",
+      "source_relative_path": "protobuf/src/reflect/field/index.rs"
+    },
+    {
+      "bytes": 19796,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/field/mod.rs",
+      "sha256": "6c646e59e64e327a961e680f5b189cdb1d540b61b26cd345d623456a4f764a22",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/field/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/field/mod.rs"
+    },
+    {
+      "bytes": 887,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/field/protobuf_field_type.rs",
+      "sha256": "6ec9ca95c25a9c9fe70fad51b1221676e9d3d5a6daac37d5633379471d8c4257",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/field/protobuf_field_type.rs",
+      "source_relative_path": "protobuf/src/reflect/field/protobuf_field_type.rs"
+    },
+    {
+      "bytes": 317,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/field/runtime_field_type.rs",
+      "sha256": "26166bb9d48caa0287dfe6235937e5bd647692ca75e8ee4855d0e198f9a79d73",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/field/runtime_field_type.rs",
+      "source_relative_path": "protobuf/src/reflect/field/runtime_field_type.rs"
+    },
+    {
+      "bytes": 6741,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/file/building.rs",
+      "sha256": "53806efda5872c32f63f55582b767be8becff1d7bfb4ed0c11947c912ad55a75",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/file/building.rs",
+      "source_relative_path": "protobuf/src/reflect/file/building.rs"
+    },
+    {
+      "bytes": 2085,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/file/dynamic.rs",
+      "sha256": "3e26271c31816dae043eb70c9990a6fc621c9b5241a555d968f731dfd4762489",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/file/dynamic.rs",
+      "source_relative_path": "protobuf/src/reflect/file/dynamic.rs"
+    },
+    {
+      "bytes": 1996,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/file/fds.rs",
+      "sha256": "9a369eaea05a000710bf977cce28d3fad1463f8ffa42df35e4f5ac5de306f9e6",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/file/fds.rs",
+      "source_relative_path": "protobuf/src/reflect/file/fds.rs"
+    },
+    {
+      "bytes": 3809,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/file/generated.rs",
+      "sha256": "88f3d88ddbcfa01812398ddc5c350c54cc42b15d99223a642574f55d4d6cdf69",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/file/generated.rs",
+      "source_relative_path": "protobuf/src/reflect/file/generated.rs"
+    },
+    {
+      "bytes": 14995,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/file/index.rs",
+      "sha256": "3d53af11b39b164b488e3850c3a5be5ae4628c172b4475e4ae5b993225bdeae9",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/file/index.rs",
+      "source_relative_path": "protobuf/src/reflect/file/index.rs"
+    },
+    {
+      "bytes": 8816,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/file/mod.rs",
+      "sha256": "b7aa1c4154677630b843c81d35c60f1374d00d44d3477e6e899e18cb7ae97db1",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/file/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/file/mod.rs"
+    },
+    {
+      "bytes": 588,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/file/syntax.rs",
+      "sha256": "8d6d6c3a7bbf9217df3550410a9ba1eb9c08295aa410cc5d2e65efe1eec3ca3a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/file/syntax.rs",
+      "source_relative_path": "protobuf/src/reflect/file/syntax.rs"
+    },
+    {
+      "bytes": 1893,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/find_message_or_enum.rs",
+      "sha256": "e8b10159819cce4414da7681cb3ce0b4e62a45adf4e3e7933a3c1b4f8e97cfb8",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/find_message_or_enum.rs",
+      "source_relative_path": "protobuf/src/reflect/find_message_or_enum.rs"
+    },
+    {
+      "bytes": 1662,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/map/empty.rs",
+      "sha256": "230cbcda25bfd3c6f348043eef032252b8a0d86a0c71d93d6206adc59d688732",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/map/empty.rs",
+      "source_relative_path": "protobuf/src/reflect/map/empty.rs"
+    },
+    {
+      "bytes": 3481,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/map/generated.rs",
+      "sha256": "f1b332e97d267c3272b26be03bee80fe9420bb6fc203ae6f3f9dd3044d564778",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/map/generated.rs",
+      "source_relative_path": "protobuf/src/reflect/map/generated.rs"
+    },
+    {
+      "bytes": 7253,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/map/mod.rs",
+      "sha256": "7648fa897f4a8acf1ab48b8bba8f165cb4b09a46125e645d600a7b9ced55e1a2",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/map/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/map/mod.rs"
+    },
+    {
+      "bytes": 4277,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/message/generated.rs",
+      "sha256": "c76f5e887534bc9648dd105718f79bb93465549d57b25c4a00957e603749721c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/message/generated.rs",
+      "source_relative_path": "protobuf/src/reflect/message/generated.rs"
+    },
+    {
+      "bytes": 4566,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/message/is_initialized_is_always_true.rs",
+      "sha256": "af716e9d0ce233fda9c7dee13814c24c188ea195cf907d81f74fb198ef2760ae",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/message/is_initialized_is_always_true.rs",
+      "source_relative_path": "protobuf/src/reflect/message/is_initialized_is_always_true.rs"
+    },
+    {
+      "bytes": 2302,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/message/message_ref.rs",
+      "sha256": "80472f804a4dd3b91f6fec4451639ca356f2b33c502775e0fd6b2c3bfbe1be0a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/message/message_ref.rs",
+      "source_relative_path": "protobuf/src/reflect/message/message_ref.rs"
+    },
+    {
+      "bytes": 12160,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/message/mod.rs",
+      "sha256": "5ef7f5ecdc2de7c0789b8558711a976e2376fcaae67975a10d9f1bd4179703e5",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/message/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/message/mod.rs"
+    },
+    {
+      "bytes": 2211,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/mod.rs",
+      "sha256": "620cab65b696a13144ed54d589ca8c4176ecb8127b2ba2a294806f649c0fbd9f",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/mod.rs"
+    },
+    {
+      "bytes": 1293,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/name.rs",
+      "sha256": "0377dcf871ca5add5e168a3bff04d9f01fe5970db4dfb66272def6484dc7d54b",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/name.rs",
+      "source_relative_path": "protobuf/src/reflect/name.rs"
+    },
+    {
+      "bytes": 724,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/oneof/generated.rs",
+      "sha256": "c02b7cd7415f52366f6092559643869812db842bd1c383ce7d8759e519ab453a",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/oneof/generated.rs",
+      "source_relative_path": "protobuf/src/reflect/oneof/generated.rs"
+    },
+    {
+      "bytes": 2541,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/oneof/mod.rs",
+      "sha256": "55c906888e89a7bfd1f8865cced5078905b512f3ce9af20d16614fdf5791c31d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/oneof/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/oneof/mod.rs"
+    },
+    {
+      "bytes": 2290,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/optional/mod.rs",
+      "sha256": "5dada97750209aeddf1506eea0a59d709aeb3e44bae5443214e0c2950c870952",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/optional/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/optional/mod.rs"
+    },
+    {
+      "bytes": 9140,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/protobuf_type_box.rs",
+      "sha256": "5ed50bdefa5eebe8bf0547cb37def38d814653ac7a0d401eb4f05b8a72ebf509",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/protobuf_type_box.rs",
+      "source_relative_path": "protobuf/src/reflect/protobuf_type_box.rs"
+    },
+    {
+      "bytes": 886,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/reflect_eq.rs",
+      "sha256": "1352d0be16ff7dc2089d499b3fbcf40d501406e8648649092aa2cb21f207aac0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/reflect_eq.rs",
+      "source_relative_path": "protobuf/src/reflect/reflect_eq.rs"
+    },
+    {
+      "bytes": 817,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/repeated/drain_iter.rs",
+      "sha256": "0f065e5ef884ee90189594b8a92d814c40a4b3ff80ed659f2f8a0ac56795011d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/repeated/drain_iter.rs",
+      "source_relative_path": "protobuf/src/reflect/repeated/drain_iter.rs"
+    },
+    {
+      "bytes": 823,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/repeated/iter.rs",
+      "sha256": "f7f7bf56347850f567612feab9542c4658f251ce74b7b8fb7ed6612cb85584f0",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/repeated/iter.rs",
+      "source_relative_path": "protobuf/src/reflect/repeated/iter.rs"
+    },
+    {
+      "bytes": 14706,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/repeated/mod.rs",
+      "sha256": "6084482af4936340e1bfd43ff8d06351c3d0316f26cb9f8b73bd8c16f3e9df98",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/repeated/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/repeated/mod.rs"
+    },
+    {
+      "bytes": 586,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/repeated/transmute.rs",
+      "sha256": "ecd5b5b2772670b030a6d96b47b54bf8500ec0996920ef0db7d5f4b6f338c493",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/repeated/transmute.rs",
+      "source_relative_path": "protobuf/src/reflect/repeated/transmute.rs"
+    },
+    {
+      "bytes": 1561,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/repeated/vec_downcast.rs",
+      "sha256": "7f4c2997d313f45bc46a097fad7c579d663c642cba425a7851f590282d58309d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/repeated/vec_downcast.rs",
+      "source_relative_path": "protobuf/src/reflect/repeated/vec_downcast.rs"
+    },
+    {
+      "bytes": 214,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/rt/mod.rs",
+      "sha256": "4f0266be9bd092a6ee49a1f3453ff08eabfcebb65473b6c8552a260ac7a4817b",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/rt/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/rt/mod.rs"
+    },
+    {
+      "bytes": 877,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/rt/v2.rs",
+      "sha256": "3faa866b4aa766875062071eb6db36c7c42a3d9145f66162a85aac91e200e354",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/rt/v2.rs",
+      "source_relative_path": "protobuf/src/reflect/rt/v2.rs"
+    },
+    {
+      "bytes": 6068,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/runtime_type_box.rs",
+      "sha256": "6d8988ed25218f13da61db5dbbefa621df3fd7f1141669854c6ec9571b3eee6c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/runtime_type_box.rs",
+      "source_relative_path": "protobuf/src/reflect/runtime_type_box.rs"
+    },
+    {
+      "bytes": 26422,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/runtime_types.rs",
+      "sha256": "07b8eeac30f666c890ccac14c5076b77d010abf322b8f23883032e2ad003476e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/runtime_types.rs",
+      "source_relative_path": "protobuf/src/reflect/runtime_types.rs"
+    },
+    {
+      "bytes": 1260,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/service/index.rs",
+      "sha256": "4a41f90b6c8b3f5c8349075aec84fcbb90ab3028451d2ba40cb83257ff4d90c7",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/service/index.rs",
+      "source_relative_path": "protobuf/src/reflect/service/index.rs"
+    },
+    {
+      "bytes": 2328,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/service/mod.rs",
+      "sha256": "1d0b5b3d9cd1968731971137ca320a91591ee9ca45828d3e4284da87397044f6",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/service/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/service/mod.rs"
+    },
+    {
+      "bytes": 1032,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/type_dynamic.rs",
+      "sha256": "76c9e764978c66444a4ffb5b558cbce241d1e1123c5dd6eb250f56b48b7b0a5c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/type_dynamic.rs",
+      "source_relative_path": "protobuf/src/reflect/type_dynamic.rs"
+    },
+    {
+      "bytes": 18651,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/types.rs",
+      "sha256": "fb6a18354a7a8fa7dc6a4db51793af8a5c41680bc49c1d157145a21a75f5f3e4",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/types.rs",
+      "source_relative_path": "protobuf/src/reflect/types.rs"
+    },
+    {
+      "bytes": 2198,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/value/mod.rs",
+      "sha256": "56f7ff8c4541108fff20f83f7f12ef173ce398e642b482dc3a4cf92c9e1cea17",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/value/mod.rs",
+      "source_relative_path": "protobuf/src/reflect/value/mod.rs"
+    },
+    {
+      "bytes": 5208,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/value/value_box.rs",
+      "sha256": "1037d01c52a4f0432e42a2c023f5c68ed458ed60b196597ca78f81b6207ecb83",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/value/value_box.rs",
+      "source_relative_path": "protobuf/src/reflect/value/value_box.rs"
+    },
+    {
+      "bytes": 11008,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/reflect/value/value_ref.rs",
+      "sha256": "7a3490eb4918ee725ad59219b0fc5810b231eaf2ddf798ab75085b4acc145b2e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/reflect/value/value_ref.rs",
+      "source_relative_path": "protobuf/src/reflect/value/value_ref.rs"
+    },
+    {
+      "bytes": 1163,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rt/map.rs",
+      "sha256": "c4bd4246181a43dc9cf1735ec5882955af595fba8ef839a06e0e1df399848520",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rt/map.rs",
+      "source_relative_path": "protobuf/src/rt/map.rs"
+    },
+    {
+      "bytes": 771,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rt/message.rs",
+      "sha256": "83893fc3ecc72e2921af44683792d344ae55324acafb5acea4a0e7331c860de5",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rt/message.rs",
+      "source_relative_path": "protobuf/src/rt/message.rs"
+    },
+    {
+      "bytes": 2152,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rt/mod.rs",
+      "sha256": "db610d871d8fb022ba4634199896534ecb3d6ad22c7e2cabbf4d7ad79e1c8c66",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rt/mod.rs",
+      "source_relative_path": "protobuf/src/rt/mod.rs"
+    },
+    {
+      "bytes": 5002,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rt/packed.rs",
+      "sha256": "be2fae85812c39d815bcb0463e3ea67774770c25014b764b8712dd2b90d360c6",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rt/packed.rs",
+      "source_relative_path": "protobuf/src/rt/packed.rs"
+    },
+    {
+      "bytes": 499,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rt/repeated.rs",
+      "sha256": "213d08349efb21bc02fb5abd1d1c3f039ae1d4368f53f548cdf1999897c60f1c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rt/repeated.rs",
+      "source_relative_path": "protobuf/src/rt/repeated.rs"
+    },
+    {
+      "bytes": 2203,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rt/singular.rs",
+      "sha256": "2c982de7a686a8d0c430ce690297a524e892a70bca33d288c6e9b912d19e994c",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rt/singular.rs",
+      "source_relative_path": "protobuf/src/rt/singular.rs"
+    },
+    {
+      "bytes": 2702,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rt/unknown_or_group.rs",
+      "sha256": "48e5c842cc10f97a64cab9131496baa29af38fe9f1b16697d24ce4961e7d7e77",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rt/unknown_or_group.rs",
+      "source_relative_path": "protobuf/src/rt/unknown_or_group.rs"
+    },
+    {
+      "bytes": 15467,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/rustproto.rs",
+      "sha256": "4a49fac5c9caaca991dd5505c154941e8f94708c254269119e64cf053f7aaea9",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/rustproto.rs",
+      "source_relative_path": "protobuf/src/rustproto.rs"
+    },
+    {
+      "bytes": 937,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/special.rs",
+      "sha256": "2f64cfbb0659249cf4a951cefb51b1a17ddf85785eb868b68af7546cd31a5101",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/special.rs",
+      "source_relative_path": "protobuf/src/special.rs"
+    },
+    {
+      "bytes": 930,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/text_format/mod.rs",
+      "sha256": "da0aeb839963afcba1923b68a06264185a927cef3f3075ca958c11fa1e780535",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/text_format/mod.rs",
+      "source_relative_path": "protobuf/src/text_format/mod.rs"
+    },
+    {
+      "bytes": 10310,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/text_format/parse.rs",
+      "sha256": "c7be3464fa8f6624ed2001b450e999f93bea5f6118132b7f372110c7af5e5e71",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/text_format/parse.rs",
+      "source_relative_path": "protobuf/src/text_format/parse.rs"
+    },
+    {
+      "bytes": 5962,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/text_format/print.rs",
+      "sha256": "b052fa3bc5ee94867ffc55abf2b21d208dc7db41884240159a02f346a7090417",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/text_format/print.rs",
+      "source_relative_path": "protobuf/src/text_format/print.rs"
+    },
+    {
+      "bytes": 3556,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/timestamp.rs",
+      "sha256": "f0590e19fd7740bdc65a0dc6f9d73bf55559638515ca7849481022288a9bee43",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/timestamp.rs",
+      "source_relative_path": "protobuf/src/timestamp.rs"
+    },
+    {
+      "bytes": 15228,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/unknown.rs",
+      "sha256": "6c315932ebe893feff2aa11156478c77382451e08f8a8882e1b323d66ea7b4ad",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/unknown.rs",
+      "source_relative_path": "protobuf/src/unknown.rs"
+    },
+    {
+      "bytes": 3370,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/varint/decode.rs",
+      "sha256": "5e9fdf9fb5fe82ddc223feaf5867c0a081bd67731635f88cb9a5b1faeeb79f82",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/varint/decode.rs",
+      "source_relative_path": "protobuf/src/varint/decode.rs"
+    },
+    {
+      "bytes": 3687,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/varint/encode.rs",
+      "sha256": "bc0969a152aff774976216f9f2bdbc273a24da07d57b8e3ec96ebe691d4559c1",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/varint/encode.rs",
+      "source_relative_path": "protobuf/src/varint/encode.rs"
+    },
+    {
+      "bytes": 835,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/varint/generic.rs",
+      "sha256": "98e31da80c278cff672ddc8231241cc789ad6de138fa6ca6c0483ff1783f4957",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/varint/generic.rs",
+      "source_relative_path": "protobuf/src/varint/generic.rs"
+    },
+    {
+      "bytes": 234,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/varint/mod.rs",
+      "sha256": "643b5b2443b4e103fc4eeac7844dcda4b9c6b2bab3cfe9fba00145ccea9a4505",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/varint/mod.rs",
+      "source_relative_path": "protobuf/src/varint/mod.rs"
+    },
+    {
+      "bytes": 18489,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/any.rs",
+      "sha256": "7db9c4f0df3f0809821e09bb0bd2ddaa07ff4471be005fc02f2be9828a1aedd1",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/any.rs",
+      "source_relative_path": "protobuf/src/well_known_types/any.rs"
+    },
+    {
+      "bytes": 43562,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/api.rs",
+      "sha256": "80bf5fe39c7263a440d5c1bec8bb6c5a0dd274f73c3f702c4e223cfdf02f74eb",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/api.rs",
+      "source_relative_path": "protobuf/src/well_known_types/api.rs"
+    },
+    {
+      "bytes": 15763,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/duration.rs",
+      "sha256": "33c4039d594eb8df4a35f1bae1ad2a5dc36a5bf167369d99faf480cc7e1cb284",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/duration.rs",
+      "source_relative_path": "protobuf/src/well_known_types/duration.rs"
+    },
+    {
+      "bytes": 9222,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/empty.rs",
+      "sha256": "47f56d10483e9c6c3e276e54d877e70aaf3b2a57c269a636dd9948d0e4ff419f",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/empty.rs",
+      "source_relative_path": "protobuf/src/well_known_types/empty.rs"
+    },
+    {
+      "bytes": 20476,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/field_mask.rs",
+      "sha256": "7b4d883c03ec89d83b919271d03273def230c30caae36b7247cba1b325ccc551",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/field_mask.rs",
+      "source_relative_path": "protobuf/src/well_known_types/field_mask.rs"
+    },
+    {
+      "bytes": 461,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/mod.rs",
+      "sha256": "b141483834c860b221d0946a584389ebcefc2c5f7692ce1f95869c9f83ff2c16",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/mod.rs",
+      "source_relative_path": "protobuf/src/well_known_types/mod.rs"
+    },
+    {
+      "bytes": 10462,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/source_context.rs",
+      "sha256": "fbec3ec4e1e59be865d0b7cb4d3b08aa197b46ca27fc3d90ed7da30514df6355",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/source_context.rs",
+      "source_relative_path": "protobuf/src/well_known_types/source_context.rs"
+    },
+    {
+      "bytes": 39269,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/struct_.rs",
+      "sha256": "00bfebd64c851a7e0b0b26d3fc1319fd072975cb84169066b5aa00a4871ac6c8",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/struct_.rs",
+      "source_relative_path": "protobuf/src/well_known_types/struct_.rs"
+    },
+    {
+      "bytes": 17537,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/timestamp.rs",
+      "sha256": "bc8b3a27f7b1ec134aa5a9d1187b63e02d5d2e72b153a9b6153e0b7a078c003e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/timestamp.rs",
+      "source_relative_path": "protobuf/src/well_known_types/timestamp.rs"
+    },
+    {
+      "bytes": 73941,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/type_.rs",
+      "sha256": "789fa7e0ec2fe7fc5f68a06636ade107fc305780b597c7c9687dbe3560252514",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/type_.rs",
+      "source_relative_path": "protobuf/src/well_known_types/type_.rs"
+    },
+    {
+      "bytes": 47089,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types/wrappers.rs",
+      "sha256": "56cbbf290be81ce7d62fd33b883015ef3de2abc1d5f8c683e38e96397f1d056d",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types/wrappers.rs",
+      "source_relative_path": "protobuf/src/well_known_types/wrappers.rs"
+    },
+    {
+      "bytes": 3374,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types_util/any.rs",
+      "sha256": "2b2e5cdf1d413bc13485bfc78c84d8403168d6b1a6dbc10d585bf10326120c81",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types_util/any.rs",
+      "source_relative_path": "protobuf/src/well_known_types_util/any.rs"
+    },
+    {
+      "bytes": 1881,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types_util/duration.rs",
+      "sha256": "e0d9de89f8c7c4b2075f23c2a4451dfec4ae1f28c9784ea39a626a8c3aa9e005",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types_util/duration.rs",
+      "source_relative_path": "protobuf/src/well_known_types_util/duration.rs"
+    },
+    {
+      "bytes": 38,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types_util/mod.rs",
+      "sha256": "81fb1c0721602ffe91c4587f727457b59c8697863e3f853cd9569db5cee973e9",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types_util/mod.rs",
+      "source_relative_path": "protobuf/src/well_known_types_util/mod.rs"
+    },
+    {
+      "bytes": 3522,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/well_known_types_util/timestamp.rs",
+      "sha256": "f55906fef3190fa1786ed736ded16f3ac6de2095cb974af5a476c2a2f91260b3",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/well_known_types_util/timestamp.rs",
+      "source_relative_path": "protobuf/src/well_known_types_util/timestamp.rs"
+    },
+    {
+      "bytes": 4511,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/wire_format.rs",
+      "sha256": "f1d09b0bd1e4c5e4072b5c943e749f7b727737bd08a6d82f81d4f2a60e2ab94e",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/wire_format.rs",
+      "source_relative_path": "protobuf/src/wire_format.rs"
+    },
+    {
+      "bytes": 2143,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/src/zigzag.rs",
+      "sha256": "0dcbdf54d4bc8141fdc64d074e6f6f7633bbb66cc782cd4bd6d343ce0569c3de",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/src/zigzag.rs",
+      "source_relative_path": "protobuf/src/zigzag.rs"
+    },
+    {
+      "bytes": 5696,
+      "mode": "0644",
+      "production_path": "vendor/rust-protobuf-a001/protobuf/tests/unknown_groups.rs",
+      "sha256": "3128092a10458c700202cbc6490c1d9ed7b6dc4a815f0dad1c72f7d32b0f76b7",
+      "source_path": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor/protobuf/tests/unknown_groups.rs",
+      "source_relative_path": "protobuf/tests/unknown_groups.rs"
+    }
+  ],
+  "provenance": {
+    "accepted_candidate": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001",
+    "accepted_vendor_manifest": "tests/proofs/lossless_protocol/candidates/rust-protobuf-a001/vendor-manifest.json",
+    "accepted_vendor_manifest_sha256": "646738b5d5fe26c422c92ce7d8904c74ca320a99339d5927f519d6c67b79b161",
+    "fork_revision": "a001.2",
+    "packages": [
+      {
+        "license": "MIT",
+        "name": "protobuf",
+        "version": "3.7.2"
+      },
+      {
+        "license": "MIT",
+        "name": "protobuf-codegen",
+        "version": "3.7.2"
+      }
+    ],
+    "upstream_patch_provenance": "docs/port/reports/T06/a001/selected-upstream.patch (pointer only; not copied)"
+  },
+  "schema": "parrot-rust-production-vendor-manifest/v1"
+}

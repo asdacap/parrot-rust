@@ -1,0 +1,11 @@
+mod alias_tests;
+mod anthropic_tests;
+mod auth_tests;
+mod configuration_tests;
+mod factory_tests;
+mod models_dev_tests;
+mod profile_selection_tests;
+mod projection_tests;
+mod projector;
+mod registry_tests;
+mod usage_tests;

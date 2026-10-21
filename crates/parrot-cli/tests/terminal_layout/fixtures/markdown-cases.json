@@ -1,0 +1,245 @@
+[
+  {
+    "id": "terminal.layout.emoji-arbitrary-zwj",
+    "api": "Parrot.Cli.Enhanced.TerminalText.Width+LayoutWords",
+    "input": {
+      "value": "a‍b",
+      "width": 1
+    },
+    "expected": {
+      "width": 2,
+      "rows": [
+        "a‍",
+        "b"
+      ]
+    }
+  },
+  {
+    "id": "markdown.review.heading-inline",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "# **bold** [site](url)",
+      "columns": 80,
+      "color": true
+    },
+    "expected": [
+      "\u001b[1;36mbold \u001b[0m\u001b[1;4;36msite (url)\u001b[0m"
+    ]
+  },
+  {
+    "id": "markdown.review.table-inline",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "A | B\n--- | ---\n**bold** | x",
+      "columns": 80,
+      "color": true
+    },
+    "expected": [
+      "\u001b[2;90m┌──────────┬───┐\u001b[0m",
+      "\u001b[2;90m│\u001b[0m\u001b[1;36m A\u001b[0m\u001b[38;5;195m        \u001b[0m\u001b[2;90m│\u001b[0m\u001b[1;36m B\u001b[0m\u001b[38;5;195m \u001b[0m\u001b[2;90m│\u001b[0m",
+      "\u001b[2;90m├──────────┼───┤\u001b[0m",
+      "\u001b[2;90m│\u001b[0m\u001b[38;5;195m \u001b[0m\u001b[1;38;5;195mbold\u001b[0m\u001b[38;5;195m \u001b[0m\u001b[2;90m│\u001b[0m\u001b[38;5;195m x \u001b[0m\u001b[2;90m│\u001b[0m",
+      "\u001b[2;90m└──────────┴───┘\u001b[0m"
+    ]
+  },
+  {
+    "id": "markdown.review.table-fallback-inline",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "A | B\n--- | ---\n**bold** | x",
+      "columns": 15,
+      "color": true
+    },
+    "expected": [
+      "\u001b[1;36mA: \u001b[0m\u001b[1;38;5;195mbold\u001b[0m",
+      "\u001b[1;36mB: \u001b[0m\u001b[38;5;195mx\u001b[0m"
+    ]
+  },
+  {
+    "id": "markdown.review.empty-delimiter.2*",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "**",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "**"
+    ]
+  },
+  {
+    "id": "markdown.review.empty-delimiter.2_",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "__",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "__"
+    ]
+  },
+  {
+    "id": "markdown.review.empty-delimiter.2~",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "~~",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "~~"
+    ]
+  },
+  {
+    "id": "markdown.review.empty-delimiter.1*",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "*",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "*"
+    ]
+  },
+  {
+    "id": "markdown.review.empty-delimiter.1_",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "_",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "_"
+    ]
+  },
+  {
+    "id": "markdown.review.unicode-symbol-escape",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "\\€",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "€"
+    ]
+  },
+  {
+    "id": "markdown.review.highlighter-state-number",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "```csharp\n/* public */\n42\n/* open\npublic\n*/ `quoted`\n```",
+      "columns": 80,
+      "color": true
+    },
+    "expected": [
+      "\u001b[2;3;90m/* public */\u001b[0m",
+      "\u001b[33m42\u001b[0m",
+      "\u001b[2;3;90m/* open\u001b[0m",
+      "\u001b[2;3;90mpublic\u001b[0m",
+      "\u001b[2;3;90m*/\u001b[0m\u001b[38;5;195m \u001b[0m\u001b[32m`quoted`\u001b[0m"
+    ]
+  },
+  {
+    "id": "markdown.review.trailing-spacing",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "hello ",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "hello "
+    ]
+  },
+  {
+    "id": "markdown.review.whitespace-code-line",
+    "api": "Parrot.Cli.Enhanced.MarkdownRenderer.Render",
+    "input": {
+      "prefix": "",
+      "source": "```csharp\n    \n```",
+      "columns": 80,
+      "color": false
+    },
+    "expected": [
+      "    "
+    ]
+  },
+  {
+    "id": "yaml.review.date-key.1773cc7308d2",
+    "api": "Parrot.Cli.Enhanced.Tools.ToolYamlFormatter.Format",
+    "input": {
+      "key": "2024-01 junk",
+      "json": "{\"2024-01 junk\":1}"
+    },
+    "expected": "2024-01 junk: 1"
+  },
+  {
+    "id": "yaml.review.date-key.f1b2d9fc00ea",
+    "api": "Parrot.Cli.Enhanced.Tools.ToolYamlFormatter.Format",
+    "input": {
+      "key": "1/2 junk",
+      "json": "{\"1/2 junk\":1}"
+    },
+    "expected": "1/2 junk: 1"
+  },
+  {
+    "id": "yaml.review.date-key.402089f6358f",
+    "api": "Parrot.Cli.Enhanced.Tools.ToolYamlFormatter.Format",
+    "input": {
+      "key": "2024-01-02T13:00 PM",
+      "json": "{\"2024-01-02T13:00 PM\":1}"
+    },
+    "expected": "2024-01-02T13:00 PM: 1"
+  },
+  {
+    "id": "yaml.review.date-key.51fa106d06f4",
+    "api": "Parrot.Cli.Enhanced.Tools.ToolYamlFormatter.Format",
+    "input": {
+      "key": "2024-01-02T01:00+0100",
+      "json": "{\"2024-01-02T01:00\\u002B0100\":1}"
+    },
+    "expected": "\"2024-01-02T01:00+0100\": 1"
+  },
+  {
+    "id": "yaml.review.date-key.8d31f7e4300a",
+    "api": "Parrot.Cli.Enhanced.Tools.ToolYamlFormatter.Format",
+    "input": {
+      "key": "January 2, 2024 12:00",
+      "json": "{\"January 2, 2024 12:00\":1}"
+    },
+    "expected": "\"January 2, 2024 12:00\": 1"
+  },
+  {
+    "id": "yaml.review.date-key.4c65374b7c60",
+    "api": "Parrot.Cli.Enhanced.Tools.ToolYamlFormatter.Format",
+    "input": {
+      "key": "Tue, 02 Jan 2024 12:00:00 GMT",
+      "json": "{\"Tue, 02 Jan 2024 12:00:00 GMT\":1}"
+    },
+    "expected": "\"Tue, 02 Jan 2024 12:00:00 GMT\": 1"
+  },
+  {
+    "id": "yaml.review.date-key.d26e5bd4b503",
+    "api": "Parrot.Cli.Enhanced.Tools.ToolYamlFormatter.Format",
+    "input": {
+      "key": "12:30 am",
+      "json": "{\"12:30 am\":1}"
+    },
+    "expected": "\"12:30 am\": 1"
+  }
+]

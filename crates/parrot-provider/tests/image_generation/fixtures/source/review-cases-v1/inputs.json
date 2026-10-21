@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "case_id": "review-invalid-prefix-then-io",
+      "family": "response_read_order",
+      "first": "invalid-prefix",
+      "first_chunk_bytes": 16384,
+      "tail": "io"
+    },
+    {
+      "case_id": "review-invalid-prefix-then-cancel",
+      "family": "response_read_order",
+      "first": "invalid-prefix",
+      "first_chunk_bytes": 16384,
+      "tail": "cancel"
+    },
+    {
+      "case_id": "review-invalid-prefix-then-block",
+      "family": "response_read_order",
+      "first": "invalid-prefix",
+      "first_chunk_bytes": 16384,
+      "tail": "block"
+    },
+    {
+      "case_id": "review-duplicate-data-invalid-before-valid",
+      "family": "response_read_order",
+      "first": "duplicate-data-invalid-before-valid",
+      "first_chunk_bytes": 16384,
+      "tail": "eof"
+    },
+    {
+      "case_id": "review-duplicate-base64-invalid-before-valid",
+      "family": "response_read_order",
+      "first": "duplicate-base64-invalid-before-valid",
+      "first_chunk_bytes": 16384,
+      "tail": "eof"
+    },
+    {
+      "case_id": "review-known-schema-failure-then-io",
+      "family": "response_read_order",
+      "first": "known-schema-prefix",
+      "first_chunk_bytes": 16384,
+      "tail": "io"
+    },
+    {
+      "case_id": "review-incomplete-potentially-valid-then-io",
+      "family": "response_read_order",
+      "first": "potentially-valid-prefix",
+      "first_chunk_bytes": 16384,
+      "tail": "io"
+    },
+    {
+      "case_id": "review-incomplete-potentially-valid-then-cancel",
+      "family": "response_read_order",
+      "first": "potentially-valid-prefix",
+      "first_chunk_bytes": 16384,
+      "tail": "cancel"
+    }
+  ]
+}

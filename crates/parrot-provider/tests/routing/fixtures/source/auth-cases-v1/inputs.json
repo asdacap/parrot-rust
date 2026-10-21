@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "case_id": "auth-direct-auth",
+      "mode": "direct",
+      "failure": "auth",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-missing_key",
+      "mode": "direct",
+      "failure": "missing_key",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-format",
+      "mode": "direct",
+      "failure": "format",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-argument_range",
+      "mode": "direct",
+      "failure": "argument_range",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-not_supported",
+      "mode": "direct",
+      "failure": "not_supported",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-invalid_operation",
+      "mode": "direct",
+      "failure": "invalid_operation",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-io",
+      "mode": "direct",
+      "failure": "io",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-transport",
+      "mode": "direct",
+      "failure": "transport",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-visible",
+      "mode": "direct",
+      "failure": "auth",
+      "visible": true,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-caller-cancelled",
+      "mode": "direct",
+      "failure": "auth",
+      "visible": false,
+      "caller_cancelled": true,
+      "factory": false
+    },
+    {
+      "case_id": "auth-direct-factory_auth",
+      "mode": "direct",
+      "failure": "factory_auth",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": true
+    },
+    {
+      "case_id": "auth-direct-factory_missing_key",
+      "mode": "direct",
+      "failure": "factory_missing_key",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": true
+    },
+    {
+      "case_id": "auth-session-auth",
+      "mode": "session",
+      "failure": "auth",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-missing_key",
+      "mode": "session",
+      "failure": "missing_key",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-format",
+      "mode": "session",
+      "failure": "format",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-argument_range",
+      "mode": "session",
+      "failure": "argument_range",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-not_supported",
+      "mode": "session",
+      "failure": "not_supported",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-invalid_operation",
+      "mode": "session",
+      "failure": "invalid_operation",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-io",
+      "mode": "session",
+      "failure": "io",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-transport",
+      "mode": "session",
+      "failure": "transport",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-visible",
+      "mode": "session",
+      "failure": "auth",
+      "visible": true,
+      "caller_cancelled": false,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-caller-cancelled",
+      "mode": "session",
+      "failure": "auth",
+      "visible": false,
+      "caller_cancelled": true,
+      "factory": false
+    },
+    {
+      "case_id": "auth-session-factory_auth",
+      "mode": "session",
+      "failure": "factory_auth",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": true
+    },
+    {
+      "case_id": "auth-session-factory_missing_key",
+      "mode": "session",
+      "failure": "factory_missing_key",
+      "visible": false,
+      "caller_cancelled": false,
+      "factory": true
+    }
+  ]
+}

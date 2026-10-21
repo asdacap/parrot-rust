@@ -1,0 +1,9 @@
+{"name":"admission-before","errors":["cancelled"],"writes":1,"flushes":1,"write_cancelable":[false],"flush_cancelable":[false],"output":"1b5b3f32356c1b5b3f376c1b5b324b61667465722020200d1b5b31431b5b3f37681b5b3f323568"}
+{"name":"admission-waiting","errors":["cancelled"],"writes":2,"flushes":2,"write_cancelable":[false,false],"flush_cancelable":[false,false],"output":"1b5b3f32356c1b5b3f376c1b5b324b66697273742020200d1b5b31431b5b3f37681b5b3f3235681b5b3f32356c1b5b3f376c0d0d1b5b324b61667465722020200d1b5b31431b5b3f37681b5b3f323568"}
+{"name":"admission-admitted","errors":[],"writes":1,"flushes":1,"write_cancelable":[false],"flush_cancelable":[false],"output":"1b5b3f32356c1b5b3f376c1b5b324b66697273742020200d1b5b31431b5b3f37681b5b3f323568"}
+{"name":"admission-write-error","errors":["write failed"],"writes":2,"flushes":1,"write_cancelable":[false,false],"flush_cancelable":[false],"output":"1b5b3f32356c1b5b3f376c1b5b324b61667465722020200d1b5b31431b5b3f37681b5b3f323568"}
+{"name":"admission-flush-error","errors":["flush failed"],"writes":2,"flushes":2,"write_cancelable":[false,false],"flush_cancelable":[false,false],"output":"1b5b3f32356c1b5b3f376c1b5b324b66697273742020200d1b5b31431b5b3f37681b5b3f3235681b5b3f32356c1b5b3f376c1b5b324b61667465722020200d1b5b31431b5b3f37681b5b3f323568"}
+{"name":"admission-render-error","errors":["render failed"],"writes":1,"flushes":1,"write_cancelable":[false],"flush_cancelable":[false],"output":"1b5b3f32356c1b5b3f376c1b5b324b61667465722020200d1b5b31431b5b3f37681b5b3f323568"}
+{"name":"spinner-pending-cancel","events":["draw-start","lifetime","draw-joined","clear:false"]}
+{"name":"spinner-pending-preserve","events":["draw-start","lifetime","draw-joined","preserved"]}
+{"name":"spinner-pending-complete","events":["draw-start","lifetime","draw-complete","draw-joined","delay","preserved"]}

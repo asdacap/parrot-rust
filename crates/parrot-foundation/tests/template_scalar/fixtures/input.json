@@ -1,0 +1,20 @@
+[
+  {"id":"format-multiline","kind":"render","path":"prompt_templates.custom.format","template":"Agent {name} says:\nvalue {value}\nnext","allowed":["name","value"],"required":["name","value"],"arguments":[["name","worker"],["value","literal value"]]},
+  {"id":"literal-braces-never-reparsed","kind":"render","path":"prompt_templates.custom.literal","template":"{{prefix}} {value}; {value}","allowed":["value"],"required":["value"],"arguments":[["value","{{ hostile }} {unresolved}\nnext"]]},
+  {"id":"unicode-and-zero-like-values","kind":"render","path":"prompt_templates.custom.unicode","template":"[{zero}] é 👨‍👩‍👧‍👦 {value}","allowed":["zero","value"],"required":["zero","value"],"arguments":[["zero","0"],["value",""]]},
+  {"id":"zero-arguments-without-placeholders","kind":"render","path":"prompt_templates.custom.empty","template":"constant","allowed":[],"required":[],"arguments":[]},
+  {"id":"missing-required-catalog-argument","kind":"render","path":"prompt_templates.custom.required","template":"{required}","allowed":["required"],"required":["required"],"arguments":[]},
+  {"id":"required-order-z-a","kind":"render","path":"prompt_templates.custom.required-order","template":"constant","allowed":["z","a"],"required":["z","a"],"arguments":[]},
+  {"id":"required-order-a-z","kind":"render","path":"prompt_templates.custom.required-order","template":"constant","allowed":["a","z"],"required":["a","z"],"arguments":[]},
+  {"id":"missing-optional-placeholder-value","kind":"render","path":"prompt_templates.custom.optional","template":"{optional}","allowed":["optional"],"required":[],"arguments":[]},
+  {"id":"extra-disallowed-argument","kind":"render","path":"prompt_templates.custom.extra","template":"plain","allowed":[],"required":[],"arguments":[["other","value"]]},
+  {"id":"duplicate-supplied-argument","kind":"render","path":"prompt_templates.custom.duplicate-argument","template":"{name}","allowed":["name"],"required":["name"],"arguments":[["name","one"],["name","two"]]},
+  {"id":"non-string-structured-value","kind":"render","path":"prompt_templates.custom.typed","template":"{value}","allowed":["value"],"required":["value"],"structured":[["value",0]]},
+  {"id":"unknown-placeholder-load-path","kind":"load","yaml":"prompt_templates:\n  custom.unknown:\n    template: '{unknown}'\n    allowed_arguments: []\n    required_arguments: []"},
+  {"id":"duplicate-placeholder-load-path","kind":"load","yaml":"prompt_templates:\n  custom.duplicate:\n    template: '{path} {path}'\n    allowed_arguments: [path]\n    required_arguments: [path]"},
+  {"id":"empty-template-load-path","kind":"load","yaml":"prompt_templates:\n  custom.empty:\n    template: ''\n    allowed_arguments: []\n    required_arguments: []"},
+  {"id":"invalid-required-subset-load-path","kind":"load","yaml":"prompt_templates:\n  custom.required:\n    template: text\n    allowed_arguments: [present]\n    required_arguments: [absent]"},
+  {"id":"unmatched-opening-brace","kind":"render","path":"prompt_templates.custom.open","template":"prefix {name","allowed":["name"],"required":[],"arguments":[]},
+  {"id":"unmatched-closing-brace","kind":"render","path":"prompt_templates.custom.close","template":"prefix }","allowed":[],"required":[],"arguments":[]},
+  {"id":"delegated-t11-multiline-and-literal-insertion","kind":"configuration_render","yaml":"prompt_templates:\n  agent-session.child-completion:\n    template: |-\n      Agent {agent_name} says:\n      {result}","renders":[{"id":"agent-session.child-completion","arguments":[["agent_name","worker"],["result","value {not_a_placeholder}\nnext"]]},{"id":"tool-result.output-blob-notice","arguments":[["path","/tmp/{runtime}"]] }]}
+]

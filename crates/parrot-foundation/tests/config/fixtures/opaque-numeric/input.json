@@ -1,0 +1,788 @@
+[
+  {
+    "id": "opaque-numeric-0",
+    "kind": "yaml_json",
+    "scalar": "inf",
+    "yaml": "\"inf\"\n"
+  },
+  {
+    "id": "opaque-numeric-1",
+    "kind": "yaml_json",
+    "scalar": "-inf",
+    "yaml": "\"-inf\"\n"
+  },
+  {
+    "id": "opaque-numeric-2",
+    "kind": "yaml_json",
+    "scalar": "+inf",
+    "yaml": "\"+inf\"\n"
+  },
+  {
+    "id": "opaque-numeric-3",
+    "kind": "yaml_json",
+    "scalar": "INF",
+    "yaml": "\"INF\"\n"
+  },
+  {
+    "id": "opaque-numeric-4",
+    "kind": "yaml_json",
+    "scalar": "-INF",
+    "yaml": "\"-INF\"\n"
+  },
+  {
+    "id": "opaque-numeric-5",
+    "kind": "yaml_json",
+    "scalar": "Infinity",
+    "yaml": "\"Infinity\"\n"
+  },
+  {
+    "id": "opaque-numeric-6",
+    "kind": "yaml_json",
+    "scalar": "infinity",
+    "yaml": "\"infinity\"\n"
+  },
+  {
+    "id": "opaque-numeric-7",
+    "kind": "yaml_json",
+    "scalar": "INFINITY",
+    "yaml": "\"INFINITY\"\n"
+  },
+  {
+    "id": "opaque-numeric-8",
+    "kind": "yaml_json",
+    "scalar": "-Infinity",
+    "yaml": "\"-Infinity\"\n"
+  },
+  {
+    "id": "opaque-numeric-9",
+    "kind": "yaml_json",
+    "scalar": "+Infinity",
+    "yaml": "\"+Infinity\"\n"
+  },
+  {
+    "id": "opaque-numeric-10",
+    "kind": "yaml_json",
+    "scalar": "NaN",
+    "yaml": "\"NaN\"\n"
+  },
+  {
+    "id": "opaque-numeric-11",
+    "kind": "yaml_json",
+    "scalar": "nan",
+    "yaml": "\"nan\"\n"
+  },
+  {
+    "id": "opaque-numeric-12",
+    "kind": "yaml_json",
+    "scalar": "NAN",
+    "yaml": "\"NAN\"\n"
+  },
+  {
+    "id": "opaque-numeric-13",
+    "kind": "yaml_json",
+    "scalar": "-NaN",
+    "yaml": "\"-NaN\"\n"
+  },
+  {
+    "id": "opaque-numeric-14",
+    "kind": "yaml_json",
+    "scalar": "+NaN",
+    "yaml": "\"+NaN\"\n"
+  },
+  {
+    "id": "opaque-numeric-15",
+    "kind": "yaml_json",
+    "scalar": "\u221e",
+    "yaml": "\"\\u221e\"\n"
+  },
+  {
+    "id": "opaque-numeric-16",
+    "kind": "yaml_json",
+    "scalar": "-\u221e",
+    "yaml": "\"-\\u221e\"\n"
+  },
+  {
+    "id": "opaque-numeric-17",
+    "kind": "yaml_json",
+    "scalar": "123\u0000",
+    "yaml": "\"123\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-18",
+    "kind": "yaml_json",
+    "scalar": "123\u0000\u0000",
+    "yaml": "\"123\\u0000\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-19",
+    "kind": "yaml_json",
+    "scalar": "123\u0000 ",
+    "yaml": "\"123\\u0000 \"\n"
+  },
+  {
+    "id": "opaque-numeric-20",
+    "kind": "yaml_json",
+    "scalar": "123 \u0000",
+    "yaml": "\"123 \\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-21",
+    "kind": "yaml_json",
+    "scalar": " 123\u0000 ",
+    "yaml": "\" 123\\u0000 \"\n"
+  },
+  {
+    "id": "opaque-numeric-22",
+    "kind": "yaml_json",
+    "scalar": "123\u0000x",
+    "yaml": "\"123\\u0000x\"\n"
+  },
+  {
+    "id": "opaque-numeric-23",
+    "kind": "yaml_json",
+    "scalar": "1.25\u0000",
+    "yaml": "\"1.25\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-24",
+    "kind": "yaml_json",
+    "scalar": "1e2\u0000",
+    "yaml": "\"1e2\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-25",
+    "kind": "yaml_json",
+    "scalar": "NaN\u0000",
+    "yaml": "\"NaN\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-26",
+    "kind": "yaml_json",
+    "scalar": "Infinity\u0000",
+    "yaml": "\"Infinity\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-27",
+    "kind": "yaml_json",
+    "scalar": "-Infinity\u0000",
+    "yaml": "\"-Infinity\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-28",
+    "kind": "yaml_json",
+    "scalar": "\u0000",
+    "yaml": "\"\\u0000\"\n"
+  },
+  {
+    "id": "opaque-numeric-29",
+    "kind": "yaml_json",
+    "scalar": "\u0000 123",
+    "yaml": "\"\\u0000 123\"\n"
+  },
+  {
+    "id": "opaque-numeric-30",
+    "kind": "yaml_json",
+    "scalar": " +123 ",
+    "yaml": "\" +123 \"\n"
+  },
+  {
+    "id": "opaque-numeric-31",
+    "kind": "yaml_json",
+    "scalar": "-123",
+    "yaml": "\"-123\"\n"
+  },
+  {
+    "id": "opaque-numeric-32",
+    "kind": "yaml_json",
+    "scalar": "123-",
+    "yaml": "\"123-\"\n"
+  },
+  {
+    "id": "opaque-numeric-33",
+    "kind": "yaml_json",
+    "scalar": "1,234",
+    "yaml": "\"1,234\"\n"
+  },
+  {
+    "id": "opaque-numeric-34",
+    "kind": "yaml_json",
+    "scalar": "1_234",
+    "yaml": "\"1_234\"\n"
+  },
+  {
+    "id": "opaque-numeric-35",
+    "kind": "yaml_json",
+    "scalar": ".5",
+    "yaml": "\".5\"\n"
+  },
+  {
+    "id": "opaque-numeric-36",
+    "kind": "yaml_json",
+    "scalar": "1.",
+    "yaml": "\"1.\"\n"
+  },
+  {
+    "id": "opaque-numeric-37",
+    "kind": "yaml_json",
+    "scalar": "1e2",
+    "yaml": "\"1e2\"\n"
+  },
+  {
+    "id": "opaque-numeric-38",
+    "kind": "yaml_json",
+    "scalar": "1e+2",
+    "yaml": "\"1e+2\"\n"
+  },
+  {
+    "id": "opaque-numeric-39",
+    "kind": "yaml_json",
+    "scalar": "1e-2",
+    "yaml": "\"1e-2\"\n"
+  },
+  {
+    "id": "opaque-numeric-40",
+    "kind": "yaml_json",
+    "scalar": "1e",
+    "yaml": "\"1e\"\n"
+  },
+  {
+    "id": "opaque-numeric-41",
+    "kind": "yaml_json",
+    "scalar": ".e2",
+    "yaml": "\".e2\"\n"
+  },
+  {
+    "id": "opaque-numeric-42",
+    "kind": "yaml_json",
+    "scalar": "1e309",
+    "yaml": "\"1e309\"\n"
+  },
+  {
+    "id": "opaque-numeric-43",
+    "kind": "yaml_json",
+    "scalar": "-1e309",
+    "yaml": "\"-1e309\"\n"
+  },
+  {
+    "id": "opaque-numeric-44",
+    "kind": "yaml_json",
+    "scalar": "0x10",
+    "yaml": "\"0x10\"\n"
+  },
+  {
+    "id": "opaque-numeric-45",
+    "kind": "yaml_json",
+    "scalar": "\u0661\u0662\u0663",
+    "yaml": "\"\\u0661\\u0662\\u0663\"\n"
+  },
+  {
+    "id": "opaque-numeric-46",
+    "kind": "yaml_json",
+    "scalar": "\uff11\uff12\uff13",
+    "yaml": "\"\\uff11\\uff12\\uff13\"\n"
+  },
+  {
+    "id": "opaque-numeric-47",
+    "kind": "yaml_json",
+    "scalar": "9223372036854775807",
+    "yaml": "\"9223372036854775807\"\n"
+  },
+  {
+    "id": "opaque-numeric-48",
+    "kind": "yaml_json",
+    "scalar": "9223372036854775808",
+    "yaml": "\"9223372036854775808\"\n"
+  },
+  {
+    "id": "opaque-numeric-49",
+    "kind": "yaml_json",
+    "scalar": "-9223372036854775808",
+    "yaml": "\"-9223372036854775808\"\n"
+  },
+  {
+    "id": "opaque-numeric-50",
+    "kind": "yaml_json",
+    "scalar": "-9223372036854775809",
+    "yaml": "\"-9223372036854775809\"\n"
+  },
+  {
+    "id": "opaque-numeric-51",
+    "kind": "yaml_json",
+    "scalar": " 123 ",
+    "yaml": "\" 123 \"\n"
+  },
+  {
+    "id": "opaque-numeric-52",
+    "kind": "yaml_json",
+    "scalar": " 1.25 ",
+    "yaml": "\" 1.25 \"\n"
+  },
+  {
+    "id": "opaque-numeric-53",
+    "kind": "yaml_json",
+    "scalar": " NaN ",
+    "yaml": "\" NaN \"\n"
+  },
+  {
+    "id": "opaque-numeric-54",
+    "kind": "yaml_json",
+    "scalar": " Infinity ",
+    "yaml": "\" Infinity \"\n"
+  },
+  {
+    "id": "opaque-numeric-55",
+    "kind": "yaml_json",
+    "scalar": " inf ",
+    "yaml": "\" inf \"\n"
+  },
+  {
+    "id": "opaque-numeric-56",
+    "kind": "yaml_json",
+    "scalar": "\t123\t",
+    "yaml": "\"\\t123\\t\"\n"
+  },
+  {
+    "id": "opaque-numeric-57",
+    "kind": "yaml_json",
+    "scalar": "\t1.25\t",
+    "yaml": "\"\\t1.25\\t\"\n"
+  },
+  {
+    "id": "opaque-numeric-58",
+    "kind": "yaml_json",
+    "scalar": "\tNaN\t",
+    "yaml": "\"\\tNaN\\t\"\n"
+  },
+  {
+    "id": "opaque-numeric-59",
+    "kind": "yaml_json",
+    "scalar": "\tInfinity\t",
+    "yaml": "\"\\tInfinity\\t\"\n"
+  },
+  {
+    "id": "opaque-numeric-60",
+    "kind": "yaml_json",
+    "scalar": "\tinf\t",
+    "yaml": "\"\\tinf\\t\"\n"
+  },
+  {
+    "id": "opaque-numeric-61",
+    "kind": "yaml_json",
+    "scalar": "\n123\n",
+    "yaml": "\"\\n123\\n\"\n"
+  },
+  {
+    "id": "opaque-numeric-62",
+    "kind": "yaml_json",
+    "scalar": "\n1.25\n",
+    "yaml": "\"\\n1.25\\n\"\n"
+  },
+  {
+    "id": "opaque-numeric-63",
+    "kind": "yaml_json",
+    "scalar": "\nNaN\n",
+    "yaml": "\"\\nNaN\\n\"\n"
+  },
+  {
+    "id": "opaque-numeric-64",
+    "kind": "yaml_json",
+    "scalar": "\nInfinity\n",
+    "yaml": "\"\\nInfinity\\n\"\n"
+  },
+  {
+    "id": "opaque-numeric-65",
+    "kind": "yaml_json",
+    "scalar": "\ninf\n",
+    "yaml": "\"\\ninf\\n\"\n"
+  },
+  {
+    "id": "opaque-numeric-66",
+    "kind": "yaml_json",
+    "scalar": "\u000b123\u000b",
+    "yaml": "\"\\u000b123\\u000b\"\n"
+  },
+  {
+    "id": "opaque-numeric-67",
+    "kind": "yaml_json",
+    "scalar": "\u000b1.25\u000b",
+    "yaml": "\"\\u000b1.25\\u000b\"\n"
+  },
+  {
+    "id": "opaque-numeric-68",
+    "kind": "yaml_json",
+    "scalar": "\u000bNaN\u000b",
+    "yaml": "\"\\u000bNaN\\u000b\"\n"
+  },
+  {
+    "id": "opaque-numeric-69",
+    "kind": "yaml_json",
+    "scalar": "\u000bInfinity\u000b",
+    "yaml": "\"\\u000bInfinity\\u000b\"\n"
+  },
+  {
+    "id": "opaque-numeric-70",
+    "kind": "yaml_json",
+    "scalar": "\u000binf\u000b",
+    "yaml": "\"\\u000binf\\u000b\"\n"
+  },
+  {
+    "id": "opaque-numeric-71",
+    "kind": "yaml_json",
+    "scalar": "\f123\f",
+    "yaml": "\"\\f123\\f\"\n"
+  },
+  {
+    "id": "opaque-numeric-72",
+    "kind": "yaml_json",
+    "scalar": "\f1.25\f",
+    "yaml": "\"\\f1.25\\f\"\n"
+  },
+  {
+    "id": "opaque-numeric-73",
+    "kind": "yaml_json",
+    "scalar": "\fNaN\f",
+    "yaml": "\"\\fNaN\\f\"\n"
+  },
+  {
+    "id": "opaque-numeric-74",
+    "kind": "yaml_json",
+    "scalar": "\fInfinity\f",
+    "yaml": "\"\\fInfinity\\f\"\n"
+  },
+  {
+    "id": "opaque-numeric-75",
+    "kind": "yaml_json",
+    "scalar": "\finf\f",
+    "yaml": "\"\\finf\\f\"\n"
+  },
+  {
+    "id": "opaque-numeric-76",
+    "kind": "yaml_json",
+    "scalar": "\r123\r",
+    "yaml": "\"\\r123\\r\"\n"
+  },
+  {
+    "id": "opaque-numeric-77",
+    "kind": "yaml_json",
+    "scalar": "\r1.25\r",
+    "yaml": "\"\\r1.25\\r\"\n"
+  },
+  {
+    "id": "opaque-numeric-78",
+    "kind": "yaml_json",
+    "scalar": "\rNaN\r",
+    "yaml": "\"\\rNaN\\r\"\n"
+  },
+  {
+    "id": "opaque-numeric-79",
+    "kind": "yaml_json",
+    "scalar": "\rInfinity\r",
+    "yaml": "\"\\rInfinity\\r\"\n"
+  },
+  {
+    "id": "opaque-numeric-80",
+    "kind": "yaml_json",
+    "scalar": "\rinf\r",
+    "yaml": "\"\\rinf\\r\"\n"
+  },
+  {
+    "id": "opaque-numeric-81",
+    "kind": "yaml_json",
+    "scalar": "\u0085123\u0085",
+    "yaml": "\"\\u0085123\\u0085\"\n"
+  },
+  {
+    "id": "opaque-numeric-82",
+    "kind": "yaml_json",
+    "scalar": "\u00851.25\u0085",
+    "yaml": "\"\\u00851.25\\u0085\"\n"
+  },
+  {
+    "id": "opaque-numeric-83",
+    "kind": "yaml_json",
+    "scalar": "\u0085NaN\u0085",
+    "yaml": "\"\\u0085NaN\\u0085\"\n"
+  },
+  {
+    "id": "opaque-numeric-84",
+    "kind": "yaml_json",
+    "scalar": "\u0085Infinity\u0085",
+    "yaml": "\"\\u0085Infinity\\u0085\"\n"
+  },
+  {
+    "id": "opaque-numeric-85",
+    "kind": "yaml_json",
+    "scalar": "\u0085inf\u0085",
+    "yaml": "\"\\u0085inf\\u0085\"\n"
+  },
+  {
+    "id": "opaque-numeric-86",
+    "kind": "yaml_json",
+    "scalar": "\u00a0123\u00a0",
+    "yaml": "\"\\u00a0123\\u00a0\"\n"
+  },
+  {
+    "id": "opaque-numeric-87",
+    "kind": "yaml_json",
+    "scalar": "\u00a01.25\u00a0",
+    "yaml": "\"\\u00a01.25\\u00a0\"\n"
+  },
+  {
+    "id": "opaque-numeric-88",
+    "kind": "yaml_json",
+    "scalar": "\u00a0NaN\u00a0",
+    "yaml": "\"\\u00a0NaN\\u00a0\"\n"
+  },
+  {
+    "id": "opaque-numeric-89",
+    "kind": "yaml_json",
+    "scalar": "\u00a0Infinity\u00a0",
+    "yaml": "\"\\u00a0Infinity\\u00a0\"\n"
+  },
+  {
+    "id": "opaque-numeric-90",
+    "kind": "yaml_json",
+    "scalar": "\u00a0inf\u00a0",
+    "yaml": "\"\\u00a0inf\\u00a0\"\n"
+  },
+  {
+    "id": "opaque-numeric-91",
+    "kind": "yaml_json",
+    "scalar": "\u1680123\u1680",
+    "yaml": "\"\\u1680123\\u1680\"\n"
+  },
+  {
+    "id": "opaque-numeric-92",
+    "kind": "yaml_json",
+    "scalar": "\u16801.25\u1680",
+    "yaml": "\"\\u16801.25\\u1680\"\n"
+  },
+  {
+    "id": "opaque-numeric-93",
+    "kind": "yaml_json",
+    "scalar": "\u1680NaN\u1680",
+    "yaml": "\"\\u1680NaN\\u1680\"\n"
+  },
+  {
+    "id": "opaque-numeric-94",
+    "kind": "yaml_json",
+    "scalar": "\u1680Infinity\u1680",
+    "yaml": "\"\\u1680Infinity\\u1680\"\n"
+  },
+  {
+    "id": "opaque-numeric-95",
+    "kind": "yaml_json",
+    "scalar": "\u1680inf\u1680",
+    "yaml": "\"\\u1680inf\\u1680\"\n"
+  },
+  {
+    "id": "opaque-numeric-96",
+    "kind": "yaml_json",
+    "scalar": "\u2000123\u2000",
+    "yaml": "\"\\u2000123\\u2000\"\n"
+  },
+  {
+    "id": "opaque-numeric-97",
+    "kind": "yaml_json",
+    "scalar": "\u20001.25\u2000",
+    "yaml": "\"\\u20001.25\\u2000\"\n"
+  },
+  {
+    "id": "opaque-numeric-98",
+    "kind": "yaml_json",
+    "scalar": "\u2000NaN\u2000",
+    "yaml": "\"\\u2000NaN\\u2000\"\n"
+  },
+  {
+    "id": "opaque-numeric-99",
+    "kind": "yaml_json",
+    "scalar": "\u2000Infinity\u2000",
+    "yaml": "\"\\u2000Infinity\\u2000\"\n"
+  },
+  {
+    "id": "opaque-numeric-100",
+    "kind": "yaml_json",
+    "scalar": "\u2000inf\u2000",
+    "yaml": "\"\\u2000inf\\u2000\"\n"
+  },
+  {
+    "id": "opaque-numeric-101",
+    "kind": "yaml_json",
+    "scalar": "\u2028123\u2028",
+    "yaml": "\"\\u2028123\\u2028\"\n"
+  },
+  {
+    "id": "opaque-numeric-102",
+    "kind": "yaml_json",
+    "scalar": "\u20281.25\u2028",
+    "yaml": "\"\\u20281.25\\u2028\"\n"
+  },
+  {
+    "id": "opaque-numeric-103",
+    "kind": "yaml_json",
+    "scalar": "\u2028NaN\u2028",
+    "yaml": "\"\\u2028NaN\\u2028\"\n"
+  },
+  {
+    "id": "opaque-numeric-104",
+    "kind": "yaml_json",
+    "scalar": "\u2028Infinity\u2028",
+    "yaml": "\"\\u2028Infinity\\u2028\"\n"
+  },
+  {
+    "id": "opaque-numeric-105",
+    "kind": "yaml_json",
+    "scalar": "\u2028inf\u2028",
+    "yaml": "\"\\u2028inf\\u2028\"\n"
+  },
+  {
+    "id": "opaque-numeric-106",
+    "kind": "yaml_json",
+    "scalar": "\u2029123\u2029",
+    "yaml": "\"\\u2029123\\u2029\"\n"
+  },
+  {
+    "id": "opaque-numeric-107",
+    "kind": "yaml_json",
+    "scalar": "\u20291.25\u2029",
+    "yaml": "\"\\u20291.25\\u2029\"\n"
+  },
+  {
+    "id": "opaque-numeric-108",
+    "kind": "yaml_json",
+    "scalar": "\u2029NaN\u2029",
+    "yaml": "\"\\u2029NaN\\u2029\"\n"
+  },
+  {
+    "id": "opaque-numeric-109",
+    "kind": "yaml_json",
+    "scalar": "\u2029Infinity\u2029",
+    "yaml": "\"\\u2029Infinity\\u2029\"\n"
+  },
+  {
+    "id": "opaque-numeric-110",
+    "kind": "yaml_json",
+    "scalar": "\u2029inf\u2029",
+    "yaml": "\"\\u2029inf\\u2029\"\n"
+  },
+  {
+    "id": "opaque-numeric-111",
+    "kind": "yaml_json",
+    "scalar": "\u202f123\u202f",
+    "yaml": "\"\\u202f123\\u202f\"\n"
+  },
+  {
+    "id": "opaque-numeric-112",
+    "kind": "yaml_json",
+    "scalar": "\u202f1.25\u202f",
+    "yaml": "\"\\u202f1.25\\u202f\"\n"
+  },
+  {
+    "id": "opaque-numeric-113",
+    "kind": "yaml_json",
+    "scalar": "\u202fNaN\u202f",
+    "yaml": "\"\\u202fNaN\\u202f\"\n"
+  },
+  {
+    "id": "opaque-numeric-114",
+    "kind": "yaml_json",
+    "scalar": "\u202fInfinity\u202f",
+    "yaml": "\"\\u202fInfinity\\u202f\"\n"
+  },
+  {
+    "id": "opaque-numeric-115",
+    "kind": "yaml_json",
+    "scalar": "\u202finf\u202f",
+    "yaml": "\"\\u202finf\\u202f\"\n"
+  },
+  {
+    "id": "opaque-numeric-116",
+    "kind": "yaml_json",
+    "scalar": "\u205f123\u205f",
+    "yaml": "\"\\u205f123\\u205f\"\n"
+  },
+  {
+    "id": "opaque-numeric-117",
+    "kind": "yaml_json",
+    "scalar": "\u205f1.25\u205f",
+    "yaml": "\"\\u205f1.25\\u205f\"\n"
+  },
+  {
+    "id": "opaque-numeric-118",
+    "kind": "yaml_json",
+    "scalar": "\u205fNaN\u205f",
+    "yaml": "\"\\u205fNaN\\u205f\"\n"
+  },
+  {
+    "id": "opaque-numeric-119",
+    "kind": "yaml_json",
+    "scalar": "\u205fInfinity\u205f",
+    "yaml": "\"\\u205fInfinity\\u205f\"\n"
+  },
+  {
+    "id": "opaque-numeric-120",
+    "kind": "yaml_json",
+    "scalar": "\u205finf\u205f",
+    "yaml": "\"\\u205finf\\u205f\"\n"
+  },
+  {
+    "id": "opaque-numeric-121",
+    "kind": "yaml_json",
+    "scalar": "\u3000123\u3000",
+    "yaml": "\"\\u3000123\\u3000\"\n"
+  },
+  {
+    "id": "opaque-numeric-122",
+    "kind": "yaml_json",
+    "scalar": "\u30001.25\u3000",
+    "yaml": "\"\\u30001.25\\u3000\"\n"
+  },
+  {
+    "id": "opaque-numeric-123",
+    "kind": "yaml_json",
+    "scalar": "\u3000NaN\u3000",
+    "yaml": "\"\\u3000NaN\\u3000\"\n"
+  },
+  {
+    "id": "opaque-numeric-124",
+    "kind": "yaml_json",
+    "scalar": "\u3000Infinity\u3000",
+    "yaml": "\"\\u3000Infinity\\u3000\"\n"
+  },
+  {
+    "id": "opaque-numeric-125",
+    "kind": "yaml_json",
+    "scalar": "\u3000inf\u3000",
+    "yaml": "\"\\u3000inf\\u3000\"\n"
+  },
+  {
+    "id": "opaque-numeric-126",
+    "kind": "yaml_json",
+    "scalar": "\ufeff123\ufeff",
+    "yaml": "\"\\ufeff123\\ufeff\"\n"
+  },
+  {
+    "id": "opaque-numeric-127",
+    "kind": "yaml_json",
+    "scalar": "\ufeff1.25\ufeff",
+    "yaml": "\"\\ufeff1.25\\ufeff\"\n"
+  },
+  {
+    "id": "opaque-numeric-128",
+    "kind": "yaml_json",
+    "scalar": "\ufeffNaN\ufeff",
+    "yaml": "\"\\ufeffNaN\\ufeff\"\n"
+  },
+  {
+    "id": "opaque-numeric-129",
+    "kind": "yaml_json",
+    "scalar": "\ufeffInfinity\ufeff",
+    "yaml": "\"\\ufeffInfinity\\ufeff\"\n"
+  },
+  {
+    "id": "opaque-numeric-130",
+    "kind": "yaml_json",
+    "scalar": "\ufeffinf\ufeff",
+    "yaml": "\"\\ufeffinf\\ufeff\"\n"
+  }
+]

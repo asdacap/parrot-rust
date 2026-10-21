@@ -1,0 +1,51 @@
+[package]
+name = "parrot-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+parrot-domain = { path = "../parrot-domain" }
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
+protobuf = "=3.7.2"
+tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "macros"] }
+serde_json = { version = "=1.0.138", features = ["preserve_order", "raw_value"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+unicode-general-category = "=1.0.0"
+sha2 = "=0.10.8"
+rustix = { version = "=1.1.5", features = ["fs"] }
+
+[dev-dependencies]
+base64 = "=0.22.1"
+parrot-foundation = { path = "../parrot-foundation" }
+
+[[test]]
+name = "database"
+path = "tests/database/main.rs"
+
+[[test]]
+name = "queue_files"
+path = "tests/queue_files/main.rs"
+
+[[test]]
+name = "diagnostics"
+path = "tests/diagnostics/main.rs"
+
+[[test]]
+name = "events"
+path = "tests/events/main.rs"
+
+[[test]]
+name = "artifacts"
+path = "tests/artifacts/main.rs"
+
+[[test]]
+name = "conversation"
+path = "tests/conversation/main.rs"
+
+[[test]]
+name = "ownership"
+path = "tests/ownership/main.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+-f
+/private/profile with spaces.sb
+/usr/bin/env
+-i
+A=first
+COMMAND_VALUE=present
+Z=last
+/bin/sh
+-c
+printf '%s' 'a; $(not-executed) quote"'

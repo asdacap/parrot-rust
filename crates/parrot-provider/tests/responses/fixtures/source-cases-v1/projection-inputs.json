@@ -1,0 +1,278 @@
+{
+  "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+  "contract": "t27-responses-source-projection-v1",
+  "cases": [
+    {
+      "case_id": "source-v1.reasoning-encrypted-absent",
+      "kind": "stream",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}]}]}}\n\n"
+      }
+    },
+    {
+      "case_id": "source-v1.reasoning-encrypted-null",
+      "kind": "stream",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":null}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":null}]}}\n\n"
+      }
+    },
+    {
+      "case_id": "source-v1.reasoning-encrypted-empty",
+      "kind": "stream",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":\"\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":\"\"}]}}\n\n"
+      }
+    },
+    {
+      "case_id": "source-v1.reasoning-encrypted-number",
+      "kind": "stream",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":123}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":123}]}}\n\n"
+      }
+    },
+    {
+      "case_id": "source-v1.reasoning-encrypted-false",
+      "kind": "stream",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":false}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable\"}],\"encrypted_content\":false}]}}\n\n"
+      }
+    },
+    {
+      "case_id": "source-v1.fallback-encrypted-number",
+      "kind": "outbound",
+      "input": {
+        "model": "model",
+        "provider_id": "test",
+        "messages": [
+          {
+            "role": "Assistant",
+            "contents": [
+              {
+                "kind": "text",
+                "text": "answer"
+              }
+            ],
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "name": "read",
+                "arguments_json": "{}"
+              }
+            ],
+            "provider_content": {
+              "provider_id": "test",
+              "content": "{\"Version\":1,\"Protocol\":\"responses\",\"Output\":[{\"type\":\"reasoning\",\"encrypted_content\":42}]}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "source-v1.fallback-output-null-item",
+      "kind": "outbound",
+      "input": {
+        "model": "model",
+        "provider_id": "test",
+        "messages": [
+          {
+            "role": "Assistant",
+            "contents": [
+              {
+                "kind": "text",
+                "text": "answer"
+              }
+            ],
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "name": "read",
+                "arguments_json": "{}"
+              }
+            ],
+            "provider_content": {
+              "provider_id": "test",
+              "content": "{\"Version\":1,\"Protocol\":\"responses\",\"Output\":[null]}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "source-v1.fallback-output-null",
+      "kind": "outbound",
+      "input": {
+        "model": "model",
+        "provider_id": "test",
+        "messages": [
+          {
+            "role": "Assistant",
+            "contents": [
+              {
+                "kind": "text",
+                "text": "answer"
+              }
+            ],
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "name": "read",
+                "arguments_json": "{}"
+              }
+            ],
+            "provider_content": {
+              "provider_id": "test",
+              "content": "{\"Version\":1,\"Protocol\":\"responses\",\"Output\":null}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "source-v1.fallback-root-null",
+      "kind": "outbound",
+      "input": {
+        "model": "model",
+        "provider_id": "test",
+        "messages": [
+          {
+            "role": "Assistant",
+            "contents": [
+              {
+                "kind": "text",
+                "text": "answer"
+              }
+            ],
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "name": "read",
+                "arguments_json": "{}"
+              }
+            ],
+            "provider_content": {
+              "provider_id": "test",
+              "content": "null"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "source-v1.fallback-empty-payload",
+      "kind": "outbound",
+      "input": {
+        "model": "model",
+        "provider_id": "test",
+        "messages": [
+          {
+            "role": "Assistant",
+            "contents": [
+              {
+                "kind": "text",
+                "text": "answer"
+              }
+            ],
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "name": "read",
+                "arguments_json": "{}"
+              }
+            ],
+            "provider_content": {
+              "provider_id": "test",
+              "content": ""
+            }
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "source-v1.prepared-tool-nested-schema-overrides",
+      "kind": "outbound",
+      "input": {
+        "model": "gpt-5.6-sol",
+        "provider_id": "test",
+        "messages": [
+          {
+            "role": "User",
+            "contents": [
+              {
+                "kind": "text",
+                "text": "hello"
+              }
+            ]
+          }
+        ],
+        "tools": [
+          {
+            "name": "read",
+            "description": "Read configured content.",
+            "parameters_json": "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"integer\",\"minimum\":7,\"description\":\"Configured path prose.\"}}}"
+          },
+          {
+            "name": "glob",
+            "description": "Find paths beneath an optional root with deterministic glob matching, including **. Relative roots resolve within the workspace.",
+            "parameters_json": "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":\"string\"}}}"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "source-v1.roundtrip-native-reasoning-tools-followup-terminal-items",
+      "kind": "roundtrip",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"readable summary\"}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-secret\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable summary\"}],\"status\":\"completed\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[{\"type\":\"test_annotation\",\"value\":\"kept\"}]}]}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-secret\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable summary\"}],\"status\":\"completed\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-secret\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable summary\"}],\"status\":\"completed\"},{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[{\"type\":\"test_annotation\",\"value\":\"kept\"}]}]},{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}]}}\n\n",
+        "request": {
+          "model": "different-model",
+          "initial_user": "hello",
+          "tool_result": {
+            "call_id": "call_1",
+            "content": "result"
+          },
+          "following_user": "next",
+          "reasoning": {
+            "effort": "high",
+            "summary": "auto"
+          }
+        }
+      }
+    },
+    {
+      "case_id": "source-v1.roundtrip-native-reasoning-tools-followup-empty-terminal",
+      "kind": "roundtrip",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"readable summary\"}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",\"status\":\"completed\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-secret\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable summary\"}],\"status\":\"completed\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\",\"annotations\":[{\"type\":\"test_annotation\",\"value\":\"kept\"}]}]}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-secret\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"readable summary\"}],\"status\":\"completed\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[]}}\n\n",
+        "request": {
+          "model": "different-model",
+          "initial_user": "hello",
+          "tool_result": {
+            "call_id": "call_1",
+            "content": "result"
+          },
+          "following_user": "next",
+          "reasoning": {
+            "effort": "high",
+            "summary": "auto"
+          }
+        }
+      }
+    },
+    {
+      "case_id": "source-v1.roundtrip-reasoning-only-native-with-accepted-tool",
+      "kind": "roundtrip",
+      "input": {
+        "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\ndata: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_1\",\"call_id\":\"call_1\",\"arguments\":\"{}\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque\",\"summary\":[]}]}}\n\n",
+        "request": {
+          "model": "model",
+          "initial_user": "",
+          "tool_result": {
+            "call_id": "call_1",
+            "content": "result"
+          },
+          "following_user": ""
+        }
+      }
+    }
+  ]
+}

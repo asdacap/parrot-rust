@@ -1,0 +1,1387 @@
+[
+  {
+    "case_id": "catalog.source",
+    "input": {},
+    "expected": {
+      "strict_is_standard": true,
+      "plaintext_is_standard": true,
+      "reused": true,
+      "insecure_is_standard": false,
+      "count_before": 1,
+      "count_after": 0,
+      "tls": [
+        {
+          "url": "https://insecure.example/path",
+          "errors": "None",
+          "accepted": true
+        },
+        {
+          "url": "https://insecure.example/path",
+          "errors": "RemoteCertificateChainErrors",
+          "accepted": true
+        },
+        {
+          "url": "https://INSECURE.example:443/x",
+          "errors": "None",
+          "accepted": true
+        },
+        {
+          "url": "https://INSECURE.example:443/x",
+          "errors": "RemoteCertificateChainErrors",
+          "accepted": true
+        },
+        {
+          "url": "https://insecure.example:444/x",
+          "errors": "None",
+          "accepted": true
+        },
+        {
+          "url": "https://insecure.example:444/x",
+          "errors": "RemoteCertificateChainErrors",
+          "accepted": false
+        },
+        {
+          "url": "https://other.example/",
+          "errors": "None",
+          "accepted": true
+        },
+        {
+          "url": "https://other.example/",
+          "errors": "RemoteCertificateChainErrors",
+          "accepted": false
+        },
+        {
+          "url": "http://insecure.example/",
+          "errors": "None",
+          "accepted": true
+        },
+        {
+          "url": "http://insecure.example/",
+          "errors": "RemoteCertificateChainErrors",
+          "accepted": false
+        }
+      ],
+      "disposed": {
+        "category": "System.ObjectDisposedException",
+        "message": "Cannot access a disposed object.\nObject name: 'System.Net.Http.HttpClient'."
+      }
+    }
+  },
+  {
+    "case_id": "catalog.authority.0",
+    "input": {
+      "endpoint": "https://insecure.example/v1",
+      "authority": "https://insecure.example"
+    },
+    "expected": {
+      "matches": true
+    }
+  },
+  {
+    "case_id": "catalog.authority.1",
+    "input": {
+      "endpoint": "https://other.example/v1",
+      "authority": "https://insecure.example"
+    },
+    "expected": {
+      "matches": false
+    }
+  },
+  {
+    "case_id": "catalog.authority.2",
+    "input": {
+      "endpoint": "https://insecure.example:443/x",
+      "authority": "HTTPS://INSECURE.EXAMPLE"
+    },
+    "expected": {
+      "matches": true
+    }
+  },
+  {
+    "case_id": "catalog.authority.3",
+    "input": {
+      "endpoint": "http://insecure.example",
+      "authority": "http://insecure.example"
+    },
+    "expected": {
+      "matches": false
+    }
+  },
+  {
+    "case_id": "catalog.authority.4",
+    "input": {
+      "endpoint": "https://insecure.example:444",
+      "authority": "https://insecure.example"
+    },
+    "expected": {
+      "matches": false
+    }
+  },
+  {
+    "case_id": "catalog.authority.null",
+    "input": {
+      "authority": "https://insecure.example"
+    },
+    "expected": {
+      "matches": false
+    }
+  },
+  {
+    "case_id": "catalog.fallback.0",
+    "input": {
+      "url": "bad"
+    },
+    "expected": {
+      "is_standard": true,
+      "count": 0
+    }
+  },
+  {
+    "case_id": "catalog.fallback.1",
+    "input": {
+      "url": "http://x.test"
+    },
+    "expected": {
+      "is_standard": true,
+      "count": 0
+    }
+  },
+  {
+    "case_id": "catalog.fallback.2",
+    "input": {
+      "url": "ftp://x.test"
+    },
+    "expected": {
+      "is_standard": true,
+      "count": 0
+    }
+  },
+  {
+    "case_id": "catalog.fallback.3",
+    "input": {
+      "url": "https://x.test"
+    },
+    "expected": {
+      "is_standard": false,
+      "count": 1
+    }
+  },
+  {
+    "case_id": "endpoint.0",
+    "input": {
+      "base_url": "https://example.test/v1///",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "https://example.test/v1/models",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.1",
+    "input": {
+      "base_url": "https://example.test/v1",
+      "endpoint": "/models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "https://example.test/v1//models",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.2",
+    "input": {
+      "base_url": "https://example.test/a",
+      "endpoint": "../models?x=1#f",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "https://example.test/models%3Fx=1%23f",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.3",
+    "input": {
+      "base_url": "https://example.test:443",
+      "endpoint": "",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "https://example.test/",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.4",
+    "input": {
+      "base_url": "http://localhost/v1",
+      "endpoint": "models",
+      "allow_local": true,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "http://localhost/v1/models",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.5",
+    "input": {
+      "base_url": "http://127.0.0.2/v1",
+      "endpoint": "models",
+      "allow_local": true,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "http://127.0.0.2/v1/models",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.6",
+    "input": {
+      "base_url": "http://[::1]/v1",
+      "endpoint": "models",
+      "allow_local": true,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "http://[::1]/v1/models",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.7",
+    "input": {
+      "base_url": "http://remote.test/v1",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": true
+    },
+    "expected": {
+      "url": "http://remote.test/v1/models",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.8",
+    "input": {
+      "base_url": "http://remote.test/v1",
+      "endpoint": "models",
+      "allow_local": true,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: HTTP requires allow_insecure_remote, or allow_insecure_localhost for a loopback host",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.9",
+    "input": {
+      "base_url": "http://localhost/v1",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: HTTP requires allow_insecure_remote, or allow_insecure_localhost for a loopback host",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.10",
+    "input": {
+      "base_url": "https://u:p@example.test",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: base URL must contain only a scheme, host, and path",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.11",
+    "input": {
+      "base_url": "https://example.test?q=x",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: base URL must contain only a scheme, host, and path",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.12",
+    "input": {
+      "base_url": "https://example.test#f",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: base URL must contain only a scheme, host, and path",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.13",
+    "input": {
+      "base_url": "ftp://example.test",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: base URL must use HTTPS",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.14",
+    "input": {
+      "base_url": "not a url",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: invalid base URL: not a url",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.15",
+    "input": {
+      "base_url": "file:///tmp/a",
+      "endpoint": "models",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: base URL must contain only a scheme, host, and path",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "endpoint.16",
+    "input": {
+      "base_url": "https://bücher.example/a%20b",
+      "endpoint": "x y",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "https://bücher.example/a%20b/x%20y",
+      "error": null
+    }
+  },
+  {
+    "case_id": "endpoint.17",
+    "input": {
+      "base_url": "https://example.test/",
+      "endpoint": "https://other.test/x",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    "expected": {
+      "url": "https://example.test/https://other.test/x",
+      "error": null
+    }
+  },
+  {
+    "case_id": "header.0",
+    "input": {
+      "name": "X-Test",
+      "value": " value\t"
+    },
+    "expected": {
+      "headers": {
+        "X-Test": " value\t"
+      },
+      "error": null
+    }
+  },
+  {
+    "case_id": "header.1",
+    "input": {
+      "name": "!#$%&'*+-.^_`|~",
+      "value": "é"
+    },
+    "expected": {
+      "headers": {
+        "!#$%&'*+-.^_`|~": "é"
+      },
+      "error": null
+    }
+  },
+  {
+    "case_id": "header.2",
+    "input": {
+      "name": "",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: invalid configured header name \"\"",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.3",
+    "input": {
+      "name": " X-Test",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: invalid configured header name \" X-Test\"",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.4",
+    "input": {
+      "name": "X-Test ",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: invalid configured header name \"X-Test \"",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.5",
+    "input": {
+      "name": "X Test",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: invalid configured header name \"X Test\"",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.6",
+    "input": {
+      "name": "X:Test",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: invalid configured header name \"X:Test\"",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.7",
+    "input": {
+      "name": "X-é",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: invalid configured header name \"X-é\"",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.8",
+    "input": {
+      "name": "Authorization",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: configured header \"Authorization\" is not allowed",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.9",
+    "input": {
+      "name": "COOKIE",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: configured header \"COOKIE\" is not allowed",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.10",
+    "input": {
+      "name": "Host",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: configured header \"Host\" is not allowed",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.11",
+    "input": {
+      "name": "Proxy-Authorization",
+      "value": "x"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: configured header \"Proxy-Authorization\" is not allowed",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.12",
+    "input": {
+      "name": "X-Test",
+      "value": "a\rb"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: configured header \"X-Test\" has an invalid value",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.13",
+    "input": {
+      "name": "X-Test",
+      "value": "a\nb"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: configured header \"X-Test\" has an invalid value",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "header.14",
+    "input": {
+      "name": "X-Test",
+      "value": "a\u0000b"
+    },
+    "expected": {
+      "headers": {
+        "X-Test": "a\u0000b"
+      },
+      "error": null
+    }
+  },
+  {
+    "case_id": "header.case-overwrite",
+    "input": {
+      "X-Test": "first",
+      "x-test": "second"
+    },
+    "expected": {
+      "headers": {
+        "X-Test": "second"
+      }
+    }
+  },
+  {
+    "case_id": "bounded.False.False",
+    "input": {
+      "asynchronous": false,
+      "exceeds": false,
+      "bytes_hex": "C3A9C3A9",
+      "limit": 4,
+      "read_size": 8
+    },
+    "expected": {
+      "count": 4,
+      "error": null,
+      "bytes_hex": "C3A9C3A9",
+      "response_bytes": 4,
+      "source_position": 4,
+      "subsequent_read": 0,
+      "source_disposed": true
+    }
+  },
+  {
+    "case_id": "bounded.False.True",
+    "input": {
+      "asynchronous": false,
+      "exceeds": true,
+      "bytes_hex": "C3A9C3A921",
+      "limit": 4,
+      "read_size": 8
+    },
+    "expected": {
+      "count": null,
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: response stream exceeds byte limit"
+      },
+      "bytes_hex": "C3A9C3A9",
+      "response_bytes": 5,
+      "source_position": 5,
+      "subsequent_read": 0,
+      "source_disposed": true
+    }
+  },
+  {
+    "case_id": "bounded.True.False",
+    "input": {
+      "asynchronous": true,
+      "exceeds": false,
+      "bytes_hex": "C3A9C3A9",
+      "limit": 4,
+      "read_size": 8
+    },
+    "expected": {
+      "count": 4,
+      "error": null,
+      "bytes_hex": "C3A9C3A9",
+      "response_bytes": 4,
+      "source_position": 4,
+      "subsequent_read": 0,
+      "source_disposed": true
+    }
+  },
+  {
+    "case_id": "bounded.True.True",
+    "input": {
+      "asynchronous": true,
+      "exceeds": true,
+      "bytes_hex": "C3A9C3A921",
+      "limit": 4,
+      "read_size": 8
+    },
+    "expected": {
+      "count": null,
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: response stream exceeds byte limit"
+      },
+      "bytes_hex": "C3A9C3A9",
+      "response_bytes": 5,
+      "source_position": 5,
+      "subsequent_read": 0,
+      "source_disposed": true
+    }
+  },
+  {
+    "case_id": "bounded.limit.0",
+    "input": {
+      "limit": 0
+    },
+    "expected": {
+      "count": 0,
+      "source_position": 0
+    }
+  },
+  {
+    "case_id": "bounded.limit.-1",
+    "input": {
+      "limit": -1
+    },
+    "expected": {
+      "count": 0,
+      "source_position": 0
+    }
+  },
+  {
+    "case_id": "bounded.limit.5",
+    "input": {
+      "limit": 5
+    },
+    "expected": {
+      "count": 3,
+      "source_position": 3
+    }
+  },
+  {
+    "case_id": "idle.first",
+    "input": {},
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: idle timeout waiting for HTTP/SSE response bytes"
+      }
+    }
+  },
+  {
+    "case_id": "idle.reset-probe",
+    "input": {},
+    "expected": {
+      "counts": [
+        1,
+        1
+      ],
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: idle timeout waiting for HTTP/SSE response bytes"
+      }
+    }
+  },
+  {
+    "case_id": "idle.cancel.False",
+    "input": {
+      "disabled": false
+    },
+    "expected": {
+      "completed_before_cancel": false,
+      "caller_token_preserved": true,
+      "error": {
+        "category": "System.OperationCanceledException",
+        "message": "The operation was canceled."
+      }
+    }
+  },
+  {
+    "case_id": "idle.cancel.True",
+    "input": {
+      "disabled": true
+    },
+    "expected": {
+      "completed_before_cancel": false,
+      "caller_token_preserved": true,
+      "error": {
+        "category": "System.OperationCanceledException",
+        "message": "The operation was canceled."
+      }
+    }
+  },
+  {
+    "case_id": "idle.empty-eof-dispose",
+    "input": {},
+    "expected": {
+      "empty": 0,
+      "eof": 0,
+      "source_disposed": true
+    }
+  },
+  {
+    "case_id": "http.bytes.False.False",
+    "input": {
+      "error": false,
+      "oversized": false,
+      "input_length": 5
+    },
+    "expected": {
+      "response_bytes_before_read": 0,
+      "read_count": 2,
+      "response_bytes": 2,
+      "error": null,
+      "disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "http.bytes.True.False",
+    "input": {
+      "error": true,
+      "oversized": false,
+      "input_length": 5
+    },
+    "expected": {
+      "response_bytes_before_read": null,
+      "read_count": null,
+      "response_bytes": 5,
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider request failed with HTTP 400: éé!",
+        "status": 400,
+        "type": "",
+        "code": "",
+        "detail": "éé!",
+        "response_body": "éé!"
+      },
+      "disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "http.bytes.True.True",
+    "input": {
+      "error": true,
+      "oversized": true,
+      "input_length": 131072
+    },
+    "expected": {
+      "response_bytes_before_read": null,
+      "read_count": null,
+      "response_bytes": 65540,
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "status": 400,
+        "type": "",
+        "code": ""
+      },
+      "disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "http.request",
+    "input": {},
+    "expected": {
+      "method": "POST",
+      "uri": "https://example.test/responses",
+      "body_hex": "7B2278223A317D",
+      "content_type": "application/json",
+      "accept": "text/event-stream",
+      "custom": [
+        "custom"
+      ]
+    }
+  },
+  {
+    "case_id": "http.success",
+    "input": {},
+    "expected": {
+      "headers": {
+        "X-Codex-Turn-State": "one, two"
+      },
+      "events": [
+        "hi"
+      ],
+      "response_bytes": 10
+    }
+  },
+  {
+    "case_id": "http.error.364",
+    "input": {
+      "body": "{\"error\":{\"type\":\"quota\",\"code\":429,\"message\":\"  too\\n many\\trequests  \"}}"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider request failed with HTTP 429 (quota) [429]: too many\trequests",
+        "status": 429,
+        "type": "quota",
+        "code": "429",
+        "detail": "too many\trequests",
+        "response_body": "{\"error\":{\"type\":\"quota\",\"code\":429,\"message\":\"  too\\n many\\trequests  \"}}"
+      },
+      "response_bytes": 74
+    }
+  },
+  {
+    "case_id": "http.error.365",
+    "input": {
+      "body": "{\"type\":\"x\",\"code\":true,\"message\":\"root\"}"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider request failed with HTTP 429 (x) [true]: root",
+        "status": 429,
+        "type": "x",
+        "code": "true",
+        "detail": "root",
+        "response_body": "{\"type\":\"x\",\"code\":true,\"message\":\"root\"}"
+      },
+      "response_bytes": 41
+    }
+  },
+  {
+    "case_id": "http.error.366",
+    "input": {
+      "body": "[]"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider request failed with HTTP 429: []",
+        "status": 429,
+        "type": "",
+        "code": "",
+        "detail": "[]",
+        "response_body": "[]"
+      },
+      "response_bytes": 2
+    }
+  },
+  {
+    "case_id": "http.error.367",
+    "input": {
+      "body": ""
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider request failed with HTTP 429: Too Many Requests",
+        "status": 429,
+        "type": "",
+        "code": "",
+        "detail": "Too Many Requests",
+        "response_body": ""
+      },
+      "response_bytes": 0
+    }
+  },
+  {
+    "case_id": "http.error.368",
+    "input": {
+      "body": "oops\u0001\n  bad"
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider request failed with HTTP 429: oops  bad",
+        "status": 429,
+        "type": "",
+        "code": "",
+        "detail": "oops  bad",
+        "response_body": "oops\u0001\n  bad"
+      },
+      "response_bytes": 11
+    }
+  },
+  {
+    "case_id": "http.control.negative-idle",
+    "input": {},
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.LLMProviderException",
+        "message": "provider: stream idle timeout cannot be negative"
+      },
+      "handler_calls": 0
+    }
+  },
+  {
+    "case_id": "http.control.request-too-large",
+    "input": {},
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderRequestTooLargeException",
+        "message": "provider: request exceeds 1 bytes"
+      },
+      "handler_calls": 0
+    }
+  },
+  {
+    "case_id": "http.control.caller-cancel",
+    "input": {},
+    "expected": {
+      "error": {
+        "category": "System.Threading.Tasks.TaskCanceledException",
+        "message": "A task was canceled."
+      },
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "http.control.header-timeout",
+    "input": {},
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.HeaderTimeoutException",
+        "message": "provider: response headers timed out after 00:00:00.0100000"
+      },
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "http.get.C3A9C3A9",
+    "input": {
+      "body": "éé",
+      "max_bytes": 4
+    },
+    "expected": {
+      "result": "éé",
+      "error": null
+    }
+  },
+  {
+    "case_id": "http.get.C3A9C3A921",
+    "input": {
+      "body": "éé!",
+      "max_bytes": 4
+    },
+    "expected": {
+      "result": null,
+      "error": {
+        "category": "Parrot.Llm.Wire.ProviderHttpException",
+        "message": "provider: response exceeds 4 bytes",
+        "status": 0,
+        "type": "",
+        "code": "",
+        "detail": "",
+        "response_body": ""
+      }
+    }
+  },
+  {
+    "case_id": "http.get.616263",
+    "input": {
+      "body": "abc",
+      "max_bytes": 4
+    },
+    "expected": {
+      "result": "abc",
+      "error": null
+    }
+  },
+  {
+    "case_id": "http.wrapper-bound",
+    "input": {
+      "limit": 3
+    },
+    "expected": {
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: response stream exceeds byte limit"
+      },
+      "response_bytes": 4,
+      "source_disposed": true,
+      "owner_disposed": true
+    }
+  },
+  {
+    "case_id": "provider-idle.chatgpt.False.20",
+    "input": {
+      "transport": "chatgpt",
+      "fallback": false,
+      "timeout_milliseconds": 20
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: idle timeout waiting for HTTP/SSE response bytes"
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.chatgpt.True.20",
+    "input": {
+      "transport": "chatgpt",
+      "fallback": true,
+      "timeout_milliseconds": 20
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: idle timeout waiting for HTTP/SSE response bytes"
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.responses.False.20",
+    "input": {
+      "transport": "responses",
+      "fallback": false,
+      "timeout_milliseconds": 20
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: idle timeout waiting for HTTP/SSE response bytes"
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.responses.True.20",
+    "input": {
+      "transport": "responses",
+      "fallback": true,
+      "timeout_milliseconds": 20
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: idle timeout waiting for HTTP/SSE response bytes"
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.chat-completions.False.20",
+    "input": {
+      "transport": "chat-completions",
+      "fallback": false,
+      "timeout_milliseconds": 20
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "Parrot.Llm.Wire.WireProtocolException",
+        "message": "provider: idle timeout waiting for HTTP/SSE response bytes"
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.chatgpt.False.0",
+    "input": {
+      "transport": "chatgpt",
+      "fallback": false,
+      "timeout_milliseconds": 0
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "System.Threading.Tasks.TaskCanceledException",
+        "message": "A task was canceled."
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.chatgpt.True.0",
+    "input": {
+      "transport": "chatgpt",
+      "fallback": true,
+      "timeout_milliseconds": 0
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "System.Threading.Tasks.TaskCanceledException",
+        "message": "A task was canceled."
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.responses.False.0",
+    "input": {
+      "transport": "responses",
+      "fallback": false,
+      "timeout_milliseconds": 0
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "System.Threading.Tasks.TaskCanceledException",
+        "message": "A task was canceled."
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.responses.True.0",
+    "input": {
+      "transport": "responses",
+      "fallback": true,
+      "timeout_milliseconds": 0
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "System.Threading.Tasks.TaskCanceledException",
+        "message": "A task was canceled."
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  },
+  {
+    "case_id": "provider-idle.chat-completions.False.0",
+    "input": {
+      "transport": "chat-completions",
+      "fallback": false,
+      "timeout_milliseconds": 0
+    },
+    "expected": {
+      "events": [
+        "HttpRequestStarted",
+        "HttpResponseHeadersReceived"
+      ],
+      "error": {
+        "category": "System.Threading.Tasks.TaskCanceledException",
+        "message": "A task was canceled."
+      },
+      "response_bytes": 0,
+      "body_disposed": true,
+      "handler_calls": 1
+    }
+  }
+]

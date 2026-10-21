@@ -1,0 +1,312 @@
+{
+  "cases": [
+    {
+      "case_id": "uri-case58-unreserved-tilde",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e/item.png",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-unreserved-mixed-case",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7E/%41%61%30%2D%5F%2E",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-reserved-casing",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a%2fb/%2F/%3a/%3A/%40/%23/%3F/%25",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-single-percent-dot",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%2E/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-double-percent-dot",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/%2e%2e/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-mixed-percent-literal-dot-a",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/%2E./c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-mixed-percent-literal-dot-b",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/.%2e/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-mixed-percent-case-dots",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/%2e%2E/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-multiple-dot-segments",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/%2E/b/%2e./c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-double-escaped-dots",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/%252E/%252e%252e/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-dot-prefix-not-segment",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/%2eX/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-escaped-slash-before-dots",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a%2fb/%2e%2e/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-double-slash-dot",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a//%2E/c",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-trailing-double-dot",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/a/%2e%2e",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-root-double-dot",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/%2E%2E/escape",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-unicode-escaped",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%E2%98%83/%c3%a9",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-query-unreserved",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?x=%7e&u=%41%61%30%2D%5F%2e",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-query-reserved-casing",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?x=%2f&y=%2F&colon=%3a&at=%40&hash=%23",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-query-dots",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?x=.%2e&y=%2e%2E&z=%252E",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-query-sort-duplicates",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?b=2&a=3&a=1&blank&plus=a+b&space=a%20b",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-query-escaped-delimiters",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?%61=%26%3D&b=%3f%23%2b",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-query-empty-pairs",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?&&a=&=value&&bare&",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-query-mixed-case-percent",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?q=%2f%2F%7e%7E%41%4a",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-fragment-query",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%7e?q=%23%3F#fragment%7e",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-invalid-utf8-percent",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%FF/%C3%28?x=%FF&y=%C3%28",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-invalid-utf8-mixed-valid",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%E2%98%83%FF%C3%A9?x=%E2%98%83%FF%C3%A9",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-incomplete-percent",
+      "family": "uri_signing",
+      "url": "https://s3.example.test/b/%/%2/%ZZ?x=%&y=%2&z=%ZZ",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-authority-uppercase-default-port",
+      "family": "uri_signing",
+      "url": "HTTPS://S3.Example.Test:443/b/%7e",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-authority-explicit-port",
+      "family": "uri_signing",
+      "url": "https://s3.example.test:9443/b/%7e",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-authority-host-override",
+      "family": "uri_signing",
+      "url": "https://s3.example.test:9443/b/%7e",
+      "host_header": "override.example.test:8443"
+    },
+    {
+      "case_id": "uri-authority-ipv6",
+      "family": "uri_signing",
+      "url": "https://[::1]:9443/b/%7e",
+      "host_header": ""
+    },
+    {
+      "case_id": "uri-authority-userinfo",
+      "family": "uri_signing",
+      "url": "https://synthetic-user:synthetic-password@s3.example.test/b/%7e",
+      "host_header": ""
+    },
+    {
+      "case_id": "endpoint-https-path-tilde",
+      "family": "endpoint_policy",
+      "base_url": "https://example.test/v%7e",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-https-percent-dot",
+      "family": "endpoint_policy",
+      "base_url": "https://example.test/a/%2E%2E/v1",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-https-reserved-path",
+      "family": "endpoint_policy",
+      "base_url": "https://example.test/a%2fb/%7e",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-remote-http-denied",
+      "family": "endpoint_policy",
+      "base_url": "http://example.test/v1",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-remote-http-allowed",
+      "family": "endpoint_policy",
+      "base_url": "http://example.test/v1",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": true
+    },
+    {
+      "case_id": "endpoint-loopback-http-denied",
+      "family": "endpoint_policy",
+      "base_url": "http://127.0.0.1:9000/v1",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-loopback-http-allowed",
+      "family": "endpoint_policy",
+      "base_url": "http://127.0.0.1:9000/v1",
+      "endpoint": "images/generations",
+      "allow_local": true,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-query-denied",
+      "family": "endpoint_policy",
+      "base_url": "https://example.test/v1?x=%7e",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-fragment-denied",
+      "family": "endpoint_policy",
+      "base_url": "https://example.test/v1#x",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-userinfo-denied",
+      "family": "endpoint_policy",
+      "base_url": "https://synthetic-user:synthetic-password@example.test/v1",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "endpoint-ftp-denied",
+      "family": "endpoint_policy",
+      "base_url": "ftp://example.test/v1",
+      "endpoint": "images/generations",
+      "allow_local": false,
+      "allow_remote": false
+    },
+    {
+      "case_id": "short-invalid-byte-then-io",
+      "family": "response_read_order",
+      "first": "invalid-prefix",
+      "first_chunk_bytes": 1,
+      "tail": "io"
+    },
+    {
+      "case_id": "short-invalid-byte-then-cancel",
+      "family": "response_read_order",
+      "first": "invalid-prefix",
+      "first_chunk_bytes": 1,
+      "tail": "cancel"
+    },
+    {
+      "case_id": "short-invalid-byte-then-block",
+      "family": "response_read_order",
+      "first": "invalid-prefix",
+      "first_chunk_bytes": 1,
+      "tail": "block"
+    },
+    {
+      "case_id": "short-invalid-byte-then-eof",
+      "family": "response_read_order",
+      "first": "invalid-prefix",
+      "first_chunk_bytes": 1,
+      "tail": "eof"
+    }
+  ]
+}

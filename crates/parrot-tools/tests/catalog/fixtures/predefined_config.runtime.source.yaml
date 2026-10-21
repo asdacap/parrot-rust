@@ -1,0 +1,1056 @@
+
+# Markdown skills discovered from repository, user, and packaged roots.
+skills:
+  enabled: true
+  entries: []
+
+# Default model selected as provider/model, optionally followed by /variant.
+model: ""
+
+# Named snapshots of the selected model and model alias targets.
+model_presets: {}
+
+# Stable aliases for model routing after delegation is justified. Empty
+# model_string values are intended to be configured by the user.
+model_aliases:
+  low_llm:
+    model_string: ""
+    usage: Explicit reversible mechanical or evidence work with failure-specific validation; never judgmental review. use fork none for this one please. It tend to confuse instruction also.
+    # Optional alias-specific system-prompt augmentation. An explicit empty
+    # string suppresses this augmentation rather than inheriting it.
+    augment_system_prompt: Please refuse to decide or to determine fact that is not clearly stated in code or docs. Only provide evidence, do not infer or determine a fact.
+    icon:
+      glyph: ◆
+      color: gray
+  medium_llm:
+    model_string: ""
+    usage: Settled component work requiring local specific judgment.
+    augment_system_prompt: null
+    icon:
+      glyph: ◆
+      color: cyan
+  high_llm:
+    model_string: ""
+    usage: Tactical ambiguity, debugging, coordination, integration, or substantive review. Good architect.
+    augment_system_prompt: null
+    icon:
+      glyph: ◆
+      color: yellow
+  xhigh_llm:
+    model_string: ""
+    usage: Strategic, architectural, open-ended, tightly coupled, difficult-to-verify, or consequential work with hard-to-detect errors.
+    augment_system_prompt: null
+    icon:
+      glyph: ◆
+      color: red
+
+# Recommended standard alias targets for each provider. Every provider entry must
+# define all four aliases, and each target must select that provider.
+provider_model_alias_defaults:
+  chatgpt:
+    low_llm: chatgpt/gpt-6-luna/high
+    medium_llm: chatgpt/gpt-6.1-sol/medium
+    high_llm: chatgpt/gpt-6.1-sol/high
+    xhigh_llm: chatgpt/gpt-6-astra/medium
+
+  opencode-go:
+    low_llm: opencode-go/deepseek-v4-flash/high
+    medium_llm: opencode-go/deepseek-v4-pro/high
+    high_llm: opencode-go/glm-5.2/high
+    xhigh_llm: opencode-go/kimi-k3/high
+
+  openrouter:
+    low_llm: openrouter/deepseek/deepseek-v4-flash-0731/high
+    medium_llm: openrouter/deepseek/deepseek-v4-pro/high
+    high_llm: openrouter/z-ai/glm-5.2/high
+    xhigh_llm: openrouter/moonshotai/kimi-k3/high
+
+# Model guidance keyed by provider/model[/variant] or a slash-delimited prefix.
+# Each property inherits from broader prefixes; an explicit empty string clears it.
+model_profiles:
+  chatgpt:
+    maximum_input_tokens: 250000
+    summary_output_tokens: 32000
+  chatgpt/gpt-6-luna:
+    usage: "Very cheap. Feel free to use whenever it save time. Feel free to spawn multiple subagent of this model. However, quite dumb. Use for automation or very clear small coding task with clear unit-testable acceptance criteria"
+    system_prompt: "Do not decide on your own. You are the hand and feet of a higher level model. Do not deviate from instruction and do not omit detail when exploring."
+  chatgpt/gpt-6.1-sol:
+    usage: "General purpose. A little bit short sighted. Relatively cheap. However, quite slow and not so capable, but in general is fine. Do spawn multiple subagent of this model to speed things up where possible. "
+    system_prompt: "Be careful of loosing the point. When thinking that something is a flaw, look at a higher level, the caller, and the system in general, that flaw may not actually be a flaw and addressing it may take more of the user's attention, causing a net reduction in productivity."
+  chatgpt/gpt-6.1-sol/high:
+    usage: "General purpose with deeper thinking. A little bit short sighted, tend to lose big picture and write unnecessary code. Do verify if code is too complicated."
+    system_prompt: "Be careful of loosing the point. When thinking that something is a flaw, look at a higher level, the caller, and the system in general, that flaw may not actually be a flaw and addressing it may take more of the user's attention, causing a net reduction in productivity."
+  chatgpt/gpt-6-astra:
+    usage: "Nice model, however, quite expensive and slow. Will generally provide right answer. Use for consult or decision making. But try not to use much due to its speed and cost."
+    system_prompt: "You are considered an expert actor and should not do low level tasks on your own. Delegate any low level tasks. Your job is to delegate, inspect, think and decide."
+
+# CLI executable names to discover on PATH. Expected utilities should normally be
+# available; optional utilities are reported only when installed. User entries
+# append after these defaults; use !replace on either sequence to replace inherited
+# entries, including !replace []. A name present in both lists is treated as expected.
+cli_utilities:
+  expected:
+    - awk
+    - bash
+    - bwrap
+    - curl
+    - find
+    - git
+    - grep
+    - jq
+    - rg
+    - sed
+    - stat
+    - tar
+    - xargs
+  optional:
+    - bat
+    - bun
+    - cal
+    - cargo
+    - clang
+    - cmake
+    - composer
+    - date
+    - delta
+    - deno
+    - docker
+    - dotnet
+    - fd
+    - fzf
+    - gcc
+    - gh
+    - go
+    - gradle
+    - java
+    - javac
+    - kubectl
+    - make
+    - mvn
+    - ninja
+    - nix
+    - node
+    - npm
+    - perl
+    - php
+    - pip
+    - pip3
+    - pnpm
+    - python
+    - python3
+    - ruby
+    - rustc
+    - shellcheck
+    - swift
+    - time
+    - timeout
+    - touch
+    - tree
+    - yarn
+
+# Command prefixes whose exec activity is rendered as compact muted output.
+# User entries append after these defaults; use !replace to replace the inherited sequence.
+read_only_exec_command_prefixes:
+  - cat
+  - file
+  - find
+  - git diff
+  - git log
+  - git show
+  - git status
+  - grep
+  - head
+  - ls
+  - nl
+  - pwd
+  - rg
+  - sed
+  - stat
+  - strings
+  - tail
+  - tree
+  - wc
+
+# Render changed lines inline. Set to false for a side-by-side diff viewer.
+inline_diff: true
+
+# Let child agents message their direct parent with agent_send. Set to true to
+# allow children to message their parent in addition to their final message.
+agent_send_to_parent: false
+
+# Number of rows retained in the live terminal buffer.
+live_buffer_rows: 20
+
+# Milliseconds to wait for interactive user input. Set to -1 to wait indefinitely.
+user_input_timeout_ms: 1200000
+
+# Limits for each compaction request.
+compaction:
+  trigger_percent: 95
+  target_percent: 30
+  maximum_input_tokens: 60000
+  summary_output_tokens: 12000
+
+# Complete model-facing definitions for built-in tools. User configuration may override
+# descriptions or structural JSON Schema members while inheriting remaining entries.
+# Parameters use standard JSON Schema represented as YAML.
+tools:
+  compact_context:
+    description: Compact only this calling agent session's context. An optional target_context_size accepts positive whole tokens, an integer k suffix, or a whole percentage of the model context window.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        target_context_size:
+          type: string
+          description: Optional compaction target such as 100k or 20%.
+      required: []
+  answer:
+    description: Answer the pending ordered questions from one direct child agent.
+    parameters:
+      type: object
+      properties:
+        agent_name:
+          type: string
+          minLength: 1
+          description: Name of the direct child whose pending question is being answered.
+        answers:
+          type: array
+          minItems: 1
+          maxItems: 32
+          description: One nonblank textual answer for every question, in the order shown in the child question steer.
+          items:
+            type: string
+            minLength: 1
+      required:
+      - agent_name
+      - answers
+      additionalProperties: false
+  agent_send:
+    description: Send a message to an agent in this user session using a direct name or a relative or absolute slash-separated agent path. Paths may traverse children, use parent segments to reach ancestors or siblings, or start with /root-name to address from the root; examples include child/grandchild, parent/sibling, and /root-name/child.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Agent name or slash-separated path within this user session. Relative paths may traverse child names and 'parent' segments (for example child/grandchild, parent/sibling, or parent/parent/sibling); absolute paths start with /root-name (for example /root-name/child). A bare 'parent' or the parent's friendly name addresses the parent. Sending to any ancestor is disabled when parent sending is disabled. Sending to a non-ancestor with a more permissive security profile is rejected.
+        message:
+          type: string
+          minLength: 1
+          description: Message to send. At most 32768 UTF-8 bytes; split larger content into smaller messages.
+      required:
+      - name
+      - message
+      additionalProperties: false
+  agent_status:
+    description: Report current activity for an agent in this user session using a direct child name or relative or absolute slash-separated path. Paths may traverse children and parent segments (for example child/grandchild or parent/sibling), or start at /root-name.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Direct child name or relative or absolute slash-separated agent path in this user session; paths may traverse children and parent segments or start at /root-name.
+      required:
+      - name
+      additionalProperties: false
+  agent_interrupt:
+    description: Interrupt one direct child agent by name. The child's current turn stops and settles like a parent-initiated interrupt.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Direct child agent name
+      required:
+      - name
+      additionalProperties: false
+  agent_spawn:
+    description: 'Start a child agent in an isolated session. The name identifies the child among this session''s direct children: an existing idle child with the same normalized name is resumed with the new prompt, model, and profile; an existing running child fails the call. Its terminal result is automatically sent to this session.'
+    parameters:
+      type: object
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          description: The subtask for the child agent
+        agent:
+          type: string
+          minLength: 1
+          description: Configured child profile to run
+        model:
+          type: string
+          description: Optional configured model. Default follows caller model.
+        name:
+          type: string
+          minLength: 1
+          description: 'Required friendly name, unique among this session''s direct children. An existing idle child with this name is resumed instead of creating a new agent; a running child fails the call.'
+        scope:
+          type: string
+          description: Optional problem-space scope for the child; omitted or empty inherits the parent's effective scope. Specify this to prevent subagent for doing redundant work with other agent. Ignored when resuming an existing child.
+        fork:
+          type: string
+          default: empty
+          description: 'Conversation history for the child: default to no history; `full` gives the
+            parent''s effective history; a checkpoint title gives history from that checkpoint. Ignored when resuming an existing child.'
+      required:
+      - prompt
+      - agent
+      - name
+      additionalProperties: false
+  edit:
+    description: Replace exact, case-sensitive text in an existing UTF-8 file. With replace_all false exactly one match is
+      required; with replace_all true zero or more matches are replaced.
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          minLength: 1
+          description: Path of the existing ile to edit.
+        old_string:
+          type: string
+          minLength: 1
+          description: Exact text to replace.
+        new_string:
+          type: string
+          description: Text that replaces each selected match.
+        replace_all:
+          type: boolean
+          default: false
+          description: Whether to replace every match instead of requiring exactly one.
+      required:
+      - path
+      - old_string
+      - new_string
+      additionalProperties: false
+  exec_command:
+    description: Run a shell command. Command run sandbox by default. Optionally reserve a name unique among this agent session's running processes
+      and yield without stopping it; completed process names can be reused and omitted names are generated.
+      Yielded run will send notification to caller once done.
+    parameters:
+      type: object
+      properties:
+        command:
+          type: string
+          description: The shell command to run
+        cmd:
+          type: string
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables for the command. Values override the inherited environment.
+        name:
+          type: string
+          description: Name unique among running processes; completed names can be reused and omitted names are generated.
+        description:
+          type: string
+          description: Short description of what the command does.
+        yield_after_ms:
+          type: integer
+          minimum: 500
+          description: Return the process name if still running after this many milliseconds. 0 mean yield immediately. undefined means block indefinitely.
+        tty:
+          type: boolean
+          default: false
+          description: Run the command in a pseudo-terminal so its standard input can accept later write_stdin calls
+      required:
+      - command
+      additionalProperties: false
+  glob:
+    description: Find paths beneath an optional root with deterministic glob matching, including **. Relative roots resolve
+      within the workspace.
+    parameters:
+      type: object
+      properties:
+        pattern:
+          type: string
+          description: Root-relative glob pattern, including ** for recursive matching.
+        path:
+          type: string
+          description: Optional workspace-relative or authorized absolute directory to search.
+      required:
+      - pattern
+      additionalProperties: false
+  interrupt_process:
+    description: Send a process signal to a running shell process's tracked top-level wrapper. Use a bare process name for this agent or agent-path/process-name to target a process owned by another agent in this user session.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Bare process name for this agent or agent-path/process-name for a process owned by another agent in this user session.
+        signal:
+          type: integer
+          minimum: 1
+          maximum: 64
+          default: 2
+          description: Process signal number from 1 through 64
+      required:
+      - name
+  monitor:
+    description: |-
+      Start a background monitor whose stdout lines stream to you as notifications while you keep working. Each stdout line is an event; lines arriving within 200ms are batched into one notification; exit ends the watch and reports the exit code. Unlike exec_command, a running monitor does not keep the turn open. Notifications are not replies from the user.
+      For a single notification ("tell me when the build finishes"), use exec_command with yield_after_ms instead. Use a monitor for one notification per occurrence, such as `tail -f app.log | grep --line-buffered ERROR` or a poll loop that prints one line per new item.
+      Every pipe stage must flush per line (grep --line-buffered, awk fflush()); `| head` delivers nothing until it ends. Only stdout is the event stream, so merge stderr with 2>&1 when the command's own failures matter. In poll loops tolerate transient failures (`|| true`) and poll remote APIs at 30s or slower.
+      Silence is not success: the filter must match every terminal state (for example `Traceback|Error|FAILED|Killed`), not just the happy path. Filter to the lines you would act on; a monitor that emits too many events is stopped automatically.
+      Every monitor is stopped at timeout_ms and you get one notice; start it again to keep watching. Stop it early with interrupt_process using its name.
+    parameters:
+      type: object
+      properties:
+        command:
+          type: string
+          description: Shell command or script. Each stdout line is an event; exit ends the watch.
+        description:
+          type: string
+          description: Short description of what is being monitored, shown in every notification.
+        name:
+          type: string
+          description: Name unique among running processes; completed names can be reused and omitted names are generated.
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables for the command. Values override the inherited environment.
+        timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 1800000
+          default: 300000
+          description: Stop the monitor after this many milliseconds. You are notified when it stops.
+      required:
+      - command
+      - description
+      additionalProperties: false
+  question:
+    description: Ask ordered questions when a decision or missing information is needed. The root agent asks the user; a child agent asks its direct parent. Use this instead of asking questions in normal chat.
+    parameters:
+      type: object
+      properties:
+        questions:
+          type: array
+          items:
+            type: object
+            properties:
+              header:
+                type: string
+                description: Short heading displayed with the question.
+              prompt:
+                type: string
+                minLength: 1
+                description: Question text shown to the user.
+              options:
+                type: array
+                items:
+                  oneOf:
+                  - type: string
+                    minLength: 1
+                    description: Plain answer text shown verbatim to the user.
+                  - type: object
+                    properties:
+                      label:
+                        type: string
+                        minLength: 1
+                        description: The answer text; this is what gets returned when selected.
+                      description:
+                        type: string
+                        description: Short explanation of the option shown to the user alongside the label.
+                    required:
+                    - label
+                    additionalProperties: false
+                description: Selectable answers offered to the user; a string is a plain answer, an object adds a short explanation shown to the user.
+              multiple:
+                type: boolean
+                description: Whether the user may select more than one answer.
+              custom:
+                type: boolean
+                description: Whether the user may supply a custom answer.
+            required:
+            - prompt
+            additionalProperties: false
+          minItems: 1
+          maxItems: 32
+          description: Questions whose answers are returned in the same order.
+      required:
+      - questions
+      additionalProperties: false
+  queue_create:
+    description: Explicitly create a persistent queue owned by the invoking agent. Its direct children can access it.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+          description: Queue name containing lowercase ASCII letters, numbers, and hyphens.
+        description:
+          type: string
+          description: Human-readable description of the queue.
+      required:
+      - name
+      additionalProperties: false
+  queue_info:
+    description: Get metadata and current size of a queue. Use a bare name for a local or parent queue, or agent-path/queue-name to select an exact owner in this user session; explicit owner paths do not fall back to another owner.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Bare queue name or agent-path/queue-name; an explicit owner path selects that exact agent and does not fall back.
+      required:
+      - name
+      additionalProperties: false
+  queue_push:
+    description: Push strings onto a queue, then optionally close it. Use a bare name for a local or parent queue, or agent-path/queue-name to select an exact owner in this user session; explicit owner paths do not fall back. Exactly one of items or source_file is required. Items may be empty to close without adding data. A source file up to 16 MiB contributes one item per nonblank UTF-8 line.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Bare queue name or agent-path/queue-name; an explicit owner path selects that exact agent and does not fall back.
+        items:
+          type: array
+          items:
+            type: string
+          description: Strings to push. Exactly one of items or source_file is required; items may be empty when closing.
+        source_file:
+          type: string
+          description: Workspace-relative or authorized absolute UTF-8 text file up to 16 MiB, supplying one item per nonblank
+            line. Exactly one of items or source_file is required.
+        direction:
+          type: string
+          enum:
+          - front
+          - back
+          default: back
+          description: End of the queue onto which the items are pushed.
+        close:
+          type: boolean
+          default: false
+          description: Whether to close the queue after pushing the items.
+      required:
+      - name
+      additionalProperties: false
+  queue_take:
+    description: Remove and return strings from a queue. Use a bare name for a local or parent queue, or agent-path/queue-name to select an exact owner in this user session; explicit owner paths do not fall back. If the queue is open and empty, wait until an item is available or yield_after_ms elapses. Every result reports whether the queue is closed; a closed drained queue returns immediately. Count defaults to one, direction defaults to front, and yield_after_ms defaults to 30000. The queue does not need to fill count before returning.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Bare queue name or agent-path/queue-name; an explicit owner path selects that exact agent and does not fall back.
+        count:
+          type: integer
+          minimum: 1
+          default: 1
+          description: Maximum number of items to remove.
+        direction:
+          type: string
+          enum:
+          - front
+          - back
+          default: front
+          description: End of the queue from which items are removed.
+        yield_after_ms:
+          type: integer
+          minimum: 0
+          default: 30000
+          description: Milliseconds to wait for an item when the queue is empty.
+      required:
+      - name
+      additionalProperties: false
+  read:
+    description: Read a bounded line range from a text file or list a directory. Relative paths resolve within the workspace;
+      absolute paths require read permission.
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Workspace-relative or authorized absolute file or directory path.
+        offset:
+          type: integer
+          minimum: 1
+          description: One-based first line to read.
+        limit:
+          type: integer
+          minimum: 1
+          description: Maximum number of lines to read.
+      required:
+      - path
+      additionalProperties: false
+  imagegen:
+    description: >-
+      Generate or edit one PNG image using gpt-image-2 through the current turn's provider and credentials.
+      Requires a prompt and output_path ending in .png. Saves the image and returns its absolute path, without attaching
+      or displaying it. Existing regular files may be overwritten under the active write-security profile.
+      Relative paths resolve within the workspace; absolute paths require permission. Missing authorized parents are created.
+      Omit referenced_image_paths to generate; provide up to five local PNG, JPEG, or WebP files to edit, in reference order.
+      Inspect unfamiliar local images with read_image first. References must be single-frame images, at most 10 MiB each
+      and 50 MiB total, at most 8192 pixels per dimension and 40000000 pixels. Output is limited to 32 MiB with the same
+      dimension and frame limits. Generation may take several minutes, with a ten-minute operation timeout.
+      ChatGPT uses existing OAuth login; OpenAI-compatible providers use their configured credentials and Images endpoints
+      and may charge for generation. Unsupported providers or endpoints fail without fallback. No URL, conversation-history,
+      mask, or batch input is supported. Request each asset separately; transparency is not guaranteed.
+    parameters:
+      type: object
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          description: Image generation or editing instructions, sent verbatim to the image model.
+        output_path:
+          type: string
+          minLength: 1
+          description: Workspace-relative or authorized absolute .png destination; existing regular files may be overwritten.
+        referenced_image_paths:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+          description: Ordered local image paths to edit or use as references. Omit or leave empty to generate without references.
+      required:
+      - prompt
+      - output_path
+      additionalProperties: false
+  read_image:
+    description: Read a PNG, JPEG, GIF, or WebP image file. Relative paths resolve within the workspace; absolute paths require
+      read permission.
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Workspace-relative or authorized absolute image file path.
+      required:
+      - path
+      additionalProperties: false
+  request_write_permission:
+    description: Request agent-session-scoped permission for write, edit, and sandboxed shell operations on exact existing
+      files or directories.
+    parameters:
+      type: object
+      properties:
+        paths:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+          description: Exact absolute paths of existing files or directories to make writable for write, edit, and sandboxed
+            shell operations
+        reason:
+          type: string
+          minLength: 1
+          description: Why write access to these paths is needed
+      required:
+      - paths
+      - reason
+      additionalProperties: false
+  set_checkpoint:
+    description: Save a named checkpoint of this agent's conversation for a future child-agent fork.
+    parameters:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Human-readable name for this checkpoint.
+      required:
+      - title
+      additionalProperties: false
+  set_exit_reminder:
+    description: Set or replace a titled reminder injected before this agent finishes a turn. The agent cannot finish until every exit reminder is cleared with clear_exit_reminder.
+    parameters:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Unique title of the reminder; setting an existing title replaces its description.
+        description:
+          type: string
+          minLength: 1
+          description: Reminder text, including the condition for clearing it.
+      required:
+      - title
+      - description
+      additionalProperties: false
+  clear_exit_reminder:
+    description: Clear the exit reminder with the given title once its condition is met.
+    parameters:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the exit reminder to clear.
+      required:
+      - title
+      additionalProperties: false
+  status:
+    description: Query current runtime status without adding it to the system prompt.
+    parameters:
+      type: object
+      additionalProperties: false
+  wait:
+    description: Wait for incoming activity. Returns early for a new message, completed child-agent, AgentTask graph completion, process completion. Do not use the sleep shell command. Use this wait tool than `sleep` cli.
+    parameters:
+      type: object
+      properties:
+        duration_ms:
+          type: integer
+          minimum: 10000
+          maximum: 4294967294
+          default: 300000
+          description: Maximum time to wait in milliseconds.
+      additionalProperties: false
+  web_fetch:
+    description: Fetch bounded HTTP or HTTPS text with GET or HEAD after exact network permission review.
+    parameters:
+      type: object
+      properties:
+        url:
+          type: string
+          description: HTTP or HTTPS URL to fetch.
+        method:
+          type: string
+          description: HTTP method, either GET or HEAD.
+      required:
+      - url
+      additionalProperties: false
+  write_stdin:
+    description: Write text to the standard input of a running pseudo-terminal process and return its available output.
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Bare process name for this agent or agent-path/process-name for a process owned by another agent in this user session.
+        input:
+          type: string
+          description: Text to write to the process standard input
+        yield_after_ms:
+          type: integer
+          minimum: 0
+          default: 250
+          description: Return the process name if still running after this many milliseconds
+      required:
+      - name
+      - input
+      additionalProperties: false
+  write:
+    description: Create or replace a file with exact UTF-8 content. Relative paths resolve within the workspace; absolute
+      paths require explicit write authorization.
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          minLength: 1
+          description: Path of the file to create or replace.
+        content:
+          type: string
+          description: Exact UTF-8 content to write.
+      required:
+      - path
+      - content
+      additionalProperties: false
+# Tools disabled globally, keyed by tool ID. True disables a tool; false in a
+# higher-precedence layer re-enables an inherited disabled entry.
+disabled_tools: {}
+
+# Child-agent concurrency and nesting limits.
+subagents:
+  # Maximum child-agent turns running across the process.
+  max_concurrent: 64
+  # Maximum child-agent turns running for one parent session.
+  max_concurrent_per_parent: 16
+  # Maximum number of nested child-agent levels.
+  max_depth: 4
+
+# Active built-in providers and their seeded model catalogues. Credential values
+# are sourced from the configured environment variables or credential store.
+providers:
+  # Header timeout includes request upload. Zero disables it; overrides are per provider.
+  # header_timeout_max_retries defaults to 5; zero disables header-timeout retries.
+  chatgpt:
+    disable_websocket: false
+    header_timeout_ms: 60000
+    header_timeout_max_retries: 5
+    model_defaults:
+      gpt-5.4: {}
+      gpt-5.4-mini:
+        name: GPT-5.4 Mini
+      gpt-5.5: {}
+      gpt-5.6-luna: {}
+      gpt-5.6-terra: {}
+      gpt-5.6-sol: {}
+  openai:
+    type: openai-compatible
+    protocol: responses
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    header_timeout_ms: 60000
+    model_defaults:
+      gpt-5.4: {}
+      gpt-5.4-mini:
+        name: GPT-5.4 Mini
+      gpt-5.5: {}
+      gpt-5.6-luna: {}
+      gpt-5.6-terra: {}
+      gpt-5.6-sol: {}
+  anthropic:
+    type: anthropic
+    base_url: https://api.anthropic.com/v1
+    api_key_env: ANTHROPIC_API_KEY
+    header_timeout_ms: 60000
+  openrouter:
+    protocol: chat-completions
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    header_timeout_ms: 60000
+    session_header: x-session-id
+    provider_preferences:
+      allow_fallbacks: true
+      require_parameters: true
+      data_collection: deny
+      zdr: true
+  opencode-go:
+    protocol: chat-completions
+    base_url: https://opencode.ai/zen/go/v1
+    api_key_env: OPENCODE_GO_API_KEY
+    header_timeout_ms: 60000
+    session_header: x-opencode-session
+    model_defaults:
+      minimax-m3: { name: MiniMax M3, reasoning: false }
+      minimax-m2.7: { name: MiniMax M2.7, reasoning: false }
+      minimax-m2.5: { name: MiniMax M2.5, reasoning: false }
+      kimi-k3: {}
+      kimi-k2.7-code: { reasoning: false }
+      kimi-k2.6: { reasoning: false }
+      kimi-k2.5: { reasoning: false }
+      glm-5.2:
+        name: GLM 5.2
+      glm-5.1: { name: GLM 5.1, reasoning: false }
+      glm-5: { name: GLM 5, reasoning: false }
+      deepseek-v4-pro:
+        name: DeepSeek V4 Pro
+      deepseek-v4-flash: {}
+      qwen3.7-max: { reasoning: false }
+      qwen3.7-plus: { reasoning: false }
+      qwen3.6-plus: { reasoning: false }
+      qwen3.5-plus: { reasoning: false }
+      mimo-v2.5-pro: { reasoning: false }
+      mimo-v2.5: { reasoning: false }
+      mimo-v2-pro: { reasoning: false }
+      mimo-v2-omni: { reasoning: false }
+      hy3-preview:
+        name: Hy3 Preview
+        context: 262144
+        max_output_tokens: 0
+        tools: true
+        reasoning: true
+        output: [text]
+        variants:
+          high: { reasoning_effort: high }
+          low: { reasoning_effort: low }
+          none: { reasoning_effort: none }
+      grok-4.5: {}
+  opencode-zen:
+    protocol: chat-completions
+    base_url: https://opencode.ai/zen/v1
+    api_key_env: OPENCODE_ZEN_API_KEY
+    header_timeout_ms: 60000
+    session_header: x-opencode-session
+    models_dev_id: opencode
+  kimi-code:
+    protocol: chat-completions
+    base_url: https://api.kimi.com/coding/v1
+    api_key_env: KIMI_API_KEY
+    model_defaults:
+      kimi-for-coding: { name: Kimi For Coding, context: 262144, max_output_tokens: 0, tools: true, reasoning: true, output: [text] }
+  kimi-api:
+    protocol: chat-completions
+    base_url: https://api.moonshot.ai/v1
+    api_key_env: MOONSHOT_API_KEY
+    model_defaults:
+      kimi-k2-thinking: { name: Kimi K2 Thinking, context: 262144, max_output_tokens: 32768, tools: true, reasoning: true, output: [text] }
+      kimi-k2-turbo-preview: { name: Kimi K2 Turbo, context: 262144, max_output_tokens: 32768, tools: true, reasoning: false, output: [text] }
+      kimi-k2-0905-preview: { name: Kimi K2 0905, context: 262144, max_output_tokens: 32768, tools: true, reasoning: false, output: [text] }
+
+# OpenAI-compatible providers and their model catalogs.
+# providers:
+#   provider:
+#     # Provider adapter type: 'compatible' or 'openai-compatible'.
+#     type: openai-compatible
+#     # API protocol: 'responses' or 'chat-completions'. Responses providers use
+#     # HTTP/SSE by default. Set disable_websocket to false to try the OpenAI
+#     # Responses WebSocket v2 transport first and fall back to HTTP/SSE for the
+#     # current agent session when the upgrade is unsupported or exhausted.
+#     protocol: responses
+#     # Provider base URL, e.g. https://api.example.test/v1. A secure base URL
+#     # derives its WebSocket endpoint by replacing https with wss.
+#     base_url: https://api.example.test/v1
+#     # Disable Responses WebSocket transport and use HTTP/SSE directly.
+#     disable_websocket: true
+#     # Environment variable holding the API key.
+#     api_key_env: PROVIDER_API_KEY
+#     # Extra headers to send. Do not store secrets here.
+#     headers:
+#       X-Tenant: non-secret-value
+#     # Header that carries a random id stable for one provider session, so the
+#     # provider can route a conversation consistently. Empty sends none.
+#     session_header: x-session-id
+#     # models.dev provider id whose catalog supplies model metadata when it
+#     # differs from this provider's id.
+#     models_dev_id: opencode
+#     # Allow plain HTTP for localhost endpoints.
+#     allow_insecure_localhost: false
+#     # Allow plain HTTP for remote endpoints. This exposes credentials and content.
+#     allow_insecure_remote: false
+#     # Accept invalid or self-signed TLS certificates for this provider only.
+#     allow_invalid_tls_certificate: false
+#     # Milliseconds to wait for response headers; zero disables.
+#     header_timeout_ms: 10000
+#     # OpenRouter provider routing preferences. The OpenRouter adapter forwards
+#     # this open-ended mapping as the request body's provider object.
+#     provider_preferences:
+#       allow_fallbacks: true
+#       require_parameters: true
+#       data_collection: deny
+#       zdr: true
+#     # Built-in seed catalog, normally supplied only by predefined configuration.
+#     model_defaults:
+#       model:
+#         name: Display Name
+#     # User-declared model metadata that supplements the endpoint catalog.
+#     models:
+#       model:
+#         # Display name for the model.
+#         name: Display Name
+#         # Context window in tokens.
+#         context: 128000
+#         # Maximum output tokens.
+#         max_output_tokens: 16384
+#         # USD per input token.
+#         input_price: 0.000001
+#         # USD per output token.
+#         output_price: 0.000002
+#         # Whether the model supports tool calls.
+#         tools: true
+#         # Whether the model supports reasoning tokens.
+#         reasoning: false
+#         # Supported output modalities, e.g. text.
+#         output:
+#           - text
+#         # Named provider request options.
+#         variants:
+#           high:
+#             # Reasoning effort passed to the provider, e.g. low/medium/high.
+#             reasoning_effort: high
+
+# Model Context Protocol servers to start.
+# mcp:
+#   server-name:
+#     # Transport: 'stdio' or 'http'.
+#     transport: stdio
+#     # Absolute path to the server executable for stdio.
+#     command: /absolute/path/to/server
+#     # Arguments for the server command.
+#     args:
+#       - --stdio
+#     # Environment variables for the server process.
+#     env:
+#       NAME: value
+#     # Working directory for the server process.
+#     cwd: /absolute/working/directory
+#     # Endpoint URL for http transport.
+#     url: https://mcp.example.test/rpc
+#     # Extra headers for http requests. Do not store secrets here.
+#     headers:
+#       X-Tenant: non-secret-value
+#     # Whether the server is started.
+#     enabled: false
+#     # Allow plain HTTP for localhost endpoints.
+#     allow_insecure_localhost: false
+#     # Milliseconds to wait for the server to start; zero uses default.
+#     startup_timeout_ms: 15000
+#     # Milliseconds to wait for a call; zero uses default.
+#     call_timeout_ms: 30000
+
+# Globally enable or disable the OS process sandbox for shell commands.
+# Disabling runs shell commands unconfined; file-tool permission checks are
+# unaffected. The /sandbox_enable command changes this at runtime without
+# persisting it.
+sandbox:
+  enabled: true
+  dev_bind: []
+
+# Ordered sandbox rules applied after the built-in mounts below. User rules append
+# after these rules; use !replace on a sandbox_rules sequence to replace inherited
+# rules, including !replace []. Each rule has a path and an action: allow_write,
+# deny_read, allow_read, or deny_write. More specific paths override broader paths;
+# rules for the same normalized path retain declaration order. A missing allow_write
+# target is ignored unless create_if_not_exist is true, which creates it as a
+# directory with any missing parents. That option is invalid for other actions.
+# Paths must be absolute after environment expansion. Use ${NAME} for a required
+# nonempty environment variable or ${NAME:-fallback} when it is unset or empty;
+# fallbacks may contain nested expansions. Expansion does not invoke a shell and
+# an unavailable required variable rejects the configuration.
+#
+# Built-in access (applied first):
+#   /                             read-only host filesystem
+#   /dev                          sandbox tmpfs
+#   /dev/null                     writable null device
+#   /proc                         sandbox procfs
+#   {user session scratch root}   writable by every agent in that user session
+#   {workspace and repository}    writable for non-read-only profiles
+#   {approved profile paths}      writable for non-read-only profiles
+#
+sandbox_rules:
+  - path: /tmp
+    rule: allow_write
+    create_if_not_exist: true
+  - path: '${XDG_CACHE_HOME:-${HOME}/.cache}'
+    rule: allow_write
+    create_if_not_exist: true
+  - path: '${HOME}/.nuget/packages'
+    rule: allow_write
+    create_if_not_exist: true
+  - path: '${HOME}/.npm'
+    rule: allow_write
+    create_if_not_exist: true
+  - path: '${HOME}/.local/share/pnpm/store'
+    rule: allow_write
+    create_if_not_exist: true
+# Add broader rules before narrower overrides.
+#   - path: /absolute/path/to/dir
+#     rule: deny_read
+
+request_limits:
+  image_bytes_per_tool_cycle: 16777216
+  image_bytes_per_read: 3145728
+  provider_request_bytes: 67108864
+
+# Web fetch restrictions.
+web_fetch:
+  # Allow fetching from private addresses; increases SSRF risk.
+  allow_private: false
+
+# Upload prompt images to an S3-compatible bucket and send their public URLs
+# instead of inline base64. Inactive unless configured. The endpoint must be
+# https. Credentials are read from the named environment variables. The bucket
+# must be configured manually so objects under key_prefix are publicly
+# readable; Parrot does not change bucket policies. Set providers.<id>.image_urls: false to keep base64 for one provider.
+# image_upload:
+#   endpoint: https://minio.example.com
+#   bucket: parrot-images
+#   region: us-east-1
+#   key_prefix: parrot/
+#   public_base_url: ""
+#   access_key_env: PARROT_S3_ACCESS_KEY
+#   secret_key_env: PARROT_S3_SECRET_KEY

@@ -1,0 +1,32 @@
+{"input":"{\u0022a\\nb\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: \u0022value\u0022"}
+{"input":"{\u0022a\\n\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E\n  a\n: \u0022value\u0022"}
+{"input":"{\u0022a\\n\\nb\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\n\n\n  b\n: \u0022value\u0022"}
+{"input":"{\u0022a\\tb\u0022: \u0022value\u0022}","ok":true,"value":"a\tb: \u0022value\u0022"}
+{"input":"{\u0022a\\r\\nb\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: \u0022value\u0022"}
+{"input":"{\u0022a\\u0085b\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\n\n  b\n: \u0022value\u0022"}
+{"input":"{\u0022a\\u2028b\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\u2028  b\n: \u0022value\u0022"}
+{"input":"{\u0022a\\u2029b\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\u2029  b\n: \u0022value\u0022"}
+{"input":"{\u0022\\n\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E2\n\n: \u0022value\u0022"}
+{"input":"{\u0022a\\n b\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\n   b\n: \u0022value\u0022"}
+{"input":"{\u0022a\\n\\nb\\n\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E\n  a\n\n\n  b\n: \u0022value\u0022"}
+{"input":"{\u0022a\\r b\u0022: \u0022value\u0022}","ok":true,"value":"? \u003E-\n  a\n   b\n: \u0022value\u0022"}
+{"input":"{\u0022---foo\u0022: \u0022value\u0022}","ok":true,"value":"\u0027---foo\u0027: \u0022value\u0022"}
+{"input":"{\u0022...\u0022: \u0022value\u0022}","ok":true,"value":"\u0027...\u0027: \u0022value\u0022"}
+{"input":"{\u0022a:b\u0022: \u0022value\u0022}","ok":true,"value":"a:b: \u0022value\u0022"}
+{"input":"{\u0022a\\t: b\u0022: \u0022value\u0022}","ok":true,"value":"\u0027a\t: b\u0027: \u0022value\u0022"}
+{"input":"{\u0022\\u00a0x\u0022: \u0022value\u0022}","ok":true,"value":"\u00A0x: \u0022value\u0022"}
+{"input":"{\u00221e99999999999\u0022: \u0022value\u0022}","ok":true,"value":"1e99999999999: \u0022value\u0022"}
+{"input":"{\u00221e-99999999999\u0022: \u0022value\u0022}","ok":true,"value":"\u00221e-99999999999\u0022: \u0022value\u0022"}
+{"input":"{\u002279228162514264337593543950335.5\u0022: \u0022value\u0022}","ok":true,"value":"79228162514264337593543950335.5: \u0022value\u0022"}
+{"input":"{\u0022January 2, 2024\u0022: \u0022value\u0022}","ok":true,"value":"\u0022January 2, 2024\u0022: \u0022value\u0022"}
+{"input":"{\u00222 Jan 2024\u0022: \u0022value\u0022}","ok":true,"value":"\u00222 Jan 2024\u0022: \u0022value\u0022"}
+{"input":"{\u00222024-01\u0022: \u0022value\u0022}","ok":true,"value":"\u00222024-01\u0022: \u0022value\u0022"}
+{"input":"{\u00221/2\u0022: \u0022value\u0022}","ok":true,"value":"\u00221/2\u0022: \u0022value\u0022"}
+{"input":"{\u002212:30oops\u0022: \u0022value\u0022}","ok":true,"value":"12:30oops: \u0022value\u0022"}
+{"input":"{\u002212:30\u002B99:00\u0022: \u0022value\u0022}","ok":true,"value":"12:30\u002B99:00: \u0022value\u0022"}
+{"input":"{\u00222024-01-01T12:30:45.123Z\u0022: \u0022value\u0022}","ok":true,"value":"\u00222024-01-01T12:30:45.123Z\u0022: \u0022value\u0022"}
+{"input":"\u0022\\ud83d\\ude00\u0022","ok":true,"value":"\u0022\\U0001F600\u0022"}
+{"input":"\u0022\\ufffe\\uffff\u0022","ok":true,"value":"\u0022\\uFFFE\\uFFFF\u0022"}
+{"input":"\u0022\\u0080\\u0081\\u009f\u0022","ok":true,"value":"\u0022\\x80\\x81\\x9F\u0022"}
+{"input":"\u0022a\\t b\u0022","ok":true,"value":"\u0022a\t b\u0022"}
+{"input":"\u0022\\ua0a0\u0022","ok":true,"value":"\u0022\uA0A0\u0022"}

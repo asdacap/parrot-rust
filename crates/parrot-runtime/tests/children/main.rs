@@ -1,0 +1,22 @@
+//! T48 retained child integration through the actual runtime and SQLite history.
+mod active_shutdown;
+mod admission_boundaries;
+mod admission_publisher;
+mod child_gate;
+mod completion;
+mod completion_bound;
+mod diagnostics;
+mod final_cleanup;
+mod fork_rejection;
+mod forks;
+mod harness;
+mod history_preparation;
+mod lifetime;
+mod lineage;
+mod ownership;
+mod publication_failures;
+mod resolution;
+mod resolver_boundaries;
+mod resources;
+mod retained;
+mod support;

@@ -1,0 +1,528 @@
+{
+  "schema_version": 1,
+  "authority": "A008/v6",
+  "entries": [
+    {
+      "case_id": "A008.M2.status.selection",
+      "catalog_index": 4,
+      "id": "status.selection",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "status.selection",
+        "engine": "scriban",
+        "text": "Active profile: {{ profile }}\nModel: {{ model }}{{ if has_parent }}\nParent session: {{ parent_session_id }}{{ if has_parent_name }} ({{ parent_session_name }}){{ end }}{{ end }}",
+        "allowed": [
+          "profile",
+          "model",
+          "parent_session_id",
+          "parent_session_name",
+          "has_parent",
+          "has_parent_name"
+        ],
+        "required": [
+          "profile",
+          "model",
+          "parent_session_id",
+          "parent_session_name",
+          "has_parent",
+          "has_parent_name"
+        ]
+      },
+      "new": {
+        "id": "status.selection",
+        "engine": "minijinja",
+        "text": "Active profile: {{ profile }}\nModel: {{ model }}{% if has_parent %}\nParent session: {{ parent_session_id }}{% if has_parent_name %} ({{ parent_session_name }}){% endif %}{% endif %}",
+        "allowed": [
+          "profile",
+          "model",
+          "parent_session_id",
+          "parent_session_name",
+          "has_parent",
+          "has_parent_name"
+        ],
+        "required": [
+          "profile",
+          "model",
+          "parent_session_id",
+          "parent_session_name",
+          "has_parent",
+          "has_parent_name"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.status.context",
+      "catalog_index": 6,
+      "id": "status.context",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "status.context",
+        "engine": "scriban",
+        "text": "Context: {{ if available }}{{ usage }}% used{{ else }}unavailable{{ end }} ({{ estimated_tokens }} estimated tokens / {{ context_limit }} limit); reminders every {{ cadence }}%; automatic compaction at {{ trigger }}%.",
+        "allowed": [
+          "available",
+          "usage",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger"
+        ],
+        "required": [
+          "available",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger"
+        ]
+      },
+      "new": {
+        "id": "status.context",
+        "engine": "minijinja",
+        "text": "Context: {% if available %}{{ usage }}% used{% else %}unavailable{% endif %} ({{ estimated_tokens }} estimated tokens / {{ context_limit }} limit); reminders every {{ cadence }}%; automatic compaction at {{ trigger }}%.",
+        "allowed": [
+          "available",
+          "usage",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger"
+        ],
+        "required": [
+          "available",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.status.context-limit",
+      "catalog_index": 7,
+      "id": "status.context-limit",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "status.context-limit",
+        "engine": "scriban",
+        "text": "Context: {{ if available }}{{ usage }}%{{ else }}unavailable{{ end }} ({{ estimated_tokens }} / {{ context_limit }} tokens); auto-compact: >{{ trigger_tokens }} tokens.",
+        "allowed": [
+          "available",
+          "usage",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger",
+          "trigger_tokens"
+        ],
+        "required": [
+          "available",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger_tokens"
+        ]
+      },
+      "new": {
+        "id": "status.context-limit",
+        "engine": "minijinja",
+        "text": "Context: {% if available %}{{ usage }}%{% else %}unavailable{% endif %} ({{ estimated_tokens }} / {{ context_limit }} tokens); auto-compact: >{{ trigger_tokens }} tokens.",
+        "allowed": [
+          "available",
+          "usage",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger",
+          "trigger_tokens"
+        ],
+        "required": [
+          "available",
+          "estimated_tokens",
+          "context_limit",
+          "cadence",
+          "trigger_tokens"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.status.statistics",
+      "catalog_index": 8,
+      "id": "status.statistics",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "status.statistics",
+        "engine": "scriban",
+        "text": "Statistics (lifetime):{{ for view in views }}\n{{ if view.cumulative }}Cumulative (self + descendants){{ else }}Self{{ end }}: {{ view.input_tokens }} ({{ view.cache_percentage }}% cache) / {{ view.output_tokens }}; {{ view.tool_calls }} tool; cost ${{ view.total_cost }} (input ${{ view.input_cost }}, output ${{ view.output_cost }}).{{ for model in view.models }}\n  - {{ model.provider }}/{{ model.model }}/{{ if model.legacy }}unknown (legacy){{ else if model.has_effort }}{{ model.effort }}{{ else }}unspecified/default{{ end }}: {{ model.input_tokens }} ({{ model.cache_percentage }}% cache) / {{ model.output_tokens }}; {{ model.tool_calls }} tool; cost ${{ model.total_cost }} (input ${{ model.input_cost }}, output ${{ model.output_cost }}).{{ end }}{{ end }}{{ if incomplete_legacy_tool_counts }}\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.{{ end }}",
+        "allowed": [
+          "session_id",
+          "views",
+          "incomplete_legacy_tool_counts"
+        ],
+        "required": [
+          "session_id",
+          "views",
+          "incomplete_legacy_tool_counts"
+        ]
+      },
+      "new": {
+        "id": "status.statistics",
+        "engine": "minijinja",
+        "text": "Statistics (lifetime):{% for view in views %}\n{% if view.cumulative %}Cumulative (self + descendants){% else %}Self{% endif %}: {{ view.input_tokens }} ({{ view.cache_percentage }}% cache) / {{ view.output_tokens }}; {{ view.tool_calls }} tool; cost ${{ view.total_cost }} (input ${{ view.input_cost }}, output ${{ view.output_cost }}).{% for model in view.models %}\n  - {{ model.provider }}/{{ model.model }}/{% if model.legacy %}unknown (legacy){% elif model.has_effort %}{{ model.effort }}{% else %}unspecified/default{% endif %}: {{ model.input_tokens }} ({{ model.cache_percentage }}% cache) / {{ model.output_tokens }}; {{ model.tool_calls }} tool; cost ${{ model.total_cost }} (input ${{ model.input_cost }}, output ${{ model.output_cost }}).{% endfor %}{% endfor %}{% if incomplete_legacy_tool_counts %}\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.{% endif %}",
+        "allowed": [
+          "session_id",
+          "views",
+          "incomplete_legacy_tool_counts"
+        ],
+        "required": [
+          "session_id",
+          "views",
+          "incomplete_legacy_tool_counts"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.status.runtime",
+      "catalog_index": 9,
+      "id": "status.runtime",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "status.runtime",
+        "engine": "scriban",
+        "text": "{{ if section == \"tree\" }}Runtime:{{ for agent in agents }}\n{{ agent.indent }}- agent: {{ agent.name }}{{ if agent.status != \"\" }} ({{ agent.status }}){{ end }}{{ for queue in agent.queues }}\n{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items{{ if queue.description != \"\" }}, description: {{ queue.description }}{{ end }}){{ end }}{{ for process in agent.processes }}\n{{ agent.indent }}  - process: {{ process.id }} (shell, {{ process.state }}, name: {{ process.name }}){{ end }}{{ end }}{{ else }}{{ for run in runs }}{{ if !for.first }}\n{{ end }}- AgentTask graph: {{ run.run_id }} (name: {{ run.display_name }}, owner: {{ run.owner_session_id }}, revision: {{ run.revision }}){{ for node in run.nodes }}\n{{ node.indent }}- task: {{ node.name }} ({{ node.status }}, description: {{ node.description }}){{ end }}{{ end }}{{ end }}",
+        "allowed": [
+          "section",
+          "agents",
+          "runs"
+        ],
+        "required": [
+          "section",
+          "agents",
+          "runs"
+        ]
+      },
+      "new": {
+        "id": "status.runtime",
+        "engine": "minijinja",
+        "text": "{% if section == \"tree\" %}Runtime:{% for agent in agents %}\n{{ agent.indent }}- agent: {{ agent.name }}{% if agent.status != \"\" %} ({{ agent.status }}){% endif %}{% for queue in agent.queues %}\n{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items{% if queue.description != \"\" %}, description: {{ queue.description }}{% endif %}){% endfor %}{% for process in agent.processes %}\n{{ agent.indent }}  - process: {{ process.id }} (shell, {{ process.state }}, name: {{ process.name }}){% endfor %}{% endfor %}{% else %}{% for run in runs %}{% if not loop.first %}\n{% endif %}- AgentTask graph: {{ run.run_id }} (name: {{ run.display_name }}, owner: {{ run.owner_session_id }}, revision: {{ run.revision }}){% for node in run.nodes %}\n{{ node.indent }}- task: {{ node.name }} ({{ node.status }}, description: {{ node.description }}){% endfor %}{% endfor %}{% endif %}",
+        "allowed": [
+          "section",
+          "agents",
+          "runs"
+        ],
+        "required": [
+          "section",
+          "agents",
+          "runs"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.monitor.ended",
+      "catalog_index": 36,
+      "id": "monitor.ended",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "monitor.ended",
+        "engine": "scriban",
+        "text": "Monitor {{ name }} ({{ description }}) {{ if reason == \"exited\" }}exited with code {{ exit_code }}{{ else if reason == \"timed_out\" }}reached its {{ timeout_ms }}ms timeout and was stopped; start it again if you still need the watch{{ else if reason == \"flooded\" }}produced too many events and was stopped; start it again with a tighter filter{{ else }}failed: {{ error }}{{ end }}. Events delivered: {{ events }}.",
+        "allowed": [
+          "name",
+          "description",
+          "events",
+          "reason",
+          "exit_code",
+          "error",
+          "timeout_ms"
+        ],
+        "required": [
+          "name",
+          "description",
+          "events",
+          "reason",
+          "exit_code",
+          "error",
+          "timeout_ms"
+        ]
+      },
+      "new": {
+        "id": "monitor.ended",
+        "engine": "minijinja",
+        "text": "Monitor {{ name }} ({{ description }}) {% if reason == \"exited\" %}exited with code {{ exit_code }}{% elif reason == \"timed_out\" %}reached its {{ timeout_ms }}ms timeout and was stopped; start it again if you still need the watch{% elif reason == \"flooded\" %}produced too many events and was stopped; start it again with a tighter filter{% else %}failed: {{ error }}{% endif %}. Events delivered: {{ events }}.",
+        "allowed": [
+          "name",
+          "description",
+          "events",
+          "reason",
+          "exit_code",
+          "error",
+          "timeout_ms"
+        ],
+        "required": [
+          "name",
+          "description",
+          "events",
+          "reason",
+          "exit_code",
+          "error",
+          "timeout_ms"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.context.agent-path-environment",
+      "catalog_index": 62,
+      "id": "context.agent-path-environment",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "context.agent-path-environment",
+        "engine": "scriban",
+        "text": "Shell path environment (defaults; references below describe absolute runtime values):\n{{ for entry in entries }}{{ if !for.first }}\n{{ end }}{{ entry.name }} = {{ entry.path }}{{ end }}\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+        "allowed": [
+          "entries"
+        ],
+        "required": [
+          "entries"
+        ]
+      },
+      "new": {
+        "id": "context.agent-path-environment",
+        "engine": "minijinja",
+        "text": "Shell path environment (defaults; references below describe absolute runtime values):\n{% for entry in entries %}{% if not loop.first %}\n{% endif %}{{ entry.name }} = {{ entry.path }}{% endfor %}\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+        "allowed": [
+          "entries"
+        ],
+        "required": [
+          "entries"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.context.model-aliases",
+      "catalog_index": 71,
+      "id": "context.model-aliases",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "context.model-aliases",
+        "engine": "scriban",
+        "text": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n{{ for alias in aliases }}{{ if !for.first }}\n{{ end }}- {{ alias.name }}: {{ alias.model }} — {{ alias.usage }}{{ end }}",
+        "allowed": [
+          "aliases"
+        ],
+        "required": [
+          "aliases"
+        ]
+      },
+      "new": {
+        "id": "context.model-aliases",
+        "engine": "minijinja",
+        "text": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n{% for alias in aliases %}{% if not loop.first %}\n{% endif %}- {{ alias.name }}: {{ alias.model }} — {{ alias.usage }}{% endfor %}",
+        "allowed": [
+          "aliases"
+        ],
+        "required": [
+          "aliases"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.context.security-profile",
+      "catalog_index": 72,
+      "id": "context.security-profile",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "context.security-profile",
+        "engine": "scriban",
+        "text": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:{{ for rule in rules }}\n- Path: \"{{ rule.path }}\"; Action: {{ rule.action }}{{ end }}{{ if sandbox_enabled == false }}\nThe OS process sandbox is currently disabled; shell commands run unconfined.{{ end }}",
+        "allowed": [
+          "rules",
+          "sandbox_enabled"
+        ],
+        "required": [
+          "rules",
+          "sandbox_enabled"
+        ]
+      },
+      "new": {
+        "id": "context.security-profile",
+        "engine": "minijinja",
+        "text": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:{% for rule in rules %}\n- Path: \"{{ rule.path }}\"; Action: {{ rule.action }}{% endfor %}{% if sandbox_enabled == false %}\nThe OS process sandbox is currently disabled; shell commands run unconfined.{% endif %}",
+        "allowed": [
+          "rules",
+          "sandbox_enabled"
+        ],
+        "required": [
+          "rules",
+          "sandbox_enabled"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    },
+    {
+      "case_id": "A008.M2.context.subagents",
+      "catalog_index": 73,
+      "id": "context.subagents",
+      "old_resource": "assets/config/predefined_config.system_prompts.yaml",
+      "new_resource": "assets/config/predefined_config.system_prompts.minijinja.yaml",
+      "old": {
+        "id": "context.subagents",
+        "engine": "scriban",
+        "text": "{{ if subagents.size == 0 }}Available subagents: none{{ else }}Available subagents; delegate according to their configured usage:{{ for subagent in subagents }}- {{ subagent.id }}: {{ subagent.usage }}{{ end }}{{ end }}",
+        "allowed": [
+          "subagents"
+        ],
+        "required": [
+          "subagents"
+        ]
+      },
+      "new": {
+        "id": "context.subagents",
+        "engine": "minijinja",
+        "text": "{% if subagents | length == 0 %}Available subagents: none{% else %}Available subagents; delegate according to their configured usage:{% for subagent in subagents %}- {{ subagent.id }}: {{ subagent.usage }}{% endfor %}{% endif %}",
+        "allowed": [
+          "subagents"
+        ],
+        "required": [
+          "subagents"
+        ]
+      },
+      "allowed_changed_fields": [
+        "engine",
+        "template"
+      ],
+      "implementation_owner": "T12h-bundled-template-migration",
+      "required_independent_variants": [
+        "empty",
+        "multiple",
+        "nested-branch"
+      ],
+      "rendered_bytes": "unchanged for mapped models; independently supplied source goldens required",
+      "status": "contract_only_not_native_render_pass"
+    }
+  ],
+  "original_system_prompts": {
+    "path": "assets/config/predefined_config.system_prompts.yaml",
+    "sha256": "57a50f943ac17855c2539c2f3fc3eb67822a0a3b4f49150a832a8a03186170fc"
+  },
+  "original_runtime": {
+    "path": "assets/config/predefined_config.runtime.yaml",
+    "sha256": "a8eb006532d514343db2674a6fcb82a6469391542a53d9564c468c6c5c3c1701"
+  },
+  "original_runtime_structured_count": 0,
+  "migration_mechanism": "Fixed manual ten-field mapping; no general translator/rewrite/alias/fallback"
+}

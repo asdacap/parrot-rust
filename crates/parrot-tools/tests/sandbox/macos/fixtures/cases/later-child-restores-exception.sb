@@ -1,0 +1,4 @@
+(version 1)
+(allow default)
+(deny file-read* (require-all (subpath "$ROOT/tree") (require-not (subpath "$ROOT/tree/child"))))
+(deny file-write* (require-not (subpath "$ROOT/tree/child")))

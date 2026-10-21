@@ -1,0 +1,440 @@
+[
+  {
+    "id": "A008.M2.status.selection.empty",
+    "kind": "catalog-default",
+    "template_id": "status.selection",
+    "arguments": {
+      "profile": "",
+      "model": "",
+      "parent_session_id": "",
+      "parent_session_name": "",
+      "has_parent": false,
+      "has_parent_name": false
+    }
+  },
+  {
+    "id": "A008.M2.status.selection.multiple",
+    "kind": "catalog-default",
+    "template_id": "status.selection",
+    "arguments": {
+      "profile": "multiple-profile {{ opaque }}\nnext $${NAME} 🪶",
+      "model": "multiple-model {{ opaque }}\nnext $${NAME} 🪶",
+      "parent_session_id": "multiple-parent_session_id {{ opaque }}\nnext $${NAME} 🪶",
+      "parent_session_name": "multiple-parent_session_name {{ opaque }}\nnext $${NAME} 🪶",
+      "has_parent": true,
+      "has_parent_name": true
+    }
+  },
+  {
+    "id": "A008.M2.status.selection.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "status.selection",
+    "arguments": {
+      "profile": "nested",
+      "model": "local/nested",
+      "parent_session_id": "root",
+      "parent_session_name": "parent",
+      "has_parent": true,
+      "has_parent_name": true
+    }
+  },
+  {
+    "id": "A008.M2.status.context.empty",
+    "kind": "catalog-default",
+    "template_id": "status.context",
+    "arguments": {
+      "available": false,
+      "usage": "",
+      "estimated_tokens": "",
+      "context_limit": "",
+      "cadence": "",
+      "trigger": ""
+    }
+  },
+  {
+    "id": "A008.M2.status.context.multiple",
+    "kind": "catalog-default",
+    "template_id": "status.context",
+    "arguments": {
+      "available": true,
+      "usage": "multiple-usage {{ opaque }}\nnext $${NAME} 🪶",
+      "estimated_tokens": "multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶",
+      "context_limit": "multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶",
+      "cadence": "multiple-cadence {{ opaque }}\nnext $${NAME} 🪶",
+      "trigger": "multiple-trigger {{ opaque }}\nnext $${NAME} 🪶"
+    }
+  },
+  {
+    "id": "A008.M2.status.context.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "status.context",
+    "arguments": {
+      "available": false,
+      "usage": 0,
+      "estimated_tokens": 123,
+      "context_limit": 1000,
+      "cadence": 10,
+      "trigger": 80
+    }
+  },
+  {
+    "id": "A008.M2.status.context-limit.empty",
+    "kind": "catalog-default",
+    "template_id": "status.context-limit",
+    "arguments": {
+      "available": false,
+      "usage": "",
+      "estimated_tokens": "",
+      "context_limit": "",
+      "cadence": "",
+      "trigger": "",
+      "trigger_tokens": ""
+    }
+  },
+  {
+    "id": "A008.M2.status.context-limit.multiple",
+    "kind": "catalog-default",
+    "template_id": "status.context-limit",
+    "arguments": {
+      "available": true,
+      "usage": "multiple-usage {{ opaque }}\nnext $${NAME} 🪶",
+      "estimated_tokens": "multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶",
+      "context_limit": "multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶",
+      "cadence": "multiple-cadence {{ opaque }}\nnext $${NAME} 🪶",
+      "trigger": "multiple-trigger {{ opaque }}\nnext $${NAME} 🪶",
+      "trigger_tokens": "multiple-trigger_tokens {{ opaque }}\nnext $${NAME} 🪶"
+    }
+  },
+  {
+    "id": "A008.M2.status.context-limit.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "status.context-limit",
+    "arguments": {
+      "available": true,
+      "usage": 99,
+      "estimated_tokens": 999,
+      "context_limit": 1000,
+      "cadence": 10,
+      "trigger": 80,
+      "trigger_tokens": 950
+    }
+  },
+  {
+    "id": "A008.M2.status.statistics.empty",
+    "kind": "catalog-default",
+    "template_id": "status.statistics",
+    "arguments": {
+      "session_id": "",
+      "views": [],
+      "incomplete_legacy_tool_counts": false
+    }
+  },
+  {
+    "id": "A008.M2.status.statistics.multiple",
+    "kind": "catalog-default",
+    "template_id": "status.statistics",
+    "arguments": {
+      "session_id": "multiple-session_id {{ opaque }}\nnext $${NAME} 🪶",
+      "views": [],
+      "incomplete_legacy_tool_counts": false
+    }
+  },
+  {
+    "id": "A008.M2.status.statistics.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "status.statistics",
+    "arguments": {
+      "session_id": "s",
+      "incomplete_legacy_tool_counts": true,
+      "views": [
+        {
+          "cumulative": true,
+          "input_tokens": 10,
+          "cache_percentage": 20,
+          "output_tokens": 30,
+          "tool_calls": 4,
+          "total_cost": "0.50",
+          "input_cost": "0.20",
+          "output_cost": "0.30",
+          "models": [
+            {
+              "provider": "p",
+              "model": "current",
+              "legacy": false,
+              "has_effort": true,
+              "effort": "high",
+              "input_tokens": 10,
+              "cache_percentage": 20,
+              "output_tokens": 30,
+              "tool_calls": 4,
+              "total_cost": "0.50",
+              "input_cost": "0.20",
+              "output_cost": "0.30"
+            },
+            {
+              "provider": "old",
+              "model": "legacy",
+              "legacy": true,
+              "has_effort": false,
+              "effort": "",
+              "input_tokens": 2,
+              "cache_percentage": 0,
+              "output_tokens": 3,
+              "tool_calls": 0,
+              "total_cost": "0",
+              "input_cost": "0",
+              "output_cost": "0"
+            }
+          ]
+        },
+        {
+          "cumulative": false,
+          "input_tokens": 1,
+          "cache_percentage": 0,
+          "output_tokens": 2,
+          "tool_calls": 1,
+          "total_cost": "0",
+          "input_cost": "0",
+          "output_cost": "0",
+          "models": []
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M2.status.runtime.empty",
+    "kind": "catalog-default",
+    "template_id": "status.runtime",
+    "arguments": {
+      "section": "",
+      "agents": [],
+      "runs": []
+    }
+  },
+  {
+    "id": "A008.M2.status.runtime.multiple",
+    "kind": "catalog-default",
+    "template_id": "status.runtime",
+    "arguments": {
+      "section": "agent-tasks",
+      "agents": [],
+      "runs": []
+    }
+  },
+  {
+    "id": "A008.M2.status.runtime.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "status.runtime",
+    "arguments": {
+      "section": "tree",
+      "runs": [],
+      "agents": [
+        {
+          "indent": "  ",
+          "name": "parent",
+          "status": "running",
+          "queues": [
+            {
+              "name": "jobs",
+              "size": 2,
+              "description": "native {{ text }} $${NAME}"
+            }
+          ],
+          "processes": [
+            {
+              "id": "p1",
+              "state": "running",
+              "name": "worker"
+            }
+          ]
+        },
+        {
+          "indent": "    ",
+          "name": "child",
+          "status": "",
+          "queues": [],
+          "processes": []
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M2.monitor.ended.empty",
+    "kind": "catalog-default",
+    "template_id": "monitor.ended",
+    "arguments": {
+      "name": "",
+      "description": "",
+      "events": "",
+      "reason": "",
+      "exit_code": "",
+      "error": "",
+      "timeout_ms": ""
+    }
+  },
+  {
+    "id": "A008.M2.monitor.ended.multiple",
+    "kind": "catalog-default",
+    "template_id": "monitor.ended",
+    "arguments": {
+      "name": "multiple-name {{ opaque }}\nnext $${NAME} 🪶",
+      "description": "multiple-description {{ opaque }}\nnext $${NAME} 🪶",
+      "events": "multiple-events {{ opaque }}\nnext $${NAME} 🪶",
+      "reason": "timed_out",
+      "exit_code": "multiple-exit_code {{ opaque }}\nnext $${NAME} 🪶",
+      "error": "multiple-error {{ opaque }}\nnext $${NAME} 🪶",
+      "timeout_ms": "multiple-timeout_ms {{ opaque }}\nnext $${NAME} 🪶"
+    }
+  },
+  {
+    "id": "A008.M2.monitor.ended.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "monitor.ended",
+    "arguments": {
+      "name": "monitor",
+      "description": "Unicode 🪶\nHostile {{ not_parsed }} $${NAME}",
+      "events": 5,
+      "reason": "flooded",
+      "exit_code": 1,
+      "error": "",
+      "timeout_ms": 90
+    }
+  },
+  {
+    "id": "A008.M2.context.agent-path-environment.empty",
+    "kind": "catalog-default",
+    "template_id": "context.agent-path-environment",
+    "arguments": {
+      "entries": []
+    }
+  },
+  {
+    "id": "A008.M2.context.agent-path-environment.multiple",
+    "kind": "catalog-default",
+    "template_id": "context.agent-path-environment",
+    "arguments": {
+      "entries": []
+    }
+  },
+  {
+    "id": "A008.M2.context.agent-path-environment.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "context.agent-path-environment",
+    "arguments": {
+      "entries": [
+        {
+          "name": "HOME",
+          "path": "/safe/🪶"
+        },
+        {
+          "name": "ROOT",
+          "path": "{{ no_reparse }}\nnext"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M2.context.model-aliases.empty",
+    "kind": "catalog-default",
+    "template_id": "context.model-aliases",
+    "arguments": {
+      "aliases": []
+    }
+  },
+  {
+    "id": "A008.M2.context.model-aliases.multiple",
+    "kind": "catalog-default",
+    "template_id": "context.model-aliases",
+    "arguments": {
+      "aliases": []
+    }
+  },
+  {
+    "id": "A008.M2.context.model-aliases.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "context.model-aliases",
+    "arguments": {
+      "aliases": [
+        {
+          "name": "native",
+          "model": "model/🪶",
+          "usage": "literal {{ value }}\nnext"
+        },
+        {
+          "name": "second",
+          "model": "second/model",
+          "usage": "path ${NAME}"
+        }
+      ]
+    }
+  },
+  {
+    "id": "A008.M2.context.security-profile.empty",
+    "kind": "catalog-default",
+    "template_id": "context.security-profile",
+    "arguments": {
+      "rules": [],
+      "sandbox_enabled": false
+    }
+  },
+  {
+    "id": "A008.M2.context.security-profile.multiple",
+    "kind": "catalog-default",
+    "template_id": "context.security-profile",
+    "arguments": {
+      "rules": [],
+      "sandbox_enabled": true
+    }
+  },
+  {
+    "id": "A008.M2.context.security-profile.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "context.security-profile",
+    "arguments": {
+      "rules": [
+        {
+          "path": "/tmp",
+          "action": "AllowWrite"
+        },
+        {
+          "path": "{{ literal }} $${NAME}",
+          "action": "Deny"
+        }
+      ],
+      "sandbox_enabled": false
+    }
+  },
+  {
+    "id": "A008.M2.context.subagents.empty",
+    "kind": "catalog-default",
+    "template_id": "context.subagents",
+    "arguments": {
+      "subagents": []
+    }
+  },
+  {
+    "id": "A008.M2.context.subagents.multiple",
+    "kind": "catalog-default",
+    "template_id": "context.subagents",
+    "arguments": {
+      "subagents": []
+    }
+  },
+  {
+    "id": "A008.M2.context.subagents.nested-branch",
+    "kind": "catalog-default",
+    "template_id": "context.subagents",
+    "arguments": {
+      "subagents": [
+        {
+          "id": "one",
+          "usage": "nested {{ data }}\nline"
+        },
+        {
+          "id": "two",
+          "usage": "second"
+        }
+      ]
+    }
+  }
+]

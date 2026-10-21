@@ -1,0 +1,2891 @@
+{
+  "schema_version": 1,
+  "source_test_map": "docs/port/test-map/T02.json",
+  "referenced_file_pins": [],
+  "cases": [
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).1.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-212b5ab6a93c50409a36/observation.json",
+      "observation_sha256": "37a80ec025398b51d803760e51ac757452f3d80e82a22279d5f60011d20cb83b",
+      "display_name": "Inspects_format_dimensions_and_frames(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082, image/png, 1)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).1.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082, image/png, 1)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082, image/png, 1)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).1.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082",
+          "image/png",
+          1
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).2.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).2.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-62ee06f8af2e6242c4ee/observation.json",
+      "observation_sha256": "b5ed142f37e74d13b2d2ba6e38510d8631dcccdb9851dd3c33f2719062518d9d",
+      "display_name": "Inspects_format_dimensions_and_frames(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082, image/png, 2)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).2.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082, image/png, 2)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082, image/png, 2)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).2.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082",
+          "image/png",
+          2
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).3.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).3.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-cf5a86ba60dedff3853c/observation.json",
+      "observation_sha256": "a67d62e7a1ced71dde354b6e0f003befb4464cd87f9bfebc517cd1ec172ecee2",
+      "display_name": "Inspects_format_dimensions_and_frames(47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B, image/gif, 2)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).3.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B, image/gif, 2)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B, image/gif, 2)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).3.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B",
+          "image/gif",
+          2
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).4.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).4.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-1375423aaac1a591f135/observation.json",
+      "observation_sha256": "cbf91c900b99927d5be033250eaa8b12ec9d8a136fa7de921cf27a940ca1eb94",
+      "display_name": "Inspects_format_dimensions_and_frames(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9, image/jpeg, 1)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).4.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9, image/jpeg, 1)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9, image/jpeg, 1)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).4.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9",
+          "image/jpeg",
+          1
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).5.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).5.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-e1b4bfc2030b339719b9/observation.json",
+      "observation_sha256": "8c04872d8963d726a8eee36895801eda1fb6de085e9374f00fd5a7d9d3210b3c",
+      "display_name": "Inspects_format_dimensions_and_frames(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9, image/jpeg, 1)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).5.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9, image/jpeg, 1)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9, image/jpeg, 1)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).5.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9",
+          "image/jpeg",
+          1
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).6.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).6.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-475a0767fd4f9bee1ca0/observation.json",
+      "observation_sha256": "1c47fd357852454305a015fba27c09a78c38b89df4546d1cc3a1d8bfd9171db9",
+      "display_name": "Inspects_format_dimensions_and_frames(524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000, image/webp, 1)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).6.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000, image/webp, 1)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000, image/webp, 1)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).6.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000",
+          "image/webp",
+          1
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).7.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).7.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-779ef8164a5a5b135e3c/observation.json",
+      "observation_sha256": "173403fd130453881825782a077c28d3a3efd778027c93b93db574e015f68ade",
+      "display_name": "Inspects_format_dimensions_and_frames(524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100, image/webp, 1)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).7.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100, image/webp, 1)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100, image/webp, 1)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).7.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100",
+          "image/webp",
+          1
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).8.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).8.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Inspects_format_dimensions_and_frames@15",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 16,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-a4166d3bfaac5aa47b10/observation.json",
+      "observation_sha256": "5fa266c13ae5c68b9ada94c12d88b5518d5e3744e48dc0f91d6383ad5e84cbef",
+      "display_name": "Inspects_format_dimensions_and_frames(524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100, image/webp, 2)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).8.1.0",
+      "observation": {
+        "display_name": "Inspects_format_dimensions_and_frames(524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100, image/webp, 2)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Inspects_format_dimensions_and_frames(524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100, image/webp, 2)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 31,
+          "lineStart": 16
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Inspects_format_dimensions_and_frames",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.String",
+            "System.Int32"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Inspects_format_dimensions_and_frames(System.String, System.String, System.Int32).8.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100",
+          "image/webp",
+          2
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).1.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-1545ea2f175e79d3714b/observation.json",
+      "observation_sha256": "a99daff66807522f58c837b454e9b16a75d7764315054aa15d43ed4bea22fe26",
+      "display_name": "Rejects_truncated_and_unknown_images(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).1.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).1.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D0000001049444154789C63FCCF00054C3006030013290103F0D807840000000049454E44AE426082"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).2.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).2.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-ca44ae750da67eeff5f2/observation.json",
+      "observation_sha256": "fcf6cd687dc36e0c03d96288e7f763a9a4909d5ab53b7944c91c25f2fe0247b0",
+      "display_name": "Rejects_truncated_and_unknown_images(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).2.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).2.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "89504E470D0A1A0A0000000D49484452000000030000000208020000001216F14D000000086163544C0000000200000000F38D93700000001A6663544C00000000000000030000000200000000000000000000000100000E839A090000001049444154789C63FCCF00054C3006030013290103F0D807840000001A6663544C000000010000000300000002000000000000000000000001000095F070DD000000196664415400000002789C636460F8CFC0C0C0C0C0C0C4000300112B010329811BC60000000049454E44AE426082"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).3.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).3.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-cee18daef5682421a254/observation.json",
+      "observation_sha256": "6ff6ff7c0f463c73d3b02e68d9a5817b698cc7936c042b6fcb81d4eaa35798ff",
+      "display_name": "Rejects_truncated_and_unknown_images(47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).3.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).3.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "47494638376103000200810000FF00000000000000000000002C00000000030002000008060001081C18100021F90401000001002C0000000003000200810000FF00000000000000000008060001081C1810003B"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).4.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).4.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-369ec6acca083f8dcbaf/observation.json",
+      "observation_sha256": "9d5f26acdda6bdf0ed9be22794be46ef3201fdd92bac3f021d4b85421ded4074",
+      "display_name": "Rejects_truncated_and_unknown_images(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).4.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).4.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC0000B080002000301011100FFC40014000100000000000000000000000000000000FFC40014100100000000000000000000000000000000FFDA0008010100003F003FFFD9"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).5.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).5.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-69892fe4ce895a4e524e/observation.json",
+      "observation_sha256": "d1d8dfb21f76794d4fc98a3cd65308a9d78d16e7f8d882a4c30ae068f812a135",
+      "display_name": "Rejects_truncated_and_unknown_images(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).5.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).5.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "FFD8FFE000104A46494600010100000100010000FFDB004300100B0C0E0C0A100E0D0E1211101318281A181616183123251D283A333D3C3933383740485C4E404457453738506D51575F626768673E4D71797064785C656763FFC2000B080002000301011100FFC40014000100000000000000000000000000000000FFDA00080101000000017FFFC40014100100000000000000000000000000000000FFDA00080101000105027FFFC40014100100000000000000000000000000000000FFDA0008010100063F027FFFC40014100100000000000000000000000000000000FFDA0008010100013F217FFFDA00080101000000107FFFC40014100100000000000000000000000000000000FFDA0008010100013F107FFFD9"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).6.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).6.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-794d6d637a5833aa799d/observation.json",
+      "observation_sha256": "818000805c1ab74481c6949589cf7ba67e89bda5cc0453ca17bcfdf521ae5f44",
+      "display_name": "Rejects_truncated_and_unknown_images(524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).6.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).6.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "524946463800000057454250565038202C0000009001009D012A0300020002C04C25A00274BA00039800FEEE431FEE6C738B7057FF6D0FFF5A1FFEB43FE94000"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).7.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).7.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-84a9ae6799ad7fc58fff/observation.json",
+      "observation_sha256": "7b5b0b8d9e241ce138713283d399cb1ae9f13904af936364e1e31cea0f06bcdb",
+      "display_name": "Rejects_truncated_and_unknown_images(524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).7.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).7.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "524946461C000000574542505650384C0F0000002F024000000710FD8FFE0722A2FF0100"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).8.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).8.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-ed4c7753d61669ecc8d0/observation.json",
+      "observation_sha256": "05685cfcd8ccd784cc53dfa07276f4aac8e2d9774f147df9eeb03d9486bf9335",
+      "display_name": "Rejects_truncated_and_unknown_images(524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).8.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).8.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "524946468400000057454250565038580A00000002000000020000010000414E494D06000000000000000000414E4D4628000000000000000000020000010000000000025650384C0F0000002F024000000710FD8FFE0722A2FF0100414E4D4628000000000000000000020000010000000000005650384C0F0000002F024000000710D1FFFE0722A2FF0100"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).9.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).9.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ImageInspectionTests.cs::ImageInspectionTests.Rejects_truncated_and_unknown_images@32",
+      "source_file": "test/Parrot.Common.Tests/ImageInspectionTests.cs",
+      "source_line": 33,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-24d0e11d008f08d58afb/observation.json",
+      "observation_sha256": "e0186e193a40f546985f5004dfbaf96ac54f9e74ced682389ddfc8ac876d4ba1",
+      "display_name": "Rejects_truncated_and_unknown_images(000102000102000102000102)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).9.1.0",
+      "observation": {
+        "display_name": "Rejects_truncated_and_unknown_images(000102000102000102000102)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Rejects_truncated_and_unknown_images(000102000102000102000102)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ImageInspectionTests.cs",
+          "lineEnd": 48,
+          "lineStart": 33
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Rejects_truncated_and_unknown_images",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageInspectionTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageInspectionTests.1.1.Rejects_truncated_and_unknown_images(System.String).9.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "000102000102000102000102"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).1.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ToolCycleImageBudgetTests.cs::ToolCycleImageBudgetTests.Restores_usage_and_overflow_without_sharing_state@7",
+      "source_file": "test/Parrot.Common.Tests/ToolCycleImageBudgetTests.cs",
+      "source_line": 7,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-9bae0fec18aeb4896d90/observation.json",
+      "observation_sha256": "8d07061705d1cab2c1795ae1d55c3621a0513fc359c01be3877ce729b6291e2c",
+      "display_name": "Restores_usage_and_overflow_without_sharing_state(False)",
+      "fixture_case_id": "Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).1.1.0",
+      "observation": {
+        "display_name": "Restores_usage_and_overflow_without_sharing_state(False)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Restores_usage_and_overflow_without_sharing_state(False)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ToolCycleImageBudgetTests.cs",
+          "lineEnd": 27,
+          "lineStart": 7
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Restores_usage_and_overflow_without_sharing_state",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.Boolean"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ToolCycleImageBudgetTests"
+        },
+        "uid": "Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).1.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          false
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Common.Tests::Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).2.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).2.1.0",
+      "source_declaration_id": "test/Parrot.Common.Tests/ToolCycleImageBudgetTests.cs::ToolCycleImageBudgetTests.Restores_usage_and_overflow_without_sharing_state@7",
+      "source_file": "test/Parrot.Common.Tests/ToolCycleImageBudgetTests.cs",
+      "source_line": 7,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Common.Tests-94446cbd23ab5fa659a1/observation.json",
+      "observation_sha256": "e0fcad9d0a25584ed14704c0c5cfa8bbc6869904dfa889d996bb657865018744",
+      "display_name": "Restores_usage_and_overflow_without_sharing_state(True)",
+      "fixture_case_id": "Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).2.1.0",
+      "observation": {
+        "display_name": "Restores_usage_and_overflow_without_sharing_state(True)",
+        "exit_code": 0,
+        "project": "Parrot.Common.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Restores_usage_and_overflow_without_sharing_state(True)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Common.Tests/ToolCycleImageBudgetTests.cs",
+          "lineEnd": 27,
+          "lineStart": 7
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Common.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Restores_usage_and_overflow_without_sharing_state",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.Boolean"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ToolCycleImageBudgetTests"
+        },
+        "uid": "Parrot.Core.Tests.ToolCycleImageBudgetTests.1.1.Restores_usage_and_overflow_without_sharing_state(System.Boolean).2.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          true
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageAdapterTests.cs::ImageAdapterTests.Chat_completions_encode_ordered_text_and_image_reference@27",
+      "source_file": "test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+      "source_line": 28,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-cb970ad796933d34ae6c/observation.json",
+      "observation_sha256": "f2b26e55855473da6d5ffce22fdc991204c7bfdbc742698883b25a36814beb8e",
+      "display_name": "Chat_completions_encode_ordered_text_and_image_reference(False, data:image/png;base64,AAEC)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0",
+      "observation": {
+        "display_name": "Chat_completions_encode_ordered_text_and_image_reference(False, data:image/png;base64,AAEC)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Chat_completions_encode_ordered_text_and_image_reference(False, data:image/png;base64,AAEC)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+          "lineEnd": 43,
+          "lineStart": 28
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Chat_completions_encode_ordered_text_and_image_reference",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.Boolean",
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageAdapterTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          false,
+          "data:image/png;base64,AAEC"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageAdapterTests.cs::ImageAdapterTests.Chat_completions_encode_ordered_text_and_image_reference@27",
+      "source_file": "test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+      "source_line": 28,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-128b23defde7fbf1164a/observation.json",
+      "observation_sha256": "d0071db62112d16ad6967ffe40003ba2c1055abdb31f8c16af2fce689716133c",
+      "display_name": "Chat_completions_encode_ordered_text_and_image_reference(True, https://minio·example·com/parrot-images/parrot/abc·png)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0",
+      "observation": {
+        "display_name": "Chat_completions_encode_ordered_text_and_image_reference(True, https://minio·example·com/parrot-images/parrot/abc·png)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Chat_completions_encode_ordered_text_and_image_reference(True, https://minio·example·com/parrot-images/parrot/abc·png)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+          "lineEnd": 43,
+          "lineStart": 28
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Chat_completions_encode_ordered_text_and_image_reference",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.Boolean",
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageAdapterTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Chat_completions_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageAdapterTests.cs::ImageAdapterTests.Responses_encode_ordered_text_and_image_reference@10",
+      "source_file": "test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+      "source_line": 11,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-a9f3d1507a9e460fe647/observation.json",
+      "observation_sha256": "e9438a2e6ffd2467e775977977880e83bd4852e3dedf1947f0c401959c182b58",
+      "display_name": "Responses_encode_ordered_text_and_image_reference(False, data:image/png;base64,AAEC)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0",
+      "observation": {
+        "display_name": "Responses_encode_ordered_text_and_image_reference(False, data:image/png;base64,AAEC)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Responses_encode_ordered_text_and_image_reference(False, data:image/png;base64,AAEC)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+          "lineEnd": 26,
+          "lineStart": 11
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Responses_encode_ordered_text_and_image_reference",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.Boolean",
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageAdapterTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).1.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          false,
+          "data:image/png;base64,AAEC"
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageAdapterTests.cs::ImageAdapterTests.Responses_encode_ordered_text_and_image_reference@10",
+      "source_file": "test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+      "source_line": 11,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-122182a43715fe33ab08/observation.json",
+      "observation_sha256": "0b0b40595379d057149aaa814a135ab3e3f329932526ef0e6919a20c0d0496ca",
+      "display_name": "Responses_encode_ordered_text_and_image_reference(True, https://minio·example·com/parrot-images/parrot/abc·png)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0",
+      "observation": {
+        "display_name": "Responses_encode_ordered_text_and_image_reference(True, https://minio·example·com/parrot-images/parrot/abc·png)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Responses_encode_ordered_text_and_image_reference(True, https://minio·example·com/parrot-images/parrot/abc·png)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageAdapterTests.cs",
+          "lineEnd": 26,
+          "lineStart": 11
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Responses_encode_ordered_text_and_image_reference",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.Boolean",
+            "System.String"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageAdapterTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageAdapterTests.1.1.Responses_encode_ordered_text_and_image_reference(System.Boolean, System.String).2.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).1.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-cd11db3a6343ef232e34/observation.json",
+      "observation_sha256": "51e582f4dd5e10ac7e946d8a948e5df85e61b62adacbd436ea558e788a2d438b",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 400, 400, 203)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).1.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 400, 400, 203)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 400, 400, 203)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).1.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          400,
+          400,
+          203
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).10.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).10.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-a5a0950352aa7d79519d/observation.json",
+      "observation_sha256": "599543e86e1648c355ca293b584f1799560929e45a04292d3e95d17dbf164bf4",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·6-sol, 400, 400, 203)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).10.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·6-sol, 400, 400, 203)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·6-sol, 400, 400, 203)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).10.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).11.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).11.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-b6b71626171aa9fbc817/observation.json",
+      "observation_sha256": "c53ccd314b925e83dac03442b4d9d283e0aa885a6d5d2af3e5a3857fde249dd3",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·6-terra, 400, 400, 203)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).11.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·6-terra, 400, 400, 203)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·6-terra, 400, 400, 203)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).11.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).12.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).12.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-d45c9c8b76cba051a3b1/observation.json",
+      "observation_sha256": "df13b4fcbad701c55b524cec387f9f5605efe107e8ed4b56e4e64fea83770763",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·5, 4096, 4096, 12000)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).12.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·5, 4096, 4096, 12000)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·5, 4096, 4096, 12000)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).12.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).13.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).13.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-9622c2a9f235094ef5da/observation.json",
+      "observation_sha256": "0c8cebbf5f5a5bbac3ff76f502e367894a76f5173910ac81a65e2aac792d6490",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·4, 2048, 2048, 3000)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).13.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·4, 2048, 2048, 3000)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·4, 2048, 2048, 3000)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).13.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).14.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).14.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-21a06aa1d949283bb714/observation.json",
+      "observation_sha256": "c939def1929f73cdd0fa8a2605759498cb5b61b2512b6ef333d86a335f34c86a",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·4, 2048, 1536, 2942)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).14.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·4, 2048, 1536, 2942)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·4, 2048, 1536, 2942)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).14.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).15.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).15.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-5fbd325323f0864d93f1/observation.json",
+      "observation_sha256": "d236daf470d19237fe085bdec92ad2c5c80e83e19138898f8100010ac34ceac0",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·4, 1536, 2048, 2942)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).15.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·4, 1536, 2048, 2942)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·4, 1536, 2048, 2942)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).15.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).16.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).16.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-689132cd648d556c472e/observation.json",
+      "observation_sha256": "3d095958460146ee2b2e38802b8b58cef5cc3c0f1c84a98efc56a82079e1dbfd",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·5, 12000, 32, 226)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).16.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·5, 12000, 32, 226)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·5, 12000, 32, 226)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).16.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).17.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).17.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-15980c4c79292e453d27/observation.json",
+      "observation_sha256": "774aab591a16116a9caf4f0780ab01f5f7f39c25f06f9010267e9b854ade025b",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 65536, 1, 2458)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).17.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 65536, 1, 2458)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 65536, 1, 2458)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).17.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          65536,
+          1,
+          2458
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).18.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).18.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-215c3563d053dbfe4d82/observation.json",
+      "observation_sha256": "2f9f436820460aac03fafaa9dd5e0ef0b280319b202d1d6aa65b7301659ab259",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·4-mini, 2048, 2048, 3000)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).18.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·4-mini, 2048, 2048, 3000)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·4-mini, 2048, 2048, 3000)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).18.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).19.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).19.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-0a3748b072455da3c527/observation.json",
+      "observation_sha256": "5be28633a3482d5d446c578672dbde46a538c34e7c34893a4f6261e9bd4a4d6d",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·4-nano, 2048, 2048, 3000)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).19.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·4-nano, 2048, 2048, 3000)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·4-nano, 2048, 2048, 3000)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).19.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).2.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).2.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-fa78b96d87a53e644c50/observation.json",
+      "observation_sha256": "7ecb4a055da4d27e0217425f010a66049df37f0f39eac1f993468a589e64d462",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 1200, 1200, 1733)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).2.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 1200, 1200, 1733)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 1200, 1200, 1733)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).2.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          1200,
+          1200,
+          1733
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).20.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).20.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-643dba1f98a9658c7e78/observation.json",
+      "observation_sha256": "33c1440a85fe0712994760b5eaf8f95ece99ef978257a68023a04f97779251a8",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·2, 4096, 2048, 2458)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).20.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·2, 4096, 2048, 2458)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·2, 4096, 2048, 2458)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).20.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).21.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).21.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-736ec615e0695505f48b/observation.json",
+      "observation_sha256": "edbd4e6650383a98cec3ca83e3d6ece50f00e15301b8a2bb54d0c1addc626ac1",
+      "display_name": "Calculates_documented_auto_detail(gpt-4·1-mini, 1024, 1024, 1659)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).21.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4·1-mini, 1024, 1024, 1659)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4·1-mini, 1024, 1024, 1659)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).21.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).22.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).22.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-ba3c8ba271e86e6f6801/observation.json",
+      "observation_sha256": "a0950a7ecbe0507261e39674725e7c147e2cbdd12b77e0a2af6b5e75fb516f97",
+      "display_name": "Calculates_documented_auto_detail(gpt-4·1-mini-2025-04-14, 1024, 1024, 1659)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).22.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4·1-mini-2025-04-14, 1024, 1024, 1659)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4·1-mini-2025-04-14, 1024, 1024, 1659)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).22.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).23.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).23.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-b9add1a06010fcb1e7a2/observation.json",
+      "observation_sha256": "7379705f4d7c4db4ce9e68a77ee3476e351d8f838c8810a11564a56625522077",
+      "display_name": "Calculates_documented_auto_detail(gpt-4o, 1024, 1024, 765)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).23.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4o, 1024, 1024, 765)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4o, 1024, 1024, 765)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).23.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-4o",
+          1024,
+          1024,
+          765
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).24.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).24.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-ff314a9313451ec68d01/observation.json",
+      "observation_sha256": "7e4c6fb80d09797616d6443acc3856ceb7e3e5bb2613ca98fee4f0ea5c63551d",
+      "display_name": "Calculates_documented_auto_detail(gpt-4o, 400, 400, 255)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).24.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4o, 400, 400, 255)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4o, 400, 400, 255)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).24.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-4o",
+          400,
+          400,
+          255
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).25.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).25.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-0911789e3d2d19809278/observation.json",
+      "observation_sha256": "e58ff3a8ca3c756c754f4696c5ae88e03b0388333a17df50b54fb09652a9c6bf",
+      "display_name": "Calculates_documented_auto_detail(gpt-4o, 4096, 1024, 765)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).25.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4o, 4096, 1024, 765)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4o, 4096, 1024, 765)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).25.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-4o",
+          4096,
+          1024,
+          765
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).26.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).26.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-92333fd36e6b1f5be799/observation.json",
+      "observation_sha256": "3d0cb253e3406d65ae4e45bde2f7721c0ed8d9abbdb4d76727339028c6e2cc6e",
+      "display_name": "Calculates_documented_auto_detail(gpt-4·1, 1024, 2048, 1105)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).26.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4·1, 1024, 2048, 1105)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4·1, 1024, 2048, 1105)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).26.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).27.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).27.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-73f88def761d22d6dbff/observation.json",
+      "observation_sha256": "235bf925ec226a3d671f094f9e15df407afdb80f4c4f5f10eb0d0fc36d96a756",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·1, 1024, 1024, 630)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).27.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·1, 1024, 1024, 630)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·1, 1024, 1024, 630)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).27.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).28.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).28.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-9dcdbaeedb49e544f9c5/observation.json",
+      "observation_sha256": "8ff9c59133bb47bebe97e5363c0ea81864ffa04160ea8b10ee9f5a6d08c5a8a5",
+      "display_name": "Calculates_documented_auto_detail(gpt-4o-mini, 1024, 1024, 25501)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).28.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4o-mini, 1024, 1024, 25501)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4o-mini, 1024, 1024, 25501)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).28.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-4o-mini",
+          1024,
+          1024,
+          25501
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).29.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).29.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-8c94ae1fbd815775176a/observation.json",
+      "observation_sha256": "d84cdeada6c1342321116b9581d99bee2509de27f993e0394351522d55610800",
+      "display_name": "Calculates_documented_auto_detail(gpt-4·1-mini-unknown, 400, 400, 4096)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).29.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-4·1-mini-unknown, 400, 400, 4096)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-4·1-mini-unknown, 400, 400, 4096)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).29.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).3.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).3.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-3732c4db262ace42baca/observation.json",
+      "observation_sha256": "7b7beaa21296cb405e900d79c9b48c2930deef75f47f43672b17fe064e57ea8e",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 2048, 2048, 4916)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).3.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 2048, 2048, 4916)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 2048, 2048, 4916)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).3.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          2048,
+          2048,
+          4916
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).30.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).30.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-047fa12d30cbf691f2e4/observation.json",
+      "observation_sha256": "40c30122c38b5ddebe5adf449adf52a994dcc7526e94b0da1cdb29f6ba246c36",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra-special, 400, 400, 4096)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).30.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra-special, 400, 400, 4096)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra-special, 400, 400, 4096)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).30.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra-special",
+          400,
+          400,
+          4096
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).4.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).4.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-54067eea63e0a4bc7343/observation.json",
+      "observation_sha256": "c3ff9a8b1f3e0a585d1be671092042775c85111447524a572c48731962e324ad",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 1, 1, 2)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).4.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 1, 1, 2)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 1, 1, 2)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).4.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).5.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).5.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-f39f3bfab62cb58ecd2d/observation.json",
+      "observation_sha256": "b91adf50294a6bedd0c758b643a3404d8dc199451aea0a979fbe838beddb98b2",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 31, 32, 2)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).5.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 31, 32, 2)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 31, 32, 2)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).5.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          31,
+          32,
+          2
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).6.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).6.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-2f77d2b6098655faa5a6/observation.json",
+      "observation_sha256": "831187343b6a742862ff855d086f097752aa20c1ab1a14b1a4cf31e877ad9569",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 32, 32, 2)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).6.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 32, 32, 2)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 32, 32, 2)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).6.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          32,
+          32,
+          2
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).7.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).7.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-b1cd6cfd5a3864c261ae/observation.json",
+      "observation_sha256": "1ade69dfcfec002bc982b0e2068989bed31aa3bdb2ef17d1c1f5fc9a611b7562",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 33, 32, 3)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).7.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 33, 32, 3)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 33, 32, 3)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).7.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          33,
+          32,
+          3
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).8.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).8.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-78e3114b345e808c92c2/observation.json",
+      "observation_sha256": "dc69cc1063684abc66c3463cf4201af160d467131b3c7151dd0551f88731dea5",
+      "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 4096, 512, 2458)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).8.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-6-astra, 4096, 512, 2458)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-6-astra, 4096, 512, 2458)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).8.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "gpt-6-astra",
+          4096,
+          512,
+          2458
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).9.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).9.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Calculates_documented_auto_detail@9",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 9,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-78cf2838dcb659a9c149/observation.json",
+      "observation_sha256": "51bdb5d572e150fa96e96a229418f213fc6224b19aafe57f84c2a673d6ccb5e0",
+      "display_name": "Calculates_documented_auto_detail(gpt-5·6-luna, 2048, 2048, 4916)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).9.1.0",
+      "observation": {
+        "display_name": "Calculates_documented_auto_detail(gpt-5·6-luna, 2048, 2048, 4916)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Calculates_documented_auto_detail(gpt-5·6-luna, 2048, 2048, 4916)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 45,
+          "lineStart": 9
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Calculates_documented_auto_detail",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int32",
+            "System.Int32",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Calculates_documented_auto_detail(System.String, System.Int32, System.Int32, System.Int64).9.1.0"
+      },
+      "original_test_input_json": null
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).1.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Composition_and_retry_preserve_provider_calculation@57",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 58,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-011b817b639a7cf8f542/observation.json",
+      "observation_sha256": "66cf41eea08a627399a383f6afe3ceec6c60466fee660d2a8a4c41cc13905091",
+      "display_name": "Composition_and_retry_preserve_provider_calculation(openai, 203)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).1.1.0",
+      "observation": {
+        "display_name": "Composition_and_retry_preserve_provider_calculation(openai, 203)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Composition_and_retry_preserve_provider_calculation(openai, 203)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 77,
+          "lineStart": 58
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Composition_and_retry_preserve_provider_calculation",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).1.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "openai",
+          203
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).2.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).2.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Composition_and_retry_preserve_provider_calculation@57",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 58,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-d70538ac66d064325faa/observation.json",
+      "observation_sha256": "56473846a1ad1ffe11efc5571cca46233ef1ec4b760202a3577aa1e3a9669f15",
+      "display_name": "Composition_and_retry_preserve_provider_calculation(chatgpt, 203)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).2.1.0",
+      "observation": {
+        "display_name": "Composition_and_retry_preserve_provider_calculation(chatgpt, 203)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Composition_and_retry_preserve_provider_calculation(chatgpt, 203)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 77,
+          "lineStart": 58
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Composition_and_retry_preserve_provider_calculation",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).2.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "chatgpt",
+          203
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).3.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).3.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Composition_and_retry_preserve_provider_calculation@57",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 58,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-fed2d3e8feb1f77b3ffd/observation.json",
+      "observation_sha256": "4fcaef27fc52e1c1e377d071a1721954953c33406e8f35881a5d10a2286ee921",
+      "display_name": "Composition_and_retry_preserve_provider_calculation(generic, 4096)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).3.1.0",
+      "observation": {
+        "display_name": "Composition_and_retry_preserve_provider_calculation(generic, 4096)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Composition_and_retry_preserve_provider_calculation(generic, 4096)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 77,
+          "lineStart": 58
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Composition_and_retry_preserve_provider_calculation",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).3.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "generic",
+          4096
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).4.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).4.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Composition_and_retry_preserve_provider_calculation@57",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 58,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-70ffc199e4da538e820f/observation.json",
+      "observation_sha256": "7ec2733419a4f4565385bae82f09ef8ed05ad7ddcd7db53d5c82a9db336a3bbf",
+      "display_name": "Composition_and_retry_preserve_provider_calculation(openrouter, 4096)",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).4.1.0",
+      "observation": {
+        "display_name": "Composition_and_retry_preserve_provider_calculation(openrouter, 4096)",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Composition_and_retry_preserve_provider_calculation(openrouter, 4096)",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 77,
+          "lineStart": 58
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Composition_and_retry_preserve_provider_calculation",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [
+            "System.String",
+            "System.Int64"
+          ],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Composition_and_retry_preserve_provider_calculation(System.String, System.Int64).4.1.0"
+      },
+      "original_test_input_json": {
+        "arguments": [
+          "openrouter",
+          4096
+        ]
+      }
+    },
+    {
+      "coverage_id": "Parrot.Llm.Tests::Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Invalid_images_and_unknown_providers_retain_fallback.1.1.0",
+      "runtime_uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Invalid_images_and_unknown_providers_retain_fallback.1.1.0",
+      "source_declaration_id": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs::ImageTokenCalculatorTests.Invalid_images_and_unknown_providers_retain_fallback@46",
+      "source_file": "test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+      "source_line": 47,
+      "observation_file": "artifacts/reference/linux-baseline-isolated-runtime/cases/Parrot.Llm.Tests-496b27a9a9274e163f05/observation.json",
+      "observation_sha256": "75879180dc3282c7f2c89392c95cee20268f57caf709e61995de77e1b55d31f8",
+      "display_name": "Invalid_images_and_unknown_providers_retain_fallback",
+      "fixture_case_id": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Invalid_images_and_unknown_providers_retain_fallback.1.1.0",
+      "observation": {
+        "display_name": "Invalid_images_and_unknown_providers_retain_fallback",
+        "exit_code": 0,
+        "project": "Parrot.Llm.Tests",
+        "results": [
+          {
+            "message": null,
+            "name": "Invalid_images_and_unknown_providers_retain_fallback",
+            "outcome": "Passed"
+          }
+        ],
+        "schema_version": 1,
+        "source": {
+          "file": "<REFERENCE_SOURCE>/test/Parrot.Llm.Tests/ImageTokenCalculatorTests.cs",
+          "lineEnd": 56,
+          "lineStart": 47
+        },
+        "source_commit": "5f27a8a92625ee31d8bec094e5c3e09550193781",
+        "status": "passed",
+        "type": {
+          "assemblyFullName": "Parrot.Llm.Tests, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "methodArity": 0,
+          "methodName": "Invalid_images_and_unknown_providers_retain_fallback",
+          "namespace": "Parrot.Core.Tests",
+          "parameterTypeFullNames": [],
+          "returnTypeFullName": "System.Threading.Tasks.Task",
+          "typeName": "ImageTokenCalculatorTests"
+        },
+        "uid": "Parrot.Core.Tests.ImageTokenCalculatorTests.1.1.Invalid_images_and_unknown_providers_retain_fallback.1.1.0"
+      },
+      "original_test_input_json": null
+    }
+  ]
+}

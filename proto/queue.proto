@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option csharp_namespace = "Parrot.Protocol";
+
+package parrot.v1;
+
+message QueueState {
+  string name                    = 1;
+  string description             = 2;
+  int32 item_count               = 3;
+  string owner_agent_session_id  = 4;
+  string owner_agent_name        = 5;
+  string parent_agent_session_id = 6;
+  string parent_agent_name       = 7;
+}
+
+// The data of one "queue" ToolSnapshot chunk.
+message QueueSnapshot {
+  string root_agent_session_id = 1;
+  repeated QueueState queues   = 2;
+}

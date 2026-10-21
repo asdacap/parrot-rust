@@ -1,0 +1,1486 @@
+[
+  {
+    "input": {
+      "case_id": "text-fold",
+      "sse": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"},\"sequence_number\":0}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello \"}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"\\u4e16\\u754c\\n\"}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "Hello ",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "TextDelta",
+        "Text": "世界\n",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "Hello 世界\n",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "terminal-text-does-not-replace-deltas",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"streamed\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"terminal\"}]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "streamed",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "streamed",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "terminal"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "reasoning_summary_text-identity",
+      "sse": "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"reason1\",\"output_index\":2,\"summary_index\":3,\"content_index\":4,\"delta\":\"thinking\"}\n\ndata: {\"type\":\"response.reasoning_summary_text.done\",\"item_id\":\"reason1\",\"output_index\":2,\"summary_index\":3,\"content_index\":4,\"text\":\"ignored done text\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "thinking",
+        "ReasoningKind": "Summary",
+        "ReasoningPartId": "reason1:3",
+        "ReasoningCompleted": false,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "",
+        "ReasoningKind": "Summary",
+        "ReasoningPartId": "reason1:3",
+        "ReasoningCompleted": true,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "reasoning_summary_text-index-fallback",
+      "sse": "data: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":2,\"summary_index\":3,\"content_index\":4,\"delta\":\"a\"}\n\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":2,\"summary_index\":4,\"content_index\":5,\"delta\":\"b\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "a",
+        "ReasoningKind": "Summary",
+        "ReasoningPartId": "3",
+        "ReasoningCompleted": false,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "b",
+        "ReasoningKind": "Summary",
+        "ReasoningPartId": "4",
+        "ReasoningCompleted": false,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "reasoning_text-identity",
+      "sse": "data: {\"type\":\"response.reasoning_text.delta\",\"item_id\":\"reason1\",\"output_index\":2,\"summary_index\":3,\"content_index\":4,\"delta\":\"thinking\"}\n\ndata: {\"type\":\"response.reasoning_text.done\",\"item_id\":\"reason1\",\"output_index\":2,\"summary_index\":3,\"content_index\":4,\"text\":\"ignored done text\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "thinking",
+        "ReasoningKind": "Raw",
+        "ReasoningPartId": "reason1:4",
+        "ReasoningCompleted": false,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "",
+        "ReasoningKind": "Raw",
+        "ReasoningPartId": "reason1:4",
+        "ReasoningCompleted": true,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "reasoning_text-index-fallback",
+      "sse": "data: {\"type\":\"response.reasoning_text.delta\",\"output_index\":2,\"summary_index\":3,\"content_index\":4,\"delta\":\"a\"}\n\ndata: {\"type\":\"response.reasoning_text.delta\",\"output_index\":2,\"summary_index\":4,\"content_index\":5,\"delta\":\"b\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "a",
+        "ReasoningKind": "Raw",
+        "ReasoningPartId": "4",
+        "ReasoningCompleted": false,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "b",
+        "ReasoningKind": "Raw",
+        "ReasoningPartId": "5",
+        "ReasoningCompleted": false,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "annotation-with-delta",
+      "sse": "data: {\"type\":\"response.output_text.annotation.added\",\"item_id\":\"m1\",\"output_index\":1,\"content_index\":2,\"annotation_index\":3,\"delta\":\"citation\",\"annotation\":{\"type\":\"url_citation\",\"url\":\"https://example.invalid\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ReasoningDelta",
+        "Text": "citation",
+        "ReasoningKind": "Raw",
+        "ReasoningPartId": "m1:3",
+        "ReasoningCompleted": false,
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "annotation-without-delta",
+      "sse": "data: {\"type\":\"response.output_text.annotation.added\",\"annotation\":{\"type\":\"url_citation\",\"url\":\"https://example.invalid\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tools-order-alias-delta-done",
+      "sse": "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"i1\",\"call_id\":\"c1\",\"name\":\"first\",\"arguments\":\"\"}}\n\ndata: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"id\":\"i2\",\"call_id\":\"c2\",\"name\":\"second\",\"arguments\":\"{}\"}}\n\ndata: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"i1\",\"delta\":\"{\\\"a\\\":\"}\n\ndata: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"c1\",\"delta\":\"1}\"}\n\ndata: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"i1\",\"arguments\":\"{\\\"a\\\":2}\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "{\"a\":2}",
+        "ToolCallId": "c1",
+        "ToolName": "first",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "{}",
+        "ToolCallId": "c2",
+        "ToolName": "second",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "c1",
+            "Name": "first",
+            "ArgumentsJson": "{\"a\":2}"
+          },
+          {
+            "Id": "c2",
+            "Name": "second",
+            "ArgumentsJson": "{}"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tool-delta-before-item",
+      "sse": "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"i1\",\"delta\":\"[\"}\n\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"i1\",\"call_id\":\"c1\",\"name\":\"late\",\"arguments\":\"\"}}\n\ndata: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"c1\",\"delta\":\"1]\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "[1]",
+        "ToolCallId": "c1",
+        "ToolName": "late",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "c1",
+            "Name": "late",
+            "ArgumentsJson": "[1]"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tool-done-only",
+      "sse": "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"i1\",\"call_id\":\"c1\",\"name\":\"done\",\"arguments\":\"{}\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "{}",
+        "ToolCallId": "c1",
+        "ToolName": "done",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "c1",
+            "Name": "done",
+            "ArgumentsJson": "{}"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tool-item-done-overrides",
+      "sse": "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"i1\",\"call_id\":\"c1\",\"name\":\"first\",\"arguments\":\"a\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"i1\",\"call_id\":\"c1\",\"name\":\"second\",\"arguments\":\"{\\\"done\\\":true}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "{\"done\":true}",
+        "ToolCallId": "c1",
+        "ToolName": "first",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "c1",
+            "Name": "first",
+            "ArgumentsJson": "{\"done\":true}"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "function_call",
+            "id": "i1",
+            "call_id": "c1",
+            "name": "second",
+            "arguments": "{\"done\":true}"
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tool-empty-done-retains",
+      "sse": "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"i1\",\"call_id\":\"c1\",\"name\":\"first\",\"arguments\":\"x\"}}\n\ndata: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"i1\",\"arguments\":\"\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "x",
+        "ToolCallId": "c1",
+        "ToolName": "first",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "c1",
+            "Name": "first",
+            "ArgumentsJson": "x"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tool-missing-ids",
+      "sse": "data: {\"type\":\"response.function_call_arguments.delta\",\"name\":\"a\",\"delta\":\"1\"}\n\ndata: {\"type\":\"response.function_call_arguments.delta\",\"name\":\"b\",\"delta\":\"2\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "1",
+        "ToolCallId": "",
+        "ToolName": "a",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "2",
+        "ToolCallId": "",
+        "ToolName": "b",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "",
+            "Name": "a",
+            "ArgumentsJson": "1"
+          },
+          {
+            "Id": "",
+            "Name": "b",
+            "ArgumentsJson": "2"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tool-item-id-fallback",
+      "sse": "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"item-only\",\"call_id\":\"\",\"name\":\"f\",\"arguments\":\"{}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "{}",
+        "ToolCallId": "item-only",
+        "ToolName": "f",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "item-only",
+            "Name": "f",
+            "ArgumentsJson": "{}"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "tool-call-id-fallback",
+      "sse": "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"\",\"call_id\":\"call-only\",\"name\":\"f\",\"arguments\":\"{}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "{}",
+        "ToolCallId": "call-only",
+        "ToolName": "f",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "call-only",
+            "Name": "f",
+            "ArgumentsJson": "{}"
+          }
+        ],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "usage-cached",
+      "sse": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"usage\":{\"input_tokens\":30,\"output_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":11}}}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 30,
+        "CachedInputTokens": 11,
+        "OutputTokens": 7,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "incomplete-max_output_tokens",
+      "sse": "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"r1\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":8,\"output_tokens\":3}}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "length",
+        "InputTokens": 8,
+        "CachedInputTokens": 0,
+        "OutputTokens": 3,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "incomplete-content_filter",
+      "sse": "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"r1\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":8,\"output_tokens\":3}}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "content_filter",
+        "InputTokens": 8,
+        "CachedInputTokens": 0,
+        "OutputTokens": 3,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "incomplete-other",
+      "sse": "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"r1\",\"incomplete_details\":{\"reason\":\"other\"},\"usage\":{\"input_tokens\":8,\"output_tokens\":3}}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "incomplete",
+        "InputTokens": 8,
+        "CachedInputTokens": 0,
+        "OutputTokens": 3,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "incomplete-no-details",
+      "sse": "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "incomplete",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-added-is-not-arrival",
+      "sse": "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-done-before-terminal",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e1",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-id-dedup-different-index",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":5,\"item\":{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e1",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-index-dedup-no-id",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-index-upgrade-id",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e1",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-distinct-id-same-index",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"e2\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"e2\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e2",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-terminal-new-order",
+      "sse": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"e2\",\"encrypted_content\":\"cipher\",\"summary\":[]},{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e2",
+            "encrypted_content": "cipher",
+            "summary": []
+          },
+          {
+            "type": "reasoning",
+            "id": "e1",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-empty-not-arrival",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e1",
+            "encrypted_content": "",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "terminal-output-wins",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"streamed\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"terminal\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "terminal",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "terminal-empty-output-streamed-fallback",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"reasoning\",\"id\":\"e2\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"e0\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e0",
+            "encrypted_content": "cipher",
+            "summary": []
+          },
+          {
+            "type": "reasoning",
+            "id": "e2",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "terminal-no-output-streamed-fallback",
+      "sse": "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"reasoning\",\"id\":\"e2\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e2",
+            "encrypted_content": "cipher",
+            "summary": []
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "encrypted-preserves-text-and-tool",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"i1\",\"call_id\":\"c1\",\"name\":\"f\",\"arguments\":\"{}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"output\":[{\"type\":\"reasoning\",\"id\":\"e1\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "answer",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "EncryptedReasoningReceived",
+        "IsVisibleOutput": false
+      },
+      {
+        "Kind": "ToolCallDelta",
+        "Text": "{}",
+        "ToolCallId": "c1",
+        "ToolName": "f",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "tool_calls",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [
+          {
+            "Id": "c1",
+            "Name": "f",
+            "ArgumentsJson": "{}"
+          }
+        ],
+        "AssistantText": "answer",
+        "IsVisibleOutput": true,
+        "Output": [
+          {
+            "type": "reasoning",
+            "id": "e1",
+            "encrypted_content": "cipher",
+            "summary": []
+          },
+          {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "answer"
+              }
+            ]
+          },
+          {
+            "id": "i1",
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "f",
+            "arguments": "{}"
+          }
+        ]
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "failed-structured",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"r1\",\"error\":{\"type\":\"server_error\",\"code\":\"overloaded\",\"message\":\"Try later\"}}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "partial",
+        "IsVisibleOutput": true
+      }
+    ],
+    "error": {
+      "type": "Parrot.Llm.Wire.ProviderResponseException",
+      "message": "Try later (server_error) [overloaded]",
+      "error_type": "server_error",
+      "error_code": "overloaded",
+      "detail": "Try later",
+      "response_body": "{\"type\":\"response.failed\",\"response\":{\"id\":\"r1\",\"error\":{\"type\":\"server_error\",\"code\":\"overloaded\",\"message\":\"Try later\"}}}"
+    }
+  },
+  {
+    "input": {
+      "case_id": "error-structured",
+      "sse": "data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request\",\"code\":\"bad\",\"message\":\"Nope\"}}\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.ProviderResponseException",
+      "message": "Nope (invalid_request) [bad]",
+      "error_type": "invalid_request",
+      "error_code": "bad",
+      "detail": "Nope",
+      "response_body": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request\",\"code\":\"bad\",\"message\":\"Nope\"}}"
+    }
+  },
+  {
+    "input": {
+      "case_id": "error-root",
+      "sse": "data: {\"type\":\"error\",\"code\":\"root_code\",\"message\":\"root failure\"}\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.ProviderResponseException",
+      "message": "root failure (error) [root_code]",
+      "error_type": "error",
+      "error_code": "root_code",
+      "detail": "root failure",
+      "response_body": "{\"type\":\"error\",\"code\":\"root_code\",\"message\":\"root failure\"}"
+    }
+  },
+  {
+    "input": {
+      "case_id": "error-empty",
+      "sse": "data: {\"type\":\"error\"}\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.ProviderResponseException",
+      "message": "provider error (error)",
+      "error_type": "error",
+      "error_code": "",
+      "detail": "",
+      "response_body": "{\"type\":\"error\"}"
+    }
+  },
+  {
+    "input": {
+      "case_id": "done-before-terminal",
+      "sse": "data: [DONE]\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: provider stream completed without a terminal event"
+    }
+  },
+  {
+    "input": {
+      "case_id": "done-after-text",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: [DONE]\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "partial",
+        "IsVisibleOutput": true
+      }
+    ],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: provider stream completed without a terminal event"
+    }
+  },
+  {
+    "input": {
+      "case_id": "eof-empty",
+      "sse": ""
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: unexpected provider EOF (stream ended without a terminal event)"
+    }
+  },
+  {
+    "input": {
+      "case_id": "eof-after-text",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "partial",
+        "IsVisibleOutput": true
+      }
+    ],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: unexpected provider EOF (stream ended without a terminal event)"
+    }
+  },
+  {
+    "input": {
+      "case_id": "malformed-json",
+      "sse": "data: {\"type\":\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "System.Text.Json.JsonReaderException",
+      "line_number": 0,
+      "byte_position_in_line": 8
+    }
+  },
+  {
+    "input": {
+      "case_id": "malformed-after-text",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {broken\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "partial",
+        "IsVisibleOutput": true
+      }
+    ],
+    "error": {
+      "type": "System.Text.Json.JsonReaderException",
+      "line_number": 0,
+      "byte_position_in_line": 1
+    }
+  },
+  {
+    "input": {
+      "case_id": "sequence-fractional",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\",\"sequence_number\":1.5}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: sequence_number must be an integer"
+    }
+  },
+  {
+    "input": {
+      "case_id": "sequence-out-of-range",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\",\"sequence_number\":9223372036854775808}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: sequence_number must be an integer"
+    }
+  },
+  {
+    "input": {
+      "case_id": "sequence-duplicate",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\",\"sequence_number\":2}\n\ndata: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "x",
+        "IsVisibleOutput": true
+      }
+    ],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: sequence_number must be strictly increasing"
+    }
+  },
+  {
+    "input": {
+      "case_id": "sequence-decreasing",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\",\"sequence_number\":2}\n\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "x",
+        "IsVisibleOutput": true
+      }
+    ],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: sequence_number must be strictly increasing"
+    }
+  },
+  {
+    "input": {
+      "case_id": "sequence-string-ignored",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\",\"sequence_number\":\"1.5\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "x",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "x",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "terminal-id-mismatch",
+      "sse": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r2\"}}\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: terminal response id does not match response.created"
+    }
+  },
+  {
+    "input": {
+      "case_id": "failed-id-mismatch-before-error",
+      "sse": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"r2\",\"error\":{\"message\":\"failure\"}}}\n\n"
+    },
+    "events": [],
+    "error": {
+      "type": "Parrot.Llm.Wire.WireProtocolException",
+      "message": "responses: terminal response id does not match response.created"
+    }
+  },
+  {
+    "input": {
+      "case_id": "event-after-terminal-ignored",
+      "sse": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"too late\"}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "duplicate-terminal-ignored",
+      "sse": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "malformed-after-terminal-ignored",
+      "sse": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\ndata: {bad\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "done-after-terminal-ignored",
+      "sse": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\ndata: [DONE]\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "cancel-before-read",
+      "sse": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n",
+      "cancel_before": true
+    },
+    "events": [],
+    "error": {
+      "type": "System.Threading.Tasks.TaskCanceledException",
+      "message": "A task was canceled."
+    }
+  },
+  {
+    "input": {
+      "case_id": "cancel-after-text-buffered",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n",
+      "cancel_after_events": 1
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "partial",
+        "IsVisibleOutput": true
+      },
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "partial",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "input": {
+      "case_id": "cancel-after-text-before-refill",
+      "sse": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"unknown\",\"padding\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n",
+      "cancel_after_events": 1
+    },
+    "events": [
+      {
+        "Kind": "TextDelta",
+        "Text": "partial",
+        "IsVisibleOutput": true
+      }
+    ],
+    "error": {
+      "type": "System.Threading.Tasks.TaskCanceledException",
+      "message": "A task was canceled."
+    }
+  },
+  {
+    "input": {
+      "case_id": "unknown-and-nonobject",
+      "sse": "data: null\n\ndata: []\n\ndata: {\"type\":\"unknown\",\"delta\":\"ignored\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n"
+    },
+    "events": [
+      {
+        "Kind": "Completed",
+        "FinishReason": "stop",
+        "InputTokens": 0,
+        "CachedInputTokens": 0,
+        "OutputTokens": 0,
+        "ToolCalls": [],
+        "AssistantText": "",
+        "IsVisibleOutput": true,
+        "Output": null
+      }
+    ],
+    "error": null
+  }
+]

@@ -1,0 +1,786 @@
+{
+  "schema_version": 1,
+  "source_capture": {
+    "path": "crates/parrot-foundation/tests/template_migration/fixtures/m2-source-oracle.json",
+    "sha256": "92bab04acf774cfab2319c16710976a33709505bb7b1097d6437011b51174488"
+  },
+  "provenance": {
+    "path": "crates/parrot-foundation/tests/template_migration/fixtures/m2-source-provenance.json",
+    "sha256": "97a0fdb5d60d2c8ee1e42c4a2ea3870b4ad7bfd7d68e5a945ea952b5a4e84f69"
+  },
+  "approved_mapping": {
+    "path": "tests/fixtures/scriban/a008/bundled-migration-map.json",
+    "sha256": "6ec3c8c41cb3d8e6cd0b42e11c0fb9e808bf491ff2cec4a9c97424181b6f3c86"
+  },
+  "entries": [
+    {
+      "case_id": "A008.M2.status.selection.empty",
+      "template_id": "status.selection",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.status.selection.empty",
+        "kind": "catalog-default",
+        "template_id": "status.selection",
+        "arguments": {
+          "profile": "",
+          "model": "",
+          "parent_session_id": "",
+          "parent_session_name": "",
+          "has_parent": false,
+          "has_parent_name": false
+        }
+      },
+      "original_source_expected": "Active profile: \nModel: ",
+      "migrated_template": "Active profile: {{ profile }}\nModel: {{ model }}{% if has_parent %}\nParent session: {{ parent_session_id }}{% if has_parent_name %} ({{ parent_session_name }}){% endif %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Active profile: \nModel: ",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.selection.multiple",
+      "template_id": "status.selection",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.status.selection.multiple",
+        "kind": "catalog-default",
+        "template_id": "status.selection",
+        "arguments": {
+          "profile": "multiple-profile {{ opaque }}\nnext $${NAME} 🪶",
+          "model": "multiple-model {{ opaque }}\nnext $${NAME} 🪶",
+          "parent_session_id": "multiple-parent_session_id {{ opaque }}\nnext $${NAME} 🪶",
+          "parent_session_name": "multiple-parent_session_name {{ opaque }}\nnext $${NAME} 🪶",
+          "has_parent": true,
+          "has_parent_name": true
+        }
+      },
+      "original_source_expected": "Active profile: multiple-profile {{ opaque }}\nnext $${NAME} 🪶\nModel: multiple-model {{ opaque }}\nnext $${NAME} 🪶\nParent session: multiple-parent_session_id {{ opaque }}\nnext $${NAME} 🪶 (multiple-parent_session_name {{ opaque }}\nnext $${NAME} 🪶)",
+      "migrated_template": "Active profile: {{ profile }}\nModel: {{ model }}{% if has_parent %}\nParent session: {{ parent_session_id }}{% if has_parent_name %} ({{ parent_session_name }}){% endif %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Active profile: multiple-profile {{ opaque }}\nnext $${NAME} 🪶\nModel: multiple-model {{ opaque }}\nnext $${NAME} 🪶\nParent session: multiple-parent_session_id {{ opaque }}\nnext $${NAME} 🪶 (multiple-parent_session_name {{ opaque }}\nnext $${NAME} 🪶)",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.selection.nested-branch",
+      "template_id": "status.selection",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.status.selection.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "status.selection",
+        "arguments": {
+          "profile": "nested",
+          "model": "local/nested",
+          "parent_session_id": "root",
+          "parent_session_name": "parent",
+          "has_parent": true,
+          "has_parent_name": true
+        }
+      },
+      "original_source_expected": "Active profile: nested\nModel: local/nested\nParent session: root (parent)",
+      "migrated_template": "Active profile: {{ profile }}\nModel: {{ model }}{% if has_parent %}\nParent session: {{ parent_session_id }}{% if has_parent_name %} ({{ parent_session_name }}){% endif %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Active profile: nested\nModel: local/nested\nParent session: root (parent)",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.context.empty",
+      "template_id": "status.context",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.status.context.empty",
+        "kind": "catalog-default",
+        "template_id": "status.context",
+        "arguments": {
+          "available": false,
+          "usage": "",
+          "estimated_tokens": "",
+          "context_limit": "",
+          "cadence": "",
+          "trigger": ""
+        }
+      },
+      "original_source_expected": "Context: unavailable ( estimated tokens /  limit); reminders every %; automatic compaction at %.",
+      "migrated_template": "Context: {% if available %}{{ usage }}% used{% else %}unavailable{% endif %} ({{ estimated_tokens }} estimated tokens / {{ context_limit }} limit); reminders every {{ cadence }}%; automatic compaction at {{ trigger }}%.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Context: unavailable ( estimated tokens /  limit); reminders every %; automatic compaction at %.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.context.multiple",
+      "template_id": "status.context",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.status.context.multiple",
+        "kind": "catalog-default",
+        "template_id": "status.context",
+        "arguments": {
+          "available": true,
+          "usage": "multiple-usage {{ opaque }}\nnext $${NAME} 🪶",
+          "estimated_tokens": "multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶",
+          "context_limit": "multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶",
+          "cadence": "multiple-cadence {{ opaque }}\nnext $${NAME} 🪶",
+          "trigger": "multiple-trigger {{ opaque }}\nnext $${NAME} 🪶"
+        }
+      },
+      "original_source_expected": "Context: multiple-usage {{ opaque }}\nnext $${NAME} 🪶% used (multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶 estimated tokens / multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶 limit); reminders every multiple-cadence {{ opaque }}\nnext $${NAME} 🪶%; automatic compaction at multiple-trigger {{ opaque }}\nnext $${NAME} 🪶%.",
+      "migrated_template": "Context: {% if available %}{{ usage }}% used{% else %}unavailable{% endif %} ({{ estimated_tokens }} estimated tokens / {{ context_limit }} limit); reminders every {{ cadence }}%; automatic compaction at {{ trigger }}%.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Context: multiple-usage {{ opaque }}\nnext $${NAME} 🪶% used (multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶 estimated tokens / multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶 limit); reminders every multiple-cadence {{ opaque }}\nnext $${NAME} 🪶%; automatic compaction at multiple-trigger {{ opaque }}\nnext $${NAME} 🪶%.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.context.nested-branch",
+      "template_id": "status.context",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.status.context.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "status.context",
+        "arguments": {
+          "available": false,
+          "usage": 0,
+          "estimated_tokens": 123,
+          "context_limit": 1000,
+          "cadence": 10,
+          "trigger": 80
+        }
+      },
+      "original_source_expected": "Context: unavailable (123 estimated tokens / 1000 limit); reminders every 10%; automatic compaction at 80%.",
+      "migrated_template": "Context: {% if available %}{{ usage }}% used{% else %}unavailable{% endif %} ({{ estimated_tokens }} estimated tokens / {{ context_limit }} limit); reminders every {{ cadence }}%; automatic compaction at {{ trigger }}%.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Context: unavailable (123 estimated tokens / 1000 limit); reminders every 10%; automatic compaction at 80%.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.context-limit.empty",
+      "template_id": "status.context-limit",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.status.context-limit.empty",
+        "kind": "catalog-default",
+        "template_id": "status.context-limit",
+        "arguments": {
+          "available": false,
+          "usage": "",
+          "estimated_tokens": "",
+          "context_limit": "",
+          "cadence": "",
+          "trigger": "",
+          "trigger_tokens": ""
+        }
+      },
+      "original_source_expected": "Context: unavailable ( /  tokens); auto-compact: > tokens.",
+      "migrated_template": "Context: {% if available %}{{ usage }}%{% else %}unavailable{% endif %} ({{ estimated_tokens }} / {{ context_limit }} tokens); auto-compact: >{{ trigger_tokens }} tokens.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Context: unavailable ( /  tokens); auto-compact: > tokens.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.context-limit.multiple",
+      "template_id": "status.context-limit",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.status.context-limit.multiple",
+        "kind": "catalog-default",
+        "template_id": "status.context-limit",
+        "arguments": {
+          "available": true,
+          "usage": "multiple-usage {{ opaque }}\nnext $${NAME} 🪶",
+          "estimated_tokens": "multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶",
+          "context_limit": "multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶",
+          "cadence": "multiple-cadence {{ opaque }}\nnext $${NAME} 🪶",
+          "trigger": "multiple-trigger {{ opaque }}\nnext $${NAME} 🪶",
+          "trigger_tokens": "multiple-trigger_tokens {{ opaque }}\nnext $${NAME} 🪶"
+        }
+      },
+      "original_source_expected": "Context: multiple-usage {{ opaque }}\nnext $${NAME} 🪶% (multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶 / multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶 tokens); auto-compact: >multiple-trigger_tokens {{ opaque }}\nnext $${NAME} 🪶 tokens.",
+      "migrated_template": "Context: {% if available %}{{ usage }}%{% else %}unavailable{% endif %} ({{ estimated_tokens }} / {{ context_limit }} tokens); auto-compact: >{{ trigger_tokens }} tokens.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Context: multiple-usage {{ opaque }}\nnext $${NAME} 🪶% (multiple-estimated_tokens {{ opaque }}\nnext $${NAME} 🪶 / multiple-context_limit {{ opaque }}\nnext $${NAME} 🪶 tokens); auto-compact: >multiple-trigger_tokens {{ opaque }}\nnext $${NAME} 🪶 tokens.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.context-limit.nested-branch",
+      "template_id": "status.context-limit",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.status.context-limit.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "status.context-limit",
+        "arguments": {
+          "available": true,
+          "usage": 99,
+          "estimated_tokens": 999,
+          "context_limit": 1000,
+          "cadence": 10,
+          "trigger": 80,
+          "trigger_tokens": 950
+        }
+      },
+      "original_source_expected": "Context: 99% (999 / 1000 tokens); auto-compact: >950 tokens.",
+      "migrated_template": "Context: {% if available %}{{ usage }}%{% else %}unavailable{% endif %} ({{ estimated_tokens }} / {{ context_limit }} tokens); auto-compact: >{{ trigger_tokens }} tokens.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Context: 99% (999 / 1000 tokens); auto-compact: >950 tokens.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.statistics.empty",
+      "template_id": "status.statistics",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.status.statistics.empty",
+        "kind": "catalog-default",
+        "template_id": "status.statistics",
+        "arguments": {
+          "session_id": "",
+          "views": [],
+          "incomplete_legacy_tool_counts": false
+        }
+      },
+      "original_source_expected": "Statistics (lifetime):",
+      "migrated_template": "Statistics (lifetime):{% for view in views %}\n{% if view.cumulative %}Cumulative (self + descendants){% else %}Self{% endif %}: {{ view.input_tokens }} ({{ view.cache_percentage }}% cache) / {{ view.output_tokens }}; {{ view.tool_calls }} tool; cost ${{ view.total_cost }} (input ${{ view.input_cost }}, output ${{ view.output_cost }}).{% for model in view.models %}\n  - {{ model.provider }}/{{ model.model }}/{% if model.legacy %}unknown (legacy){% elif model.has_effort %}{{ model.effort }}{% else %}unspecified/default{% endif %}: {{ model.input_tokens }} ({{ model.cache_percentage }}% cache) / {{ model.output_tokens }}; {{ model.tool_calls }} tool; cost ${{ model.total_cost }} (input ${{ model.input_cost }}, output ${{ model.output_cost }}).{% endfor %}{% endfor %}{% if incomplete_legacy_tool_counts %}\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Statistics (lifetime):",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.statistics.multiple",
+      "template_id": "status.statistics",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.status.statistics.multiple",
+        "kind": "catalog-default",
+        "template_id": "status.statistics",
+        "arguments": {
+          "session_id": "multiple-session_id {{ opaque }}\nnext $${NAME} 🪶",
+          "views": [],
+          "incomplete_legacy_tool_counts": false
+        }
+      },
+      "original_source_expected": "Statistics (lifetime):",
+      "migrated_template": "Statistics (lifetime):{% for view in views %}\n{% if view.cumulative %}Cumulative (self + descendants){% else %}Self{% endif %}: {{ view.input_tokens }} ({{ view.cache_percentage }}% cache) / {{ view.output_tokens }}; {{ view.tool_calls }} tool; cost ${{ view.total_cost }} (input ${{ view.input_cost }}, output ${{ view.output_cost }}).{% for model in view.models %}\n  - {{ model.provider }}/{{ model.model }}/{% if model.legacy %}unknown (legacy){% elif model.has_effort %}{{ model.effort }}{% else %}unspecified/default{% endif %}: {{ model.input_tokens }} ({{ model.cache_percentage }}% cache) / {{ model.output_tokens }}; {{ model.tool_calls }} tool; cost ${{ model.total_cost }} (input ${{ model.input_cost }}, output ${{ model.output_cost }}).{% endfor %}{% endfor %}{% if incomplete_legacy_tool_counts %}\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Statistics (lifetime):",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.statistics.nested-branch",
+      "template_id": "status.statistics",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.status.statistics.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "status.statistics",
+        "arguments": {
+          "session_id": "s",
+          "incomplete_legacy_tool_counts": true,
+          "views": [
+            {
+              "cumulative": true,
+              "input_tokens": 10,
+              "cache_percentage": 20,
+              "output_tokens": 30,
+              "tool_calls": 4,
+              "total_cost": "0.50",
+              "input_cost": "0.20",
+              "output_cost": "0.30",
+              "models": [
+                {
+                  "provider": "p",
+                  "model": "current",
+                  "legacy": false,
+                  "has_effort": true,
+                  "effort": "high",
+                  "input_tokens": 10,
+                  "cache_percentage": 20,
+                  "output_tokens": 30,
+                  "tool_calls": 4,
+                  "total_cost": "0.50",
+                  "input_cost": "0.20",
+                  "output_cost": "0.30"
+                },
+                {
+                  "provider": "old",
+                  "model": "legacy",
+                  "legacy": true,
+                  "has_effort": false,
+                  "effort": "",
+                  "input_tokens": 2,
+                  "cache_percentage": 0,
+                  "output_tokens": 3,
+                  "tool_calls": 0,
+                  "total_cost": "0",
+                  "input_cost": "0",
+                  "output_cost": "0"
+                }
+              ]
+            },
+            {
+              "cumulative": false,
+              "input_tokens": 1,
+              "cache_percentage": 0,
+              "output_tokens": 2,
+              "tool_calls": 1,
+              "total_cost": "0",
+              "input_cost": "0",
+              "output_cost": "0",
+              "models": []
+            }
+          ]
+        }
+      },
+      "original_source_expected": "Statistics (lifetime):\nCumulative (self + descendants): 10 (20% cache) / 30; 4 tool; cost $0.50 (input $0.20, output $0.30).\n  - p/current/high: 10 (20% cache) / 30; 4 tool; cost $0.50 (input $0.20, output $0.30).\n  - old/legacy/unknown (legacy): 2 (0% cache) / 3; 0 tool; cost $0 (input $0, output $0).\nSelf: 1 (0% cache) / 2; 1 tool; cost $0 (input $0, output $0).\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.",
+      "migrated_template": "Statistics (lifetime):{% for view in views %}\n{% if view.cumulative %}Cumulative (self + descendants){% else %}Self{% endif %}: {{ view.input_tokens }} ({{ view.cache_percentage }}% cache) / {{ view.output_tokens }}; {{ view.tool_calls }} tool; cost ${{ view.total_cost }} (input ${{ view.input_cost }}, output ${{ view.output_cost }}).{% for model in view.models %}\n  - {{ model.provider }}/{{ model.model }}/{% if model.legacy %}unknown (legacy){% elif model.has_effort %}{{ model.effort }}{% else %}unspecified/default{% endif %}: {{ model.input_tokens }} ({{ model.cache_percentage }}% cache) / {{ model.output_tokens }}; {{ model.tool_calls }} tool; cost ${{ model.total_cost }} (input ${{ model.input_cost }}, output ${{ model.output_cost }}).{% endfor %}{% endfor %}{% if incomplete_legacy_tool_counts %}\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Statistics (lifetime):\nCumulative (self + descendants): 10 (20% cache) / 30; 4 tool; cost $0.50 (input $0.20, output $0.30).\n  - p/current/high: 10 (20% cache) / 30; 4 tool; cost $0.50 (input $0.20, output $0.30).\n  - old/legacy/unknown (legacy): 2 (0% cache) / 3; 0 tool; cost $0 (input $0, output $0).\nSelf: 1 (0% cache) / 2; 1 tool; cost $0 (input $0, output $0).\nLegacy tool-execution counts may be incomplete in this agent or its descendants; only recoverable executions are included.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.runtime.empty",
+      "template_id": "status.runtime",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.status.runtime.empty",
+        "kind": "catalog-default",
+        "template_id": "status.runtime",
+        "arguments": {
+          "section": "",
+          "agents": [],
+          "runs": []
+        }
+      },
+      "original_source_expected": "",
+      "migrated_template": "{% if section == \"tree\" %}Runtime:{% for agent in agents %}\n{{ agent.indent }}- agent: {{ agent.name }}{% if agent.status != \"\" %} ({{ agent.status }}){% endif %}{% for queue in agent.queues %}\n{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items{% if queue.description != \"\" %}, description: {{ queue.description }}{% endif %}){% endfor %}{% for process in agent.processes %}\n{{ agent.indent }}  - process: {{ process.id }} (shell, {{ process.state }}, name: {{ process.name }}){% endfor %}{% endfor %}{% else %}{% for run in runs %}{% if not loop.first %}\n{% endif %}- AgentTask graph: {{ run.run_id }} (name: {{ run.display_name }}, owner: {{ run.owner_session_id }}, revision: {{ run.revision }}){% for node in run.nodes %}\n{{ node.indent }}- task: {{ node.name }} ({{ node.status }}, description: {{ node.description }}){% endfor %}{% endfor %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.runtime.multiple",
+      "template_id": "status.runtime",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.status.runtime.multiple",
+        "kind": "catalog-default",
+        "template_id": "status.runtime",
+        "arguments": {
+          "section": "agent-tasks",
+          "agents": [],
+          "runs": []
+        }
+      },
+      "original_source_expected": "",
+      "migrated_template": "{% if section == \"tree\" %}Runtime:{% for agent in agents %}\n{{ agent.indent }}- agent: {{ agent.name }}{% if agent.status != \"\" %} ({{ agent.status }}){% endif %}{% for queue in agent.queues %}\n{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items{% if queue.description != \"\" %}, description: {{ queue.description }}{% endif %}){% endfor %}{% for process in agent.processes %}\n{{ agent.indent }}  - process: {{ process.id }} (shell, {{ process.state }}, name: {{ process.name }}){% endfor %}{% endfor %}{% else %}{% for run in runs %}{% if not loop.first %}\n{% endif %}- AgentTask graph: {{ run.run_id }} (name: {{ run.display_name }}, owner: {{ run.owner_session_id }}, revision: {{ run.revision }}){% for node in run.nodes %}\n{{ node.indent }}- task: {{ node.name }} ({{ node.status }}, description: {{ node.description }}){% endfor %}{% endfor %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.status.runtime.nested-branch",
+      "template_id": "status.runtime",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.status.runtime.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "status.runtime",
+        "arguments": {
+          "section": "tree",
+          "runs": [],
+          "agents": [
+            {
+              "indent": "  ",
+              "name": "parent",
+              "status": "running",
+              "queues": [
+                {
+                  "name": "jobs",
+                  "size": 2,
+                  "description": "native {{ text }} $${NAME}"
+                }
+              ],
+              "processes": [
+                {
+                  "id": "p1",
+                  "state": "running",
+                  "name": "worker"
+                }
+              ]
+            },
+            {
+              "indent": "    ",
+              "name": "child",
+              "status": "",
+              "queues": [],
+              "processes": []
+            }
+          ]
+        }
+      },
+      "original_source_expected": "Runtime:\n  - agent: parent (running)\n    - queue: jobs (2 items, description: native {{ text }} $${NAME})\n    - process: p1 (shell, running, name: worker)\n    - agent: child",
+      "migrated_template": "{% if section == \"tree\" %}Runtime:{% for agent in agents %}\n{{ agent.indent }}- agent: {{ agent.name }}{% if agent.status != \"\" %} ({{ agent.status }}){% endif %}{% for queue in agent.queues %}\n{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items{% if queue.description != \"\" %}, description: {{ queue.description }}{% endif %}){% endfor %}{% for process in agent.processes %}\n{{ agent.indent }}  - process: {{ process.id }} (shell, {{ process.state }}, name: {{ process.name }}){% endfor %}{% endfor %}{% else %}{% for run in runs %}{% if not loop.first %}\n{% endif %}- AgentTask graph: {{ run.run_id }} (name: {{ run.display_name }}, owner: {{ run.owner_session_id }}, revision: {{ run.revision }}){% for node in run.nodes %}\n{{ node.indent }}- task: {{ node.name }} ({{ node.status }}, description: {{ node.description }}){% endfor %}{% endfor %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Runtime:\n  - agent: parent (running)\n    - queue: jobs (2 items, description: native {{ text }} $${NAME})\n    - process: p1 (shell, running, name: worker)\n    - agent: child",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.monitor.ended.empty",
+      "template_id": "monitor.ended",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.monitor.ended.empty",
+        "kind": "catalog-default",
+        "template_id": "monitor.ended",
+        "arguments": {
+          "name": "",
+          "description": "",
+          "events": "",
+          "reason": "",
+          "exit_code": "",
+          "error": "",
+          "timeout_ms": ""
+        }
+      },
+      "original_source_expected": "Monitor  () failed: . Events delivered: .",
+      "migrated_template": "Monitor {{ name }} ({{ description }}) {% if reason == \"exited\" %}exited with code {{ exit_code }}{% elif reason == \"timed_out\" %}reached its {{ timeout_ms }}ms timeout and was stopped; start it again if you still need the watch{% elif reason == \"flooded\" %}produced too many events and was stopped; start it again with a tighter filter{% else %}failed: {{ error }}{% endif %}. Events delivered: {{ events }}.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Monitor  () failed: . Events delivered: .",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.monitor.ended.multiple",
+      "template_id": "monitor.ended",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.monitor.ended.multiple",
+        "kind": "catalog-default",
+        "template_id": "monitor.ended",
+        "arguments": {
+          "name": "multiple-name {{ opaque }}\nnext $${NAME} 🪶",
+          "description": "multiple-description {{ opaque }}\nnext $${NAME} 🪶",
+          "events": "multiple-events {{ opaque }}\nnext $${NAME} 🪶",
+          "reason": "timed_out",
+          "exit_code": "multiple-exit_code {{ opaque }}\nnext $${NAME} 🪶",
+          "error": "multiple-error {{ opaque }}\nnext $${NAME} 🪶",
+          "timeout_ms": "multiple-timeout_ms {{ opaque }}\nnext $${NAME} 🪶"
+        }
+      },
+      "original_source_expected": "Monitor multiple-name {{ opaque }}\nnext $${NAME} 🪶 (multiple-description {{ opaque }}\nnext $${NAME} 🪶) reached its multiple-timeout_ms {{ opaque }}\nnext $${NAME} 🪶ms timeout and was stopped; start it again if you still need the watch. Events delivered: multiple-events {{ opaque }}\nnext $${NAME} 🪶.",
+      "migrated_template": "Monitor {{ name }} ({{ description }}) {% if reason == \"exited\" %}exited with code {{ exit_code }}{% elif reason == \"timed_out\" %}reached its {{ timeout_ms }}ms timeout and was stopped; start it again if you still need the watch{% elif reason == \"flooded\" %}produced too many events and was stopped; start it again with a tighter filter{% else %}failed: {{ error }}{% endif %}. Events delivered: {{ events }}.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Monitor multiple-name {{ opaque }}\nnext $${NAME} 🪶 (multiple-description {{ opaque }}\nnext $${NAME} 🪶) reached its multiple-timeout_ms {{ opaque }}\nnext $${NAME} 🪶ms timeout and was stopped; start it again if you still need the watch. Events delivered: multiple-events {{ opaque }}\nnext $${NAME} 🪶.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.monitor.ended.nested-branch",
+      "template_id": "monitor.ended",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.monitor.ended.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "monitor.ended",
+        "arguments": {
+          "name": "monitor",
+          "description": "Unicode 🪶\nHostile {{ not_parsed }} $${NAME}",
+          "events": 5,
+          "reason": "flooded",
+          "exit_code": 1,
+          "error": "",
+          "timeout_ms": 90
+        }
+      },
+      "original_source_expected": "Monitor monitor (Unicode 🪶\nHostile {{ not_parsed }} $${NAME}) produced too many events and was stopped; start it again with a tighter filter. Events delivered: 5.",
+      "migrated_template": "Monitor {{ name }} ({{ description }}) {% if reason == \"exited\" %}exited with code {{ exit_code }}{% elif reason == \"timed_out\" %}reached its {{ timeout_ms }}ms timeout and was stopped; start it again if you still need the watch{% elif reason == \"flooded\" %}produced too many events and was stopped; start it again with a tighter filter{% else %}failed: {{ error }}{% endif %}. Events delivered: {{ events }}.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Monitor monitor (Unicode 🪶\nHostile {{ not_parsed }} $${NAME}) produced too many events and was stopped; start it again with a tighter filter. Events delivered: 5.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.agent-path-environment.empty",
+      "template_id": "context.agent-path-environment",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.context.agent-path-environment.empty",
+        "kind": "catalog-default",
+        "template_id": "context.agent-path-environment",
+        "arguments": {
+          "entries": []
+        }
+      },
+      "original_source_expected": "Shell path environment (defaults; references below describe absolute runtime values):\n\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "migrated_template": "Shell path environment (defaults; references below describe absolute runtime values):\n{% for entry in entries %}{% if not loop.first %}\n{% endif %}{{ entry.name }} = {{ entry.path }}{% endfor %}\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Shell path environment (defaults; references below describe absolute runtime values):\n\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.agent-path-environment.multiple",
+      "template_id": "context.agent-path-environment",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.context.agent-path-environment.multiple",
+        "kind": "catalog-default",
+        "template_id": "context.agent-path-environment",
+        "arguments": {
+          "entries": []
+        }
+      },
+      "original_source_expected": "Shell path environment (defaults; references below describe absolute runtime values):\n\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "migrated_template": "Shell path environment (defaults; references below describe absolute runtime values):\n{% for entry in entries %}{% if not loop.first %}\n{% endif %}{{ entry.name }} = {{ entry.path }}{% endfor %}\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Shell path environment (defaults; references below describe absolute runtime values):\n\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.agent-path-environment.nested-branch",
+      "template_id": "context.agent-path-environment",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.context.agent-path-environment.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "context.agent-path-environment",
+        "arguments": {
+          "entries": [
+            {
+              "name": "HOME",
+              "path": "/safe/🪶"
+            },
+            {
+              "name": "ROOT",
+              "path": "{{ no_reparse }}\nnext"
+            }
+          ]
+        }
+      },
+      "original_source_expected": "Shell path environment (defaults; references below describe absolute runtime values):\nHOME = /safe/🪶\nROOT = {{ no_reparse }}\nnext\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "migrated_template": "Shell path environment (defaults; references below describe absolute runtime values):\n{% for entry in entries %}{% if not loop.first %}\n{% endif %}{{ entry.name }} = {{ entry.path }}{% endfor %}\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Shell path environment (defaults; references below describe absolute runtime values):\nHOME = /safe/🪶\nROOT = {{ no_reparse }}\nnext\nWORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.\nexec_command supports normal shell expansion, for example \"$SCRATCH_DIR/somefile.txt\" or \"${AGENT_SCRATCH_DIR}/somefile.txt\". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand \"$NAME\" and \"${NAME}\" references to these defaults only; other tools' path arguments do not expand environment variables.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.model-aliases.empty",
+      "template_id": "context.model-aliases",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.context.model-aliases.empty",
+        "kind": "catalog-default",
+        "template_id": "context.model-aliases",
+        "arguments": {
+          "aliases": []
+        }
+      },
+      "original_source_expected": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n",
+      "migrated_template": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n{% for alias in aliases %}{% if not loop.first %}\n{% endif %}- {{ alias.name }}: {{ alias.model }} — {{ alias.usage }}{% endfor %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.model-aliases.multiple",
+      "template_id": "context.model-aliases",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.context.model-aliases.multiple",
+        "kind": "catalog-default",
+        "template_id": "context.model-aliases",
+        "arguments": {
+          "aliases": []
+        }
+      },
+      "original_source_expected": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n",
+      "migrated_template": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n{% for alias in aliases %}{% if not loop.first %}\n{% endif %}- {{ alias.name }}: {{ alias.model }} — {{ alias.usage }}{% endfor %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.model-aliases.nested-branch",
+      "template_id": "context.model-aliases",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.context.model-aliases.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "context.model-aliases",
+        "arguments": {
+          "aliases": [
+            {
+              "name": "native",
+              "model": "model/🪶",
+              "usage": "literal {{ value }}\nnext"
+            },
+            {
+              "name": "second",
+              "model": "second/model",
+              "usage": "path ${NAME}"
+            }
+          ]
+        }
+      },
+      "original_source_expected": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n- native: model/🪶 — literal {{ value }}\nnext\n- second: second/model — path ${NAME}",
+      "migrated_template": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n{% for alias in aliases %}{% if not loop.first %}\n{% endif %}- {{ alias.name }}: {{ alias.model }} — {{ alias.usage }}{% endfor %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Configured model aliases may be passed anywhere a model selector is accepted, especially `agent_spawn.model`:\n- native: model/🪶 — literal {{ value }}\nnext\n- second: second/model — path ${NAME}",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.security-profile.empty",
+      "template_id": "context.security-profile",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.context.security-profile.empty",
+        "kind": "catalog-default",
+        "template_id": "context.security-profile",
+        "arguments": {
+          "rules": [],
+          "sandbox_enabled": false
+        }
+      },
+      "original_source_expected": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:\nThe OS process sandbox is currently disabled; shell commands run unconfined.",
+      "migrated_template": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:{% for rule in rules %}\n- Path: \"{{ rule.path }}\"; Action: {{ rule.action }}{% endfor %}{% if sandbox_enabled == false %}\nThe OS process sandbox is currently disabled; shell commands run unconfined.{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:\nThe OS process sandbox is currently disabled; shell commands run unconfined.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.security-profile.multiple",
+      "template_id": "context.security-profile",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.context.security-profile.multiple",
+        "kind": "catalog-default",
+        "template_id": "context.security-profile",
+        "arguments": {
+          "rules": [],
+          "sandbox_enabled": true
+        }
+      },
+      "original_source_expected": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:",
+      "migrated_template": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:{% for rule in rules %}\n- Path: \"{{ rule.path }}\"; Action: {{ rule.action }}{% endfor %}{% if sandbox_enabled == false %}\nThe OS process sandbox is currently disabled; shell commands run unconfined.{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.security-profile.nested-branch",
+      "template_id": "context.security-profile",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.context.security-profile.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "context.security-profile",
+        "arguments": {
+          "rules": [
+            {
+              "path": "/tmp",
+              "action": "AllowWrite"
+            },
+            {
+              "path": "{{ literal }} $${NAME}",
+              "action": "Deny"
+            }
+          ],
+          "sandbox_enabled": false
+        }
+      },
+      "original_source_expected": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:\n- Path: \"/tmp\"; Action: AllowWrite\n- Path: \"{{ literal }} $${NAME}\"; Action: Deny\nThe OS process sandbox is currently disabled; shell commands run unconfined.",
+      "migrated_template": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:{% for rule in rules %}\n- Path: \"{{ rule.path }}\"; Action: {{ rule.action }}{% endfor %}{% if sandbox_enabled == false %}\nThe OS process sandbox is currently disabled; shell commands run unconfined.{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "The following configured sandbox rules override every other prompt rule and instruction.\nRules, in enforcement order:\n- Path: \"/tmp\"; Action: AllowWrite\n- Path: \"{{ literal }} $${NAME}\"; Action: Deny\nThe OS process sandbox is currently disabled; shell commands run unconfined.",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.subagents.empty",
+      "template_id": "context.subagents",
+      "variant": "empty",
+      "original_input": {
+        "id": "A008.M2.context.subagents.empty",
+        "kind": "catalog-default",
+        "template_id": "context.subagents",
+        "arguments": {
+          "subagents": []
+        }
+      },
+      "original_source_expected": "Available subagents: none",
+      "migrated_template": "{% if subagents | length == 0 %}Available subagents: none{% else %}Available subagents; delegate according to their configured usage:{% for subagent in subagents %}- {{ subagent.id }}: {{ subagent.usage }}{% endfor %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Available subagents: none",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.subagents.multiple",
+      "template_id": "context.subagents",
+      "variant": "multiple",
+      "original_input": {
+        "id": "A008.M2.context.subagents.multiple",
+        "kind": "catalog-default",
+        "template_id": "context.subagents",
+        "arguments": {
+          "subagents": []
+        }
+      },
+      "original_source_expected": "Available subagents: none",
+      "migrated_template": "{% if subagents | length == 0 %}Available subagents: none{% else %}Available subagents; delegate according to their configured usage:{% for subagent in subagents %}- {{ subagent.id }}: {{ subagent.usage }}{% endfor %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Available subagents: none",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    },
+    {
+      "case_id": "A008.M2.context.subagents.nested-branch",
+      "template_id": "context.subagents",
+      "variant": "nested-branch",
+      "original_input": {
+        "id": "A008.M2.context.subagents.nested-branch",
+        "kind": "catalog-default",
+        "template_id": "context.subagents",
+        "arguments": {
+          "subagents": [
+            {
+              "id": "one",
+              "usage": "nested {{ data }}\nline"
+            },
+            {
+              "id": "two",
+              "usage": "second"
+            }
+          ]
+        }
+      },
+      "original_source_expected": "Available subagents; delegate according to their configured usage:- one: nested {{ data }}\nline- two: second",
+      "migrated_template": "{% if subagents | length == 0 %}Available subagents: none{% else %}Available subagents; delegate according to their configured usage:{% for subagent in subagents %}- {{ subagent.id }}: {{ subagent.usage }}{% endfor %}{% endif %}",
+      "migrated_engine": "minijinja",
+      "expected_migrated_output": "Available subagents; delegate according to their configured usage:- one: nested {{ data }}\nline- two: second",
+      "expected_output_origin": "Independent original .NET source replay above; identical output is A008-preservation contract, not output copied from native Rust",
+      "rust_migration_test_status": "pending_registered_target_execution"
+    }
+  ],
+  "coverage": "10 template IDs x 3 independently expected original-source variants = 30"
+}

@@ -1,0 +1,22 @@
+	false
+git status	true
+git status --short	true
+git statusx	false
+ git status	true
+\t\r\ngit status\n	true
+GIT status	false
+cat	true
+catalog	false
+cat\tfile	true
+cat\nfile	true
+cat\rfile	true
+cat; touch x	false
+cat && false	true
+cat > target	true
+cat file	false
+ cat	false
+catfile	false
+catfile	false
+cat😀	false
+git status|cat	false
+cat # note	true

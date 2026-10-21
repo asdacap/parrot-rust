@@ -1,0 +1,18 @@
+{"input":"not json","ok":false,"value":"not json"}
+{"input":"{\u0022value\u0022:1} trailing","ok":false,"value":"{\u0022value\u0022:1} trailing"}
+{"input":"true false","ok":false,"value":"true false"}
+{"input":"{\u0022value\u0022:1,\u0022value\u0022:2}","ok":false,"value":"{\u0022value\u0022:1,\u0022value\u0022:2}"}
+{"input":"{\u0022value\u0022:1,\u0022text\u0022:\u0022true\u0022,\u0022null\u0022:\u0022null\u0022}","ok":true,"value":"value: 1\ntext: \u0022true\u0022\n\u0022null\u0022: \u0022null\u0022"}
+{"input":"[1,true,null]","ok":true,"value":"- 1\n- true\n- null"}
+{"input":"\u0022hello\u0022","ok":true,"value":"\u0022hello\u0022"}
+{"input":"42","ok":true,"value":"42"}
+{"input":"true","ok":true,"value":"true"}
+{"input":"null","ok":true,"value":"null"}
+{"input":"{\u0022a\u0022:[1,{\u0022x\u0022:[1,2],\u0022y\u0022:{}},[2,3],[]],\u0022b\u0022:{}}","ok":true,"value":"a:\n- 1\n- x:\n  - 1\n  - 2\n  y: {}\n- - 2\n  - 3\n- []\nb: {}"}
+{"input":"\u0022\\uDEAD\u0022","error":"InvalidOperationException","message":"Cannot read invalid UTF-16 JSON text as string. Invalid surrogate value: \u00270xDEAD\u0027."}
+{"input":"{\u0022a\u0022:\u0022\\uDEAD\u0022, \u0022a\u0022:2}","error":"InvalidOperationException","message":"Cannot read invalid UTF-16 JSON text as string. Invalid surrogate value: \u00270xDEAD\u0027."}
+{"input":"{\u0022x\u0022:1e9999,\u0022y\u0022:-0.00E\u002B10}","ok":true,"value":"x: 1e9999\ny: -0.00E\u002B10"}
+{"input":"{\u0022a:b\u0022: \u0022v\u0022, \u0022a: b\u0022: \u0022v\u0022, \u0022?\u0022: \u0022v\u0022, \u0022a#b\u0022: \u0022v\u0022, \u0022a #b\u0022: \u0022v\u0022, \u0022-foo\u0022: \u0022v\u0022, \u0022- foo\u0022: \u0022v\u0022, \u0022[x]\u0022: \u0022v\u0022, \u0022  x\u0022: \u0022v\u0022, \u0022x\\nq\u0022: \u0022v\u0022, \u00222024-01-01\u0022: \u0022v\u0022, \u002212:30\u0022: \u0022v\u0022, \u00221.2\u0022: \u0022v\u0022, \u00221,000\u0022: \u0022v\u0022, \u0022TRUE\u0022: \u0022v\u0022, \u0022 false \u0022: \u0022v\u0022, \u00222001\u0022: \u0022v\u0022, \u0022hello\u0022: \u0022v\u0022}","ok":true,"value":"a:b: \u0022v\u0022\n\u0027a: b\u0027: \u0022v\u0022\n\u0027?\u0027: \u0022v\u0022\na#b: \u0022v\u0022\n\u0027a #b\u0027: \u0022v\u0022\n-foo: \u0022v\u0022\n\u0027- foo\u0027: \u0022v\u0022\n\u0027[x]\u0027: \u0022v\u0022\n\u0027  x\u0027: \u0022v\u0022\n? \u003E-\n  x\n\n  q\n: \u0022v\u0022\n\u00222024-01-01\u0022: \u0022v\u0022\n\u002212:30\u0022: \u0022v\u0022\n\u00221.2\u0022: \u0022v\u0022\n1,000: \u0022v\u0022\n\u0022TRUE\u0022: \u0022v\u0022\n\u0022 false \u0022: \u0022v\u0022\n\u00222001\u0022: \u0022v\u0022\nhello: \u0022v\u0022"}
+{"input":"{\u0022controls\u0022: \u0022\\u0000\\u0007\\b\\t\\n\\u000b\\f\\r\\u001b\\u0085\\u00a0\\u2028\\u2029\\u007f\u0022, \u0022unicode\u0022: \u0022\\u65e5\\u672c \\ud83d\\ude00\u0022}","ok":true,"value":"controls: \u0022\\0\\a\\b\t\\n\\v\\f\\r\\e\\N\u00A0\\L\\P\\x7F\u0022\nunicode: \u0022\u65E5\u672C \\U0001F600\u0022"}
+{"input":"{\u0022long\u0022: \u0022hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello \u0022}","ok":true,"value":"long: \u0022hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello hello \u0022"}
+{"input":"{\u0022xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u0022: \u0022a\u0022}","ok":true,"value":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx: \u0022a\u0022"}

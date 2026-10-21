@@ -1,0 +1,12 @@
+{"name":"worker","kind":"agent","status":"running","depth":2,"output":"x\\y\n"}
+{"name":"worker","message_id":"msg-9"}
+{"name":"worker","status":"running"}
+{"name":"a\u0022\u003C\u0026\uD83D\uDE00","kind":"agent","status":"running","depth":2,"output":"x\\y\n"}
+{"name":"a\u0022\u003C\u0026\uD83D\uDE00","message_id":"msg-9"}
+{"name":"a\u0022\u003C\u0026\uD83D\uDE00","status":"running"}
+{"name":"plus\u002Bquote\u0027backtick\u0060","kind":"agent","status":"running","depth":2,"output":"x\\y\n"}
+{"name":"plus\u002Bquote\u0027backtick\u0060","message_id":"msg-9"}
+{"name":"plus\u002Bquote\u0027backtick\u0060","status":"running"}
+{"name":"\u0627\u0644\u0639\u0631\u0628\u064A\u0629\u754C","kind":"agent","status":"running","depth":2,"output":"x\\y\n"}
+{"name":"\u0627\u0644\u0639\u0631\u0628\u064A\u0629\u754C","message_id":"msg-9"}
+{"name":"\u0627\u0644\u0639\u0631\u0628\u064A\u0629\u754C","status":"running"}
