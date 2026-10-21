@@ -3,7 +3,7 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::http_stream::ProviderHttpClient;
 use parrot_provider::responses_websocket::{
-    Connector, FrameKind, NativeConnector, Socket, SocketState,
+    Connector, FrameKind, NativeConnector, Socket, SocketState, WebSocketError,
 };
 use std::{
     sync::{
@@ -44,7 +44,14 @@ impl Cancellation for Token {
 async fn upgrade(peer: TcpStream, suffix: &[u8]) -> TcpStream {
     upgrade_mode(peer, suffix, "valid").await
 }
-async fn upgrade_mode(mut peer: TcpStream, suffix: &[u8], mode: &str) -> TcpStream {
+async fn upgrade_mode(peer: TcpStream, suffix: &[u8], mode: &str) -> TcpStream {
+    upgrade_with_request(peer, suffix, mode).await.0
+}
+async fn upgrade_with_request(
+    mut peer: TcpStream,
+    suffix: &[u8],
+    mode: &str,
+) -> (TcpStream, String) {
     let mut request = Vec::new();
     while !request.ends_with(b"\r\n\r\n") {
         request.push(peer.read_u8().await.unwrap());
@@ -82,7 +89,7 @@ async fn upgrade_mode(mut peer: TcpStream, suffix: &[u8], mode: &str) -> TcpStre
     let mut response=format!("HTTP/1.1 {status}\r\nConnection: {connection}\r\n{upgrade}Sec-WebSocket-Accept: {accept}\r\nx-native-test: retained\r\nContent-Length: 0\r\n\r\n").into_bytes();
     response.extend_from_slice(suffix);
     peer.write_all(&response).await.unwrap();
-    peer
+    (peer, request)
 }
 async fn pair(bytes: Vec<u8>) -> (Box<dyn Socket>, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -134,6 +141,115 @@ async fn collect(socket: &mut dyn Socket) -> Vec<u8> {
         if frame.end_of_message {
             return all;
         }
+    }
+}
+
+#[tokio::test]
+async fn runtime_oauth_headers_reach_native_upgrade() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let headers = vec![
+        (
+            "Authorization".into(),
+            "Bearer synthetic-oauth-token".into(),
+        ),
+        ("ChatGPT-Account-Id".into(), "synthetic-account-id".into()),
+        ("originator".into(), "parrot".into()),
+        ("User-Agent".into(), "parrot".into()),
+        ("session-id".into(), "synthetic-session-id".into()),
+        (
+            "OpenAI-Beta".into(),
+            "responses_websockets=2026-02-06".into(),
+        ),
+    ];
+    let server = tokio::spawn(async move {
+        let (peer, _) = listener.accept().await.unwrap();
+        upgrade_with_request(peer, &[], "valid").await
+    });
+    let connector = NativeConnector::new(ProviderHttpClient::standard(
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    ));
+    let connected = connector
+        .connect(
+            &format!("ws://{address}/responses"),
+            &headers,
+            Some(Duration::from_secs(2)),
+            &Token::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(connected.socket.state(), SocketState::Open);
+    let (_peer, request) = tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+    for (name, expected) in headers {
+        let values: Vec<_> = request
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(key, _)| key.eq_ignore_ascii_case(&name))
+            .map(|(_, value)| value.trim())
+            .collect();
+        assert_eq!(values, vec![expected.as_str()], "{name}");
+    }
+}
+
+#[tokio::test]
+async fn malformed_runtime_headers_are_rejected_before_connecting() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let connector = NativeConnector::new(ProviderHttpClient::standard(
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    ));
+    for (name, value) in [
+        ("bad name", "synthetic"),
+        ("Authorization", "Bearer synthetic\r\nInjected: bad"),
+    ] {
+        let result = connector
+            .connect(
+                &format!("ws://{address}/responses"),
+                &vec![(name.into(), value.into())],
+                Some(Duration::from_secs(2)),
+                &Token::default(),
+            )
+            .await;
+        assert!(
+            matches!(result, Err(WebSocketError::Transport(_))),
+            "{name}"
+        );
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn reserved_websocket_handshake_headers_remain_rejected() {
+    let connector = NativeConnector::new(ProviderHttpClient::standard(
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    ));
+    for name in [
+        "Connection",
+        "Upgrade",
+        "Sec-WebSocket-Key",
+        "Sec-WebSocket-Version",
+        "Sec-WebSocket-Extensions",
+        "sEc-WeBsOcKeT-pRoToCoL",
+    ] {
+        let result = connector
+            .connect(
+                "ws://127.0.0.1:1/responses",
+                &vec![(name.into(), "synthetic".into())],
+                Some(Duration::from_secs(2)),
+                &Token::default(),
+            )
+            .await;
+        assert!(
+            matches!(result, Err(WebSocketError::InvalidRequest(message))
+            if message == format!("provider: reserved websocket header {name}"))
+        );
     }
 }
 

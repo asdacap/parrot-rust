@@ -47,13 +47,11 @@ impl NativeConnector {
             .client
             .client_for(&endpoint)
             .map_err(|error| WebSocketError::Transport(error.to_string()))?;
-        let headers = crate::http_stream::validate_headers(headers)
-            .map_err(|error| WebSocketError::InvalidRequest(error.to_string()))?;
         let key = generate_key();
         let mut request = client
             .get(endpoint.as_url().clone())
             .version(reqwest::Version::HTTP_11);
-        for (name, value) in &headers {
+        for (name, value) in headers {
             if matches!(
                 name.to_ascii_lowercase().as_str(),
                 "connection"
