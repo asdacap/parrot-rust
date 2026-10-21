@@ -17,6 +17,7 @@ serde_json = { version = "=1.0.138", features = ["preserve_order", "raw_value"] 
 tungstenite = { version = "=0.26.2", default-features = false, features = ["handshake"] }
 getrandom = "=0.2.17"
 sha2 = "=0.10.8"
+hmac = "=0.12.1"
 
 [dev-dependencies]
 tokio = { version = "=1.43.0", default-features = false, features = ["test-util"] }

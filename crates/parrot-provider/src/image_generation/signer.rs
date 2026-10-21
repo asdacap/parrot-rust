@@ -1,5 +1,6 @@
 use super::transport::ImageHttpRequest;
 use crate::sessions::Error;
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt::Write};
 
@@ -121,25 +122,9 @@ fn hex(data: &[u8]) -> String {
     output
 }
 fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let key = if key.len() > 64 {
-        Sha256::digest(key).to_vec()
-    } else {
-        key.to_vec()
-    };
-    let mut inner = [0x36; 64];
-    let mut outer = [0x5c; 64];
-    for (i, b) in key.iter().enumerate() {
-        inner[i] ^= b;
-        outer[i] ^= b;
-    }
-    let mut hash = Sha256::new();
-    hash.update(inner);
-    hash.update(data);
-    let result = hash.finalize();
-    let mut hash = Sha256::new();
-    hash.update(outer);
-    hash.update(result);
-    hash.finalize().to_vec()
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts keys of any length");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
 }
 fn encode(value: &str) -> String {
     let mut output = String::new();
@@ -198,4 +183,39 @@ fn unescape(value: &str) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hex, hmac};
+
+    #[test]
+    fn hmac_sha256_matches_rfc4231_known_answers() {
+        // RFC 4231 cases 1, 2, 6, and 7 cover short keys, key hashing above
+        // SHA-256's block size, and messages spanning multiple blocks.
+        for (key, data, expected) in [
+            (
+                vec![0x0b; 20],
+                b"Hi There".as_slice(),
+                "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7",
+            ),
+            (
+                b"Jefe".to_vec(),
+                b"what do ya want for nothing?".as_slice(),
+                "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+            ),
+            (
+                vec![0xaa; 131],
+                b"Test Using Larger Than Block-Size Key - Hash Key First".as_slice(),
+                "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54",
+            ),
+            (
+                vec![0xaa; 131],
+                b"This is a test using a larger than block-size key and a larger than block-size data. The key needs to be hashed before being used by the HMAC algorithm.".as_slice(),
+                "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2",
+            ),
+        ] {
+            assert_eq!(hex(&hmac(&key, data)), expected);
+        }
+    }
 }
