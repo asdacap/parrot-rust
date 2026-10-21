@@ -6,6 +6,7 @@ use crate::{
     http_stream::{Endpoint, HttpError, HttpResponse},
     sessions::Error,
 };
+use chrono::{DateTime, Datelike, Utc};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{
     sync::{Arc, Mutex},
@@ -75,29 +76,22 @@ pub trait Clock: Send + Sync {
 pub struct SystemClock;
 impl Clock for SystemClock {
     fn amz_date(&self) -> String {
-        let seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let days = (seconds / 86400) as i64;
-        // Proleptic Gregorian civil date from days since Unix epoch.
-        let z = days + 719468;
-        let era = z.div_euclid(146097);
-        let doe = z - era * 146097;
-        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        let mut year = yoe + era * 400;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let day = doy - (153 * mp + 2) / 5 + 1;
-        let month = mp + if mp < 10 { 3 } else { -9 };
-        year += i64::from(month <= 2);
-        format!(
-            "{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z",
-            seconds / 3600 % 24,
-            seconds / 60 % 60,
-            seconds % 60
-        )
+        format_amz_date(SystemTime::now())
     }
+}
+fn format_amz_date(time: SystemTime) -> String {
+    let seconds = time
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    i64::try_from(seconds)
+        .ok()
+        .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0))
+        .filter(|date| date.year() <= 9999)
+        .map(|date| date.format("%Y%m%dT%H%M%SZ").to_string())
+        // AWS requires a four-digit year. An unsupported time returns an empty
+        // timestamp, which AwsV4Signer rejects before signing or dispatching.
+        .unwrap_or_default()
 }
 struct Never;
 impl Cancellation for Never {
@@ -492,5 +486,76 @@ impl ImageBucket for S3ImageBucket {
                 Err(error) => Err(error),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+
+    #[test]
+    fn formats_aws_timestamps_at_calendar_boundaries() {
+        for (seconds, expected) in [
+            (0, "19700101T000000Z"),
+            (1, "19700101T000001Z"),
+            (86_399, "19700101T235959Z"),
+            (86_400, "19700102T000000Z"),
+            (946_684_799, "19991231T235959Z"),
+            (946_684_800, "20000101T000000Z"),
+            (951_782_399, "20000228T235959Z"),
+            (951_782_400, "20000229T000000Z"),
+            (951_868_800, "20000301T000000Z"),
+            (4_107_542_399, "21000228T235959Z"),
+            (4_107_542_400, "21000301T000000Z"),
+            (253_402_300_799, "99991231T235959Z"),
+        ] {
+            assert_eq!(
+                format_amz_date(UNIX_EPOCH + Duration::from_secs(seconds)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn clamps_pre_epoch_times_and_discards_subseconds() {
+        assert_eq!(
+            format_amz_date(UNIX_EPOCH - Duration::from_nanos(1)),
+            "19700101T000000Z"
+        );
+        assert_eq!(
+            format_amz_date(UNIX_EPOCH - Duration::from_secs(86_400)),
+            "19700101T000000Z"
+        );
+        assert_eq!(
+            format_amz_date(UNIX_EPOCH + Duration::from_nanos(1_999_999_999)),
+            "19700101T000001Z"
+        );
+    }
+
+    #[test]
+    fn unsupported_timestamps_are_rejected_by_signing() {
+        for seconds in [253_402_300_800, 10_000_000_000_000, i64::MAX as u64] {
+            let time = UNIX_EPOCH
+                .checked_add(Duration::from_secs(seconds))
+                .unwrap();
+            let timestamp = format_amz_date(time);
+            assert!(timestamp.is_empty());
+            let mut request = ImageHttpRequest {
+                method: "HEAD".into(),
+                endpoint: Endpoint::parse("https://example.com/bucket").unwrap(),
+                headers: Vec::new(),
+                content_type: None,
+                body: Vec::new(),
+            };
+            assert_eq!(
+                AwsV4Signer::new("access".into(), "secret".into(), "us-east-1".into()).sign(
+                    &mut request,
+                    EMPTY_PAYLOAD_SHA256,
+                    &timestamp
+                ),
+                Err(Error::Provider("invalid AWS timestamp".into()))
+            );
+            assert!(request.headers.is_empty());
+        }
     }
 }
