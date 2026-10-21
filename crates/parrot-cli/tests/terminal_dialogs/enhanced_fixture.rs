@@ -1,5 +1,9 @@
 //! Controlled native/terminal observations only; not local application or security acceptance.
 
+#[allow(dead_code)]
+#[path = "../support/native_termios.rs"]
+mod native_termios;
+
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     io::{self, Write},
@@ -911,11 +915,11 @@ pub fn question(id: &str, prompt: &str) -> wire::PendingQuestion {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod pty {
     use super::*;
-    use parrot_cli::terminal_input::RawTerminal;
     #[cfg(target_os = "macos")]
-    use parrot_cli::terminal_input::native::DarwinTermios as PlatformTermios;
+    use native_termios::DarwinTermios as PlatformTermios;
     #[cfg(target_os = "linux")]
-    use parrot_cli::terminal_input::native::LinuxTermios as PlatformTermios;
+    use native_termios::LinuxTermios as PlatformTermios;
+    use parrot_cli::terminal_input::RawTerminal;
     #[cfg(target_os = "linux")]
     const O_NONBLOCK: i32 = 0x800;
     #[cfg(target_os = "macos")]
