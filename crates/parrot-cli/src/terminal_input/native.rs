@@ -6,51 +6,6 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// libc termios on Linux x86_64/aarch64 (not the shorter kernel ioctl termios).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct LinuxTermios {
-    pub input_flags: u32,
-    pub output_flags: u32,
-    pub control_flags: u32,
-    pub local_flags: u32,
-    pub line: u8,
-    pub control_characters: [u8; 32],
-    pub input_speed: u32,
-    pub output_speed: u32,
-}
-
-/// Darwin's 64-bit libc termios, on both Intel and Apple Silicon.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DarwinTermios {
-    pub input_flags: u64,
-    pub output_flags: u64,
-    pub control_flags: u64,
-    pub local_flags: u64,
-    pub control_characters: [u8; 20],
-    pub input_speed: u64,
-    pub output_speed: u64,
-}
-
-pub fn make_linux_raw(mut original: LinuxTermios) -> LinuxTermios {
-    original.input_flags &= !0x532;
-    original.control_flags = (original.control_flags & !0x30) | 0x30;
-    original.local_flags &= !0x800b;
-    original.control_characters[6] = 0;
-    original.control_characters[5] = 1;
-    original
-}
-
-pub fn make_darwin_raw(mut original: DarwinTermios) -> DarwinTermios {
-    original.input_flags &= !0x332;
-    original.control_flags = (original.control_flags & !0x300) | 0x300;
-    original.local_flags &= !0x588;
-    original.control_characters[16] = 0;
-    original.control_characters[17] = 1;
-    original
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReadResult {
     /// VMIN=0/VTIME=1 timed out. This is never an EOF indication.
@@ -105,47 +60,40 @@ pub fn read_input_with_retry(
 ))]
 mod platform {
     use super::*;
-    use std::ffi::c_void;
+    use rustix::fd::BorrowedFd;
+    use rustix::termios::{
+        self, ControlModes, InputModes, LocalModes, OptionalActions, SpecialCodeIndex, Termios,
+    };
     use std::time::Instant;
 
-    #[cfg(target_os = "linux")]
-    type Termios = LinuxTermios;
-    #[cfg(target_os = "macos")]
-    type Termios = DarwinTermios;
-    #[cfg(target_os = "linux")]
-    const RAW_LOCAL_FLAGS: u32 = 0x800b;
-    #[cfg(target_os = "macos")]
-    const RAW_LOCAL_FLAGS: u64 = 0x588;
-    #[cfg(target_os = "linux")]
-    const WOULD_BLOCK: i32 = 11;
-    #[cfg(target_os = "macos")]
-    const WOULD_BLOCK: i32 = 35;
+    const RAW_LOCAL_MODES: LocalModes = LocalModes::ISIG
+        .union(LocalModes::ICANON)
+        .union(LocalModes::ECHO)
+        .union(LocalModes::IEXTEN);
 
-    unsafe extern "C" {
-        fn isatty(fd: i32) -> i32;
-        fn tcgetattr(fd: i32, attributes: *mut Termios) -> i32;
-        fn tcsetattr(fd: i32, actions: i32, attributes: *const Termios) -> i32;
-        #[link_name = "read"]
-        fn read_descriptor(fd: i32, buffer: *mut c_void, count: usize) -> isize;
+    fn make_raw(mut original: Termios) -> Termios {
+        // Deliberately not cfmakeraw: retain output processing and unrelated flags.
+        original.input_modes.remove(
+            InputModes::BRKINT
+                | InputModes::INPCK
+                | InputModes::ISTRIP
+                | InputModes::ICRNL
+                | InputModes::IXON,
+        );
+        original.control_modes.remove(ControlModes::CSIZE);
+        original.control_modes.insert(ControlModes::CS8);
+        original.local_modes.remove(RAW_LOCAL_MODES);
+        original.special_codes[SpecialCodeIndex::VMIN] = 0;
+        original.special_codes[SpecialCodeIndex::VTIME] = 1;
+        original
     }
 
-    fn get_attributes(fd: i32) -> io::Result<Termios> {
-        let mut attributes = Termios::default();
-        // SAFETY: the selected type exactly matches libc termios on the supported targets.
-        if unsafe { tcgetattr(fd, &mut attributes) } == 0 {
-            Ok(attributes)
-        } else {
-            Err(io::Error::last_os_error())
-        }
+    fn get_attributes(fd: BorrowedFd<'_>) -> io::Result<Termios> {
+        termios::tcgetattr(fd).map_err(Into::into)
     }
 
-    fn set_attributes(fd: i32, attributes: &Termios) -> io::Result<()> {
-        // SAFETY: attributes is a valid libc termios; TCSANOW is zero on both platforms.
-        if unsafe { tcsetattr(fd, 0, attributes) } == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        }
+    fn set_attributes(fd: BorrowedFd<'_>, attributes: &Termios) -> io::Result<()> {
+        termios::tcsetattr(fd, OptionalActions::Now, attributes).map_err(Into::into)
     }
 
     /// Owns the raw-mode lease, but does not own or close its file descriptor.
@@ -165,18 +113,17 @@ mod platform {
         }
 
         pub fn open(descriptor: i32) -> io::Result<Option<Self>> {
-            // SAFETY: isatty accepts any descriptor and rejects invalid/non-TTY inputs.
-            if unsafe { isatty(descriptor) } != 1 {
+            if descriptor < 0 {
                 return Ok(None);
             }
-            let original = match get_attributes(descriptor) {
+            // SAFETY: the caller keeps this borrowed descriptor open through restoration.
+            let fd = unsafe { BorrowedFd::borrow_raw(descriptor) };
+            // tcgetattr also rejects non-terminals, matching libc isatty's probe.
+            let original = match get_attributes(fd) {
                 Ok(original) => original,
                 Err(_) => return Ok(None),
             };
-            #[cfg(target_os = "linux")]
-            let raw = make_linux_raw(original);
-            #[cfg(target_os = "macos")]
-            let raw = make_darwin_raw(original);
+            let raw = make_raw(original.clone());
             let mut terminal = Self {
                 descriptor,
                 original,
@@ -190,10 +137,15 @@ mod platform {
             Ok(Some(terminal))
         }
 
+        fn descriptor(&self) -> BorrowedFd<'_> {
+            // SAFETY: the descriptor remains caller-owned and open for this lease.
+            unsafe { BorrowedFd::borrow_raw(self.descriptor) }
+        }
+
         fn ensure_raw(&self) -> io::Result<()> {
-            set_attributes(self.descriptor, &self.raw)?;
-            let applied = get_attributes(self.descriptor)?;
-            if applied.local_flags & RAW_LOCAL_FLAGS != 0 {
+            set_attributes(self.descriptor(), &self.raw)?;
+            let applied = get_attributes(self.descriptor())?;
+            if applied.local_modes.intersects(RAW_LOCAL_MODES) {
                 return Err(io::Error::other("failed to verify raw terminal mode"));
             }
             Ok(())
@@ -211,17 +163,7 @@ mod platform {
             }
             self.ensure_raw()?;
             read_input_with_retry(
-                || {
-                    // SAFETY: buffer is writable for its length; fd remains caller-owned.
-                    let count = unsafe {
-                        read_descriptor(self.descriptor, buffer.as_mut_ptr().cast(), buffer.len())
-                    };
-                    if count < 0 {
-                        Err(io::Error::last_os_error())
-                    } else {
-                        Ok(count as usize)
-                    }
-                },
+                || rustix::io::read(self.descriptor(), &mut *buffer).map_err(Into::into),
                 |duration| {
                     let deadline = Instant::now() + duration;
                     loop {
@@ -233,7 +175,7 @@ mod platform {
                         std::thread::sleep(remaining.min(Duration::from_millis(1)));
                     }
                 },
-                WOULD_BLOCK,
+                rustix::io::Errno::AGAIN.raw_os_error(),
                 cancel,
             )
         }
@@ -241,7 +183,7 @@ mod platform {
         /// Restore exactly once on success. A failed explicit restore can be retried by Drop.
         pub fn restore(&mut self) -> io::Result<()> {
             if !self.restored {
-                set_attributes(self.descriptor, &self.original)?;
+                set_attributes(self.descriptor(), &self.original)?;
                 self.restored = true;
             }
             Ok(())
@@ -252,6 +194,50 @@ mod platform {
         fn drop(&mut self) {
             // Drop cannot report errors; callers needing diagnostics should explicitly restore.
             let _ = self.restore();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use rustix::termios::OutputModes;
+
+        #[test]
+        fn typed_raw_masks_preserve_unrelated_fields_and_poll_timeout() {
+            // SAFETY: Termios contains only integer fields and integer bitflags;
+            // zero is valid for every field on the supported Unix targets.
+            let mut original: Termios = unsafe { std::mem::zeroed() };
+            original.input_modes = InputModes::from_bits_retain(!0);
+            original.local_modes = LocalModes::from_bits_retain(!0);
+            original.output_modes = OutputModes::from_bits_retain(123);
+            original.special_codes[SpecialCodeIndex::VINTR] = 9;
+            original.set_speed(9600).unwrap();
+            original
+                .control_modes
+                .insert(ControlModes::PARENB | ControlModes::CSTOPB);
+            #[cfg(target_os = "linux")]
+            {
+                original.line_discipline = 7;
+            }
+            let raw = make_raw(original.clone());
+            #[cfg(target_os = "linux")]
+            let (input_mask, local_mask, character_size) = (0x532, 0x800b, 0x30);
+            #[cfg(target_os = "macos")]
+            let (input_mask, local_mask, character_size) = (0x332, 0x588, 0x300);
+            assert_eq!(raw.input_modes.bits(), !input_mask);
+            assert_eq!(raw.local_modes.bits(), !local_mask);
+            assert_eq!(
+                raw.control_modes.bits(),
+                (original.control_modes.bits() & !character_size) | character_size
+            );
+            assert_eq!(raw.special_codes[SpecialCodeIndex::VMIN], 0);
+            assert_eq!(raw.special_codes[SpecialCodeIndex::VTIME], 1);
+            assert_eq!(raw.special_codes[SpecialCodeIndex::VINTR], 9);
+            assert_eq!(raw.output_modes, original.output_modes);
+            assert_eq!(raw.input_speed(), original.input_speed());
+            assert_eq!(raw.output_speed(), original.output_speed());
+            #[cfg(target_os = "linux")]
+            assert_eq!(raw.line_discipline, original.line_discipline);
         }
     }
 }

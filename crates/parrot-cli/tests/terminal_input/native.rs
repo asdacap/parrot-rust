@@ -1,10 +1,10 @@
 //! Source cases: UnixRawTerminalTests.cs at 5f27a8a92625ee31d8bec094e5c3e09550193781.
 //! Run through the workspace terminal-input integration target, not a synthetic PTY shim.
 
-use parrot_cli::terminal_input::native::{
-    DarwinTermios, LinuxTermios, RawTerminal, ReadResult, make_darwin_raw, make_linux_raw,
-    read_input_with_retry,
-};
+#[path = "../support/native_termios.rs"]
+mod native_termios;
+use native_termios::{DarwinTermios, LinuxTermios, make_darwin_raw, make_linux_raw};
+use parrot_cli::terminal_input::native::{RawTerminal, ReadResult, read_input_with_retry};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -329,6 +329,10 @@ mod pty {
         let pty = Pty::open();
         let original = pty.attributes();
         let mut raw = RawTerminal::open(pty.slave.as_raw_fd()).unwrap().unwrap();
+        #[cfg(target_os = "linux")]
+        assert_eq!(pty.attributes(), make_linux_raw(original));
+        #[cfg(target_os = "macos")]
+        assert_eq!(pty.attributes(), make_darwin_raw(original));
         let mut buffer = [0; 8];
         assert_eq!(
             raw.read(&mut buffer, &AtomicBool::new(false)).unwrap(),

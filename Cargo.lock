@@ -1065,6 +1065,7 @@ dependencies = [
  "parrot-tools",
  "protobuf",
  "reqwest",
+ "rustix 1.1.5",
  "serde_json",
  "tokio",
  "tokio-stream",
