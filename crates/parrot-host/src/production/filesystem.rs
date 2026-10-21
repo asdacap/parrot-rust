@@ -278,35 +278,31 @@ mod unix_fs {
         paths::{ReadOrigin, ResolvedRead},
         security::AccessSnapshot,
     };
+    use rustix::fs::{AtFlags, CWD, Mode, OFlags, Stat};
+    #[cfg(target_os = "linux")]
+    use std::os::fd::AsRawFd;
     use std::{
         ffi::{CString, OsStr},
         fs::{self, File},
         io::{Read, Write},
-        mem::MaybeUninit,
         os::{
-            fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
+            fd::{AsFd, BorrowedFd, OwnedFd},
             unix::ffi::OsStrExt,
         },
     };
 
     #[cfg(target_os = "linux")]
-    const PIN_FLAGS: i32 = libc::O_PATH;
+    const PIN_FLAGS: OFlags = OFlags::PATH;
     #[cfg(target_os = "macos")]
-    const PIN_FLAGS: i32 = libc::O_EVTONLY | libc::O_NONBLOCK;
+    // rustix does not name Darwin's metadata-only flag.
+    const PIN_FLAGS: OFlags =
+        OFlags::from_bits_retain(libc::O_EVTONLY as u32).union(OFlags::NONBLOCK);
     #[cfg(target_os = "linux")]
-    const DIRECTORY_FLAGS: i32 = libc::O_PATH | libc::O_DIRECTORY;
+    const DIRECTORY_FLAGS: OFlags = OFlags::PATH.union(OFlags::DIRECTORY);
     #[cfg(target_os = "macos")]
-    const DIRECTORY_FLAGS: i32 = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NONBLOCK;
-
-    #[cfg(target_os = "linux")]
-    const RESOLVE_NO_SYMLINKS: u64 = 0x04;
-    #[cfg(target_os = "linux")]
-    #[repr(C)]
-    struct OpenHow {
-        flags: u64,
-        mode: u64,
-        resolve: u64,
-    }
+    const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
+        .union(OFlags::DIRECTORY)
+        .union(OFlags::NONBLOCK);
 
     fn c_path(path: &OsStr) -> Result<CString> {
         CString::new(path.as_bytes()).map_err(|_| {
@@ -342,65 +338,49 @@ mod unix_fs {
 
     #[cfg(target_os = "linux")]
     fn open_at(
-        directory: RawFd,
+        directory: BorrowedFd<'_>,
         name: &OsStr,
-        flags: i32,
+        flags: OFlags,
         mode: u32,
         reject_links: bool,
     ) -> Result<OwnedFd> {
         let name = c_path(name)?;
-        let specification = OpenHow {
-            flags: u64::try_from(flags | libc::O_CLOEXEC).map_err(|_| {
-                failed(
-                    FileReadErrorKind::InvalidOperation,
-                    "Invalid filesystem open flags.",
-                )
-            })?,
-            mode: u64::from(mode),
-            resolve: if reject_links { RESOLVE_NO_SYMLINKS } else { 0 },
-        };
-        // openat2 resolves all components and transfers the returned descriptor to OwnedFd.
-        let descriptor = unsafe {
-            libc::syscall(
-                libc::SYS_openat2,
-                directory,
-                name.as_ptr(),
-                &specification,
-                std::mem::size_of::<OpenHow>(),
-            )
-        };
-        if descriptor < 0 {
-            return Err(io(std::io::Error::last_os_error()));
-        }
-        let descriptor = i32::try_from(descriptor)
-            .map_err(|_| failed(FileReadErrorKind::Io, "Invalid filesystem descriptor."))?;
-        Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
+        rustix::fs::openat2(
+            directory,
+            name.as_c_str(),
+            flags | OFlags::CLOEXEC,
+            Mode::from_raw_mode(mode),
+            if reject_links {
+                rustix::fs::ResolveFlags::NO_SYMLINKS
+            } else {
+                rustix::fs::ResolveFlags::empty()
+            },
+        )
+        .map_err(|error| io(error.into()))
     }
 
     #[cfg(target_os = "macos")]
-    fn open_component(directory: RawFd, name: &OsStr, flags: i32, mode: u32) -> Result<OwnedFd> {
+    fn open_component(
+        directory: BorrowedFd<'_>,
+        name: &OsStr,
+        flags: OFlags,
+        mode: u32,
+    ) -> Result<OwnedFd> {
         let name = c_path(name)?;
-        // The C string is live for the call. Every opened component rejects links;
-        // successful openat transfers a new descriptor into OwnedFd.
-        let descriptor = unsafe {
-            libc::openat(
-                directory,
-                name.as_ptr(),
-                flags | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-                mode as libc::mode_t,
-            )
-        };
-        if descriptor < 0 {
-            return Err(io(std::io::Error::last_os_error()));
-        }
-        Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
+        rustix::fs::openat(
+            directory,
+            name.as_c_str(),
+            flags | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::from_raw_mode(mode as _),
+        )
+        .map_err(|error| io(error.into()))
     }
 
     #[cfg(target_os = "macos")]
     fn open_at(
-        directory: RawFd,
+        directory: BorrowedFd<'_>,
         name: &OsStr,
-        flags: i32,
+        flags: OFlags,
         mode: u32,
         _reject_links: bool,
     ) -> Result<OwnedFd> {
@@ -424,26 +404,26 @@ mod unix_fs {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let mut parent = open_component(libc::AT_FDCWD, OsStr::new("/"), DIRECTORY_FLAGS, 0)?;
+        let mut parent = open_component(CWD, OsStr::new("/"), DIRECTORY_FLAGS, 0)?;
         let Some((last, parents)) = names.split_last() else {
             return Ok(parent);
         };
         for name in parents {
-            parent = open_component(parent.as_raw_fd(), name, DIRECTORY_FLAGS, 0)?;
+            parent = open_component(parent.as_fd(), name, DIRECTORY_FLAGS, 0)?;
         }
-        open_component(parent.as_raw_fd(), last, flags, mode)
+        open_component(parent.as_fd(), last, flags, mode)
     }
 
     #[cfg(target_os = "linux")]
     pub(super) fn pin(path: &Path, links: LinkPolicy) -> Result<OwnedFd> {
         open_at(
-            libc::AT_FDCWD,
+            CWD,
             path.as_os_str(),
-            libc::O_PATH
+            OFlags::PATH
                 | if links == LinkPolicy::NoFollow {
-                    libc::O_NOFOLLOW
+                    OFlags::NOFOLLOW
                 } else {
-                    0
+                    OFlags::empty()
                 },
             0,
             links == LinkPolicy::RejectLinks,
@@ -463,14 +443,14 @@ mod unix_fs {
     }
 
     #[cfg(target_os = "macos")]
-    fn validate_parent(descriptor: RawFd, path: &Path) -> Result<()> {
+    fn validate_parent(descriptor: BorrowedFd<'_>, path: &Path) -> Result<()> {
         if descriptor_path(descriptor)? != path {
             return Err(changed());
         }
-        let current = open_at(libc::AT_FDCWD, path.as_os_str(), DIRECTORY_FLAGS, 0, true)
-            .map_err(|_| changed())?;
-        if !same(&stat(descriptor)?, &stat(current.as_raw_fd())?)
-            || descriptor_path(current.as_raw_fd())? != path
+        let current =
+            open_at(CWD, path.as_os_str(), DIRECTORY_FLAGS, 0, true).map_err(|_| changed())?;
+        if !same(&stat(descriptor)?, &stat(current.as_fd())?)
+            || descriptor_path(current.as_fd())? != path
             || descriptor_path(descriptor)? != path
         {
             return Err(changed());
@@ -479,33 +459,21 @@ mod unix_fs {
     }
 
     #[cfg(target_os = "macos")]
-    fn current_entry(path: &Path, links: LinkPolicy) -> Result<(PathBuf, libc::stat)> {
+    fn current_entry(path: &Path, links: LinkPolicy) -> Result<(PathBuf, Stat)> {
         let physical = resolved_path(path, links)?;
         let Some(name) = physical.file_name() else {
-            let root = open_at(
-                libc::AT_FDCWD,
-                physical.as_os_str(),
-                DIRECTORY_FLAGS,
-                0,
-                true,
-            )?;
-            if descriptor_path(root.as_raw_fd())? != physical {
+            let root = open_at(CWD, physical.as_os_str(), DIRECTORY_FLAGS, 0, true)?;
+            if descriptor_path(root.as_fd())? != physical {
                 return Err(changed());
             }
-            return Ok((physical, stat(root.as_raw_fd())?));
+            return Ok((physical, stat(root.as_fd())?));
         };
         let parent_path = physical.parent().ok_or_else(changed)?;
-        let parent = open_at(
-            libc::AT_FDCWD,
-            parent_path.as_os_str(),
-            DIRECTORY_FLAGS,
-            0,
-            true,
-        )?;
-        validate_parent(parent.as_raw_fd(), parent_path)?;
+        let parent = open_at(CWD, parent_path.as_os_str(), DIRECTORY_FLAGS, 0, true)?;
+        validate_parent(parent.as_fd(), parent_path)?;
         // Observe the final entry without opening or following it, including symlinks.
-        let status = stat_at(parent.as_raw_fd(), name, true)?;
-        validate_parent(parent.as_raw_fd(), parent_path)?;
+        let status = stat_at(parent.as_fd(), name, true)?;
+        validate_parent(parent.as_fd(), parent_path)?;
         Ok((physical, status))
     }
 
@@ -519,49 +487,38 @@ mod unix_fs {
             // access is opened separately with O_NONBLOCK and checked against this inode.
             PIN_FLAGS
         };
-        let descriptor = open_at(libc::AT_FDCWD, physical.as_os_str(), flags, 0, true)?;
-        if !same(&observed, &stat(descriptor.as_raw_fd())?) {
+        let descriptor = open_at(CWD, physical.as_os_str(), flags, 0, true)?;
+        if !same(&observed, &stat(descriptor.as_fd())?) {
             return Err(changed());
         }
         Ok(descriptor)
     }
 
-    fn stat(descriptor: RawFd) -> Result<libc::stat> {
-        let mut value = MaybeUninit::<libc::stat>::uninit();
-        if unsafe { libc::fstat(descriptor, value.as_mut_ptr()) } != 0 {
-            return Err(io(std::io::Error::last_os_error()));
-        }
-        Ok(unsafe { value.assume_init() })
+    fn stat(descriptor: BorrowedFd<'_>) -> Result<Stat> {
+        rustix::fs::fstat(descriptor).map_err(|error| io(error.into()))
     }
 
-    fn stat_at(directory: RawFd, name: &OsStr, no_follow: bool) -> Result<libc::stat> {
+    fn stat_at(directory: BorrowedFd<'_>, name: &OsStr, no_follow: bool) -> Result<Stat> {
         let name = c_path(name)?;
-        let mut value = MaybeUninit::<libc::stat>::uninit();
-        if unsafe {
-            libc::fstatat(
-                directory,
-                name.as_ptr(),
-                value.as_mut_ptr(),
-                if no_follow {
-                    libc::AT_SYMLINK_NOFOLLOW
-                } else {
-                    0
-                },
-            )
-        } != 0
-        {
-            return Err(io(std::io::Error::last_os_error()));
-        }
-        Ok(unsafe { value.assume_init() })
+        rustix::fs::statat(
+            directory,
+            name.as_c_str(),
+            if no_follow {
+                AtFlags::SYMLINK_NOFOLLOW
+            } else {
+                AtFlags::empty()
+            },
+        )
+        .map_err(|error| io(error.into()))
     }
 
-    fn same(left: &libc::stat, right: &libc::stat) -> bool {
+    fn same(left: &Stat, right: &Stat) -> bool {
         left.st_dev == right.st_dev
             && left.st_ino == right.st_ino
             && left.st_mode & libc::S_IFMT == right.st_mode & libc::S_IFMT
     }
 
-    fn kind(status: &libc::stat) -> EntryKind {
+    fn kind(status: &Stat) -> EntryKind {
         match status.st_mode & libc::S_IFMT {
             libc::S_IFREG => EntryKind::Regular,
             libc::S_IFDIR => EntryKind::Directory,
@@ -571,31 +528,23 @@ mod unix_fs {
     }
 
     #[cfg(target_os = "linux")]
-    fn descriptor_path(descriptor: RawFd) -> Result<PathBuf> {
-        fs::read_link(format!("/proc/self/fd/{descriptor}")).map_err(io)
+    fn descriptor_path(descriptor: BorrowedFd<'_>) -> Result<PathBuf> {
+        fs::read_link(format!("/proc/self/fd/{}", descriptor.as_raw_fd())).map_err(io)
     }
 
     #[cfg(target_os = "macos")]
-    fn descriptor_path(descriptor: RawFd) -> Result<PathBuf> {
-        let mut buffer = [0u8; libc::PATH_MAX as usize];
-        // F_GETPATH writes at most PATH_MAX bytes into this live writable buffer.
-        if unsafe { libc::fcntl(descriptor, libc::F_GETPATH, buffer.as_mut_ptr()) } < 0 {
-            return Err(io(std::io::Error::last_os_error()));
-        }
-        let end = buffer
-            .iter()
-            .position(|byte| *byte == 0)
-            .ok_or_else(changed)?;
-        Ok(PathBuf::from(OsStr::from_bytes(&buffer[..end])))
+    fn descriptor_path(descriptor: BorrowedFd<'_>) -> Result<PathBuf> {
+        let path = rustix::fs::getpath(descriptor).map_err(|error| io(error.into()))?;
+        Ok(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
     }
 
     #[cfg(target_os = "linux")]
     pub(super) fn validate(
-        descriptor: RawFd,
+        descriptor: BorrowedFd<'_>,
         lexical: &Path,
         links: LinkPolicy,
         expected: Option<&Path>,
-    ) -> Result<(PathBuf, libc::stat)> {
+    ) -> Result<(PathBuf, Stat)> {
         let status = stat(descriptor)?;
         let physical = descriptor_path(descriptor)?;
         if !physical.is_absolute()
@@ -604,25 +553,17 @@ mod unix_fs {
         {
             return Err(changed());
         }
-        let actual = stat_at(
-            libc::AT_FDCWD,
-            physical.as_os_str(),
-            links == LinkPolicy::NoFollow,
-        )
-        .map_err(|_| changed())?;
+        let actual = stat_at(CWD, physical.as_os_str(), links == LinkPolicy::NoFollow)
+            .map_err(|_| changed())?;
         if !same(&status, &actual) {
             return Err(changed());
         }
         let current = if links == LinkPolicy::RejectLinks {
             let current = pin(lexical, LinkPolicy::RejectLinks).map_err(|_| changed())?;
-            stat(current.as_raw_fd())?
+            stat(current.as_fd())?
         } else {
-            stat_at(
-                libc::AT_FDCWD,
-                lexical.as_os_str(),
-                links == LinkPolicy::NoFollow,
-            )
-            .map_err(|_| changed())?
+            stat_at(CWD, lexical.as_os_str(), links == LinkPolicy::NoFollow)
+                .map_err(|_| changed())?
         };
         if !same(&status, &current) {
             return Err(changed());
@@ -632,11 +573,11 @@ mod unix_fs {
 
     #[cfg(target_os = "macos")]
     pub(super) fn validate(
-        descriptor: RawFd,
+        descriptor: BorrowedFd<'_>,
         lexical: &Path,
         links: LinkPolicy,
         expected: Option<&Path>,
-    ) -> Result<(PathBuf, libc::stat)> {
+    ) -> Result<(PathBuf, Stat)> {
         let status = stat(descriptor)?;
         let physical = descriptor_path(descriptor)?;
         if !physical.is_absolute()
@@ -675,7 +616,7 @@ mod unix_fs {
             .map_err(OperationError::Failed)
     }
 
-    fn regular(status: &libc::stat) -> Result<()> {
+    fn regular(status: &Stat) -> Result<()> {
         if kind(status) != EntryKind::Regular {
             return Err(failed(
                 FileReadErrorKind::InvalidOperation,
@@ -685,7 +626,7 @@ mod unix_fs {
         Ok(())
     }
 
-    fn observation(lexical: PathBuf, physical: PathBuf, status: &libc::stat) -> FileMetadata {
+    fn observation(lexical: PathBuf, physical: PathBuf, status: &Stat) -> FileMetadata {
         let hidden = lexical
             .file_name()
             .is_some_and(|name| name.as_bytes().starts_with(b"."));
@@ -713,76 +654,41 @@ mod unix_fs {
             return Ok(observation(path.to_path_buf(), physical, &status));
         }
         let descriptor = pin(path, links)?;
-        let (physical, status) = validate(descriptor.as_raw_fd(), path, links, None)?;
+        let (physical, status) = validate(descriptor.as_fd(), path, links, None)?;
         authorize_read(snapshot, path, &physical)?;
         Ok(observation(path.to_path_buf(), physical, &status))
     }
 
     #[cfg(target_os = "linux")]
     fn directory_entries(
-        descriptor: RawFd,
+        descriptor: BorrowedFd<'_>,
     ) -> Result<impl Iterator<Item = std::io::Result<std::ffi::OsString>>> {
-        Ok(fs::read_dir(format!("/proc/self/fd/{descriptor}"))
-            .map_err(io)?
-            .map(|entry| entry.map(|entry| entry.file_name())))
+        Ok(
+            fs::read_dir(format!("/proc/self/fd/{}", descriptor.as_raw_fd()))
+                .map_err(io)?
+                .map(|entry| entry.map(|entry| entry.file_name())),
+        )
     }
 
     #[cfg(target_os = "macos")]
-    struct DirectoryEntries(*mut libc::DIR);
-
-    #[cfg(target_os = "macos")]
-    impl Drop for DirectoryEntries {
-        fn drop(&mut self) {
-            // The stream is owned by this iterator and closed exactly once.
-            unsafe { libc::closedir(self.0) };
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    impl Iterator for DirectoryEntries {
-        type Item = std::io::Result<std::ffi::OsString>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            loop {
-                // readdir's entry is valid until the next call on this owned stream;
-                // copy its NUL-terminated name before advancing. errno distinguishes EOF.
-                let name = unsafe {
-                    *libc::__error() = 0;
-                    let entry = libc::readdir(self.0);
-                    if entry.is_null() {
-                        return if *libc::__error() == 0 {
-                            None
-                        } else {
-                            Some(Err(std::io::Error::last_os_error()))
-                        };
-                    }
-                    OsStr::from_bytes(std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()).to_bytes())
-                        .to_os_string()
-                };
-                if name != "." && name != ".." {
-                    return Some(Ok(name));
+    fn directory_entries(
+        descriptor: BorrowedFd<'_>,
+    ) -> Result<impl Iterator<Item = std::io::Result<std::ffi::OsString>>> {
+        // The stream owns a CLOEXEC duplicate, leaving the validation anchor intact.
+        let duplicate =
+            rustix::io::fcntl_dupfd_cloexec(descriptor, 0).map_err(|error| io(error.into()))?;
+        let entries = rustix::fs::Dir::new(duplicate).map_err(|error| io(error.into()))?;
+        Ok(entries.filter_map(|entry| match entry {
+            Ok(entry) => {
+                let name = entry.file_name().to_bytes();
+                if name == b"." || name == b".." {
+                    None
+                } else {
+                    Some(Ok(OsStr::from_bytes(name).to_os_string()))
                 }
             }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn directory_entries(descriptor: RawFd) -> Result<DirectoryEntries> {
-        use std::os::fd::IntoRawFd;
-
-        // Duplicate so fdopendir owns its descriptor without consuming the validation anchor.
-        let duplicate = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 0) };
-        if duplicate < 0 {
-            return Err(io(std::io::Error::last_os_error()));
-        }
-        // fcntl returned a new owned descriptor. On failure fdopendir leaves it owned here.
-        let duplicate = unsafe { OwnedFd::from_raw_fd(duplicate) };
-        let stream = unsafe { libc::fdopendir(duplicate.as_raw_fd()) };
-        if stream.is_null() {
-            return Err(io(std::io::Error::last_os_error()));
-        }
-        let _ = duplicate.into_raw_fd();
-        Ok(DirectoryEntries(stream))
+            Err(error) => Some(Err(error.into())),
+        }))
     }
 
     pub(super) fn list_directory(
@@ -792,7 +698,7 @@ mod unix_fs {
         cancellation: &dyn Cancellation,
     ) -> Result<Vec<FileMetadata>> {
         let descriptor = pin(path, links)?;
-        let (physical, status) = validate(descriptor.as_raw_fd(), path, links, None)?;
+        let (physical, status) = validate(descriptor.as_fd(), path, links, None)?;
         if kind(&status) != EntryKind::Directory {
             return Err(failed(
                 FileReadErrorKind::InvalidOperation,
@@ -801,10 +707,10 @@ mod unix_fs {
         }
         authorize_read(snapshot, path, &physical)?;
         let mut result = Vec::new();
-        for entry in directory_entries(descriptor.as_raw_fd())? {
+        for entry in directory_entries(descriptor.as_fd())? {
             check_cancel(cancellation)?;
             let name = entry.map_err(io)?;
-            let status = match stat_at(descriptor.as_raw_fd(), &name, true) {
+            let status = match stat_at(descriptor.as_fd(), &name, true) {
                 Ok(value) => value,
                 Err(OperationError::Failed(error)) if error.kind == FileReadErrorKind::NotFound => {
                     continue;
@@ -817,7 +723,7 @@ mod unix_fs {
                 result.push(observation(lexical_child, physical_child, &status));
             }
         }
-        validate(descriptor.as_raw_fd(), path, links, Some(&physical))?;
+        validate(descriptor.as_fd(), path, links, Some(&physical))?;
         Ok(result)
     }
 
@@ -825,17 +731,17 @@ mod unix_fs {
     fn reopen(pinned: &OwnedFd, writable: bool) -> Result<File> {
         let descriptor_path = format!("/proc/self/fd/{}", pinned.as_raw_fd());
         let descriptor = open_at(
-            libc::AT_FDCWD,
+            CWD,
             OsStr::new(&descriptor_path),
             (if writable {
-                libc::O_WRONLY
+                OFlags::WRONLY
             } else {
-                libc::O_RDONLY
-            }) | libc::O_NONBLOCK,
+                OFlags::RDONLY
+            }) | OFlags::NONBLOCK,
             0,
             false,
         )?;
-        if !same(&stat(pinned.as_raw_fd())?, &stat(descriptor.as_raw_fd())?) {
+        if !same(&stat(pinned.as_fd())?, &stat(descriptor.as_fd())?) {
             return Err(changed());
         }
         Ok(File::from(descriptor))
@@ -843,20 +749,20 @@ mod unix_fs {
 
     #[cfg(target_os = "macos")]
     fn reopen(pinned: &OwnedFd, writable: bool) -> Result<File> {
-        let physical = descriptor_path(pinned.as_raw_fd())?;
+        let physical = descriptor_path(pinned.as_fd())?;
         let descriptor = open_at(
-            libc::AT_FDCWD,
+            CWD,
             physical.as_os_str(),
             (if writable {
-                libc::O_WRONLY
+                OFlags::WRONLY
             } else {
-                libc::O_RDONLY
-            }) | libc::O_NONBLOCK,
+                OFlags::RDONLY
+            }) | OFlags::NONBLOCK,
             0,
             true,
         )?;
         // No bytes or truncation occur until the safely walked open matches the pin.
-        if !same(&stat(pinned.as_raw_fd())?, &stat(descriptor.as_raw_fd())?) {
+        if !same(&stat(pinned.as_fd())?, &stat(descriptor.as_fd())?) {
             return Err(changed());
         }
         Ok(File::from(descriptor))
@@ -894,7 +800,7 @@ mod unix_fs {
     ) -> Result<BoundRead> {
         let pinned = pin(path, request.links)?;
         let (physical, status) = validate(
-            pinned.as_raw_fd(),
+            pinned.as_fd(),
             path,
             request.links,
             request.expected_physical.as_deref(),
@@ -903,10 +809,10 @@ mod unix_fs {
         authorize_read(snapshot, path, &physical)?;
         check_cancel(cancellation)?;
         let mut file = reopen(&pinned, false)?;
-        validate(file.as_raw_fd(), path, request.links, Some(&physical))?;
+        validate(file.as_fd(), path, request.links, Some(&physical))?;
         authorize_read(snapshot, path, &physical)?;
         let bytes = bytes(&mut file, request.max_bytes, cancellation)?;
-        validate(file.as_raw_fd(), path, request.links, Some(&physical))?;
+        validate(file.as_fd(), path, request.links, Some(&physical))?;
         Ok(BoundRead {
             lexical_path: path.to_path_buf(),
             physical_path: physical,
@@ -939,7 +845,7 @@ mod unix_fs {
         snapshot: &Security,
         cancellation: &dyn Cancellation,
     ) -> Result<Option<(OwnedFd, PathBuf)>> {
-        let mut descriptor = open_at(libc::AT_FDCWD, OsStr::new("/"), DIRECTORY_FLAGS, 0, true)?;
+        let mut descriptor = open_at(CWD, OsStr::new("/"), DIRECTORY_FLAGS, 0, true)?;
         let mut current = PathBuf::from("/");
         let mut missing = false;
         for name in parent_names(path)? {
@@ -951,12 +857,12 @@ mod unix_fs {
                 continue;
             }
             validate(
-                descriptor.as_raw_fd(),
+                descriptor.as_fd(),
                 &current,
                 LinkPolicy::RejectLinks,
                 Some(&current),
             )?;
-            match open_at(descriptor.as_raw_fd(), name, DIRECTORY_FLAGS, 0, true) {
+            match open_at(descriptor.as_fd(), name, DIRECTORY_FLAGS, 0, true) {
                 Ok(next_descriptor) => descriptor = next_descriptor,
                 Err(OperationError::Failed(error))
                     if error.kind == FileReadErrorKind::NotFound && inspect_missing =>
@@ -970,20 +876,22 @@ mod unix_fs {
                     authorize_write(snapshot, &next, &next)?;
                     check_cancel(cancellation)?;
                     validate(
-                        descriptor.as_raw_fd(),
+                        descriptor.as_fd(),
                         &current,
                         LinkPolicy::RejectLinks,
                         Some(&current),
                     )?;
                     let name_c = c_path(name)?;
-                    if unsafe { libc::mkdirat(descriptor.as_raw_fd(), name_c.as_ptr(), 0o777) } != 0
-                    {
-                        let error = std::io::Error::last_os_error();
-                        if error.raw_os_error() != Some(libc::EEXIST) {
-                            return Err(io(error));
+                    if let Err(error) = rustix::fs::mkdirat(
+                        descriptor.as_fd(),
+                        name_c.as_c_str(),
+                        Mode::from_raw_mode(0o777),
+                    ) {
+                        if error != rustix::io::Errno::EXIST {
+                            return Err(io(error.into()));
                         }
                     }
-                    descriptor = open_at(descriptor.as_raw_fd(), name, DIRECTORY_FLAGS, 0, true)?;
+                    descriptor = open_at(descriptor.as_fd(), name, DIRECTORY_FLAGS, 0, true)?;
                 }
                 Err(error) => return Err(error),
             }
@@ -993,7 +901,7 @@ mod unix_fs {
             return Ok(None);
         }
         validate(
-            descriptor.as_raw_fd(),
+            descriptor.as_fd(),
             &current,
             LinkPolicy::RejectLinks,
             Some(&current),
@@ -1012,7 +920,7 @@ mod unix_fs {
         match pin(path, LinkPolicy::RejectLinks) {
             Ok(descriptor) => {
                 let (physical, status) = validate(
-                    descriptor.as_raw_fd(),
+                    descriptor.as_fd(),
                     path,
                     LinkPolicy::RejectLinks,
                     Some(path),
@@ -1038,39 +946,33 @@ mod unix_fs {
         cancellation: &dyn Cancellation,
     ) -> Result<Vec<u8>> {
         let mut file = reopen(&pinned, false)?;
-        let (physical, status) =
-            validate(file.as_raw_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
+        let (physical, status) = validate(file.as_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
         regular(&status)?;
         authorize_write(snapshot, path, &physical)?;
         let bytes = bytes(&mut file, None, cancellation)?;
-        validate(file.as_raw_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
+        validate(file.as_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
         Ok(bytes)
     }
 
-    fn create_file(directory: RawFd, name: &OsStr) -> std::io::Result<OwnedFd> {
+    fn create_file(directory: BorrowedFd<'_>, name: &OsStr) -> std::io::Result<OwnedFd> {
         let name = CString::new(name.as_bytes()).map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "A filesystem path contains a null byte.",
             )
         })?;
-        let descriptor = unsafe {
-            libc::openat(
-                directory,
-                name.as_ptr(),
-                libc::O_WRONLY
-                    | libc::O_CREAT
-                    | libc::O_EXCL
-                    | libc::O_NOFOLLOW
-                    | libc::O_NONBLOCK
-                    | libc::O_CLOEXEC,
-                0o600,
-            )
-        };
-        if descriptor < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
+        rustix::fs::openat(
+            directory,
+            name.as_c_str(),
+            OFlags::WRONLY
+                | OFlags::CREATE
+                | OFlags::EXCL
+                | OFlags::NOFOLLOW
+                | OFlags::NONBLOCK
+                | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        )
+        .map_err(Into::into)
     }
 
     pub(super) fn write(
@@ -1091,25 +993,25 @@ mod unix_fs {
         })?;
         check_cancel(cancellation)?;
         validate(
-            parent.as_raw_fd(),
+            parent.as_fd(),
             &parent_path,
             LinkPolicy::RejectLinks,
             Some(&parent_path),
         )?;
         authorize_write(snapshot, path, path)?;
-        let mut file = match open_at(parent.as_raw_fd(), name, PIN_FLAGS, 0, true) {
+        let mut file = match open_at(parent.as_fd(), name, PIN_FLAGS, 0, true) {
             Ok(pinned) => {
-                regular(&stat(pinned.as_raw_fd())?)?;
+                regular(&stat(pinned.as_fd())?)?;
                 reopen(&pinned, true)?
             }
             Err(OperationError::Failed(error))
                 if error.kind == FileReadErrorKind::NotFound && create =>
             {
-                match create_file(parent.as_raw_fd(), name) {
+                match create_file(parent.as_fd(), name) {
                     Ok(descriptor) => File::from(descriptor),
                     Err(error) if error.raw_os_error() == Some(libc::EEXIST) => {
-                        let pinned = open_at(parent.as_raw_fd(), name, PIN_FLAGS, 0, true)?;
-                        regular(&stat(pinned.as_raw_fd())?)?;
+                        let pinned = open_at(parent.as_fd(), name, PIN_FLAGS, 0, true)?;
+                        regular(&stat(pinned.as_fd())?)?;
                         reopen(&pinned, true)?
                     }
                     Err(error) => return Err(io(error)),
@@ -1117,16 +1019,15 @@ mod unix_fs {
             }
             Err(error) => return Err(error),
         };
-        let (physical, status) =
-            validate(file.as_raw_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
+        let (physical, status) = validate(file.as_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
         regular(&status)?;
         validate(
-            parent.as_raw_fd(),
+            parent.as_fd(),
             &parent_path,
             LinkPolicy::RejectLinks,
             Some(&parent_path),
         )?;
-        if !same(&status, &stat_at(parent.as_raw_fd(), name, true)?) {
+        if !same(&status, &stat_at(parent.as_fd(), name, true)?) {
             return Err(changed());
         }
         authorize_write(snapshot, path, &physical)?;
@@ -1154,7 +1055,7 @@ mod tests {
     use std::{
         fs,
         os::{
-            fd::AsRawFd,
+            fd::AsFd,
             unix::fs::{MetadataExt, PermissionsExt, symlink},
         },
         sync::{
@@ -1687,6 +1588,30 @@ mod tests {
     }
 
     #[test]
+    fn pinned_file_and_directory_descriptors_are_close_on_exec() {
+        let fixture = Fixture::new();
+        let file = fixture.file("file", b"content");
+        for path in [file.as_path(), fixture.workspace.launch_directory()] {
+            let descriptor = unix_fs::pin(path, LinkPolicy::RejectLinks).unwrap();
+            assert!(
+                rustix::io::fcntl_getfd(&descriptor)
+                    .unwrap()
+                    .contains(rustix::io::FdFlags::CLOEXEC)
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_null_in_path_remains_an_invalid_path() {
+        let fixture = Fixture::new();
+        let path = fixture.workspace.launch_directory().join("invalid\0name");
+        assert_eq!(
+            error_kind(unix_fs::pin(&path, LinkPolicy::RejectLinks)),
+            FileReadErrorKind::InvalidPath
+        );
+    }
+
+    #[test]
     fn opened_target_replacement_is_detected_without_reading_the_replacement() {
         let fixture = Fixture::new();
         let path = fixture.file("original", b"old");
@@ -1695,7 +1620,7 @@ mod tests {
         fs::write(&path, b"replacement").unwrap();
         assert_eq!(
             error_kind(unix_fs::validate(
-                descriptor.as_raw_fd(),
+                descriptor.as_fd(),
                 &path,
                 LinkPolicy::RejectLinks,
                 Some(&path)

@@ -1138,6 +1138,7 @@ dependencies = [
  "parrot-storage",
  "parrot-tools",
  "protobuf",
+ "rustix 1.1.5",
  "serde_json",
  "subtle",
  "tokio",
