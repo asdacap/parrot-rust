@@ -109,37 +109,45 @@ impl CapturedProcessLauncher for ProductionLauncher {
             start.terminal_mode = request.terminal_mode;
             start.cancellation = Some(lifetime);
 
-            #[cfg(target_os = "linux")]
-            let sandbox_policy = parrot_tools::sandbox::linux::LinuxSandboxPolicy {
-                rules: process_rules(policy)?
-                    .into_iter()
-                    .map(|rule| parrot_tools::sandbox::linux::LinuxAccessRule {
-                        path: rule.path,
-                        read: rule.read,
-                        write: rule.write,
-                    })
-                    .collect(),
-                owned_roots: vec![scratch.root().to_path_buf(), self.queue_directory.clone()],
-                device_paths: Vec::new(),
-            };
-            #[cfg(target_os = "macos")]
-            let sandbox_policy = parrot_tools::sandbox::macos::SeatbeltPolicy::compile_rules(
-                process_rules(policy)?.into_iter().map(|rule| {
-                    (
-                        rule.path.to_string_lossy().into_owned(),
-                        parrot_tools::sandbox::macos::SeatbeltAccess {
-                            read: rule.read,
-                            write: rule.write,
-                        },
-                    )
-                }),
-            )?;
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let sandbox_policy = ();
-
-            // ProcessRunner alone implements the explicit sandbox gate. A failed
-            // sandbox start is returned, never retried outside the sandbox.
-            let execution = self.runner.start(&start, &sandbox_policy).await?;
+            // ProcessRunner alone selects the sandbox before materializing its
+            // policy. A failed sandbox start is never retried outside the sandbox.
+            let execution = self
+                .runner
+                .start_with_policy(&start, || {
+                    #[cfg(target_os = "linux")]
+                    let sandbox_policy = parrot_tools::sandbox::linux::LinuxSandboxPolicy {
+                        rules: process_rules(policy)?
+                            .into_iter()
+                            .map(|rule| parrot_tools::sandbox::linux::LinuxAccessRule {
+                                path: rule.path,
+                                read: rule.read,
+                                write: rule.write,
+                            })
+                            .collect(),
+                        owned_roots: vec![
+                            scratch.root().to_path_buf(),
+                            self.queue_directory.clone(),
+                        ],
+                        device_paths: Vec::new(),
+                    };
+                    #[cfg(target_os = "macos")]
+                    let sandbox_policy =
+                        parrot_tools::sandbox::macos::SeatbeltPolicy::compile_rules(
+                            process_rules(policy)?.into_iter().map(|rule| {
+                                (
+                                    rule.path.to_string_lossy().into_owned(),
+                                    parrot_tools::sandbox::macos::SeatbeltAccess {
+                                        read: rule.read,
+                                        write: rule.write,
+                                    },
+                                )
+                            }),
+                        )?;
+                    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                    let sandbox_policy = ();
+                    Ok(sandbox_policy)
+                })
+                .await?;
             Ok(Arc::new(execution) as Arc<dyn Execution>)
         })
     }
@@ -375,6 +383,60 @@ mod tests {
             process_rules(&policy).unwrap_err().kind(),
             io::ErrorKind::PermissionDenied
         );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn explicit_gate_off_skips_native_policy_materialization() {
+        let fixture = Fixture::new();
+        let outside = fixture.root.join("outside");
+        fs::create_dir(&outside).unwrap();
+        let alias = fixture.work.join("alias");
+        std::os::unix::fs::symlink(&outside, &alias).unwrap();
+        let policy = fixture.policy(&[SandboxRule {
+            path: alias.to_string_lossy().into_owned(),
+            action: SandboxRuleAction::AllowWrite,
+        }]);
+        assert!(policy.allows_write(&alias));
+        assert!(!policy.allows_write(&outside));
+        assert_eq!(
+            process_rules(&policy).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+
+        let marker = fixture.work.join("command-marker");
+        let text = format!("printf owned > '{}'; printf unconfined", marker.display());
+        let error = fixture
+            .launcher(true)
+            .launch(
+                command(&text),
+                SharedSecurity(policy.clone()),
+                Arc::new(ProcessLifetime::default()),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!marker.exists());
+
+        let execution = fixture
+            .launcher(false)
+            .launch(
+                command(&text),
+                SharedSecurity(policy),
+                Arc::new(ProcessLifetime::default()),
+            )
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), execution.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        execution.settle().await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, "unconfined");
+        assert_eq!(fs::read_to_string(marker).unwrap(), "owned");
+        assert!(execution.is_completed());
     }
 
     #[cfg(unix)]

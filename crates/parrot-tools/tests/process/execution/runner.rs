@@ -97,6 +97,71 @@ async fn explicit_gate_off_run_forces_pipe_and_forwards_environment_and_cwd() {
 }
 
 #[tokio::test]
+async fn disabled_runner_never_materializes_sandbox_policy() {
+    let directory = Directory::new();
+    let request = directory.request("printf unconfined");
+    let runner = ProcessRunner::new(UnavailableProcessSandbox, Arc::new(SandboxGate::new(false)));
+    let mut calls = 0;
+    let execution = runner
+        .start_with_policy(&request, || {
+            calls += 1;
+            Err(io::Error::new(io::ErrorKind::InvalidData, "policy failure"))
+        })
+        .await
+        .unwrap();
+    assert_eq!(calls, 0);
+    let result = execution.wait().await.unwrap();
+    execution.settle().await.unwrap();
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.stdout, "unconfined");
+    assert!(execution.is_completed());
+}
+
+#[tokio::test]
+async fn enabled_runner_materializes_policy_once_and_propagates_error() {
+    let directory = Directory::new();
+    let request = directory.request("printf should-not-run");
+    let runner = ProcessRunner::new(UnavailableProcessSandbox, Arc::new(SandboxGate::new(true)));
+    let mut calls = 0;
+    let error = runner
+        .start_with_policy(&request, || {
+            calls += 1;
+            Err(io::Error::new(io::ErrorKind::InvalidData, "policy failure"))
+        })
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(calls, 1);
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(error.to_string(), "policy failure");
+    assert!(!request.resources.queue_directory.exists());
+}
+
+#[tokio::test]
+async fn policy_factory_gate_change_does_not_reselect_sandbox() {
+    let directory = Directory::new();
+    let marker = directory.0.join("must-not-exist");
+    let request = directory.request(&format!("printf bypass > '{}'", marker.display()));
+    let gate = Arc::new(SandboxGate::new(true));
+    let runner = ProcessRunner::new(UnavailableProcessSandbox, gate.clone());
+    let mut calls = 0;
+    let error = runner
+        .start_with_policy(&request, || {
+            calls += 1;
+            gate.set_enabled(false);
+            Ok(())
+        })
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(calls, 1);
+    assert!(!gate.enabled());
+    assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    assert!(!marker.exists());
+    assert!(!request.resources.queue_directory.exists());
+}
+
+#[tokio::test]
 async fn request_cancellation_remains_linked_after_start_returns() {
     let directory = Directory::new();
     let mut request = directory.request("exec sleep 60");

@@ -215,8 +215,11 @@ pub(crate) fn select_child<S: RestrictableAccessSnapshot + 'static>(
     lineage: &PolicyLineage<S>,
     profile: ChildProfile<S>,
     model: ResolvedModelSelection,
+    agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
 ) -> ChildResult<TurnSelection<S>> {
-    if lineage.count_profile(&profile.profile.id)? >= profile.recursion_limit {
+    if !agent_limits.disable_recursion_limit
+        && lineage.count_profile(&profile.profile.id)? >= profile.recursion_limit
+    {
         return Err(super::ChildError::registry(
             "subagent profile recursion limit reached",
         ));

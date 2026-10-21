@@ -14,7 +14,6 @@ use parrot_foundation::{
 use parrot_provider::{
     http_stream::{HttpError, ProviderHttpClient, ProviderHttpClientCatalog, ReqwestTransport},
     image_generation::bucket::{CredentialSource, StoredCredential, SystemClock},
-    responses_websocket::NativeConnector,
     routing::{
         auth::FoundationCredentials,
         builder::{
@@ -102,7 +101,6 @@ pub async fn build(
         BuildServices {
             clients: clients.clone(),
             credentials: sources.clone(),
-            connector: Arc::new(NativeConnector::new(standard.clone())),
             models_dev: ModelsDevInformationProvider::new(Arc::new(ReqwestTransport::new(
                 standard.clone(),
             ))),

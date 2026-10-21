@@ -194,12 +194,17 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
                 scope.identity().session.name
             )));
         }
-        let profile = self
-            .authority()?
+        let authority = self.authority()?;
+        let profile = authority
             .config
             .profiles
             .resolve_child(&request.requested_profile)?;
-        let selection = select_child(scope.selection().lineage(), profile, request.model.clone())?;
+        let selection = select_child(
+            scope.selection().lineage(),
+            profile,
+            request.model.clone(),
+            authority.config.agent_limits,
+        )?;
         scope.session().update_selection(selection)?;
         Ok(scope)
     }
@@ -217,11 +222,11 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
             )));
         }
         let depth = owner.identity().session.depth + 1;
-        if depth > 4 {
+        let authority = self.authority()?;
+        if !authority.config.agent_limits.disable_recursion_limit && depth > 4 {
             return Err(ChildError::registry("subagent depth limit reached"));
         }
         let parent = owner.parent_scope().require_owner()?;
-        let authority = self.authority()?;
         let profile = authority
             .config
             .profiles
@@ -236,7 +241,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
         let result: ChildResult<Arc<Scope<S>>> = async {
             self.ensure_accepting()?;
             let lineage = owner.selection().lineage().link(owner.selection().clone());
-            let selection = select_child(&lineage, profile, request.model.clone())?;
+            let selection = select_child(&lineage, profile, request.model.clone(), authority.config.agent_limits)?;
             let session_id = authority.config.ids.agent_session()?;
             let name = select_name(&request.requested_name, &session_id, conflicts);
             if AgentScratchDirectory::RESERVED_NAMES.contains(&name.as_str()) { return Err(ChildError::registry(format!("child agent name '{name}' is reserved"))); }

@@ -161,14 +161,35 @@ impl<S: AccessSnapshot + 'static> UserSessionModes<S> {
             workflows,
         }));
     }
+    pub fn for_agent(&self, selected_scratch: AgentScratchDirectory) -> ModeResult<Self> {
+        let modes = Self::new(self.registry.clone(), self.factories.clone())?;
+        modes.attach(selected_scratch);
+        Ok(modes)
+    }
+    pub fn has_workflow(&self, id: &str) -> bool {
+        self.factories.iter().any(|(name, _)| name == id)
+    }
     pub fn resolve(&self, id: &str) -> ModeResult<SessionMode<S>> {
-        let profile = self.registry.resolve(id)?;
-        let workflow = self.factories.iter().any(|(id, _)| id == profile.id());
-        Ok(SessionMode {
+        Ok(self.session_mode(self.registry.resolve(id)?))
+    }
+    /// Prompt binding also accepts non-user-selectable child profiles. This does
+    /// not select a mode or materialize its policy.
+    pub fn resolve_profile(&self, id: &str) -> ModeResult<SessionMode<S>> {
+        let profile = self
+            .registry
+            .profiles
+            .get(id)
+            .cloned()
+            .ok_or_else(|| ModeError::Registry(format!("unknown profile {id}")))?;
+        Ok(self.session_mode(profile))
+    }
+    fn session_mode(&self, profile: Arc<MaterializedModeProfile<S>>) -> SessionMode<S> {
+        let workflow = self.has_workflow(profile.id());
+        SessionMode {
             profile,
             attached: self.attached.clone(),
             workflow,
-        })
+        }
     }
     /// Actual T46 selection construction. Resolution and attachment are checked
     /// before the single materializer call. Its returned Arc, including its own

@@ -36,8 +36,17 @@ use parrot_foundation::{
     template_catalog::PromptTemplateCatalog,
 };
 use parrot_provider::{
+    http_stream::HttpError,
     image_generation::{ImageGenerationRequest, ImageGenerationResult},
     routing::aliases::ModelRouter,
+    sessions::{
+        Error as ProviderError, ProviderSessions,
+        diagnostics::{
+            DiagnosticEvent as ProviderDiagnosticEvent,
+            DiagnosticSeverity as ProviderDiagnosticSeverity, DiagnosticSink, LastRequestDumper,
+            MonotonicDiagnosticClock,
+        },
+    },
 };
 use parrot_runtime::{
     active_work::{
@@ -68,9 +77,11 @@ use parrot_runtime::{
         ScopeParts, ServiceRegistration, SessionAdapter, SnapshotPublisher,
     },
     compaction::{
-        CompactionPlanner, CompactionSettings, Compactor, ContextController, ContextStatus,
+        CompactionPlanner, CompactionSettings, Compactor, ContextController, ContextError,
+        ContextResult, ContextStatus,
     },
     interactions::ChildQuestionCoordinator,
+    plan_mode::{ModeResult, UserSessionModes},
     prompt_context::{
         AgentIdentityDescription, AgentPathEnvironment, CompositeSystemPromptProvider,
         SystemPromptProvider, TemplateSystemPromptProvider,
@@ -317,6 +328,37 @@ impl<S: RestrictableAccessSnapshot + 'static> ScopeLog<S> {
         event.outcome = outcome.map(str::to_owned);
         event.error_code = code.map(str::to_owned);
         self.user.diagnostic(&event);
+    }
+}
+impl<S: RestrictableAccessSnapshot + 'static> DiagnosticSink for ScopeLog<S> {
+    fn write(&self, event: ProviderDiagnosticEvent) {
+        let bounded = |value: u64| i64::try_from(value).unwrap_or(i64::MAX);
+        self.user.diagnostic(&DiagnosticEvent {
+            category: event.category,
+            operation: event.operation,
+            severity: match event.severity {
+                ProviderDiagnosticSeverity::Information => DiagnosticSeverity::Information,
+                ProviderDiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
+                ProviderDiagnosticSeverity::Error => DiagnosticSeverity::Error,
+            },
+            user_session_id: event.user_session_id,
+            agent_session_id: event
+                .agent_session_id
+                .or_else(|| Some(self.session_id.clone())),
+            correlation_id: event.correlation_id,
+            request_id: event.request_id,
+            transport: event.transport,
+            provider_id: event.provider_id,
+            model_id: event.model_id,
+            tool_name: event.tool_name,
+            outcome: event.outcome,
+            duration_milliseconds: event.duration_milliseconds.map(bounded),
+            count: event.count,
+            request_bytes: event.request_bytes.map(bounded),
+            response_bytes: event.response_bytes.map(bounded),
+            close_status: event.close_status,
+            error_code: event.error_code,
+        });
     }
 }
 impl<S: RestrictableAccessSnapshot + 'static> TurnDiagnostics for ScopeLog<S> {
@@ -738,16 +780,14 @@ impl<S: RestrictableAccessSnapshot + 'static> SelectionSource<S> for RoutedSelec
     }
 }
 
-pub struct ScopedTurnStatus {
+pub struct ScopedTurnStatus<S: RestrictableAccessSnapshot + 'static> {
     pub runtime: Arc<RuntimeStatus>,
     identity: Arc<AgentIdentity>,
+    modes: Arc<UserSessionModes<S>>,
     configuration: Arc<Configuration>,
 }
-impl ScopedTurnStatus {
-    pub fn query<S: RestrictableAccessSnapshot + 'static>(
-        &self,
-        selection: &TurnSelection<S>,
-    ) -> StatusQuery {
+impl<S: RestrictableAccessSnapshot + 'static> ScopedTurnStatus<S> {
+    pub fn query(&self, selection: &TurnSelection<S>) -> StatusQuery {
         StatusQuery {
             session_id: self.identity.session.session_id.clone(),
             parent_session_id: self.identity.session.parent_session_id.clone(),
@@ -756,22 +796,73 @@ impl ScopedTurnStatus {
             requested_model: selection.model.requested_selector.value.clone(),
         }
     }
-    pub fn profile_prompt<S: RestrictableAccessSnapshot + 'static>(
-        &self,
-        selection: &TurnSelection<S>,
-    ) -> String {
-        self.configuration
+    pub fn profile_prompt(&self, selection: &TurnSelection<S>) -> ModeResult<String> {
+        if self.modes.has_workflow(&selection.profile.id) {
+            return self
+                .modes
+                .resolve_profile(&selection.profile.id)?
+                .profile()
+                .prompt();
+        }
+        Ok(self
+            .configuration
             .runtime
             .profiles
             .get(&selection.profile.id)
             .map(|profile| profile.prompt.clone())
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 }
-impl<S: RestrictableAccessSnapshot + 'static> TurnStatus<S> for ScopedTurnStatus {
+impl<S: RestrictableAccessSnapshot + 'static> TurnStatus<S> for ScopedTurnStatus<S> {
     fn bind(&self, selection: &TurnSelection<S>) -> Arc<dyn ContextStatus> {
-        self.runtime
-            .bind_context(self.query(selection), self.profile_prompt(selection))
+        let prompt = if self.modes.has_workflow(&selection.profile.id) {
+            self.modes
+                .resolve_profile(&selection.profile.id)
+                .and_then(|mode| {
+                    mode.prepare()?;
+                    mode.profile().prompt()
+                })
+        } else {
+            self.profile_prompt(selection)
+        };
+        Arc::new(ScopedModeStatus {
+            runtime: self.runtime.clone(),
+            query: self.query(selection),
+            prompt,
+        })
+    }
+}
+
+struct ScopedModeStatus {
+    runtime: Arc<RuntimeStatus>,
+    query: StatusQuery,
+    prompt: ModeResult<String>,
+}
+impl ScopedModeStatus {
+    fn context(&self) -> ContextResult<Arc<dyn ContextStatus>> {
+        let prompt = self
+            .prompt
+            .as_ref()
+            .map_err(|error| ContextError::Operation(error.to_string()))?;
+        Ok(self
+            .runtime
+            .bind_context(self.query.clone(), prompt.clone()))
+    }
+}
+impl ContextStatus for ScopedModeStatus {
+    fn observe<'a>(
+        &'a self,
+        context: &'a ContextSnapshot,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<String>> {
+        Box::pin(async move { self.context()?.observe(context, cancellation).await })
+    }
+    fn observe_fitted<'a>(
+        &'a self,
+        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<String>> {
+        Box::pin(async move { self.context()?.observe_fitted(estimate, cancellation).await })
     }
 }
 
@@ -794,14 +885,21 @@ impl<S: RestrictableAccessSnapshot + 'static> ImageProvider for ScopedImages<S> 
                 .generate_image(request, cancellation)
                 .await
                 .map_err(|error| {
-                    if matches!(error, parrot_provider::sessions::Error::Cancelled) {
-                        OperationError::Cancelled
-                    } else {
-                        OperationError::Failed(Failure::new(
-                            FailureKind::Provider,
-                            error.to_string(),
-                        ))
-                    }
+                    let kind = match &error {
+                        ProviderError::Cancelled
+                        | ProviderError::Cancellation(_)
+                        | ProviderError::Http(
+                            HttpError::Cancelled | HttpError::RequestCancelled(_),
+                        ) => {
+                            return OperationError::Cancelled;
+                        }
+                        ProviderError::Authentication(_) => FailureKind::Authentication,
+                        ProviderError::Http(HttpError::Transport(_) | HttpError::Http(_)) => {
+                            FailureKind::Network
+                        }
+                        _ => FailureKind::Provider,
+                    };
+                    OperationError::Failed(Failure::new(kind, error.to_string()))
                 })
         })
     }
@@ -825,7 +923,7 @@ struct ScopedSessionServices<S: RestrictableAccessSnapshot + 'static> {
     link: Arc<ScopeLink<S>>,
     history: AgentHistoryView,
     reminders: Arc<ExitReminders<Publisher>>,
-    status: Arc<ScopedTurnStatus>,
+    status: Arc<ScopedTurnStatus<S>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionServices<S> {
     type Security = SharedSecurity<S>;
@@ -1355,6 +1453,11 @@ where
                 let status = Arc::new(ScopedTurnStatus {
                     runtime: runtime_status.clone(),
                     identity: identity.clone(),
+                    modes: if identity.session.parent_session_id.is_empty() {
+                        self.user.modes.clone()
+                    } else {
+                        Arc::new(self.user.modes.for_agent(scratch.clone()).map_err(child)?)
+                    },
                     configuration: self.config.configuration.clone(),
                 });
                 let publisher: Arc<Publisher> = self.user.broker.clone();
@@ -1484,36 +1587,49 @@ where
                     ));
                     parent = scope.parent_scope().parent();
                 }
-                let backend = RuntimeBackend::new(RuntimeConfig {
-                    identity: identity.session.clone(),
-                    history: prepared.history.clone(),
-                    broker: self.user.broker.clone(),
-                    publisher,
-                    selection: Arc::new(RoutedSelection {
-                        source: prepared.selection.clone(),
-                        router: self.config.router.clone(),
-                    }),
-                    tools: settlement,
-                    prompt,
-                    skills: skills.skills,
-                    context: ContextController::new(
-                        compactor,
-                        prepared.history.clone(),
-                        compaction_blobs,
-                        self.user.templates.clone(),
-                    ),
-                    status: status.clone(),
-                    completions: vec![completion],
-                    templates: self.user.templates.clone(),
-                    reminders,
-                    output: output.clone(),
-                    activity: Arc::new(LiveActivity::new(activity.clone(), log.clone())),
-                    parent_completion: prepared.parent_completion.clone(),
-                    ancestors,
-                    event_id: Arc::new(|| {
-                        Identifier::event_id().expect("event identity entropy unavailable")
-                    }),
-                })
+                let provider_sessions = ProviderSessions::with_diagnostics(
+                    log.clone(),
+                    Arc::new(MonotonicDiagnosticClock::default()),
+                    identity.session.session_id.clone(),
+                    Some(Arc::new(LastRequestDumper::new(
+                        scratch.root().join("last_request.json"),
+                        log.clone(),
+                    ))),
+                );
+                let backend = RuntimeBackend::with_sessions(
+                    RuntimeConfig {
+                        agent_limits: self.config.configuration.runtime.agent_limits,
+                        identity: identity.session.clone(),
+                        history: prepared.history.clone(),
+                        broker: self.user.broker.clone(),
+                        publisher,
+                        selection: Arc::new(RoutedSelection {
+                            source: prepared.selection.clone(),
+                            router: self.config.router.clone(),
+                        }),
+                        tools: settlement,
+                        prompt,
+                        skills: skills.skills,
+                        context: ContextController::new(
+                            compactor,
+                            prepared.history.clone(),
+                            compaction_blobs,
+                            self.user.templates.clone(),
+                        ),
+                        status: status.clone(),
+                        completions: vec![completion],
+                        templates: self.user.templates.clone(),
+                        reminders,
+                        output: output.clone(),
+                        activity: Arc::new(LiveActivity::new(activity.clone(), log.clone())),
+                        parent_completion: prepared.parent_completion.clone(),
+                        ancestors,
+                        event_id: Arc::new(|| {
+                            Identifier::event_id().expect("event identity entropy unavailable")
+                        }),
+                    },
+                    provider_sessions,
+                )
                 .await
                 .map_err(child)?;
                 let actual_session =

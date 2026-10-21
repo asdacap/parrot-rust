@@ -78,7 +78,7 @@
       # leaving host build scripts/proc macros dynamically linked for the builder.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS = lib.optionalString (target == "x86_64-linux-musl") "-Ctarget-feature=+crt-static";
       doCheck = false;
-      nativeBuildInputs = [pkgs.protobuf pkgs.nodejs];
+      nativeBuildInputs = [pkgs.protobuf pkgs.nodejs pkgs.perl];
       PROTOC = "${pkgs.protobuf}/bin/protoc";
       CC = "${buildPkgs.stdenv.cc}/bin/${buildPkgs.stdenv.cc.targetPrefix or ""}cc";
       preBuild = ''

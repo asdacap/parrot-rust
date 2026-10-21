@@ -101,6 +101,59 @@ fn help_runs_on_retained_actual_runtime_without_runtime_command_or_signal_regist
 }
 
 #[test]
+fn enhanced_terminal_color_honors_no_color_existence() {
+    use parrot_cli::terminal_layout::MarkdownRenderer;
+    const EXPECTED: &str = "PARROT_TEST_ENHANCED_COLOR";
+    if let Ok(expected) = std::env::var(EXPECTED) {
+        let color = enhanced_terminal_color_enabled();
+        assert_eq!(color, expected == "enabled");
+        assert_eq!(
+            MarkdownRenderer::render("", "**answer**", 80, color),
+            [if color {
+                "\x1b[1;38;5;195manswer\x1b[0m"
+            } else {
+                "answer"
+            }]
+        );
+        for (color, expected) in [(true, "\x1b[1;38;5;195manswer\x1b[0m"), (false, "answer")] {
+            assert_eq!(
+                MarkdownRenderer::render("", "**answer**", 80, color),
+                [expected]
+            );
+        }
+        return;
+    }
+    for value in [None, Some(""), Some("1"), Some("0"), Some("false")] {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "tests::enhanced_terminal_color_honors_no_color_existence",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env(
+                EXPECTED,
+                if value.is_none() {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+            );
+        if let Some(value) = value {
+            command.env("NO_COLOR", value);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "NO_COLOR={value:?}: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn root_preserves_explicit_rpc_io_and_cancellation_failure_categories() {
     let status = Status::permission_denied("native detail");
     let failure = enhanced_failure(parrot_cli::terminal_dialogs::EnhancedFailure::Rpc(status));
@@ -148,6 +201,12 @@ macro_rules! endpoint {
             async fn list_model_aliases(&self, _: Request<wire::ListModelAliasesRequest>) -> Result<Response<wire::ListModelAliasesResponse>, Status> {
                 Ok(Response::new(wire::ListModelAliasesResponse::new()))
             }
+            async fn list_models(&self, _: Request<wire::ListModelsRequest>) -> Result<Response<wire::ListModelsResponse>, Status> {
+                Ok(Response::new(wire::ListModelsResponse {
+                    models: vec![wire::Model { provider_id: "provider".into(), id: "model".into(), ..Default::default() }],
+                    ..Default::default()
+                }))
+            }
             type ListenStream = Events;
             async fn listen(&self, request: Request<wire::ListenRequest>) -> Result<Response<Self::ListenStream>, Status> {
                 let (sender, receiver) = mpsc::channel(8);
@@ -177,7 +236,6 @@ macro_rules! endpoint {
 endpoint! {
     resume_session(wire::ResumeSessionRequest) -> wire::UserSession,
     attach_session(wire::AttachSessionRequest) -> wire::UserSession,
-    list_models(wire::ListModelsRequest) -> wire::ListModelsResponse,
     configure_model_alias(wire::ConfigureModelAliasRequest) -> wire::ConfigureModelAliasResponse,
     list_provider_model_alias_defaults(wire::ListProviderModelAliasDefaultsRequest) -> wire::ListProviderModelAliasDefaultsResponse,
     apply_provider_model_alias_defaults(wire::ApplyProviderModelAliasDefaultsRequest) -> wire::ApplyProviderModelAliasDefaultsResponse,
@@ -204,17 +262,18 @@ endpoint! {
     reply_permission(wire::ReplyPermissionRequest) -> wire::ReplyPermissionResponse,
 }
 
-async fn native_once(prompt: &str) -> (Result<i32, DispatchError>, Arc<Mutex<Calls>>) {
-    let (app, _) = application();
+#[tokio::test]
+async fn actual_remote_invalid_variant_remains_usage_before_session_creation() {
+    let (app, base) = application();
     let calls = Arc::new(Mutex::new(Calls::default()));
-    let socket = PathBuf::from("/tmp").join(format!(
-        "t65-process-{}-{}.sock",
+    let socket_root = PathBuf::from("/tmp").join(format!(
+        "t17-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     let mut server = GrpcServer::start(
         Endpoint(calls.clone()),
-        TransportAddress::Unix(socket),
+        TransportAddress::Unix(socket_root.join("rpc.sock")),
         None,
         None,
         app.diagnostics.clone(),
@@ -224,7 +283,45 @@ async fn native_once(prompt: &str) -> (Result<i32, DispatchError>, Arc<Mutex<Cal
     let options = ChatOptions {
         model: "provider/model".into(),
         model_overridden: true,
-        mode: "mode".into(),
+        variant: Some("impossible".into()),
+        connect: server.address().to_string(),
+        basic: true,
+        prompt: "synthetic prompt".into(),
+        ..Default::default()
+    };
+    let actual = tokio::time::timeout(Duration::from_secs(5), app.chat(options, &Signal::new()))
+        .await
+        .unwrap();
+    server.close().await.unwrap();
+    assert!(matches!(actual, Ok(dispatch::EXIT_USAGE)), "{actual:?}");
+    assert!(calls.lock().unwrap().created.is_empty());
+    assert!(calls.lock().unwrap().messages.is_empty());
+    std::fs::remove_dir_all(socket_root).unwrap();
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+async fn native_once(prompt: &str) -> (Result<i32, DispatchError>, Arc<Mutex<Calls>>) {
+    let (app, _) = application();
+    let calls = Arc::new(Mutex::new(Calls::default()));
+    let socket_root = PathBuf::from("/tmp").join(format!(
+        "t65-process-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&socket_root).unwrap();
+    let mut server = GrpcServer::start(
+        Endpoint(calls.clone()),
+        TransportAddress::Unix(socket_root.join("rpc.sock")),
+        None,
+        None,
+        app.diagnostics.clone(),
+    )
+    .await
+    .unwrap();
+    let options = ChatOptions {
+        model: "provider/model".into(),
+        model_overridden: true,
+        mode: "build".into(),
         connect: server.address().to_string(),
         basic: true,
         prompt: prompt.into(),
@@ -244,6 +341,7 @@ async fn native_once(prompt: &str) -> (Result<i32, DispatchError>, Arc<Mutex<Cal
     };
     // Join the actual native listener and connections while this SAME Runtime lives.
     server.close().await.unwrap();
+    std::fs::remove_dir(socket_root).unwrap();
     (result, calls)
 }
 
@@ -254,7 +352,7 @@ async fn actual_remote_basic_once_listens_then_sends_structured_text_and_finishe
     let calls = calls.lock().unwrap();
     assert_eq!(calls.created.len(), 1);
     assert_eq!(calls.created[0].model, "provider/model");
-    assert_eq!(calls.created[0].mode, "mode");
+    assert_eq!(calls.created[0].mode, "build");
     assert!(!calls.created[0].interactive_permissions);
     assert_eq!(calls.listened.len(), 1);
     assert!(!calls.listened[0].replay);

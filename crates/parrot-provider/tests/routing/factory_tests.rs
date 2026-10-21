@@ -277,6 +277,7 @@ impl HttpClients for Clients {
         Ok(SelectedHttpClient {
             streaming: self.transport.clone(),
             images: Arc::new(NoImages),
+            connector: Arc::new(NoSocket),
         })
     }
 }
@@ -295,7 +296,6 @@ async fn build(
         BuildServices {
             clients: clients.clone(),
             credentials,
-            connector: Arc::new(NoSocket),
             models_dev: ModelsDevInformationProvider::new(transport),
             image_buckets: Arc::new(NoBucket),
         },

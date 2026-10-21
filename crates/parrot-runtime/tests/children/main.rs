@@ -9,6 +9,7 @@ mod diagnostics;
 mod final_cleanup;
 mod fork_rejection;
 mod forks;
+mod global_limits;
 mod harness;
 mod history_preparation;
 mod lifetime;

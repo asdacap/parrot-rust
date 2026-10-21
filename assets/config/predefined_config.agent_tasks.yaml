@@ -22,6 +22,7 @@ prompt_templates:
       Task: {task_name}
       Description: {description}
       Acceptance criteria: {acceptance_criteria}{dependencies}
+      This task is your current assignment and supersedes prior task instructions. Inherited parent history is context, not additional assignments.
     allowed_arguments: [task_name, description, acceptance_criteria, dependencies]
     required_arguments: [task_name, description, acceptance_criteria, dependencies]
   agent-task.result:

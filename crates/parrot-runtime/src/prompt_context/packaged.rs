@@ -433,7 +433,7 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
 ];
 
 use parrot_domain::contracts::packaged_files::{
-    InstallMissingError, InstallMissingRequest, PackagedFileInstaller,
+    InstallMissingError, InstallMissingOutcome, InstallMissingRequest, PackagedFileInstaller,
 };
 use std::{fmt, path::Path};
 
@@ -468,25 +468,47 @@ pub async fn extract_packaged_skills<I: PackagedFileInstaller + ?Sized>(
     installer: &I,
     security: &I::Security,
 ) -> Result<(), PackagedSkillsError> {
-    if destination.as_os_str().is_empty() {
-        return Err(PackagedSkillsError::EmptyDestination);
-    }
-    for asset in PACKAGED_SKILL_ASSETS {
-        let request = InstallMissingRequest {
-            target: destination.join(asset.relative_path),
-            contents: asset.bytes.to_vec(),
-            executable: asset.executable,
-        };
+    for request in requests(destination)? {
         installer
             .install_missing(&request, security)
             .await
-            .map_err(|error| {
-                if error.kind.is_io_or_denied() {
-                    PackagedSkillsError::Write(error)
-                } else {
-                    PackagedSkillsError::InvalidOperation(error)
-                }
-            })?;
+            .map_err(install_error)?;
     }
     Ok(())
+}
+
+/// Installs the same embedded resources during synchronous host construction.
+pub fn extract_packaged_skills_sync(
+    destination: &Path,
+    mut install: impl FnMut(
+        &InstallMissingRequest,
+    ) -> Result<InstallMissingOutcome, InstallMissingError>,
+) -> Result<(), PackagedSkillsError> {
+    for request in requests(destination)? {
+        install(&request).map_err(install_error)?;
+    }
+    Ok(())
+}
+
+fn requests(
+    destination: &Path,
+) -> Result<impl Iterator<Item = InstallMissingRequest> + '_, PackagedSkillsError> {
+    if destination.as_os_str().is_empty() {
+        return Err(PackagedSkillsError::EmptyDestination);
+    }
+    Ok(PACKAGED_SKILL_ASSETS
+        .iter()
+        .map(move |asset| InstallMissingRequest {
+            target: destination.join(asset.relative_path),
+            contents: asset.bytes.to_vec(),
+            executable: asset.executable,
+        }))
+}
+
+fn install_error(error: InstallMissingError) -> PackagedSkillsError {
+    if error.kind.is_io_or_denied() {
+        PackagedSkillsError::Write(error)
+    } else {
+        PackagedSkillsError::InvalidOperation(error)
+    }
 }

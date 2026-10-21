@@ -423,6 +423,10 @@ impl ScopeFactory<Security> for Factory {
                 })
                 .collect();
             let backend = RuntimeBackend::new(RuntimeConfig {
+                agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                    disable_max_turns: false,
+                    ..Default::default()
+                },
                 identity: identity.session.clone(),
                 history: history.clone(),
                 broker: broker.clone(),
@@ -513,6 +517,10 @@ impl Harness {
             providers: Mutex::new(BTreeMap::new()),
         });
         let registry = AgentRegistry::new(RegistryConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_recursion_limit: false,
+                ..Default::default()
+            },
             profiles: Arc::new(support::Profiles),
             factory: factory.clone(),
             histories: histories.clone(),

@@ -280,7 +280,13 @@ impl ProfileResolver<Security> for Profiles {
         Ok(ChildProfile {
             profile: profile(name),
             security: Security::new(0xff),
-            recursion_limit: if name == "once" { 1 } else { 8 },
+            recursion_limit: match name {
+                "once" => 1,
+                "query" => 3,
+                "explorer" => 4,
+                "worker" | "agent-task-payload" => 6,
+                _ => 8,
+            },
         })
     }
 }
@@ -545,6 +551,10 @@ impl Factory {
             })
             .collect();
         let backend = RuntimeBackend::new(RuntimeConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_max_turns: false,
+                ..Default::default()
+            },
             identity: prepared.identity.session.clone(),
             history: history.clone(),
             broker,

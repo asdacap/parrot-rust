@@ -126,6 +126,8 @@ pub struct Model {
 }
 
 impl Model {
+    pub const DEFAULT_REQUESTED_OUTPUT_TOKENS: i32 = 32 * 1024;
+
     #[must_use]
     pub fn new(id: impl Into<String>, provider_id: impl Into<String>) -> Self {
         let id = id.into();
@@ -142,6 +144,23 @@ impl Model {
             capabilities: ModelCapabilities::default(),
             fields: ModelMetadataFields::NONE,
         }
+    }
+
+    #[must_use]
+    pub fn requested_output_tokens(&self) -> i32 {
+        if self.max_output_tokens > 0 {
+            Self::DEFAULT_REQUESTED_OUTPUT_TOKENS.min(self.max_output_tokens)
+        } else {
+            Self::DEFAULT_REQUESTED_OUTPUT_TOKENS
+        }
+    }
+
+    #[must_use]
+    pub fn output_reserved_input_token_limit(&self) -> Option<i64> {
+        (self.context_window > 0).then(|| {
+            ((i64::from(self.context_window) - i64::from(self.requested_output_tokens())) * 20 / 21)
+                .max(0)
+        })
     }
 
     #[must_use]

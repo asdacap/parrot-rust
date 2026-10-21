@@ -167,6 +167,10 @@ async fn skill_session(
     let instructions =
         format!("Available Markdown skills:\n- $first ({first_path})\n- $second ({second_path})");
     let backend = RuntimeBackend::new(RuntimeConfig {
+        agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+            disable_max_turns: false,
+            ..Default::default()
+        },
         identity: SessionIdentity {
             session_id: "agent".into(),
             name: "test".into(),

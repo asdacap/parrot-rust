@@ -77,10 +77,74 @@ fn resolves_window_percentages_caps_and_legacy_defaults() {
             input,
             90,
             30,
+            None,
         );
         assert_eq!(policy.trigger_tokens, expected_trigger);
         assert_eq!(policy.target_tokens, expected_target);
     }
+}
+
+#[test]
+fn output_reservation_clamps_only_the_trigger_after_resolving_targets() {
+    for (limit, target, safe_limit, trigger, expected_trigger, expected_target) in [
+        (None, None, Some(140_220), 95, Some(140_220), Some(90_000)),
+        (
+            Some("180k"),
+            None,
+            Some(140_220),
+            95,
+            Some(140_220),
+            Some(90_000),
+        ),
+        (
+            Some("100k"),
+            None,
+            Some(140_220),
+            95,
+            Some(100_000),
+            Some(50_000),
+        ),
+        (
+            Some("95%"),
+            None,
+            Some(140_220),
+            95,
+            Some(140_220),
+            Some(85_500),
+        ),
+        (
+            Some("180k"),
+            Some("160k"),
+            Some(140_220),
+            95,
+            Some(140_220),
+            Some(160_000),
+        ),
+        (None, None, Some(140_220), 50, Some(90_000), Some(90_000)),
+        (None, None, Some(0), 95, Some(0), Some(90_000)),
+        (None, None, None, 95, Some(171_000), Some(90_000)),
+    ] {
+        let limit = limit.map(|text| ContextSize::parse(text).unwrap());
+        let target = target.map(|text| ContextSize::parse(text).unwrap());
+        let policy = ContextCompactionPolicy::resolve(
+            limit.as_ref(),
+            target.as_ref(),
+            180_000,
+            180_000,
+            trigger,
+            50,
+            safe_limit,
+        );
+        assert_eq!(policy.trigger_tokens, expected_trigger);
+        assert_eq!(policy.target_tokens, expected_target);
+        let mut snapshot = ContextSnapshot::new(expected_trigger.unwrap(), 180_000, None, trigger);
+        snapshot.trigger_tokens = policy.trigger_tokens;
+        assert!(!snapshot.exceeds_trigger());
+        assert!(snapshot.exceeds_compaction_trigger(expected_trigger.unwrap() + 1));
+    }
+    let unknown = ContextCompactionPolicy::resolve(None, None, 0, 0, 95, 50, None);
+    assert_eq!(unknown.trigger_tokens, None);
+    assert_eq!(unknown.target_tokens, None);
 }
 
 #[test]
@@ -118,12 +182,12 @@ fn resolves_percentages_at_window_boundaries() {
 #[test]
 fn scales_maximum_trigger_without_intermediate_overflow() {
     let limit = ContextSize::parse("9223372036854775807").unwrap();
-    let full = ContextCompactionPolicy::resolve(Some(&limit), None, 0, 0, 90, 100);
+    let full = ContextCompactionPolicy::resolve(Some(&limit), None, 0, 0, 90, 100, None);
     assert_eq!(full.trigger_tokens, Some(i64::MAX));
     assert_eq!(full.target_tokens, Some(i64::MAX));
-    let zero = ContextCompactionPolicy::resolve(Some(&limit), None, 0, 0, 90, 0);
+    let zero = ContextCompactionPolicy::resolve(Some(&limit), None, 0, 0, 90, 0, None);
     assert_eq!(zero.target_tokens, Some(0));
-    let legacy = ContextCompactionPolicy::resolve(None, None, 0, i32::MAX, 100, 100);
+    let legacy = ContextCompactionPolicy::resolve(None, None, 0, i32::MAX, 100, 100, None);
     assert_eq!(legacy.trigger_tokens, Some(i64::from(i32::MAX)));
     assert_eq!(legacy.target_tokens, Some(i64::from(i32::MAX)));
 }

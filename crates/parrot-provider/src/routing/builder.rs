@@ -13,7 +13,7 @@ use crate::{
         bucket::{BucketConfig, Clock, CredentialSource, ImageBucket, S3ImageBucket},
         linking::ImageLinkingProvider,
     },
-    responses_websocket::Connector,
+    responses_websocket::{Connector, NativeConnector},
     sessions::{Error, Provider, decorators::RetryingProvider},
 };
 use parrot_domain::contracts::async_ops::Cancellation;
@@ -23,10 +23,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-/// Both views are constructed from the same authority-scoped client selection.
+/// All transports share the provider's authority-scoped client selection.
 pub struct SelectedHttpClient {
     pub streaming: Arc<dyn HttpTransport>,
     pub images: Arc<dyn ImageTransport>,
+    pub connector: Arc<dyn Connector>,
 }
 pub trait HttpClients: Send + Sync {
     fn resolve(
@@ -58,7 +59,8 @@ impl HttpClients for CatalogHttpClients {
             .resolve(base_url, allow_invalid_tls_certificate)?;
         Ok(SelectedHttpClient {
             streaming: Arc::new(ReqwestTransport::new(client.clone())),
-            images: Arc::new(ReqwestImageTransport::new(client)),
+            images: Arc::new(ReqwestImageTransport::new(client.clone())),
+            connector: Arc::new(NativeConnector::new(client)),
         })
     }
 }
@@ -107,7 +109,6 @@ impl ImageBucketFactory for S3ImageBucketFactory {
 pub struct BuildServices {
     pub clients: Arc<dyn HttpClients>,
     pub credentials: Arc<dyn CredentialSources>,
-    pub connector: Arc<dyn Connector>,
     pub models_dev: ModelsDevInformationProvider,
     pub image_buckets: Arc<dyn ImageBucketFactory>,
 }
@@ -169,7 +170,7 @@ impl ProviderRegistryBuilder {
                 credentials: self.services.credentials.as_ref(),
                 transport: clients.streaming,
                 images: clients.images,
-                connector: self.services.connector.clone(),
+                connector: clients.connector,
                 external_models: &external_models,
                 maximum_request_bytes: self
                     .configuration

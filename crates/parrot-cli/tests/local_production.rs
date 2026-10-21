@@ -22,6 +22,9 @@ use parrot_host::grpc::{address::TransportAddress, transport::GrpcTransportClien
 use parrot_storage::diagnostics::FileDiagnosticLog;
 use protobuf::Message;
 
+#[path = "local_production/https.rs"]
+mod https;
+
 const CHILD_TIMEOUT: Duration = Duration::from_secs(30);
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -297,6 +300,14 @@ impl Fixture {
     }
 
     fn spawn(&self, arguments: &[&str]) -> BinaryChild {
+        self.spawn_with_environment(arguments, &[])
+    }
+
+    fn spawn_with_environment(
+        &self,
+        arguments: &[&str],
+        environment: &[(&str, &str)],
+    ) -> BinaryChild {
         let binary = std::env::var_os("PARROT_TEST_BINARY")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_parrot")));
@@ -316,6 +327,7 @@ impl Fixture {
             .env("HTTP_PROXY", "http://127.0.0.1:1")
             .env("NO_PROXY", "127.0.0.1,localhost")
             .stdin(Stdio::null());
+        command.envs(environment.iter().copied());
         BinaryChild::spawn(
             command,
             self.root
@@ -604,6 +616,123 @@ fn executable_creates_then_resumes_real_local_session_and_joins_owners() {
     assert!(!String::from_utf8_lossy(&second.stderr).contains("LOCAL_CAPABILITY_UNAVAILABLE"));
 }
 
+fn diagnostic_field<'a>(line: &'a str, name: &str) -> &'a str {
+    line.split_once(&format!(" {name}=\""))
+        .unwrap_or_else(|| panic!("missing {name} in {line}"))
+        .1
+        .split('"')
+        .next()
+        .unwrap()
+}
+
+#[test]
+fn executable_provider_diagnostics_capture_actual_requests_without_logging_payloads() {
+    for failed in [false, true] {
+        let fixture = Fixture::new(failed);
+        let prompt = "private provider diagnostic prompt";
+        let output = fixture.chat(prompt);
+        assert_eq!(output.status.success(), !failed, "{}", describe(&output));
+        let requests = fixture.chat_requests();
+        assert_eq!(requests.len(), 1);
+        let body = requests[0].split_once("\r\n\r\n").unwrap().1;
+        let sessions = std::fs::read_dir(fixture.root.join("state/parrotrust/sessions"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        assert_eq!(sessions.len(), 1);
+        let agents = std::fs::read_dir(sessions[0].join("root-agents"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        assert_eq!(agents.len(), 1);
+        let dumped = std::fs::read_to_string(agents[0].join("last_request.json")).unwrap();
+        assert_eq!(
+            dumped, body,
+            "dump must contain the actual prepared wire body"
+        );
+        assert!(dumped.contains(prompt));
+        assert!(!dumped.contains("synthetic-key"));
+        assert!(!agents[0].join("last_request.json.tmp").exists());
+
+        let log = std::fs::read_to_string(sessions[0].join("session.log")).unwrap();
+        let provider = log
+            .lines()
+            .filter(|line| line.contains("category=\"provider\""))
+            .collect::<Vec<_>>();
+        let observed = |name: &str| {
+            provider
+                .iter()
+                .copied()
+                .filter(|line| diagnostic_field(line, "event") == name)
+                .collect::<Vec<_>>()
+        };
+        for name in [
+            "call_started",
+            "request_started",
+            "request_finished",
+            "call_finished",
+        ] {
+            assert_eq!(observed(name).len(), 1, "duplicate/missing {name}: {log}");
+        }
+        let call = observed("call_started")[0];
+        let started = observed("request_started")[0];
+        let finished = observed("request_finished")[0];
+        let terminal = observed("call_finished")[0];
+        for line in &provider {
+            assert_eq!(
+                diagnostic_field(line, "correlation"),
+                diagnostic_field(call, "correlation")
+            );
+            assert_eq!(
+                diagnostic_field(line, "agent"),
+                diagnostic_field(call, "agent")
+            );
+            assert_eq!(
+                diagnostic_field(line, "session"),
+                diagnostic_field(call, "session")
+            );
+            assert_eq!(diagnostic_field(line, "provider"), "fixture");
+            assert_eq!(diagnostic_field(line, "model"), "test");
+        }
+        assert_eq!(
+            diagnostic_field(started, "request"),
+            diagnostic_field(finished, "request")
+        );
+        assert_eq!(diagnostic_field(finished, "transport"), "http_sse");
+        assert_eq!(
+            diagnostic_field(finished, "request_bytes")
+                .parse::<usize>()
+                .unwrap(),
+            body.len()
+        );
+        assert_eq!(
+            diagnostic_field(terminal, "outcome"),
+            if failed { "failed" } else { "completed" }
+        );
+        let position = |name: &str| {
+            provider
+                .iter()
+                .position(|line| diagnostic_field(line, "event") == name)
+                .unwrap()
+        };
+        assert!(position("call_started") < position("request_started"));
+        assert!(position("request_started") < position("request_finished"));
+        assert!(position("request_finished") < position("call_finished"));
+        assert_eq!(observed("input_tokens").len(), usize::from(!failed));
+        assert_eq!(observed("output_tokens").len(), usize::from(!failed));
+        assert!(!log.contains(prompt));
+        assert!(!log.contains("synthetic-key"));
+        assert!(!log.contains("synthetic provider failure"));
+        for entry in std::fs::read_dir(fixture.root.join("state/parrotrust/logs")).unwrap() {
+            let global = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            assert!(!global.contains(prompt));
+            assert!(!global.contains("synthetic-key"));
+        }
+    }
+}
+
 #[test]
 fn executable_uploads_an_image_through_real_authorized_workspace_reads() {
     let fixture = Fixture::new(false);
@@ -628,14 +757,57 @@ fn executable_uploads_an_image_through_real_authorized_workspace_reads() {
 }
 
 #[test]
+fn executable_invalid_local_variant_is_usage_without_duplicate_rpc_error() {
+    let fixture = Fixture::new(false);
+    let output = fixture
+        .spawn(&[
+            "chat",
+            "--basic",
+            "--variant",
+            "impossible",
+            "synthetic prompt",
+        ])
+        .finish();
+    assert_eq!(output.status.code(), Some(2), "{}", describe(&output));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "parrot: model fixture/test does not support effort impossible; choose one of:"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("invalid reasoning variant"), "{stderr}");
+    assert!(fixture.chat_requests().is_empty());
+    let root = fixture.root.clone();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn executable_later_local_validation_is_operational_not_variant_usage() {
+    let fixture = Fixture::new(false);
+    let output = fixture
+        .spawn(&[
+            "chat",
+            "--basic",
+            "--mode",
+            "missing-mode",
+            "synthetic prompt",
+        ])
+        .finish();
+    assert_eq!(output.status.code(), Some(1), "{}", describe(&output));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("missing-mode"));
+    assert!(fixture.chat_requests().is_empty());
+    let root = fixture.root.clone();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn executable_reports_real_provider_failure_and_exits_after_owned_shutdown() {
     let fixture = Fixture::new(true);
     let output = fixture.chat("synthetic failure prompt");
-    assert!(
-        !output.status.success(),
-        "unexpected success: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+    assert_eq!(output.status.code(), Some(1), "{}", describe(&output));
     let rendered = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),

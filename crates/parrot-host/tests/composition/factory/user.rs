@@ -590,6 +590,37 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
         standing: StandingInstruction::new(catalog.clone()),
         statistics: lease.events.get_runtime_statistics().await.unwrap(),
         root_identity: AgentIdentity::root("agent-first".into(), "main".into(), catalog),
+        modes: Arc::new(
+            UserSessionModes::new(
+                Arc::new(
+                    ModeRegistry::new(
+                        vec![
+                            parrot_runtime::plan_mode::MaterializedModeProfile::new(
+                                "build".into(),
+                                &parrot_foundation::config::runtime::ProfileConfig {
+                                    prompt: String::new(),
+                                    usage: String::new(),
+                                    allowed_tools: None,
+                                    max_turns: 8,
+                                    recursion_limit: 5,
+                                    read_only: false,
+                                    is_user_selectable: true,
+                                    is_agent_selectable: false,
+                                    sandbox_rules: Vec::new(),
+                                },
+                                &[],
+                                Arc::new(TestSecurity),
+                            )
+                            .unwrap(),
+                        ],
+                        "build",
+                    )
+                    .unwrap(),
+                ),
+                Vec::new(),
+            )
+            .unwrap(),
+        ),
         registry: OnceLock::new(),
     });
     Histories {
@@ -664,6 +695,49 @@ async fn actual_history_preparation_queries_new_lineage_after_same_name_reuse() 
     histories.services.permissions.close().await;
     histories.services.broker.complete();
     lease.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn refresh_all_histories_preserves_occupant_order_and_source_failure_boundaries() {
+    let lease = real_lease().await;
+    let histories = actual_histories(lease.clone()).await;
+    record_history_occupant(&histories, "agent-first", "first-occupant-message").await;
+    record_history_occupant(&histories, "agent-second", "second-occupant-message").await;
+    let mut orphan = event(&Identifier::event_id().unwrap());
+    orphan.agent_session_id = "agent-without-lineage".into();
+    histories
+        .repository
+        .append(
+            orphan,
+            Some("user".into()),
+            Some("unresolved-history".into()),
+        )
+        .await
+        .unwrap();
+    let path = histories
+        .services
+        .resources
+        .agent_scratch(&["main"])
+        .unwrap()
+        .history_path();
+    // A directory at a derived-file path is replaced, not treated as authority.
+    std::fs::create_dir(&path).unwrap();
+    histories.refresh_all().await.unwrap();
+    assert!(path.is_file());
+    let physical = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        physical.find("first-occupant-message").unwrap()
+            < physical.find("second-occupant-message").unwrap()
+    );
+    assert!(!physical.contains("unresolved-history"));
+    let log = std::fs::read_to_string(lease.selected_root().path().join("session.log")).unwrap();
+    assert!(log.contains("agent_history_unresolved"));
+    assert!(log.contains("agent-without-lineage"));
+    histories.services.permissions.close().await;
+    histories.services.broker.complete();
+    lease.close().await.unwrap();
+    // Unlike projection I/O, failure to enumerate authoritative lineage is visible.
+    assert!(histories.refresh_all().await.is_err());
 }
 
 #[tokio::test]

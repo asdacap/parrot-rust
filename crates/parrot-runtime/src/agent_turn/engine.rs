@@ -25,7 +25,9 @@ use parrot_domain::{
     protocol::messages::parrot::{self as protocol, Event},
     values::accounting::AgentSessionStatistics,
 };
-use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_foundation::{
+    config::runtime::AgentLimitsConfig, template_catalog::PromptTemplateCatalog,
+};
 use parrot_provider::sessions::{self, ProviderSessions};
 use parrot_storage::{
     conversation::{
@@ -46,6 +48,7 @@ pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 
 pub struct RuntimeConfig<S: AccessSnapshot, T: TurnTools<S>> {
     pub identity: SessionIdentity,
+    pub agent_limits: AgentLimitsConfig,
     pub history: AgentHistoryView,
     pub broker: Arc<EventBroker>,
     pub publisher: Arc<Publisher>,
@@ -76,6 +79,7 @@ struct State {
 /// concrete filesystem/security implementation is constructed by the drain.
 pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     identity: SessionIdentity,
+    agent_limits: AgentLimitsConfig,
     history: AgentHistoryView,
     broker: Arc<EventBroker>,
     publisher: Arc<Publisher>,
@@ -117,6 +121,13 @@ where
     T::Snapshot: 'static,
 {
     pub async fn new(config: RuntimeConfig<S, T>) -> Result<Arc<Self>, TurnError> {
+        Self::with_sessions(config, ProviderSessions::new()).await
+    }
+
+    pub async fn with_sessions(
+        config: RuntimeConfig<S, T>,
+        sessions: ProviderSessions,
+    ) -> Result<Arc<Self>, TurnError> {
         if config.identity.session_id != config.history.agent_session_id() {
             return Err(TurnError::Service(
                 "session identity must match its bound history".into(),
@@ -148,6 +159,7 @@ where
         };
         Ok(Arc::new(Self {
             identity: config.identity,
+            agent_limits: config.agent_limits,
             history: config.history,
             broker: config.broker,
             publisher: config.publisher,
@@ -160,7 +172,7 @@ where
             activity: config.activity,
             parent_completion: config.parent_completion,
             event_id: config.event_id,
-            sessions: ProviderSessions::new(),
+            sessions,
             usage,
             reminders,
             interruption: AtomicBool::new(false),
@@ -538,7 +550,7 @@ where
         work: &dyn DrainWork,
     ) -> Result<Execution, TurnError> {
         let mut answer = String::new();
-        let mut budget = TurnBudget::default();
+        let mut budget = TurnBudget::new(self.agent_limits.disable_max_turns);
         let mut retry_pending = false;
         let mut compacted_oversized = false;
         let mut selected: Option<TurnSelection<S>> = None;

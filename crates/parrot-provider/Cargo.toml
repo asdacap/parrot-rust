@@ -20,6 +20,8 @@ sha2 = "=0.10.8"
 
 [dev-dependencies]
 tokio = { version = "=1.43.0", default-features = false, features = ["test-util"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls-pemfile = "=2.2.0"
 
 [[test]]
 name = "http_stream"

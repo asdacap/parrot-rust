@@ -131,6 +131,108 @@ async fn pipe_eager_live_files_cached_result_and_concurrent_waiters() {
     reaped(execution.id());
 }
 
+#[tokio::test]
+async fn pipe_bom_decodes_independent_stdout_and_stderr_into_live_files() {
+    fn quoted(bytes: &[u8]) -> String {
+        use std::fmt::Write;
+        let mut quoted = String::new();
+        for byte in bytes {
+            write!(&mut quoted, "\\{byte:03o}").unwrap();
+        }
+        quoted
+    }
+    let stderr = [0xfe, 0xff, 0, b'B', 0x20, 0xac];
+    for stdout in [
+        vec![b'A', 0xf0, 0x9f, 0x98, 0x80],
+        vec![0xef, 0xbb, 0xbf, b'A', 0xf0, 0x9f, 0x98, 0x80],
+        vec![0xff, 0xfe, b'A', 0, 0x3d, 0xd8, 0, 0xde],
+        vec![0xfe, 0xff, 0, b'A', 0xd8, 0x3d, 0xde, 0],
+        vec![0xff, 0xfe, 0, 0, b'A', 0, 0, 0, 0, 0xf6, 1, 0],
+        vec![0, 0, 0xfe, 0xff, 0, 0, 0, b'A', 0, 1, 0xf6, 0],
+    ] {
+        let directory = Directory::new();
+        let script = format!(
+            "printf '{}'; printf '{}' >&2",
+            quoted(&stdout),
+            quoted(&stderr)
+        );
+        let execution = ShellProcessExecution::start_pipe(&shell(&script), &directory.0).unwrap();
+        let actual = result(&execution).await;
+        assert_eq!(actual.exit_code, 0);
+        assert_eq!(actual.stdout, "A😀", "{stdout:?}");
+        assert_eq!(actual.stderr, "B€");
+        assert!(actual.blob_path.is_none());
+        execution.settle().await.unwrap();
+        assert_eq!(
+            fs::read_to_string(execution.stdout_path().unwrap()).unwrap(),
+            "A😀"
+        );
+        assert_eq!(
+            fs::read_to_string(execution.stderr_path().unwrap()).unwrap(),
+            "B€"
+        );
+        reaped(execution.id());
+    }
+}
+
+#[tokio::test]
+async fn pipe_bom_spill_retains_decoded_text_and_character_limits() {
+    let directory = Directory::new();
+    let execution = ShellProcessExecution::start_pipe(
+        &shell("printf '\\377\\376'; awk 'BEGIN{for(i=0;i<70000;i++)printf \"A%c\",0}'"),
+        &directory.0,
+    )
+    .unwrap();
+    let actual = result(&execution).await;
+    assert_eq!(actual.exit_code, 0);
+    assert!(actual.stdout.is_empty() && actual.stderr.is_empty());
+    let expected = "A".repeat(70000);
+    assert_eq!(
+        fs::read_to_string(execution.stdout_path().unwrap()).unwrap(),
+        expected
+    );
+    assert_eq!(
+        fs::read_to_string(actual.blob_path.unwrap()).unwrap(),
+        format!(
+            "{}\n[stdout]\n{}",
+            output::format_completion(0, actual.elapsed_milliseconds),
+            expected
+        )
+    );
+    no_temporary_files(&directory.0);
+}
+
+#[tokio::test]
+async fn pipe_bom_cancellation_flushes_partial_units_after_live_output() {
+    let directory = Directory::new();
+    let execution = ShellProcessExecution::start_pipe(
+        &shell("printf '\\377\\376A\\000\\000\\330'; exec sleep 30"),
+        &directory.0,
+    )
+    .unwrap();
+    let stdout = execution.stdout_path().unwrap();
+    until(|| fs::read(&stdout).unwrap() == b"A").await;
+    execution.request_cancel();
+    let error = tokio::time::timeout(Duration::from_secs(2), execution.wait())
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+    execution.settle().await.unwrap();
+    assert_eq!(fs::read_to_string(stdout).unwrap(), "A�");
+    reaped(execution.id());
+}
+
+#[test]
+fn pipe_bom_detection_does_not_change_pty_utf8_transcripts() {
+    let directory = Directory::new();
+    let transcript = PtyTranscript::new(&directory.0);
+    transcript.append(b"\xef\xbb\xbfA").unwrap();
+    transcript.complete().unwrap();
+    assert_eq!(transcript.read_text(0).unwrap(), (2, "\u{feff}A".into()));
+    transcript.dispose().unwrap();
+}
+
 // Original ProcessRunner oversized and combined UTF-8 formatting operands.
 #[tokio::test]
 async fn original_oversized_and_combined_utf8_results_spill_without_loss() {
@@ -306,7 +408,7 @@ async fn direct_exit_waits_for_output_eof_but_cancel_and_drop_join_inherited_dra
     let actual = result(&execution).await;
     assert_eq!(actual.stdout, "done");
     assert_eq!(actual.elapsed_milliseconds, elapsed);
-    let (execution, holder) = inherited_pipe_case(&directory).await;
+    let (execution, mut holder) = inherited_pipe_case(&directory).await;
     execution.request_cancel();
     tokio::time::timeout(Duration::from_secs(2), execution.settle())
         .await
@@ -319,8 +421,9 @@ async fn direct_exit_waits_for_output_eof_but_cancel_and_drop_join_inherited_dra
     );
     assert!(recover(&execution.state).drains.is_empty());
     reaped(execution.id());
+    assert!(holder.0.try_wait().unwrap().is_none());
     drop(holder);
-    let (execution, holder) = inherited_pipe_case(&directory).await;
+    let (execution, mut holder) = inherited_pipe_case(&directory).await;
     let pid = execution.id();
     let shared = execution.shared.clone();
     let state = execution.state.clone();
@@ -328,7 +431,58 @@ async fn direct_exit_waits_for_output_eof_but_cancel_and_drop_join_inherited_dra
     assert!(recover(&shared.native).is_none());
     assert!(recover(&state).drains.is_empty());
     reaped(pid);
+    assert!(holder.0.try_wait().unwrap().is_none());
     drop(holder);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn cancel_and_drop_join_drains_and_settle_escaped_descendants() {
+    let directory = Directory::new();
+    for cancel in [true, false] {
+        let ready = directory.0.join("ready");
+        let _ = fs::remove_file(&ready);
+        let mut spec =
+            shell("setsid /bin/sh -c 'printf \"%s\\n\" \"$$\" > ready; exec sleep 20' & wait");
+        spec.current_dir = Some(directory.0.clone());
+        let execution = ShellProcessExecution::start_pipe(&spec, &directory.0).unwrap();
+        let mut descendant = 0;
+        until(|| {
+            descendant = fs::read_to_string(&ready)
+                .ok()
+                .and_then(|text| text.trim().parse::<i32>().ok())
+                .unwrap_or(0);
+            descendant > 0
+        })
+        .await;
+        assert_ne!(unsafe { libc::getsid(descendant) }, unsafe {
+            libc::getsid(execution.id() as i32)
+        });
+        let root = execution.id();
+        let shared = execution.shared.clone();
+        let state = execution.state.clone();
+        let started = Instant::now();
+        if cancel {
+            execution.request_cancel();
+            execution.settle().await.unwrap();
+            assert_eq!(
+                execution.wait().await.unwrap_err().kind(),
+                io::ErrorKind::Interrupted
+            );
+        }
+        drop(execution);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(recover(&shared.native).is_none());
+        assert!(recover(&state).drains.is_empty());
+        reaped(root);
+        match fs::read_to_string(format!("/proc/{descendant}/stat")) {
+            Ok(stat) => assert!(matches!(
+                stat.rsplit_once(") ").unwrap().1.as_bytes()[0],
+                b'Z' | b'X'
+            )),
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::NotFound),
+        }
+    }
 }
 
 #[tokio::test]

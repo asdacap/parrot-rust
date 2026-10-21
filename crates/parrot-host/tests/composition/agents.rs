@@ -602,6 +602,10 @@ mod fixture {
                 .into_iter()
                 .collect();
             let backend = RuntimeBackend::new(RuntimeConfig {
+                agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                    disable_max_turns: false,
+                    ..Default::default()
+                },
                 identity: prepared.identity.session.clone(),
                 history: prepared.history.clone(),
                 broker: broker.clone(),
@@ -724,6 +728,10 @@ mod fixture {
                 ),
             });
             let registry = AgentRegistry::new(RegistryConfig {
+                agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                    disable_recursion_limit: false,
+                    ..Default::default()
+                },
                 profiles: Arc::new(super::support::Profiles),
                 factory: factory.clone(),
                 histories: histories.clone(),

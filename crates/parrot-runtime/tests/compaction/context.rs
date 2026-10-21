@@ -265,6 +265,7 @@ impl Scripted {
         let selector = format!("scripted/{id}");
         let mut model = Model::new(id, "scripted");
         model.context_window = context;
+        model.max_output_tokens = 1;
         let registry = Arc::new(
             ProviderRegistry::new(
                 vec![Arc::new(self.clone())],

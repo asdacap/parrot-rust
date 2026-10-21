@@ -69,12 +69,14 @@ impl BudgetRuntime {
         provider: &Scripted,
         context_window: i32,
         maximum_input_tokens: i32,
+        maximum_output_tokens: i32,
         profile: TurnProfile,
         tools: Arc<BudgetTools>,
     ) -> Self {
         let mut model = Model::new("model", "scripted");
         model.context_window = context_window;
         model.max_input_tokens = maximum_input_tokens;
+        model.max_output_tokens = maximum_output_tokens;
         let registry = Arc::new(
             ProviderRegistry::new(
                 vec![Arc::new(provider.clone())],
@@ -118,8 +120,6 @@ impl BudgetRuntime {
         let activity = Arc::new(Activity::new(trace.clone()));
         let compactor = Compactor::new(
             CompactionSettings {
-                // Match the source Drain fixture: automatic compaction must not
-                // intercept the request's own input/output-limit validation.
                 trigger_percent: i32::MAX,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
@@ -140,6 +140,10 @@ impl BudgetRuntime {
         let context =
             ContextController::new(compactor, fixture.history.clone(), blobs, templates.clone());
         let backend = RuntimeBackend::new(RuntimeConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_max_turns: false,
+                ..Default::default()
+            },
             identity: SessionIdentity {
                 session_id: "agent".into(),
                 name: "budget-test".into(),
@@ -226,7 +230,7 @@ fn tool_names(request: &Request) -> Vec<&str> {
 
 #[tokio::test]
 async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_windows() {
-    for context_window in [0, 100_000, 20_000] {
+    for (context_window, output_limit) in [(0, 0), (100_000, 0), (20_000, 8_192)] {
         let fixture = Fixture::new();
         let provider = Scripted::new(vec![Step::complete("done")]);
         let runtime = BudgetRuntime::new(
@@ -234,6 +238,7 @@ async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_w
             &provider,
             context_window,
             0,
+            output_limit,
             profile(),
             BudgetTools::new(&[]),
         )
@@ -258,10 +263,15 @@ async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_w
             )
             .unwrap();
             let headroom = (estimated + 19) / 20;
-            let expected = if context_window > 0 {
-                32_768_i64.min(i64::from(context_window) - estimated - headroom)
+            let requested = if output_limit > 0 {
+                32_768_i64.min(i64::from(output_limit))
             } else {
                 32_768
+            };
+            let expected = if context_window > 0 {
+                requested.min(i64::from(context_window) - estimated - headroom)
+            } else {
+                requested
             };
             assert!(expected > 0);
             assert_eq!(i64::from(request.max_output_tokens), expected);
@@ -276,15 +286,20 @@ async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_w
 }
 
 #[tokio::test]
-async fn actual_second_request_budget_uses_prior_reported_input_usage() {
+async fn actual_reported_usage_triggers_compaction_before_consuming_reserved_output() {
     let fixture = Fixture::new();
     let mut first = Step::complete("first answer");
     first.completion.as_mut().unwrap().input_tokens = 147_776;
-    let provider = Scripted::new(vec![first, Step::complete("done")]);
+    let provider = Scripted::new(vec![
+        first,
+        Step::complete("compacted summary"),
+        Step::complete("done"),
+    ]);
     let runtime = BudgetRuntime::new(
         &fixture,
         &provider,
         180_000,
+        0,
         0,
         profile(),
         BudgetTools::new(&[]),
@@ -301,11 +316,24 @@ async fn actual_second_request_budget_uses_prior_reported_input_usage() {
     }
     {
         let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests.len(), 2);
-        let maximum = requests[1].max_output_tokens;
-        assert!(maximum > 0);
-        assert!(147_776 + maximum <= 180_000);
-        assert!(maximum < 32_768);
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[1].max_output_tokens, 1024);
+        let final_request = &requests[2];
+        assert_eq!(final_request.max_output_tokens, 32_768);
+        let selected = runtime.selection.capture().unwrap();
+        let snapshot = fixture
+            .controller()
+            .compactor()
+            .planner()
+            .estimate_context(
+                &selected.model.canonical_model,
+                &final_request.instructions,
+                &final_request.tools,
+                &final_request.messages,
+            )
+            .unwrap();
+        assert_eq!(snapshot.trigger_tokens, Some(140_220));
+        assert!(!snapshot.exceeds_trigger());
     }
     let events = fixture.events().await;
     let usage: Vec<_> = events
@@ -314,15 +342,35 @@ async fn actual_second_request_budget_uses_prior_reported_input_usage() {
         .collect();
     assert_eq!(usage.len(), 2);
     assert_eq!(usage[0].request_usage_recorded().input_tokens, 147_776);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_compaction_finished())
+            .count(),
+        1
+    );
+    assert!(
+        fixture
+            .repository
+            .compaction("agent".into())
+            .await
+            .unwrap()
+            .is_some()
+    );
     runtime.close().await;
 }
 
 #[tokio::test]
 async fn actual_input_and_exhausted_context_fail_before_any_provider_request_with_typed_diagnostics()
  {
-    for (context, input_limit, message) in
-        [(400_000, 1, "input limit"), (1, 0, "no output capacity")]
-    {
+    for (context, input_limit, message) in [
+        (400_000, 1, "input limit"),
+        (
+            1,
+            0,
+            "A complete conversation group exceeds the compaction input budget.",
+        ),
+    ] {
         let fixture = Fixture::new();
         let provider = Scripted::default();
         let runtime = BudgetRuntime::new(
@@ -330,6 +378,7 @@ async fn actual_input_and_exhausted_context_fail_before_any_provider_request_wit
             &provider,
             context,
             input_limit,
+            0,
             profile(),
             BudgetTools::new(&[]),
         )
@@ -347,7 +396,11 @@ async fn actual_input_and_exhausted_context_fail_before_any_provider_request_wit
             .filter(|event| event.has_turn_failed())
             .collect();
         assert_eq!(failures.len(), 1);
-        assert!(failures[0].turn_failed().message.contains(message));
+        assert!(
+            failures[0].turn_failed().message.contains(message),
+            "{}",
+            failures[0].turn_failed().message
+        );
         assert!(failures[0].turn_failed().provider_response_body.is_empty());
         let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
         assert_eq!(diagnostic.len(), 2);
@@ -368,7 +421,7 @@ async fn actual_profile_allowed_and_disabled_tools_filter_every_request() {
     selected.disabled_tools = vec!["settled".into()];
     let tools = BudgetTools::new(&["settled", "held", "not-allowed", "HELD"]);
     let runtime =
-        BudgetRuntime::new(&fixture, &provider, 100_000, 0, selected, tools.clone()).await;
+        BudgetRuntime::new(&fixture, &provider, 100_000, 0, 0, selected, tools.clone()).await;
     let sent = runtime
         .send("prompt", protocol::Delivery::DELIVERY_STEER)
         .await;
@@ -405,7 +458,7 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     original.allowed_tools = Some(vec!["worker".into(), "survivor".into()]);
     let tools = BudgetTools::new(&["worker", "survivor", "new-tool"]);
     let runtime =
-        BudgetRuntime::new(&fixture, &provider, 100_000, 0, original, tools.clone()).await;
+        BudgetRuntime::new(&fixture, &provider, 100_000, 0, 0, original, tools.clone()).await;
     let sent = runtime
         .send("first prompt", protocol::Delivery::DELIVERY_STEER)
         .await;

@@ -1,3 +1,12 @@
+#[path = "image_tests.rs"]
+mod images;
+#[path = "plan_tests.rs"]
+mod plan;
+#[path = "prompt_tests.rs"]
+mod prompt_context;
+#[path = "skill_tests.rs"]
+mod skills;
+
 use super::*;
 use parrot_domain::protocol::messages::parrot as wire;
 use parrot_provider::{
@@ -10,8 +19,13 @@ use std::{
     sync::atomic::AtomicU64,
 };
 
+mod explore_alias;
+#[cfg(unix)]
+mod workspace_identity;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
-struct NoCallProvider;
+#[derive(Default)]
+struct NoCallProvider(AtomicU64);
 impl NoCallProvider {
     fn models() -> Vec<Model> {
         let mut model = Model::new("test", "local");
@@ -26,6 +40,7 @@ impl Provider for NoCallProvider {
         "local"
     }
     fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
+        self.0.fetch_add(1, Ordering::SeqCst);
         Err(Error::InvalidOperation(
             "constructor test must not call provider".into(),
         ))
@@ -43,6 +58,7 @@ impl Provider for NoCallProvider {
         Box::pin(async { Ok(Self::models()) })
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
+        self.0.fetch_add(1, Ordering::SeqCst);
         Err(Error::InvalidOperation(
             "constructor test must not open provider session".into(),
         ))
@@ -100,14 +116,21 @@ impl Fixture {
         }
     }
     fn host(&self) -> ProductionHost {
-        self.host_with(Arc::new(NoCallProvider))
+        self.host_with(Arc::new(NoCallProvider::default()))
     }
     fn host_with(&self, provider: Arc<dyn Provider>) -> ProductionHost {
+        self.host_at(self.root.join("workspace"), provider)
+    }
+    fn host_at(
+        &self,
+        launch_directory: impl AsRef<Path>,
+        provider: Arc<dyn Provider>,
+    ) -> ProductionHost {
         ProductionHost::new(ProductionHostConfig {
             configuration: self.configuration.clone(),
             templates: self.templates.clone(),
             roots: self.roots.clone(),
-            launch_directory: self.root.join("workspace"),
+            launch_directory: launch_directory.as_ref().to_owned(),
             providers: Arc::new(
                 ProviderRegistry::new(
                     vec![provider],
@@ -204,6 +227,67 @@ async fn real_production_host_creates_resumes_and_joins_local_transports() {
     assert_eq!(result.id, session.id);
     bounded(resumed.close()).await.unwrap();
     assert!(!socket.exists());
+}
+
+#[tokio::test]
+async fn real_production_host_retries_resume_after_session_scratch_directory_is_repaired() {
+    let fixture = Fixture::new();
+    let provider = Arc::new(NoCallProvider::default());
+    let host = fixture.host_with(provider.clone());
+    let session = bounded(host.service().create_session(
+        &wire::CreateSessionRequest {
+            model: "local/test".into(),
+            mode: "build".into(),
+            ..Default::default()
+        },
+        Arc::new(NeverCancelled),
+    ))
+    .await
+    .unwrap();
+    bounded(host.close()).await.unwrap();
+
+    let scratch = fixture
+        .roots
+        .current()
+        .state()
+        .join("sessions")
+        .join(&session.id)
+        .join("scratch");
+    std::fs::remove_dir_all(&scratch).unwrap();
+    std::fs::write(&scratch, "not a directory").unwrap();
+
+    let resumed = fixture.host_with(provider.clone());
+    let request = wire::ResumeSessionRequest {
+        user_session_id: session.id.clone(),
+        working_directory: fixture
+            .root
+            .join("workspace")
+            .to_string_lossy()
+            .into_owned(),
+        ..Default::default()
+    };
+    assert!(
+        bounded(
+            resumed
+                .service()
+                .resume_session(&request, Arc::new(NeverCancelled))
+        )
+        .await
+        .is_err()
+    );
+    std::fs::remove_file(&scratch).unwrap();
+    std::fs::create_dir_all(&scratch).unwrap();
+    let result = bounded(
+        resumed
+            .service()
+            .resume_session(&request, Arc::new(NeverCancelled)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.id, session.id);
+    bounded(resumed.close()).await.unwrap();
+    assert_eq!(provider.0.load(Ordering::SeqCst), 0);
+    std::fs::remove_dir_all(&fixture.root).unwrap();
 }
 
 #[tokio::test]

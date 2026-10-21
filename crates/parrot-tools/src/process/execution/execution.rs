@@ -12,6 +12,7 @@ use super::output::{
     self, MAX_OUTPUT_CHARACTERS, PipeProcessOutputFiles, ProcessOutput, ProcessOutputBlobStore,
     Utf8Decoder, Utf16Writer,
 };
+use super::pipe_decoder::PipeDecoder;
 use super::transcript::PtyTranscript;
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::filenames::FilenameGenerator;
@@ -119,7 +120,12 @@ impl Shared {
     fn stop(&self) {
         self.cancelled.store(true, Ordering::Release);
         if let Some(native) = recover(&self.native).as_mut() {
-            native.request_cancel();
+            if let Err(error) = native.request_cancel() {
+                let mut failure = recover(&self.failure);
+                if failure.is_none() {
+                    *failure = Some(Failure::capture(&error));
+                }
+            }
         }
     }
     fn fail(&self, error: &io::Error) {
@@ -920,7 +926,7 @@ fn drain_pipe(
         .parent()
         .expect("absolute output path")
         .to_path_buf();
-    let mut decoder = Utf8Decoder::default();
+    let mut decoder = PipeDecoder::default();
     let mut inline = Vec::new();
     let mut spill: Option<PrivateOutput> = None;
     let mut append = |bytes: &[u8], complete: bool| -> io::Result<()> {

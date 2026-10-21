@@ -277,7 +277,11 @@ impl HttpClients for Clients {
             Arc::as_ptr(&streaming) as *const (),
             Arc::as_ptr(&images) as *const ()
         );
-        Ok(SelectedHttpClient { streaming, images })
+        Ok(SelectedHttpClient {
+            streaming,
+            images,
+            connector: Arc::new(NoSocket),
+        })
     }
 }
 #[derive(Default)]
@@ -425,7 +429,6 @@ impl Fixture {
         let services = BuildServices {
             clients: Arc::new(Clients(http.clone())),
             credentials: Arc::new(Sources(keys.clone())),
-            connector: Arc::new(NoSocket),
             models_dev: ModelsDevInformationProvider::new(http.clone()),
             image_buckets: Arc::new(S3ImageBucketFactory::new(
                 Arc::new(Epoch),

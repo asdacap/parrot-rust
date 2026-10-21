@@ -70,23 +70,27 @@ fn execute(launch: &LaunchSpec) -> Output {
 }
 
 #[test]
-fn baseline_arguments_match_source_containment_and_order() {
+fn pipe_arguments_match_source_containment_and_order() {
+    let root = Fixture::new();
+    fs::write(root.path("bwrap"), "not executed").unwrap();
+    let sandbox = LinuxBubblewrapSandbox::new(&root.path("bwrap"), false).unwrap();
     let policy = LinuxSandboxPolicy {
         device_paths: vec!["/dev/example".into()],
         ..Default::default()
     };
-    assert_eq!(
-        strings(policy.arguments(
+    let launch = sandbox
+        .pipe_launch(
+            &policy,
             "printf '%s' a; exit 7",
             Path::new("/workspace"),
             &[("EXAMPLE".into(), "a b=c".into())],
-            None
-        )),
+        )
+        .unwrap();
+    assert_eq!(
+        strings(launch.args),
         [
             "--die-with-parent",
             "--new-session",
-            "--unshare-user",
-            "--unshare-pid",
             "--unshare-ipc",
             "--unshare-uts",
             "--cap-drop",
@@ -135,7 +139,7 @@ fn masks_existing_types_and_preserves_later_exceptions_and_owned_parents() {
         ..Default::default()
     };
     let args = strings(policy.arguments("true", Path::new("/"), &[], None));
-    let rule_args = &args[11..args.len() - 10];
+    let rule_args = &args[9..args.len() - 10];
     let expected = [
         "--dir".to_owned(),
         root.0.display().to_string(),
@@ -242,23 +246,37 @@ fn pty_inner_argv_binds_helper_before_devices_and_attaches_after_chdir() {
             )
             .unwrap(),
     );
+    let executable = root.path("bwrap").canonicalize().unwrap();
     let helper = root.path("helper").display().to_string();
     assert_eq!(
-        &args[12..19],
+        args,
         [
+            executable.to_str().unwrap(),
+            "--die-with-parent",
+            "--new-session",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--cap-drop",
+            "ALL",
+            "--ro-bind",
+            "/",
+            "/",
             "--ro-bind",
             &helper,
             &helper,
             "--dev",
             "/dev",
             "--proc",
-            "/proc"
-        ]
-    );
-    assert_eq!(
-        &args[19..],
-        [
-            "--chdir", "/", "--", &helper, "--attach", "--", "/bin/sh", "-c", "echo hi"
+            "/proc",
+            "--chdir",
+            "/",
+            "--",
+            &helper,
+            "--attach",
+            "--",
+            "/bin/sh",
+            "-c",
+            "echo hi",
         ]
     );
     assert_eq!(
@@ -323,7 +341,7 @@ fn actual_source_mount_observations_match() {
         ..Default::default()
     };
     let args = strings(policy.arguments("true", Path::new("/"), &[], None));
-    let actual = args[11..args.len() - 10]
+    let actual = args[9..args.len() - 10]
         .iter()
         .map(|arg| arg.replace(root.0.to_str().unwrap(), "$ROOT"))
         .collect::<Vec<_>>()
@@ -333,7 +351,7 @@ fn actual_source_mount_observations_match() {
 }
 
 #[test]
-#[ignore = "requires an actual usable Linux bubblewrap/user namespace capability; failure is not a skip or unconfined fallback"]
+#[ignore = "requires an actual usable Linux bubblewrap namespace capability; failure is not a skip or unconfined fallback"]
 fn native_bwrap_confines_synthetic_roots() {
     let executable = std::env::var_os("T38_BWRAP")
         .map(PathBuf::from)

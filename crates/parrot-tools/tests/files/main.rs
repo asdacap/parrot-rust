@@ -4,6 +4,7 @@ mod fixtures;
 mod image_behavior;
 mod outline;
 mod source_helpers;
+mod streaming;
 
 use std::collections::BTreeMap;
 

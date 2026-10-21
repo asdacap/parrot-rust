@@ -256,6 +256,10 @@ impl Fixture {
         let output = Arc::new(Output::default());
         let activity = Arc::new(Activity::new(trace.clone()));
         let backend = RuntimeBackend::new(RuntimeConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_max_turns: false,
+                ..Default::default()
+            },
             identity: SessionIdentity {
                 session_id: "agent".into(),
                 name: "test".into(),

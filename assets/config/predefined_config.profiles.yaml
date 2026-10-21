@@ -94,7 +94,7 @@ profiles:
       - Read-only mode is enforced by the runtime.
     usage: Select for read-only questions about the project.
     max_turns: 8
-    recursion_limit: 2
+    recursion_limit: 3
     read_only: true
     is_user_selectable: true
     is_agent_selectable: false
@@ -108,7 +108,7 @@ profiles:
       Hard rules:
       - Read-only mode is enforced by the runtime.
     max_turns: 32
-    recursion_limit: 3
+    recursion_limit: 4
     read_only: true
     is_user_selectable: false
     is_agent_selectable: true
@@ -136,7 +136,7 @@ profiles:
       Typical tasks include implementing part of a feature, fixing tests or bugs, and completing an independently assigned portion of a refactor. Respect the ownership boundaries in the task. You are not alone in the codebase: do not revert other agents' edits, and accommodate concurrent changes made by others.
       If this is a continuation of a plan, refer the plan or subplan to subagent.
     max_turns: 128
-    recursion_limit: 4
+    recursion_limit: 6
     read_only: false
     is_user_selectable: false
     is_agent_selectable: true
@@ -147,7 +147,7 @@ profiles:
 
       Preserve existing behavior outside the task, report concrete verification evidence, and stop when the task contract is satisfied. For instruction leaves, return only the required strict JSON with nonblank result and exactly one strict verdict.
     max_turns: 128
-    recursion_limit: 4
+    recursion_limit: 6
     read_only: false
     is_user_selectable: false
     is_agent_selectable: true
