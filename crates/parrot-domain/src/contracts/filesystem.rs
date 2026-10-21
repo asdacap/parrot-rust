@@ -117,6 +117,12 @@ impl fmt::Display for FileReadError {
 
 impl std::error::Error for FileReadError {}
 
+/// Receives sequential chunks of at most 8192 bytes from one authorized read.
+/// Returning `false` stops consumption, but does not skip final target validation.
+pub trait ReadConsumer: Send {
+    fn consume(&mut self, bytes: &[u8]) -> bool;
+}
+
 /// A provider bound to a workspace/path environment, not a general privileged
 /// filesystem handle. It must use the supplied captured snapshot, never recapture
 /// mutable policy or assume that constructing `ResolvedRead` authorizes access.
@@ -160,6 +166,35 @@ pub trait AuthorizedReadService: Send + Sync {
         snapshot: &'a Self::Security,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<BoundRead, FileReadError>>;
+
+    /// Stream one descriptor-bound regular-file operation with the same checks
+    /// and byte limit as `read`, including final validation after a consumer
+    /// stops early. Returns the actual bound physical path, not a capability.
+    /// Production adapters must override this method to avoid buffering the file.
+    /// This default only preserves compatibility with existing buffered adapters.
+    fn stream_read<'a>(
+        &'a self,
+        request: &'a ReadRequest,
+        snapshot: &'a Self::Security,
+        cancellation: &'a dyn Cancellation,
+        consumer: &'a mut dyn ReadConsumer,
+    ) -> BoxFuture<'a, OperationResult<PathBuf, FileReadError>> {
+        Box::pin(async move {
+            let read = self.read(request, snapshot, cancellation).await?;
+            for chunk in read.bytes.chunks(8192) {
+                cancellation
+                    .check()
+                    .map_err(|_| super::async_ops::OperationError::Cancelled)?;
+                if !consumer.consume(chunk) {
+                    break;
+                }
+            }
+            cancellation
+                .check()
+                .map_err(|_| super::async_ops::OperationError::Cancelled)?;
+            Ok(read.physical_path)
+        })
+    }
 }
 
 /// The already-expanded caller path and source Write (`true`) / Edit (`false`)

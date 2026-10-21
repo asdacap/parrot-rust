@@ -9,6 +9,7 @@ mod interleavings;
 mod limits;
 mod notifications;
 mod owner_validation;
+mod prompts;
 mod retained;
 mod retries;
 mod settlement;

@@ -7,11 +7,13 @@ use parrot_domain::{
     contracts::{async_ops::Cancellation, security::RestrictableAccessSnapshot},
     values::accounting::RetainedAgentBudget,
 };
+use parrot_foundation::config::runtime::AgentLimitsConfig;
 use std::sync::{Arc, Mutex};
 
 pub type ChildAdmission<S> = Arc<dyn Fn(&Arc<Scope<S>>) -> ChildResult<()> + Send + Sync>;
 
 pub struct RegistryConfig<S: RestrictableAccessSnapshot + 'static> {
+    pub agent_limits: AgentLimitsConfig,
     pub profiles: Arc<dyn ProfileResolver<S>>,
     pub factory: Arc<dyn ScopeFactory<S>>,
     pub histories: Arc<dyn HistoryPreparer>,

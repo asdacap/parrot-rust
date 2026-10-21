@@ -56,6 +56,25 @@ impl EdgeRuntime {
         maximum_requests: i32,
         tool: &'static str,
     ) -> Self {
+        Self::with_limits(
+            fixture,
+            provider,
+            maximum_requests,
+            tool,
+            parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_max_turns: false,
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    async fn with_limits(
+        fixture: &Fixture,
+        provider: &Scripted,
+        maximum_requests: i32,
+        tool: &'static str,
+        agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
+    ) -> Self {
         let tools = Arc::new(EdgeTools {
             inner: Tools::default(),
             name: tool,
@@ -83,6 +102,7 @@ impl EdgeRuntime {
             .unwrap(),
         );
         let backend = RuntimeBackend::new(RuntimeConfig {
+            agent_limits,
             identity: SessionIdentity {
                 session_id: "agent".into(),
                 name: "request-budget-edges".into(),
@@ -168,6 +188,45 @@ fn assert_runaway(events: &[Event]) {
     assert_eq!(failures[0].turn_failed().message, RUNAWAY);
     assert!(failures[0].turn_failed().provider_response_body.is_empty());
     assert!(!events.iter().any(|event| event.has_turn_ended()));
+}
+
+#[tokio::test]
+async fn global_default_disables_profile_request_budget_but_explicit_false_restores_it() {
+    for disable_max_turns in [true, false] {
+        let fixture = Fixture::new();
+        let provider = Scripted::new(vec![
+            tool_response("truncated-1", "settled", "length", "{"),
+            tool_response("truncated-2", "settled", "length", "{"),
+            Step::complete("done beyond profile budget"),
+        ]);
+        let mut limits = parrot_foundation::config::runtime::AgentLimitsConfig::default();
+        if !disable_max_turns {
+            limits.disable_max_turns = false;
+        }
+        let runtime = EdgeRuntime::with_limits(&fixture, &provider, 2, "settled", limits).await;
+        let execution = runtime.execute().await;
+        let events = fixture.events().await;
+        let requests = provider.requests.lock().unwrap();
+        if disable_max_turns {
+            assert_eq!(execution.status, ExecutionStatus::Succeeded);
+            assert_eq!(execution.output, "done beyond profile budget");
+            assert_eq!(requests.len(), 3);
+            assert!(
+                requests
+                    .iter()
+                    .all(|request| request.tools.iter().any(|tool| tool.name == "settled"))
+            );
+            assert!(!events.iter().any(|event| event.has_turn_failed()));
+            assert!(events.iter().any(|event| event.has_turn_ended()));
+        } else {
+            assert_eq!(execution.status, ExecutionStatus::Failed);
+            assert_eq!(requests.len(), 2);
+            assert!(requests[1].tools.is_empty());
+            assert_runaway(&events);
+        }
+        drop(requests);
+        runtime.close().await;
+    }
 }
 
 #[tokio::test]

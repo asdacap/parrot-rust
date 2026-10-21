@@ -44,8 +44,6 @@ impl LinuxSandboxPolicy {
         let mut args: Vec<OsString> = [
             "--die-with-parent",
             "--new-session",
-            "--unshare-user",
-            "--unshare-pid",
             "--unshare-ipc",
             "--unshare-uts",
             "--cap-drop",

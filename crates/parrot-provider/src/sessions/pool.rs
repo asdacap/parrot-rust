@@ -1,4 +1,8 @@
-use super::{Error, Provider, Session};
+use super::{
+    Error, Provider, Session,
+    diagnostic_session::DiagnosticSession,
+    diagnostics::{DiagnosticClock, DiagnosticSink, LastRequestDumper},
+};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 
@@ -10,16 +14,41 @@ struct State {
     close_result: Option<Result<(), Error>>,
 }
 
+struct SessionDiagnostics {
+    sink: Arc<dyn DiagnosticSink>,
+    clock: Arc<dyn DiagnosticClock>,
+    agent_session_id: String,
+    dumper: Option<Arc<LastRequestDumper>>,
+}
+
 /// Sessions belong to this owner, and provider keys use Arc reference identity.
 #[derive(Default)]
 pub struct ProviderSessions {
     state: Arc<Mutex<State>>,
     closed: Arc<Notify>,
+    diagnostics: Option<SessionDiagnostics>,
 }
 
 impl ProviderSessions {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_diagnostics(
+        sink: Arc<dyn DiagnosticSink>,
+        clock: Arc<dyn DiagnosticClock>,
+        agent_session_id: String,
+        dumper: Option<Arc<LastRequestDumper>>,
+    ) -> Self {
+        Self {
+            diagnostics: Some(SessionDiagnostics {
+                sink,
+                clock,
+                agent_session_id,
+                dumper,
+            }),
+            ..Self::default()
+        }
     }
 
     pub async fn get(&self, provider: Arc<dyn Provider>) -> Result<Arc<dyn Session>, Error> {
@@ -35,6 +64,17 @@ impl ProviderSessions {
             return Ok(session.clone());
         }
         let session = provider.open_session()?;
+        let session: Arc<dyn Session> = match &self.diagnostics {
+            Some(diagnostics) => Arc::new(DiagnosticSession::new(
+                session,
+                diagnostics.sink.clone(),
+                diagnostics.clock.clone(),
+                diagnostics.agent_session_id.clone(),
+                provider.id().to_owned(),
+                diagnostics.dumper.clone(),
+            )),
+            None => session,
+        };
         if state.turn_open {
             session.begin_turn().await?;
         }

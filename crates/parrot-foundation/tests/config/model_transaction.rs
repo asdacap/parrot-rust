@@ -1,4 +1,4 @@
-use crate::{producer, support::Context};
+use crate::{fixtures, support::Context};
 use parrot_domain::values::context::ContextSize;
 use parrot_foundation::config::{
     Configuration, Result,

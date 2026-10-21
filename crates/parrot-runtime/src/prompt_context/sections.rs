@@ -124,20 +124,45 @@ impl SystemPromptProvider for TemplateSystemPromptProvider {
     }
 }
 // SecurityProfilePrompt renders lazily and retains its first result across epochs.
-struct SecurityDescriptionProvider(TemplateSystemPromptProvider);
+pub struct SecurityProfilePromptProvider {
+    rules: Vec<SecurityRuleDescription>,
+    sandbox_enabled: Arc<dyn Fn() -> bool + Send + Sync>,
+    templates: Arc<PromptTemplateCatalog>,
+}
+impl SecurityProfilePromptProvider {
+    pub fn new(
+        rules: Vec<SecurityRuleDescription>,
+        sandbox_enabled: Arc<dyn Fn() -> bool + Send + Sync>,
+        templates: Arc<PromptTemplateCatalog>,
+    ) -> Self {
+        Self {
+            rules,
+            sandbox_enabled,
+            templates,
+        }
+    }
+}
 struct SecurityDescriptionPrompt {
     templates: Arc<PromptTemplateCatalog>,
     arguments: Vec<(String, Value)>,
     rendered: Option<PromptResult<String>>,
 }
-impl SystemPromptProvider for SecurityDescriptionProvider {
+impl SystemPromptProvider for SecurityProfilePromptProvider {
     fn key(&self) -> &str {
-        &self.0.key
+        "runtime:system-context:16-security-profile"
     }
     fn materialize(&self, _: &AgentIdentityDescription) -> PromptResult<Box<dyn SystemPrompt>> {
+        let rules = self
+            .rules
+            .iter()
+            .map(|rule| json!({"path": escape_rule_path(&rule.path), "action": rule.action.as_str()}))
+            .collect::<Vec<_>>();
         Ok(Box::new(SecurityDescriptionPrompt {
-            templates: self.0.templates.clone(),
-            arguments: self.0.arguments.clone(),
+            templates: self.templates.clone(),
+            arguments: vec![
+                ("rules".into(), rules.into()),
+                ("sandbox_enabled".into(), (self.sandbox_enabled)().into()),
+            ],
             rendered: None,
         }))
     }
@@ -156,8 +181,13 @@ impl SystemPrompt for SecurityDescriptionPrompt {
     }
 }
 
-struct IdentityProvider(Arc<PromptTemplateCatalog>);
-impl SystemPromptProvider for IdentityProvider {
+pub struct SessionIdentityPromptProvider(Arc<PromptTemplateCatalog>);
+impl SessionIdentityPromptProvider {
+    pub fn new(templates: Arc<PromptTemplateCatalog>) -> Self {
+        Self(templates)
+    }
+}
+impl SystemPromptProvider for SessionIdentityPromptProvider {
     fn key(&self) -> &str {
         "runtime:system-context:14-session-identity"
     }
@@ -181,12 +211,6 @@ pub fn materialized_context_providers(
             items.join(", ")
         }
     };
-    let rules = context
-        .security
-        .rules
-        .iter()
-        .map(|rule| json!({"path": escape_rule_path(&rule.path), "action": rule.action.as_str()}))
-        .collect::<Vec<_>>();
     let subagents = context
         .subagents
         .iter()
@@ -249,21 +273,13 @@ pub fn materialized_context_providers(
             )) as Arc<dyn SystemPromptProvider>
         })
         .collect::<Vec<_>>();
-    providers.push(Arc::new(SecurityDescriptionProvider(
-        TemplateSystemPromptProvider::new(
-            "runtime:system-context:16-security-profile",
-            "context.security-profile",
-            vec![
-                ("rules".into(), rules.into()),
-                (
-                    "sandbox_enabled".into(),
-                    context.security.sandbox_enabled.into(),
-                ),
-            ],
-            templates.clone(),
-        ),
+    let sandbox_enabled = context.security.sandbox_enabled;
+    providers.push(Arc::new(SecurityProfilePromptProvider::new(
+        context.security.rules.clone(),
+        Arc::new(move || sandbox_enabled),
+        templates.clone(),
     )));
-    providers.push(Arc::new(IdentityProvider(templates)));
+    providers.push(Arc::new(SessionIdentityPromptProvider::new(templates)));
     providers
 }
 

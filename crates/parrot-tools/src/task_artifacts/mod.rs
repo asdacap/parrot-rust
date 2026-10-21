@@ -347,7 +347,7 @@ pub(crate) fn decode_stream_reader_bytes(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
+pub(crate) fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
     let mut units = bytes
         .chunks_exact(2)
         .map(|chunk| {

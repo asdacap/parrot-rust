@@ -180,9 +180,16 @@ impl CompactionPlanner {
         let mut snapshot =
             ContextSnapshot::new(estimated, limit, usage, self.settings.trigger_percent);
         snapshot.input_limit = selected.model.input_token_limit();
-        snapshot.trigger_tokens = (snapshot.input_limit > 0).then(|| {
-            i64::from(snapshot.input_limit) * i64::from(self.settings.trigger_percent) / 100
-        });
+        snapshot.trigger_tokens = ContextCompactionPolicy::resolve(
+            None,
+            None,
+            limit,
+            snapshot.input_limit,
+            self.settings.trigger_percent,
+            self.settings.target_percent,
+            selected.model.output_reserved_input_token_limit(),
+        )
+        .trigger_tokens;
         Ok(snapshot)
     }
 
@@ -198,6 +205,10 @@ impl CompactionPlanner {
             selected.canonical_model.model.input_token_limit(),
             self.settings.trigger_percent,
             self.settings.target_percent,
+            selected
+                .canonical_model
+                .model
+                .output_reserved_input_token_limit(),
         )
     }
 

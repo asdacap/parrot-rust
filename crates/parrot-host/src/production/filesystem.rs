@@ -5,10 +5,13 @@ use parrot_domain::{
         filesystem::{
             AuthorizedMutationService, AuthorizedReadService, BoundRead, FileMetadata,
             FileReadError, FileReadErrorKind, LinkPolicy, MutationRead, MutationRequest,
-            MutationTarget, ReadRequest,
+            MutationTarget, ReadConsumer, ReadRequest,
         },
     },
-    values::project_workspace::ProjectWorkspace,
+    values::{
+        config::{PathPlatform, PlatformPath},
+        project_workspace::ProjectWorkspace,
+    },
 };
 use parrot_runtime::tool_settlement::SharedSecurity;
 use std::path::{Component, Path, PathBuf};
@@ -26,6 +29,19 @@ fn failed(kind: FileReadErrorKind, message: impl Into<String>) -> OperationError
 }
 
 fn normalize(root: &Path, requested: &Path) -> Result<PathBuf> {
+    let platform = if cfg!(target_os = "macos") {
+        PathPlatform::MacOs
+    } else {
+        PathPlatform::Unix
+    };
+    normalize_for_platform(root, requested, platform)
+}
+
+fn normalize_for_platform(
+    root: &Path,
+    requested: &Path,
+    platform: PathPlatform,
+) -> Result<PathBuf> {
     let input = if requested.is_absolute() {
         requested.to_path_buf()
     } else {
@@ -53,6 +69,17 @@ fn normalize(root: &Path, requested: &Path) -> Result<PathBuf> {
             FileReadErrorKind::InvalidPath,
             "A filesystem path must be absolute.",
         ));
+    }
+    if platform == PathPlatform::MacOs {
+        let text = result.to_str().ok_or_else(|| {
+            failed(
+                FileReadErrorKind::InvalidPath,
+                "Filesystem paths must be valid Unicode on macOS.",
+            )
+        })?;
+        return PlatformPath::normalize(text, "/", platform)
+            .map(PathBuf::from)
+            .map_err(|error| failed(FileReadErrorKind::InvalidPath, error.to_string()));
     }
     Ok(result)
 }
@@ -186,6 +213,33 @@ impl AuthorizedReadService for ProductionFilesystem {
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             {
                 let _ = (request, snapshot);
+                unsupported()
+            }
+        })
+    }
+
+    fn stream_read<'a>(
+        &'a self,
+        request: &'a ReadRequest,
+        snapshot: &'a Security,
+        cancellation: &'a dyn Cancellation,
+        consumer: &'a mut dyn ReadConsumer,
+    ) -> BoxFuture<'a, Result<PathBuf>> {
+        Box::pin(async move {
+            check_cancel(cancellation)?;
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                unix_fs::stream_read(
+                    &self.path(&request.requested)?,
+                    request,
+                    snapshot,
+                    cancellation,
+                    consumer,
+                )
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                let _ = (request, snapshot, consumer);
                 unsupported()
             }
         })
@@ -798,6 +852,29 @@ mod unix_fs {
         snapshot: &Security,
         cancellation: &dyn Cancellation,
     ) -> Result<BoundRead> {
+        struct Collect(Vec<u8>);
+        impl ReadConsumer for Collect {
+            fn consume(&mut self, bytes: &[u8]) -> bool {
+                self.0.extend_from_slice(bytes);
+                true
+            }
+        }
+        let mut consumer = Collect(Vec::new());
+        let physical_path = stream_read(path, request, snapshot, cancellation, &mut consumer)?;
+        Ok(BoundRead {
+            lexical_path: path.to_path_buf(),
+            physical_path,
+            bytes: consumer.0,
+        })
+    }
+
+    pub(super) fn stream_read(
+        path: &Path,
+        request: &ReadRequest,
+        snapshot: &Security,
+        cancellation: &dyn Cancellation,
+        consumer: &mut dyn ReadConsumer,
+    ) -> Result<PathBuf> {
         let pinned = pin(path, request.links)?;
         let (physical, status) = validate(
             pinned.as_fd(),
@@ -811,13 +888,28 @@ mod unix_fs {
         let mut file = reopen(&pinned, false)?;
         validate(file.as_fd(), path, request.links, Some(&physical))?;
         authorize_read(snapshot, path, &physical)?;
-        let bytes = bytes(&mut file, request.max_bytes, cancellation)?;
+        let mut total = 0usize;
+        let mut buffer = [0u8; 8192];
+        loop {
+            check_cancel(cancellation)?;
+            let count = file.read(&mut buffer).map_err(io)?;
+            if count == 0 {
+                break;
+            }
+            total = total.saturating_add(count);
+            if request.max_bytes.is_some_and(|limit| total > limit) {
+                return Err(failed(
+                    FileReadErrorKind::TooLarge,
+                    "The file exceeds the permitted byte limit.",
+                ));
+            }
+            if !consumer.consume(&buffer[..count]) {
+                break;
+            }
+        }
+        check_cancel(cancellation)?;
         validate(file.as_fd(), path, request.links, Some(&physical))?;
-        Ok(BoundRead {
-            lexical_path: path.to_path_buf(),
-            physical_path: physical,
-            bytes,
-        })
+        Ok(physical)
     }
 
     fn parent_names(path: &Path) -> Result<Vec<&OsStr>> {
@@ -1135,6 +1227,382 @@ mod tests {
             Err(OperationError::Failed(error)) => error.kind,
             _ => panic!("expected filesystem failure"),
         }
+    }
+
+    #[test]
+    fn normalization_maps_only_macos_root_aliases_after_lexical_cleanup() {
+        for (requested, macos, unix) in [
+            ("/tmp", "/private/tmp", "/tmp"),
+            ("/var", "/private/var", "/var"),
+            ("/etc", "/private/etc", "/etc"),
+            ("/tmp/child", "/private/tmp/child", "/tmp/child"),
+            ("/var/child", "/private/var/child", "/var/child"),
+            ("/etc/child", "/private/etc/child", "/etc/child"),
+            ("/tmp/child/../café", "/private/tmp/café", "/tmp/café"),
+            ("/var/child/..", "/private/var", "/var"),
+            ("/other/../etc/./child", "/private/etc/child", "/etc/child"),
+            ("/tmp/../other", "/other", "/other"),
+            ("/var/../etc", "/private/etc", "/etc"),
+            ("/etc/../tmp", "/private/tmp", "/tmp"),
+            ("/tmpish/child", "/tmpish/child", "/tmpish/child"),
+            ("/various", "/various", "/various"),
+            ("/etcetera", "/etcetera", "/etcetera"),
+            ("/TMP/child", "/TMP/child", "/TMP/child"),
+            ("/Var", "/Var", "/Var"),
+            ("/Etc", "/Etc", "/Etc"),
+            ("/nested/tmp", "/nested/tmp", "/nested/tmp"),
+            ("/private/tmp", "/private/tmp", "/private/tmp"),
+            (
+                "/private/var/child",
+                "/private/var/child",
+                "/private/var/child",
+            ),
+            (
+                "/private/etc/child",
+                "/private/etc/child",
+                "/private/etc/child",
+            ),
+        ] {
+            for (platform, expected) in [(PathPlatform::MacOs, macos), (PathPlatform::Unix, unix)] {
+                assert_eq!(
+                    normalize_for_platform(Path::new("/unused"), Path::new(requested), platform)
+                        .unwrap(),
+                    Path::new(expected),
+                    "{platform:?}: {requested}"
+                );
+            }
+        }
+        assert_eq!(
+            normalize_for_platform(
+                Path::new("/tmp/work"),
+                Path::new("../child"),
+                PathPlatform::MacOs
+            )
+            .unwrap(),
+            Path::new("/private/tmp/child")
+        );
+        assert_eq!(
+            normalize_for_platform(Path::new("/tmp/work"), Path::new(""), PathPlatform::Unix)
+                .unwrap(),
+            Path::new("/tmp/work")
+        );
+    }
+
+    #[test]
+    fn normalization_does_not_lossily_convert_non_unicode_paths() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let path = PathBuf::from(OsString::from_vec(b"/tmp/name-\xff".to_vec()));
+        assert_eq!(
+            normalize_for_platform(Path::new("/"), &path, PathPlatform::Unix).unwrap(),
+            path
+        );
+        assert_eq!(
+            error_kind(normalize_for_platform(
+                Path::new("/"),
+                &path,
+                PathPlatform::MacOs
+            )),
+            FileReadErrorKind::InvalidPath
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_tmp_alias_supports_mutation_reads_and_denials_without_canonicalizing_fixture() {
+        let root = Path::new("/tmp").join(format!(
+            "parrot-fs-alias-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let work = root.join("work");
+        fs::create_dir_all(&work).unwrap();
+        let workspace = ProjectWorkspace::from_resolved(work.clone(), work, None, None);
+        let fixture = Fixture {
+            filesystem: ProductionFilesystem::new(workspace.clone()).unwrap(),
+            session: root.join("session"),
+            root,
+            workspace,
+        };
+        let physical_root = Path::new("/private").join(fixture.root.strip_prefix("/").unwrap());
+        assert_eq!(fixture.filesystem.root, physical_root.join("work"));
+        let security = fixture.security(&[]);
+        let path = fixture.workspace.launch_directory().join("new/child");
+        let create = MutationRequest {
+            requested: path.clone(),
+            create: true,
+        };
+        let target = fixture
+            .filesystem
+            .write_for_mutation(&create, b"created", &security, &NeverCancelled)
+            .await
+            .unwrap();
+        assert_eq!(target.physical_path, physical_root.join("work/new/child"));
+        assert_eq!(target.display_path, "new/child");
+        let edit = MutationRequest {
+            requested: PathBuf::from("new/child"),
+            create: false,
+        };
+        let before = fixture
+            .filesystem
+            .read_for_mutation(&edit, &security, &NeverCancelled)
+            .await
+            .unwrap();
+        assert_eq!(before.target, target);
+        assert_eq!(before.bytes.unwrap(), b"created");
+        fixture
+            .filesystem
+            .write_for_mutation(&edit, b"edited", &security, &NeverCancelled)
+            .await
+            .unwrap();
+        let read = read_request(&path, LinkPolicy::RejectLinks);
+        assert_eq!(
+            fixture
+                .filesystem
+                .read(&read, &security, &NeverCancelled)
+                .await
+                .unwrap()
+                .bytes,
+            b"edited"
+        );
+        let denied = fixture.security(&[
+            rule(&path, SandboxRuleAction::DenyRead),
+            rule(&path, SandboxRuleAction::DenyWrite),
+        ]);
+        assert_eq!(
+            error_kind(
+                fixture
+                    .filesystem
+                    .read(&read, &denied, &NeverCancelled)
+                    .await
+            ),
+            FileReadErrorKind::Denied
+        );
+        assert_eq!(
+            error_kind(
+                fixture
+                    .filesystem
+                    .write_for_mutation(&edit, b"denied", &denied, &NeverCancelled)
+                    .await
+            ),
+            FileReadErrorKind::Denied
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"edited");
+        let link = fixture.workspace.launch_directory().join("link");
+        symlink(&path, &link).unwrap();
+        assert!(
+            fixture
+                .filesystem
+                .write_for_mutation(
+                    &MutationRequest {
+                        requested: link.clone(),
+                        create: false,
+                    },
+                    b"linked",
+                    &security,
+                    &NeverCancelled
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            fixture
+                .filesystem
+                .read(
+                    &read_request(&link, LinkPolicy::RejectLinks),
+                    &security,
+                    &NeverCancelled
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"edited");
+    }
+
+    struct Consumer<F>(F);
+    impl<F: FnMut(&[u8]) -> bool + Send> ReadConsumer for Consumer<F> {
+        fn consume(&mut self, bytes: &[u8]) -> bool {
+            self.0(bytes)
+        }
+    }
+
+    #[tokio::test]
+    async fn production_reader_streams_sparse_binary_without_consuming_the_tail() {
+        let fixture = Fixture::new();
+        let path = fixture.file("sparse.bin", b"text\0");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(64 * 1024 * 1024)
+            .unwrap();
+        let security = fixture.security(&[]);
+        let reader = super::super::ProductionReader(fixture.filesystem.clone());
+        let mut consumed = 0;
+        let mut consumer = Consumer(|bytes: &[u8]| {
+            consumed += bytes.len();
+            assert!(bytes.contains(&0));
+            false
+        });
+        let physical = reader
+            .stream_read(
+                &read_request(&path, LinkPolicy::Follow),
+                &security.0,
+                &NeverCancelled,
+                &mut consumer,
+            )
+            .await
+            .unwrap();
+        assert_eq!(physical, path);
+        assert_eq!(consumed, 8192);
+
+        let tool = parrot_tools::files::ReadTool::new(
+            reader,
+            parrot_tools::files::WorkspacePaths::default(),
+            parrot_domain::values::tools::ConfiguredToolDefinition::new("read", "{}"),
+        );
+        let invocation = parrot_tools::files::FileToolInvocation::new(
+            "read-test",
+            serde_json::json!({"path": path}).to_string(),
+        );
+        let result = tool
+            .execute(&invocation, &security.0, &NeverCancelled)
+            .await
+            .unwrap();
+        assert_eq!(result.text, "error: binary file");
+    }
+
+    #[tokio::test]
+    async fn production_read_tool_scans_large_text_after_one_output_line() {
+        use std::io::Write;
+        let fixture = Fixture::new();
+        let path = fixture.file("large.txt", b"");
+        let mut file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let chunk = b"line\n".repeat(1000);
+        for _ in 0..1000 {
+            file.write_all(&chunk).unwrap();
+        }
+        drop(file);
+        let security = fixture.security(&[]);
+        let tool = parrot_tools::files::ReadTool::new(
+            fixture.filesystem.clone(),
+            parrot_tools::files::WorkspacePaths::default(),
+            parrot_domain::values::tools::ConfiguredToolDefinition::new("read", "{}"),
+        );
+        let invocation = parrot_tools::files::FileToolInvocation::new(
+            "read-test",
+            serde_json::json!({"path": path, "limit": 1}).to_string(),
+        );
+        let result = tool
+            .execute(&invocation, &security, &NeverCancelled)
+            .await
+            .unwrap();
+        assert_eq!(result.text, "1: line\ntotal lines in file: 1000000\n");
+    }
+
+    #[tokio::test]
+    async fn streaming_early_stop_still_validates_the_opened_target() {
+        let fixture = Fixture::new();
+        let path = fixture.file("binary", b"\0binary");
+        let moved = path.with_extension("moved");
+        let security = fixture.security(&[]);
+        let mut consumer = Consumer(|bytes: &[u8]| {
+            assert_eq!(bytes, b"\0binary");
+            fs::rename(&path, &moved).unwrap();
+            fs::write(&path, b"replacement").unwrap();
+            false
+        });
+        assert_eq!(
+            error_kind(
+                fixture
+                    .filesystem
+                    .stream_read(
+                        &read_request(&path, LinkPolicy::Follow),
+                        &security,
+                        &NeverCancelled,
+                        &mut consumer
+                    )
+                    .await
+            ),
+            FileReadErrorKind::TargetChanged
+        );
+        assert_eq!(fs::read(moved).unwrap(), b"\0binary");
+        assert_eq!(fs::read(path).unwrap(), b"replacement");
+    }
+
+    #[tokio::test]
+    async fn streaming_cancellation_after_consumer_stops_is_propagated() {
+        use std::sync::atomic::AtomicBool;
+        struct Cancel(AtomicBool);
+        impl Cancellation for Cancel {
+            fn is_cancelled(&self) -> bool {
+                self.0.load(Ordering::Relaxed)
+            }
+            fn cancelled(&self) -> BoxFuture<'_, ()> {
+                Box::pin(std::future::pending())
+            }
+        }
+        let fixture = Fixture::new();
+        let path = fixture.file("text", b"one\ntwo\n");
+        let security = fixture.security(&[]);
+        let cancellation = Cancel(AtomicBool::new(false));
+        let mut consumer = Consumer(|_: &[u8]| {
+            cancellation.0.store(true, Ordering::Relaxed);
+            false
+        });
+        assert!(matches!(
+            fixture
+                .filesystem
+                .stream_read(
+                    &read_request(&path, LinkPolicy::Follow),
+                    &security,
+                    &cancellation,
+                    &mut consumer
+                )
+                .await,
+            Err(OperationError::Cancelled)
+        ));
+    }
+
+    #[tokio::test]
+    async fn streaming_authorizes_lexical_and_physical_targets_before_consumption() {
+        let fixture = Fixture::new();
+        let path = fixture.file("text", b"secret");
+        let alias = fixture.workspace.launch_directory().join("alias");
+        symlink(&path, &alias).unwrap();
+        for denied_path in [&path, &alias] {
+            let security = fixture.security(&[rule(denied_path, SandboxRuleAction::DenyRead)]);
+            let mut consumer =
+                Consumer(|_: &[u8]| panic!("denied bytes must not reach the consumer"));
+            assert_eq!(
+                error_kind(
+                    fixture
+                        .filesystem
+                        .stream_read(
+                            &read_request(&alias, LinkPolicy::Follow),
+                            &security,
+                            &NeverCancelled,
+                            &mut consumer
+                        )
+                        .await
+                ),
+                FileReadErrorKind::Denied
+            );
+        }
+        let security = fixture.security(&[]);
+        let mut request = read_request(&path, LinkPolicy::Follow);
+        request.expected_physical = Some(fixture.root.join("different"));
+        let mut consumer =
+            Consumer(|_: &[u8]| panic!("changed target must not reach the consumer"));
+        assert_eq!(
+            error_kind(
+                fixture
+                    .filesystem
+                    .stream_read(&request, &security, &NeverCancelled, &mut consumer)
+                    .await
+            ),
+            FileReadErrorKind::TargetChanged
+        );
     }
 
     #[tokio::test]

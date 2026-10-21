@@ -1,4 +1,4 @@
-use crate::{producer, support::Context};
+use crate::{fixtures, support::Context};
 use parrot_foundation::config::{templates, yaml};
 
 fn descriptor(engine: Option<&str>) -> String {

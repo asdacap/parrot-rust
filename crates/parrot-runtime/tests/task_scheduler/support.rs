@@ -162,6 +162,9 @@ pub fn selection(
     }
 }
 pub fn templates() -> Arc<PromptTemplateCatalog> {
+    templates_with_content("")
+}
+pub fn templates_with_content(content: &str) -> Arc<PromptTemplateCatalog> {
     let env = [
         ("HOME", "/tmp/t48/home"),
         ("XDG_CONFIG_HOME", "/tmp/t48/config"),
@@ -172,7 +175,11 @@ pub fn templates() -> Arc<PromptTemplateCatalog> {
     .into_iter()
     .map(|(k, v)| (k.into(), v.into()))
     .collect();
-    Arc::new(PromptTemplateCatalog::from_content("", &env).unwrap().1)
+    Arc::new(
+        PromptTemplateCatalog::from_content(content, &env)
+            .unwrap()
+            .1,
+    )
 }
 struct Names;
 impl FilenameGenerator for Names {
@@ -554,6 +561,10 @@ impl Factory {
             })
             .collect();
         let backend = RuntimeBackend::new(RuntimeConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_max_turns: false,
+                ..Default::default()
+            },
             identity: prepared.identity.session.clone(),
             history: history.clone(),
             broker,

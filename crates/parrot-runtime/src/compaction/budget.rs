@@ -10,7 +10,7 @@ pub struct ProviderTokenBudget {
 }
 
 impl ProviderTokenBudget {
-    pub const DEFAULT_MAXIMUM_OUTPUT_TOKENS: i32 = 32 * 1024;
+    pub const DEFAULT_MAXIMUM_OUTPUT_TOKENS: i32 = Model::DEFAULT_REQUESTED_OUTPUT_TOKENS;
 
     pub fn estimate_input_tokens(&self, selector: &str, estimated_input_tokens: i64) -> i64 {
         let estimate = estimated_input_tokens.max(0);
@@ -45,11 +45,7 @@ impl ProviderTokenBudget {
         if model.max_input_tokens > 0 && input > i64::from(model.input_token_limit()) {
             return Err(PlanningError::InputLimitExceeded);
         }
-        let mut output = if model.max_output_tokens > 0 {
-            Self::DEFAULT_MAXIMUM_OUTPUT_TOKENS.min(model.max_output_tokens)
-        } else {
-            Self::DEFAULT_MAXIMUM_OUTPUT_TOKENS
-        };
+        let mut output = model.requested_output_tokens();
         if model.context_window > 0 {
             let headroom = input / 20 + i64::from(input % 20 > 0);
             let available = i64::from(model.context_window) - input;

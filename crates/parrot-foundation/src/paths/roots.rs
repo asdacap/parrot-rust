@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 pub struct ApplicationRoots {
     current: StatePaths,
     legacy: StatePaths,
+    user_home: PathBuf,
 }
 
 impl ApplicationRoots {
@@ -17,6 +18,10 @@ impl ApplicationRoots {
         Self {
             current: StatePaths::resolve(environment),
             legacy: StatePaths::for_application(environment, "parrotdotnet"),
+            user_home: environment
+                .get("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default(),
         }
     }
 
@@ -25,6 +30,9 @@ impl ApplicationRoots {
     }
     pub fn legacy(&self) -> &StatePaths {
         &self.legacy
+    }
+    pub fn user_home(&self) -> &Path {
+        &self.user_home
     }
 
     /// Selects the new application root without creating a session or acquiring

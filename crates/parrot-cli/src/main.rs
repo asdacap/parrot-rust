@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, HashMap},
     io::{self, BufReader, IsTerminal, Write},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use parrot_cli::{
@@ -57,6 +60,7 @@ use parrot_storage::{
     ownership::{capture_runtime_identity, host_key},
 };
 
+mod https_certificate;
 #[path = "dispatch/process_signals.rs"]
 mod process_signals;
 
@@ -332,6 +336,11 @@ impl Application {
                 "TCP transport requires --token-file <owner-only-file>",
             ));
         }
+        let tls = if address.tcp_url().is_some_and(|url| url.scheme() == "https") {
+            Some(https_certificate::load().map_err(command_failure)?)
+        } else {
+            None
+        };
         let (configuration, templates) = self.configuration_and_templates()?;
         let auth = self.auth_services(&configuration)?;
         let local = self.local_host(
@@ -347,7 +356,7 @@ impl Application {
                 GrpcService::new(service),
                 address,
                 token,
-                None,
+                tls,
                 self.diagnostics.clone(),
             )
             .await
@@ -497,10 +506,13 @@ impl Application {
                 ..Default::default()
             };
             let variant = options.variant.clone();
-            let configure: dispatch::startup::ConfigureFresh =
+            let invalid_variant = Arc::new(AtomicBool::new(false));
+            let configure: dispatch::startup::ConfigureFresh = {
+                let invalid_variant = invalid_variant.clone();
                 Arc::new(move |client, cancellation| {
                     let mut request = request.clone();
                     let variant = variant.clone();
+                    let invalid_variant = invalid_variant.clone();
                     Box::pin(async move {
                         if let Some(variant) = variant {
                             request.model = override_variant(
@@ -513,12 +525,14 @@ impl Application {
                             .await
                             .map_err(dispatch_status)?
                             .ok_or_else(|| {
+                                invalid_variant.store(true, Ordering::Relaxed);
                                 tonic::Status::invalid_argument("invalid reasoning variant")
                             })?;
                         }
                         Ok(request)
                     })
-                });
+                })
+            };
             let legacy = configuration
                 .lock()
                 .expect("configuration poisoned")
@@ -544,10 +558,14 @@ impl Application {
             )
             .with_legacy_path_read_fallback(legacy);
             let result = async {
-                let opened = startup
-                    .open(options.prompt.is_empty(), cancellation)
-                    .await
-                    .map_err(|failure| DispatchError::Rpc(failure.into_status()))?;
+                let opened = match startup.open(options.prompt.is_empty(), cancellation).await {
+                    Ok(opened) => opened,
+                    Err(_) if invalid_variant.load(Ordering::Relaxed) => {
+                        cancellation.check().map_err(|_| DispatchError::Cancelled)?;
+                        return Ok(dispatch::EXIT_USAGE);
+                    }
+                    Err(failure) => return Err(DispatchError::Rpc(failure.into_status())),
+                };
                 let initial = Some(opened.session);
                 let mut connection = opened.remote;
                 let result = self
@@ -695,7 +713,7 @@ impl Application {
                     Box::new(io::stdout()),
                     Box::new(io::stderr()),
                     Arc::new(terminal_dimensions),
-                    true,
+                    enhanced_terminal_color_enabled(),
                 ),
                 prepare,
             )
@@ -945,6 +963,10 @@ fn combine<T>(
             "{failure}; cleanup failed: {cleanup}"
         ))),
     }
+}
+
+fn enhanced_terminal_color_enabled() -> bool {
+    std::env::var_os("NO_COLOR").is_none()
 }
 
 fn terminal_dimensions() -> (isize, isize) {

@@ -114,6 +114,108 @@ async fn pipe_captures_both_streams_and_caches_exit_status() {
     );
 }
 
+#[cfg(target_os = "linux")]
+fn escaped_tree(directory: &Directory) -> LaunchSpec {
+    let mut spec = shell(
+        "setsid /bin/sh -c 'sleep 20 & leaf=$!; printf \"%s %s\\n\" \"$$\" \"$leaf\" > ready; wait' & wait",
+    );
+    spec.current_dir = Some(directory.0.clone());
+    spec
+}
+
+#[cfg(target_os = "linux")]
+async fn escaped_pids(directory: &Directory, root: u32) -> Vec<i32> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(ready) = std::fs::read_to_string(directory.0.join("ready")) {
+                let pids: Vec<i32> = ready
+                    .split_whitespace()
+                    .filter_map(|pid| pid.parse().ok())
+                    .collect();
+                if pids.len() == 2 {
+                    assert_ne!(unsafe { libc::getsid(pids[0]) }, unsafe {
+                        libc::getsid(root as i32)
+                    });
+                    return pids;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+#[cfg(target_os = "linux")]
+fn assert_exited(pid: i32) {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => assert!(
+            matches!(stat.rsplit_once(") ").unwrap().1.as_bytes()[0], b'Z' | b'X'),
+            "descendant {pid} is still live"
+        ),
+        Err(error) => assert_eq!(error.kind(), io::ErrorKind::NotFound),
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn cancellation_settles_descendants_that_escape_the_owned_session() {
+    let directory = Directory::new();
+    let mut process = NativeProcess::start_pipe(&escaped_tree(&directory)).unwrap();
+    let root = process.id();
+    let stdout = drain(process.take_stdout().unwrap());
+    let stderr = drain(process.take_stderr().unwrap());
+    let descendants = escaped_pids(&directory, root).await;
+    let started = std::time::Instant::now();
+    assert_eq!(
+        process.cancel_and_wait().await.unwrap().signal(),
+        Some(libc::SIGKILL)
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    for pid in descendants {
+        assert_exited(pid);
+    }
+    // Repeated cancellation after root reap reuses only captured stable targets.
+    process.request_cancel().unwrap();
+    assert!(stdout.join().unwrap().is_empty());
+    assert!(stderr.join().unwrap().is_empty());
+    assert_eq!(
+        unsafe { libc::waitpid(root as i32, std::ptr::null_mut(), libc::WNOHANG) },
+        -1
+    );
+    assert_eq!(
+        io::Error::last_os_error().raw_os_error(),
+        Some(libc::ECHILD)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn drop_settles_escaped_descendants_before_returning() {
+    let directory = Directory::new();
+    let mut process = NativeProcess::start_pipe(&escaped_tree(&directory)).unwrap();
+    let root = process.id();
+    let stdout = drain(process.take_stdout().unwrap());
+    let stderr = drain(process.take_stderr().unwrap());
+    let descendants = escaped_pids(&directory, root).await;
+    let started = std::time::Instant::now();
+    drop(process);
+    assert!(started.elapsed() < Duration::from_secs(5));
+    for pid in descendants {
+        assert_exited(pid);
+    }
+    assert!(stdout.join().unwrap().is_empty());
+    assert!(stderr.join().unwrap().is_empty());
+    assert_eq!(
+        unsafe { libc::waitpid(root as i32, std::ptr::null_mut(), libc::WNOHANG) },
+        -1
+    );
+    assert_eq!(
+        io::Error::last_os_error().raw_os_error(),
+        Some(libc::ECHILD)
+    );
+}
+
 #[tokio::test]
 async fn pipe_preserves_working_directory_and_exact_environment_edits() {
     let directory = Directory::new();

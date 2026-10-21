@@ -48,6 +48,7 @@
             coreutils
             git
             nodejs_22
+            perl
             pkg-config
             protobuf
             rust
@@ -71,7 +72,6 @@
             alejandra --check "$src/flake.nix"
             touch "$out"
           '';
-
       }
       // import ./nix/checks {
         inherit pkgs;

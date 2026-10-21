@@ -8,4 +8,5 @@ mod profile_selection_tests;
 mod projection_tests;
 mod projector;
 mod registry_tests;
+mod tls_tests;
 mod usage_tests;

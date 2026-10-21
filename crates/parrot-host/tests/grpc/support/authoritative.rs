@@ -540,6 +540,10 @@ impl Fixture {
         let skill_templates = templates.clone();
         let skill_gate = gate.clone();
         let factory = Arc::new(UserSessionFactory::new(UserSessionFactoryConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_recursion_limit: false,
+                ..Default::default()
+            },
             router: router.clone(),
             modes,
             workflows: Vec::new(),

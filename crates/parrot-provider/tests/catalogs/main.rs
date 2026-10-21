@@ -28,6 +28,29 @@ fn assert_legacy_standard_error(json: &str, error: StandardModelError) {
 }
 
 #[test]
+fn model_reserves_requested_output_and_five_percent_input_headroom() {
+    for (context, output, requested, safe_input) in [
+        (180_000, 0, 32_768, Some(140_220)),
+        (180_000, -1, 32_768, Some(140_220)),
+        (180_000, 65_536, 32_768, Some(140_220)),
+        (180_000, 8_192, 8_192, Some(163_626)),
+        (1_000, 0, 32_768, Some(0)),
+        (1_000, 100, 100, Some(857)),
+        (22, 2, 2, Some(19)),
+        (23, 3, 3, Some(19)),
+        (i32::MAX, 0, 32_768, Some(2_045_191_313)),
+        (0, 0, 32_768, None),
+        (-1, 8_192, 8_192, None),
+    ] {
+        let mut model = model("model");
+        model.context_window = context;
+        model.max_output_tokens = output;
+        assert_eq!(model.requested_output_tokens(), requested);
+        assert_eq!(model.output_reserved_input_token_limit(), safe_input);
+    }
+}
+
+#[test]
 fn models_dev_decodes_metadata_prices_and_reasoning_efforts() {
     let catalogue = ModelsDevCatalogueDecoder::decode(r#"{"openai":{"id":"openai","unknown":true,"models":{"first":{"id":"gpt-example","name":"Example","limit":{"context":400000,"input":272000,"output":128000},"cost":{"input":5,"cache_read":0,"output":30},"tool_call":false,"reasoning":true,"modalities":{"output":["text","image",7]},"reasoning_options":[{"type":"toggle"},{"type":"effort","values":[null,"high","bogus","low","high"]}]}}}}"#).unwrap();
     let m = &catalogue[0].1[0];

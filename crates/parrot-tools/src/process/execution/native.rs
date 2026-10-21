@@ -2,10 +2,12 @@
 //!
 //! Callers take and concurrently drain the raw output handles before waiting,
 //! and join their finite drain threads before publishing a result. No output is
-//! accumulated in this layer. Cancellation kills the owned process group and
-//! reaps the direct child; this is not universal descendant containment.
+//! accumulated in this layer. Cancellation snapshots and terminates owned
+//! descendants before reaping the direct child. Like process-tree termination,
+//! this is best effort against concurrent forks, not universal containment.
 
 use super::LaunchSpec;
+use super::descendants::OwnedDescendants;
 use super::signals::ProcessSignalTarget;
 use std::fs::File;
 use std::io::{self, Read};
@@ -42,6 +44,8 @@ impl Drop for LaunchThread {
 pub struct NativeProcess {
     child: Child,
     signals: ProcessSignalTarget,
+    descendants: Option<OwnedDescendants>,
+    cleanup_failure: Option<(io::ErrorKind, String)>,
     status: Option<ExitStatus>,
     launcher: Option<LaunchThread>,
     master: Option<File>,
@@ -191,6 +195,8 @@ impl NativeProcess {
         Ok(Self {
             child,
             signals,
+            descendants: None,
+            cleanup_failure: None,
             status: None,
             launcher,
             master: None,
@@ -323,43 +329,71 @@ impl NativeProcess {
         Ok(self.status)
     }
 
-    /// Requests cancellation while retaining ownership until reap/drop.
-    pub fn request_cancel(&mut self) {
-        self.kill_owned();
+    /// Terminates the captured descendants, retaining the direct child until reap/drop.
+    pub fn request_cancel(&mut self) -> io::Result<()> {
+        self.kill_owned()
     }
 
     pub async fn cancel_and_wait(&mut self) -> io::Result<ExitStatus> {
-        self.kill_owned();
-        self.wait().await
+        let cleanup = self.kill_owned();
+        let status = self.wait().await;
+        cleanup?;
+        status
     }
 
-    fn kill_owned(&mut self) {
-        // Do not signal a numeric group after reaping its leader: it could have
-        // been reused. Stable pidfd signaling is retained for explicit signals.
-        if self.status.is_some() {
-            return;
+    fn kill_owned(&mut self) -> io::Result<()> {
+        // Capture only once, while the root PID is still owned and unreaped.
+        // Later cancellation must never discover descendants of a reused PID.
+        if self.descendants.is_none() && self.status.is_none() {
+            let (descendants, result) = OwnedDescendants::capture(self.child.id());
+            self.descendants = Some(descendants);
+            self.record_cleanup(result);
         }
-        #[cfg(target_os = "linux")]
-        if let Some(master) = &self.master {
-            let mut foreground: libc::pid_t = 0;
-            if unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCGPGRP, &mut foreground) } == 0
-                && foreground > 0
-            {
-                let _ = unsafe { libc::kill(-foreground, libc::SIGKILL) };
+        // Numeric group cleanup is safe only before reaping its owned leader.
+        if self.status.is_none() {
+            #[cfg(target_os = "linux")]
+            if let Some(master) = &self.master {
+                let mut foreground: libc::pid_t = 0;
+                if unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCGPGRP, &mut foreground) } == 0
+                    && foreground > 0
+                    && unsafe { libc::kill(-foreground, libc::SIGKILL) } < 0
+                {
+                    self.record_cleanup(Err(io::Error::last_os_error()));
+                }
+            }
+            if unsafe { libc::kill(-(self.child.id() as libc::pid_t), libc::SIGKILL) } < 0 {
+                self.record_cleanup(Err(io::Error::last_os_error()));
+            }
+            let _ = self.signals.send(libc::SIGKILL);
+            // Child::kill is a safe fallback for our still-unreaped direct child.
+            let result = self.child.kill();
+            self.record_cleanup(result);
+        }
+        if let Some(result) = self.descendants.as_ref().map(OwnedDescendants::terminate) {
+            self.record_cleanup(result);
+        }
+        if let Some(result) = self.descendants.as_ref().map(OwnedDescendants::wait) {
+            self.record_cleanup(result);
+        }
+        match &self.cleanup_failure {
+            Some((kind, message)) => Err(io::Error::new(*kind, message.clone())),
+            None => Ok(()),
+        }
+    }
+
+    fn record_cleanup(&mut self, result: io::Result<()>) {
+        if let Err(error) = result {
+            if error.raw_os_error() != Some(libc::ESRCH) && self.cleanup_failure.is_none() {
+                self.cleanup_failure = Some((error.kind(), error.to_string()));
             }
         }
-        let _ = unsafe { libc::kill(-(self.child.id() as libc::pid_t), libc::SIGKILL) };
-        let _ = self.signals.send(libc::SIGKILL);
-        // pidfd may be unavailable on an older kernel; Child::kill addresses the
-        // still-owned unreaped child, not an arbitrary caller-provided PID.
-        let _ = self.child.kill();
     }
 }
 
 impl Drop for NativeProcess {
     fn drop(&mut self) {
+        let _ = self.kill_owned();
         if self.status.is_none() {
-            self.kill_owned();
             self.status = self.child.wait().ok();
         }
         if let Some(mut launcher) = self.launcher.take() {

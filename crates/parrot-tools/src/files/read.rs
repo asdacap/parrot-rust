@@ -15,8 +15,11 @@ use parrot_domain::{
 
 use super::{
     FileToolError, FileToolInvocation, FileToolResult, Formatter, WorkspacePaths, file_error,
-    input::ReadInput, outline::MarkdownOutline,
+    input::ReadInput,
 };
+
+mod stream;
+use stream::FileRenderer;
 
 const MAX_LINES: i32 = 2000;
 const MAX_OUTPUT_BYTES: usize = 8192;
@@ -91,20 +94,15 @@ impl<S: AuthorizedReadService> ReadTool<S> {
             links: LinkPolicy::Follow,
             max_bytes: None,
         };
-        let read = self
-            .service
-            .read(&request, snapshot, cancellation)
+        let mut renderer = FileRenderer::new(&metadata.physical_path, input.offset, input.limit);
+        self.service
+            .stream_read(&request, snapshot, cancellation, &mut renderer)
             .await
             .map_err(file_error)?;
-        render_file(
-            &read.physical_path,
-            &read.bytes,
-            input.offset,
-            input.limit,
-            cancellation,
-            &formatter,
-        )
-        .map(FileToolResult::text)
+        cancellation
+            .check()
+            .map_err(|_| OperationError::Cancelled)?;
+        renderer.finish(&formatter).map(FileToolResult::text)
     }
 
     async fn list_directory(
@@ -200,70 +198,4 @@ impl<S: AuthorizedReadService + 'static> Tool for ReadTool<S> {
 
 fn ordinal_path(path: &Path) -> Vec<u16> {
     path.to_string_lossy().encode_utf16().collect()
-}
-
-pub(super) fn render_file(
-    physical_path: &Path,
-    bytes: &[u8],
-    offset: i32,
-    limit: i32,
-    cancellation: &dyn Cancellation,
-    formatter: &Formatter<'_>,
-) -> OperationResult<String, FileToolError> {
-    if bytes[..bytes.len().min(BINARY_PROBE_SIZE)].contains(&0) {
-        return formatter.error("binary file").map(|result| result.text);
-    }
-    let text = crate::task_artifacts::decode_stream_reader_bytes(bytes);
-    let mut output = String::new();
-    let mut output_bytes = 0;
-    let mut line_number = 0_i32;
-    let mut truncated = false;
-    let markdown = physical_path.extension().is_some_and(|extension| {
-        extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
-    });
-    let mut outline = MarkdownOutline::new();
-    let mut start = 0;
-    let text_bytes = text.as_bytes();
-    while start < text.len() {
-        cancellation
-            .check()
-            .map_err(|_| OperationError::Cancelled)?;
-        let mut end = start;
-        while end < text.len() && text_bytes[end] != b'\r' && text_bytes[end] != b'\n' {
-            end += 1;
-        }
-        let line = &text[start..end];
-        line_number = line_number.wrapping_add(1);
-        if markdown {
-            outline.record(line_number as usize, line);
-        }
-        if line_number >= offset && line_number < offset.wrapping_add(limit) && !truncated {
-            let formatted = format!("{line_number}: {line}\n");
-            if output_bytes + formatted.len() > MAX_OUTPUT_BYTES {
-                truncated = true;
-            } else {
-                output_bytes += formatted.len();
-                output.push_str(&formatted);
-            }
-        }
-        start = end;
-        if start < text.len() {
-            let carriage_return = text_bytes[start] == b'\r';
-            start += 1;
-            if carriage_return && text_bytes.get(start) == Some(&b'\n') {
-                start += 1;
-            }
-        }
-    }
-    if truncated {
-        output.push_str(&formatter.text("[output truncated]\n")?);
-    }
-    output.push_str(&format!("total lines in file: {line_number}\n"));
-    if markdown
-        && !outline.is_empty()
-        && (truncated || offset > 1 || line_number >= offset.wrapping_add(limit))
-    {
-        output.push_str(&formatter.outline(&outline.render())?);
-    }
-    Ok(output)
 }

@@ -862,6 +862,10 @@ impl Fixture {
         });
         let skill_templates = templates.clone();
         let mut config = UserSessionFactoryConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_recursion_limit: false,
+                ..Default::default()
+            },
             router: router.clone(),
             modes,
             workflows: Vec::new(),
@@ -1180,25 +1184,66 @@ async fn opaque_actual_constructor_failure_keeps_resources_and_activation_fenced
     use parrot_domain::values::identifiers::UserSessionId;
     use parrot_storage::ownership::ClaimDisposition;
 
-    let fixture = Fixture::new(true, false).await;
-    assert!(fixture.open().await.is_err());
-    let user = fixture.user();
+    let (release, barrier) = tokio::sync::oneshot::channel();
+    let (started, entered) = tokio::sync::oneshot::channel();
+    let gate = Arc::new(Mutex::new(Some((started, barrier))));
+    let admitted = Arc::new(Mutex::new(None));
+    let captured = admitted.clone();
+    let fixture = Fixture::with_config(
+        false,
+        false,
+        None,
+        None,
+        Arc::new(Policies),
+        move |config| {
+            config.permissions = Arc::new(move |lease, _, _| {
+                let (started, barrier) = gate.lock().unwrap().take().unwrap();
+                let retained = lease.clone();
+                let producer = lease.runtime_handle().spawn(async move {
+                    let _ = started.send(());
+                    let _ = barrier.await;
+                    retained.events.replay().await
+                });
+                *captured.lock().unwrap() = Some((lease, producer));
+                Err(RpcError::new(
+                    RpcCode::Internal,
+                    "synthetic opaque supplier failure after admitting a producer",
+                ))
+            });
+        },
+    )
+    .await;
+    assert!(bounded(fixture.open()).await.is_err());
+    bounded(entered).await.unwrap();
+    let (lease, producer) = admitted.lock().unwrap().take().unwrap();
+    assert!(!producer.is_finished());
     assert!(
-        user.lease.is_cancelled(),
+        lease.is_cancelled(),
         "request-close flag does not attest settlement"
     );
-    let first = bounded(user.lease.close()).await.unwrap_err().to_string();
-    let repeated = bounded(user.lease.close()).await.unwrap_err().to_string();
+    let first = bounded(lease.close()).await.unwrap_err().to_string();
+    let repeated = bounded(lease.close()).await.unwrap_err().to_string();
     assert_eq!(
         first, repeated,
         "unknown construction keeps a stable failure, not success"
     );
-    bounded(user.lease.events.replay()).await.unwrap();
-    let id = UserSessionId::parse(&user.id).unwrap();
+    bounded(lease.events.replay()).await.unwrap();
+    let id = UserSessionId::parse(
+        lease
+            .selected_root()
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert!(matches!(
         bounded(fixture.store.resume(&id, true, false)).await,
         Err(SessionStoreError::Admission(ClaimDisposition::Live))
     ));
+    release.send(()).unwrap();
+    bounded(producer).await.unwrap().unwrap();
 }
 
 #[tokio::test]
@@ -1898,7 +1943,7 @@ async fn actual_drain_and_external_observer_share_live_routing_and_same_prepared
         "external observation does not call a provider"
     );
     let status = root
-        .get_service::<parrot_host::composition::factory::scope::ScopedTurnStatus>()
+        .get_service::<parrot_host::composition::factory::scope::ScopedTurnStatus<Security>>()
         .unwrap();
     let runtime_status = root
         .get_service::<parrot_runtime::active_work::status::RuntimeStatus>()
@@ -1989,13 +2034,13 @@ async fn actual_hosted_status_uses_live_context_then_full_status_then_later_stat
     assert_same_policy(&current, &original);
     assert!(Arc::ptr_eq(&current.model.routing_snapshot, &replacement));
     assert_eq!(current.model.routing_snapshot.revision, 1);
-    let status = root.get_service::<ScopedTurnStatus>().unwrap();
+    let status = root.get_service::<ScopedTurnStatus<Security>>().unwrap();
     assert!(Arc::ptr_eq(
         &status.runtime,
         &root.get_service::<RuntimeStatus>().unwrap()
     ));
     let query = status.query(&current);
-    let profile = status.profile_prompt(&current);
+    let profile = status.profile_prompt(&current).unwrap();
     assert!(!profile.is_empty());
     let user = fixture.user();
     let statistics = user
@@ -2729,6 +2774,7 @@ mod integrated_adapters;
 mod integrated_rpc;
 mod original_adapters_v8;
 mod original_rpc_v8;
+mod resume_histories;
 
 #[path = "../../e2e_scenarios/scenarios.rs"]
 mod e2e_scenarios;

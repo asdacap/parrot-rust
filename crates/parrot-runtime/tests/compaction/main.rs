@@ -61,6 +61,7 @@ impl Provider for ImageProvider {
 fn model(context: i32) -> ProviderModel {
     let mut value = Model::new("model", "provider");
     value.context_window = context;
+    value.max_output_tokens = 1;
     ProviderModel {
         provider: Arc::new(ImageProvider {
             tokens: 4096,
@@ -163,7 +164,8 @@ fn original_output_budget_rows() {
 fn original_actual_usage_five_percent_rows() {
     let mut budget = ProviderTokenBudget::default();
     budget.observe_usage("provider/model", 120000, &completion(147776));
-    let selected = model(180000);
+    let mut selected = model(180000);
+    selected.model.max_output_tokens = 0;
     for (estimate, expected_input, expected_output) in
         [(120000, 147776, 24835), (121000, 148776, 23785)]
     {
@@ -178,6 +180,42 @@ fn original_actual_usage_five_percent_rows() {
         assert!(expected_input + i64::from(output) + (expected_input + 19) / 20 <= 180000);
     }
 }
+#[test]
+fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
+    for (context, output) in [
+        (180_000, 0),
+        (180_000, 8_192),
+        (180_000, 65_536),
+        (1_000, 100),
+        (22, 2),
+        (23, 3),
+        (i32::MAX, 0),
+        (1_000, 1),
+    ] {
+        let mut selected = model(context);
+        selected.model.max_output_tokens = output;
+        let snapshot = planner(100, 30, 60000)
+            .estimate_context(&selected, "", &[], &[])
+            .unwrap();
+        let trigger = snapshot.trigger_tokens.unwrap();
+        let budget = ProviderTokenBudget::default();
+        let requested = selected.model.requested_output_tokens();
+        assert_eq!(
+            budget.calculate_maximum_output_tokens("provider/model", trigger, &selected.model),
+            Ok(requested)
+        );
+        let above =
+            budget.calculate_maximum_output_tokens("provider/model", trigger + 1, &selected.model);
+        if output == 1 {
+            assert_eq!(above, Err(PlanningError::NoOutputCapacity));
+        } else {
+            assert!(above.unwrap() < requested);
+        }
+        assert!(!snapshot.exceeds_compaction_trigger(trigger));
+        assert!(snapshot.exceeds_compaction_trigger(trigger + 1));
+    }
+}
+
 #[test]
 fn original_exhausted_capacity_rows_exact_messages() {
     for (context, input, actual, expected) in [
@@ -346,6 +384,82 @@ fn actual_selected_policy_and_override_preserve_total_window() {
     assert_eq!(plan.keep_group_from, 1);
     assert_eq!(plan.input_budget, 1000);
 }
+#[test]
+fn selected_and_raw_planning_reserve_output_without_recomputing_targets() {
+    for (limit, window, input, output, trigger, expected) in [
+        (None, 180_000, 0, 0, 95, 140_220),
+        (None, 180_000, 0, 65_536, 95, 140_220),
+        (None, 180_000, 0, 8_192, 95, 163_626),
+        (None, 180_000, 0, 0, 50, 90_000),
+        (Some("100k"), 180_000, 0, 0, 95, 100_000),
+        (Some("95%"), 180_000, 0, 0, 95, 140_220),
+        (Some("180k"), 180_000, 0, 0, 95, 140_220),
+        (None, 180_000, 100_000, 0, 95, 95_000),
+        (Some("180k"), 180_000, 100_000, 0, 95, 100_000),
+        (None, 0, 100_000, 0, 95, 95_000),
+        (Some("100k"), 0, 100_000, 0, 95, 100_000),
+        (None, 1_000, 0, 0, 95, 0),
+        (None, i32::MAX, 0, 0, 100, 2_045_191_313),
+    ] {
+        let mut canonical = model(window);
+        canonical.model.max_input_tokens = input;
+        canonical.model.max_output_tokens = output;
+        let registry = Arc::new(
+            ProviderRegistry::new(
+                vec![canonical.provider.clone()],
+                BTreeMap::from([("provider".into(), vec![canonical.model.clone()])]),
+            )
+            .unwrap(),
+        );
+        let mut alias = ModelAliasDefinition::new("selected", "provider/model", "test alias");
+        alias.context_limit = limit.map(|text| ContextSize::parse(text).unwrap());
+        let catalog = Arc::new(ModelAliasCatalog::new(registry.clone(), [alias]).unwrap());
+        let selected = ModelRouter::new(
+            registry,
+            Arc::new(ModelRouting::new(catalog, "provider/model")),
+        )
+        .resolve("selected")
+        .unwrap();
+        let planner = planner(trigger, 50, 60000);
+        let snapshot = planner
+            .estimate_selected_context(&selected, "", &[], &[])
+            .unwrap();
+        assert_eq!(snapshot.trigger_tokens, Some(expected));
+        if limit.is_none() {
+            let raw = planner.estimate_context(&canonical, "", &[], &[]).unwrap();
+            assert_eq!(raw.trigger_tokens, Some(expected));
+        }
+        if window == 180_000 && input == 0 && output == 0 && trigger == 95 {
+            let expected_target = match limit {
+                Some("100k") => 50_000,
+                Some("95%") => 85_500,
+                _ => 90_000,
+            };
+            assert_eq!(
+                planner.resolve_policy(&selected, None).target_tokens,
+                Some(expected_target)
+            );
+            assert_eq!(
+                planner
+                    .resolve_policy(&selected, Some(&ContextSize::parse("160k").unwrap()))
+                    .target_tokens,
+                Some(160_000)
+            );
+            if limit.is_none() {
+                let snapshot = planner
+                    .estimate_context(&canonical, &"x".repeat((160_000 - 4) * 4), &[], &[])
+                    .unwrap();
+                assert_eq!(snapshot.estimated_tokens, 160_000);
+                assert!(snapshot.exceeds_trigger());
+            }
+        }
+    }
+    let unknown = planner(95, 50, 60000)
+        .estimate_context(&model(0), "", &[], &[])
+        .unwrap();
+    assert_eq!(unknown.trigger_tokens, None);
+}
+
 #[test]
 fn groups_only_capture_contiguous_tool_results_and_keep_order() {
     let history = [

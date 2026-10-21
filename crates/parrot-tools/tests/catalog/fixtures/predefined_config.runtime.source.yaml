@@ -7,6 +7,9 @@ skills:
 # Default model selected as provider/model, optionally followed by /variant.
 model: ""
 
+disable_max_turns: true
+disable_recursion_limit: true
+
 # Named snapshots of the selected model and model alias targets.
 model_presets: {}
 

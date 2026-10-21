@@ -90,6 +90,8 @@ fn root() -> Node {
             ]),
         ),
         ("agent_send_to_parent", scalar("false")),
+        ("disable_max_turns", scalar("true")),
+        ("disable_recursion_limit", scalar("true")),
         ("tools", Node::mapping(Vec::new())),
     ])
 }

@@ -1,6 +1,7 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::sessions::{
     Error, Event, EventStream, Provider, ProviderSessions, Request, Session,
+    diagnostics::{DiagnosticEvent, DiagnosticSink, MonotonicDiagnosticClock},
 };
 use std::sync::{
     Arc, Mutex,
@@ -130,6 +131,59 @@ impl Provider for TestProvider {
         self.sessions.lock().unwrap().push(session.clone());
         Ok(session)
     }
+}
+
+#[derive(Default)]
+struct RecordingDiagnostics(Mutex<Vec<DiagnosticEvent>>);
+impl DiagnosticSink for RecordingDiagnostics {
+    fn write(&self, event: DiagnosticEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+#[tokio::test]
+async fn configured_sessions_trace_once_per_call_and_retain_the_real_owner() {
+    let provider = TestProvider::new(None, false);
+    let sink = Arc::new(RecordingDiagnostics::default());
+    let owner = ProviderSessions::with_diagnostics(
+        sink.clone(),
+        Arc::new(MonotonicDiagnosticClock::default()),
+        "diagnostic-agent".into(),
+        None,
+    );
+    owner.begin_turn().await.unwrap();
+    let session = owner.get(provider.clone()).await.unwrap();
+    assert!(Arc::ptr_eq(
+        &session,
+        &owner.get(provider.clone()).await.unwrap()
+    ));
+    assert_eq!(provider.session(0).turns.load(Ordering::SeqCst), 1);
+    drop(session.call(Request::default()).unwrap());
+    assert!(
+        sink.0.lock().unwrap().is_empty(),
+        "unpulled calls stay lazy"
+    );
+    drain_session(session.as_ref()).await;
+    drain_session(session.as_ref()).await;
+    owner.close().await.unwrap();
+    owner.close().await.unwrap();
+    assert_eq!(provider.opened.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.session(0).calls.load(Ordering::SeqCst), 2);
+    assert_eq!(provider.session(0).closes.load(Ordering::SeqCst), 1);
+    let events = sink.0.lock().unwrap();
+    assert_eq!(events.len(), 4);
+    for call in events.chunks_exact(2) {
+        assert_eq!(call[0].operation, "call_started");
+        assert_eq!(call[1].operation, "call_finished");
+        assert_eq!(call[1].outcome.as_deref(), Some("completed"));
+        assert_eq!(call[0].correlation_id, call[1].correlation_id);
+        for event in call {
+            assert_eq!(event.agent_session_id.as_deref(), Some("diagnostic-agent"));
+            assert_eq!(event.provider_id.as_deref(), Some("session-provider"));
+            assert_eq!(event.model_id.as_deref(), Some("model"));
+        }
+    }
+    assert_ne!(events[0].correlation_id, events[2].correlation_id);
 }
 
 #[tokio::test]

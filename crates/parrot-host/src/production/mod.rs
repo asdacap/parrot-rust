@@ -4,6 +4,7 @@ pub mod filesystem;
 pub mod launcher;
 pub mod permissions;
 pub mod policy;
+mod skills;
 
 #[cfg(test)]
 mod tests;
@@ -36,13 +37,15 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationResult},
         filesystem::{
-            AuthorizedReadService, BoundRead, FileMetadata, FileReadError, LinkPolicy, ReadRequest,
+            AuthorizedReadService, BoundRead, FileMetadata, FileReadError, LinkPolicy,
+            ReadConsumer, ReadRequest,
         },
+        security::SecurityProvider,
     },
     values::{config::PathPlatform, identifiers::Identifier},
 };
 use parrot_foundation::{
-    config::Configuration,
+    config::{Configuration, runtime::SandboxRuleAction},
     paths::{AgentScratchDirectory, ApplicationRoots, UserSessionResources},
     template_catalog::PromptTemplateCatalog,
 };
@@ -66,8 +69,10 @@ use parrot_runtime::{
         RetainedModePolicyMaterializer,
     },
     prompt_context::{
-        ModelPromptProvider, SkillCatalog, SkillDiscoveryContext, SkillRoot, SkillScope,
-        StaticSystemPromptProvider, SystemPromptProvider,
+        AgentsPromptProvider, ModelPromptProvider, RuleActionDescription,
+        SecurityProfilePromptProvider, SecurityRuleDescription, SessionIdentityPromptProvider,
+        SkillCatalog, SkillDiscoveryContext, StaticSystemPromptProvider, SystemPromptProvider,
+        TemplateSystemPromptProvider, native_platform_identifier, resolve_skill_roots,
     },
     tool_settlement::SharedSecurity,
 };
@@ -81,7 +86,10 @@ use parrot_storage::{
     },
 };
 use parrot_tools::{
-    process::execution::runner::SandboxGate,
+    process::execution::{
+        locator::{CliUtilityAvailability, ExecutableLocator},
+        runner::SandboxGate,
+    },
     task_artifacts::TaskArtifactParserAdapter,
     web_fetch::{AddressPolicy, PrivateAddressPolicy, PublicAddressPolicy, WebFetcher},
 };
@@ -155,6 +163,9 @@ struct LocalTransport {
 impl ProductionHost {
     pub fn new(config: ProductionHostConfig) -> protocol::Result<Self> {
         let workspace = ordinary_workspace_resolver()(&config.launch_directory)?;
+        let skill_directory = config.roots.current().skills_directory();
+        skills::install_packaged_skills(&skill_directory).map_err(internal)?;
+        let user_home = config.roots.user_home().to_owned();
         let aliases = Arc::new(
             ModelAliasCatalog::new(
                 config.providers.clone(),
@@ -197,14 +208,20 @@ impl ProductionHost {
             templates: config.templates.clone(),
             materializer: materializer.clone(),
             gate: gate.clone(),
+            configuration_directory: config.roots.current().config().to_owned(),
+            utilities: CliUtilityAvailability::inspect(
+                &configuration.runtime.cli_utilities.expected,
+                &configuration.runtime.cli_utilities.optional,
+                &ExecutableLocator::capture(),
+            ),
         });
         let skills_configuration = Arc::new(Mutex::new(configuration.as_ref().clone()));
         let skill_templates = config.templates.clone();
-        let skill_directory = config.roots.current().skills_directory();
         let diagnostics = Arc::new(ProductionDiagnostics(config.diagnostics.clone()));
         let timeout = (configuration.runtime.user_input_timeout_ms >= 0)
             .then(|| Duration::from_millis(configuration.runtime.user_input_timeout_ms as u64));
         let factory = Arc::new(UserSessionFactory::new(UserSessionFactoryConfig {
+            agent_limits: configuration.runtime.agent_limits,
             router: router.clone(),
             modes,
             workflows: vec![(
@@ -229,32 +246,19 @@ impl ProductionHost {
                 ));
                 let capture = skills_configuration.clone();
                 let persist = skills_configuration.clone();
-                let roots = vec![
-                    SkillRoot {
-                        path: skill_directory.to_string_lossy().into_owned(),
-                        scope: SkillScope::User,
-                        follow_directory_links: false,
-                    },
-                    SkillRoot {
-                        path: workspace
-                            .launch_directory()
-                            .join(".agents/skills")
-                            .to_string_lossy()
-                            .into_owned(),
-                        scope: SkillScope::Repo,
-                        follow_directory_links: false,
-                    },
-                ];
+                let platform = if cfg!(target_os = "macos") {
+                    PathPlatform::MacOs
+                } else {
+                    PathPlatform::Unix
+                };
+                let roots = resolve_skill_roots(workspace, &user_home, &skill_directory, platform)
+                    .map_err(internal)?;
                 let catalog = SkillCatalog::new(
                     reader.clone(),
                     roots,
                     SkillDiscoveryContext {
                         working_directory: workspace.launch_directory().to_owned(),
-                        platform: if cfg!(target_os = "macos") {
-                            PathPlatform::MacOs
-                        } else {
-                            PathPlatform::Unix
-                        },
+                        platform,
                     },
                     Arc::new(move || {
                         let config = capture.lock().expect("skill configuration poisoned");
@@ -398,7 +402,19 @@ struct ProductionSource {
     templates: Arc<PromptTemplateCatalog>,
     materializer: Arc<ProductionPolicyMaterializer>,
     gate: Arc<SandboxGate>,
+    configuration_directory: PathBuf,
+    utilities: CliUtilityAvailability,
 }
+
+struct InstructionSecurity(ProductionPolicy);
+impl SecurityProvider for InstructionSecurity {
+    type Snapshot = ProductionPolicy;
+
+    fn capture(&self) -> ProductionPolicy {
+        self.0.clone()
+    }
+}
+
 impl AgentFactorySource<ProductionPolicy> for ProductionSource {
     fn create(
         &self,
@@ -439,6 +455,128 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
                 )) as Arc<dyn SystemPromptProvider>
             })
             .collect();
+        // Instructions are host context, not a file-tool invocation under the
+        // selected profile. Keep this read-only capture separate from tool grants.
+        prompts.push(Arc::new(
+            AgentsPromptProvider::new(
+                &services
+                    .resources
+                    .workspace()
+                    .launch_directory()
+                    .to_string_lossy(),
+                &self.configuration_directory.to_string_lossy(),
+                Arc::new(ProductionReader(filesystem.clone())),
+                Arc::new(InstructionSecurity(
+                    ProductionPolicy::compose(true, &[], &[], &[]).map_err(internal)?,
+                )),
+                templates.clone(),
+            )
+            .map_err(internal)?,
+        ));
+        let utilities = |entries: &[String]| {
+            if entries.is_empty() {
+                "none".to_owned()
+            } else {
+                entries.join(", ")
+            }
+        };
+        let mut children = self
+            .configuration
+            .runtime
+            .profiles
+            .iter()
+            .filter(|(_, profile)| profile.is_agent_selectable)
+            .collect::<Vec<_>>();
+        children.sort_by(|(left, _), (right, _)| left.encode_utf16().cmp(right.encode_utf16()));
+        let subagents = children
+            .into_iter()
+            .map(|(id, profile)| serde_json::json!({"id": id, "usage": profile.usage}))
+            .collect::<Vec<_>>();
+        let context = [
+            (
+                "05b-optional-cli-utilities",
+                "context.optional-cli-utilities",
+                vec![(
+                    "utilities".into(),
+                    utilities(self.utilities.available_optional()).into(),
+                )],
+            ),
+            (
+                "06-cli-utilities",
+                "context.expected-cli-utilities",
+                vec![(
+                    "utilities".into(),
+                    utilities(self.utilities.available_expected()).into(),
+                )],
+            ),
+            (
+                "07-platform",
+                "context.platform",
+                vec![("platform".into(), native_platform_identifier().into())],
+            ),
+            (
+                "12-working-directory",
+                "system.working-directory",
+                vec![(
+                    "working_directory".into(),
+                    services
+                        .resources
+                        .workspace()
+                        .launch_directory()
+                        .to_string_lossy()
+                        .into_owned()
+                        .into(),
+                )],
+            ),
+            (
+                "13-git-repository",
+                "context.git-repository",
+                vec![(
+                    "is_repository".into(),
+                    services
+                        .resources
+                        .workspace()
+                        .is_git_repository()
+                        .to_string()
+                        .into(),
+                )],
+            ),
+            (
+                "15-subagents",
+                "context.subagents",
+                vec![("subagents".into(), subagents.into())],
+            ),
+        ];
+        prompts.extend(context.into_iter().map(|(key, template, arguments)| {
+            Arc::new(TemplateSystemPromptProvider::new(
+                format!("runtime:system-context:{key}"),
+                template,
+                arguments,
+                templates.clone(),
+            )) as Arc<dyn SystemPromptProvider>
+        }));
+        prompts.push(Arc::new(SessionIdentityPromptProvider::new(
+            templates.clone(),
+        )));
+        let sandbox = self.gate.clone();
+        prompts.push(Arc::new(SecurityProfilePromptProvider::new(
+            self.configuration
+                .runtime
+                .sandbox_rules
+                .iter()
+                .map(|rule| SecurityRuleDescription {
+                    path: rule.path.clone(),
+                    action: match rule.action {
+                        SandboxRuleAction::AllowWrite => RuleActionDescription::AllowWrite,
+                        SandboxRuleAction::DenyRead => RuleActionDescription::DenyRead,
+                        SandboxRuleAction::AllowRead => RuleActionDescription::AllowRead,
+                        SandboxRuleAction::DenyWrite => RuleActionDescription::DenyWrite,
+                    },
+                })
+                .collect(),
+            Arc::new(move || sandbox.enabled()),
+            templates.clone(),
+        )));
         prompts.push(Arc::new(ModelPromptProvider::new(
             self.configuration.models.model_profiles.clone(),
             self.router.clone(),
@@ -612,14 +750,24 @@ impl ProductionProfiles {
 }
 impl ProfileResolver<ProductionPolicy> for ProductionProfiles {
     fn resolve_child(&self, id: &str) -> ChildResult<ChildProfile<ProductionPolicy>> {
+        let selected = if id == "explore"
+            && self
+                .profiles
+                .get("explorer")
+                .is_some_and(|(config, _)| config.is_agent_selectable)
+        {
+            "explorer"
+        } else {
+            id
+        };
         let (configuration, security) = self
             .profiles
-            .get(id)
+            .get(selected)
             .filter(|(config, _)| config.is_agent_selectable)
             .ok_or_else(|| ChildError::registry(format!("unknown child profile {id}")))?;
         Ok(ChildProfile {
             profile: TurnProfile {
-                id: id.into(),
+                id: selected.into(),
                 maximum_requests: configuration.max_turns,
                 allowed_tools: configuration.allowed_tools.clone(),
                 disabled_tools: self.disabled.clone(),
@@ -647,7 +795,7 @@ struct StorageWorkspace;
 impl SessionWorkspaceResolver for StorageWorkspace {
     fn resolve(&self, path: &Path) -> Result<PathBuf, SessionStoreError> {
         ordinary_workspace_resolver()(path)
-            .map(|workspace| workspace.physical_identity().to_owned())
+            .map(|workspace| workspace.launch_directory().to_owned())
             .map_err(SessionStoreError::failure)
     }
 }
@@ -753,6 +901,25 @@ impl AuthorizedReadService for ProductionReader {
                     request,
                     &SharedSecurity(Arc::new(snapshot.clone())),
                     cancellation,
+                )
+                .await
+        })
+    }
+
+    fn stream_read<'a>(
+        &'a self,
+        request: &'a ReadRequest,
+        snapshot: &'a ProductionPolicy,
+        cancellation: &'a dyn Cancellation,
+        consumer: &'a mut dyn ReadConsumer,
+    ) -> BoxFuture<'a, OperationResult<std::path::PathBuf, FileReadError>> {
+        Box::pin(async move {
+            self.0
+                .stream_read(
+                    request,
+                    &SharedSecurity(Arc::new(snapshot.clone())),
+                    cancellation,
+                    consumer,
                 )
                 .await
         })

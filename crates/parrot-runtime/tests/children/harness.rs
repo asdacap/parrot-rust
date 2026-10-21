@@ -37,12 +37,36 @@ impl Harness {
         histories: Arc<Histories>,
         preparer: Arc<dyn HistoryPreparer>,
     ) -> Self {
+        Self::with_settings(
+            capacity,
+            histories,
+            preparer,
+            parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_recursion_limit: false,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn with_limits(
+        capacity: usize,
+        limits: parrot_foundation::config::runtime::AgentLimitsConfig,
+    ) -> Self {
+        let histories = Histories::new();
+        Self::with_settings(capacity, histories.clone(), histories, limits)
+    }
+    fn with_settings(
+        capacity: usize,
+        histories: Arc<Histories>,
+        preparer: Arc<dyn HistoryPreparer>,
+        agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
+    ) -> Self {
         let factory = Arc::new(Factory::default());
         *factory.histories.lock().unwrap() = Some(histories.clone());
         let diagnostics = Arc::new(Diagnostics::default());
         let lifetime = Arc::new(Signal::new());
         let budget = RetainedAgentBudget::new(capacity.try_into().unwrap());
         let registry = AgentRegistry::new(RegistryConfig {
+            agent_limits,
             profiles: Arc::new(Profiles),
             factory: factory.clone(),
             histories: preparer,

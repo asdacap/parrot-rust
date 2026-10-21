@@ -151,6 +151,21 @@ pub struct ConfiguredToolDefinition {
     pub parameters_json: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AgentLimitsConfig {
+    pub disable_max_turns: bool,
+    pub disable_recursion_limit: bool,
+}
+
+impl Default for AgentLimitsConfig {
+    fn default() -> Self {
+        Self {
+            disable_max_turns: true,
+            disable_recursion_limit: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeSettings {
     pub profiles: BTreeMap<String, ProfileConfig>,
@@ -165,6 +180,7 @@ pub struct RuntimeSettings {
     pub compaction: CompactionConfig,
     pub agent_tasks: AgentTaskConfig,
     pub agent_send_to_parent: bool,
+    pub agent_limits: AgentLimitsConfig,
     pub tools: BTreeMap<String, ConfiguredToolDefinition>,
     pub live_buffer_rows: i32,
     /// -1 denotes the source's infinite timeout; all other values are positive milliseconds.
@@ -216,6 +232,13 @@ impl RuntimeSettings {
         let agent_tasks = read_agent_tasks(root)?;
         let agent_send_to_parent =
             boolean(root.get("agent_send_to_parent"), "agent_send_to_parent")?;
+        let agent_limits = AgentLimitsConfig {
+            disable_max_turns: boolean(root.get("disable_max_turns"), "disable_max_turns")?,
+            disable_recursion_limit: boolean(
+                root.get("disable_recursion_limit"),
+                "disable_recursion_limit",
+            )?,
+        };
         let tools = read_tool_definitions(root)?;
         let skills = read_skills(root)?;
         Ok(Self {
@@ -233,6 +256,7 @@ impl RuntimeSettings {
             compaction,
             agent_tasks,
             agent_send_to_parent,
+            agent_limits,
             tools,
             live_buffer_rows,
             user_input_timeout_ms,
@@ -276,6 +300,7 @@ impl RuntimeSettings {
             "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
             "agentTasks":{"maximumAttempts":self.agent_tasks.maximum_attempts,"maximumResponseRepairs":self.agent_tasks.maximum_response_repairs,"forkHistoryMode":format!("{:?}",self.agent_tasks.fork_history_mode)},
             "agentSend":{"toParent":self.agent_send_to_parent},"toolDefinitions":tools,
+            "agentLimits":{"disableMaxTurns":self.agent_limits.disable_max_turns,"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
             "liveBufferRows":self.live_buffer_rows,"userInputTimeoutMs":self.user_input_timeout_ms,
             "requestLimits":{"imageBytesPerToolCycle":self.request_limits.image_bytes_per_tool_cycle,"imageBytesPerRead":self.request_limits.image_bytes_per_read,"providerRequestBytes":self.request_limits.provider_request_bytes},
             "webFetch":{"allowPrivate":self.web_fetch_allow_private},"imageUpload":upload,

@@ -92,6 +92,7 @@ impl ContextCompactionPolicy {
         input_limit: i32,
         trigger_percent: i32,
         target_percent: i32,
+        output_reserved_input_limit: Option<i64>,
     ) -> Self {
         let trigger_tokens = match context_limit {
             Some(limit) => cap_tokens(limit.resolve_tokens(context_window), input_limit),
@@ -109,6 +110,10 @@ impl ContextCompactionPolicy {
                     .wrapping_mul(i64::from(target_percent))
                     .wrapping_add((trigger % 100) * i64::from(target_percent) / 100)
             }),
+        };
+        let trigger_tokens = match (trigger_tokens, output_reserved_input_limit) {
+            (Some(trigger), Some(safe_input_limit)) => Some(trigger.min(safe_input_limit)),
+            (trigger, _) => trigger,
         };
         Self {
             trigger_tokens,

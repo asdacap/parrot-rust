@@ -528,6 +528,10 @@ impl Rpc {
         let resolver = Arc::new(Physical(root.clone()));
         let factory_resolver = resolver.clone();
         let factory_config = UserSessionFactoryConfig {
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_recursion_limit: false,
+                ..Default::default()
+            },
             router,
             modes,
             workflows: Vec::new(),

@@ -46,7 +46,7 @@ use parrot_runtime::{
     tool_settlement::ToolSettlement,
 };
 use parrot_storage::{
-    conversation::{AgentHistoryView, ConversationRepository},
+    conversation::{AgentHistoryView, ConversationRepository, HistoryProjection},
     diagnostics::{DiagnosticEvent, DiagnosticSeverity, statistics::UserSessionStatistics},
     events::{Admission, ConversationPart, NeverCancelled},
     history_files::AgentHistoryFile,
@@ -112,6 +112,7 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub standing: StandingInstruction,
     pub statistics: Arc<UserSessionStatistics>,
     pub root_identity: Arc<AgentIdentity>,
+    pub modes: Arc<UserSessionModes<S>>,
     registry: OnceLock<Weak<AgentRegistry<S>>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> UserServices<S> {
@@ -243,6 +244,7 @@ pub fn durable_permission_factory(
 }
 
 pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
+    pub agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
     pub router: Arc<ModelRouter>,
     pub modes: Arc<ModeRegistry<S>>,
     pub workflows: Vec<(String, Arc<dyn ModeWorkflowFactory<S>>)>,
@@ -284,6 +286,67 @@ struct Histories<S: RestrictableAccessSnapshot + 'static> {
     services: Arc<UserServices<S>>,
     repository: ConversationRepository,
 }
+impl<S: RestrictableAccessSnapshot + 'static> Histories<S> {
+    async fn lineage(&self) -> ChildResult<AgentDirectoryLineage> {
+        let records = self
+            .services
+            .lease
+            .events
+            .agent_lineage()
+            .await
+            .map_err(|error| child(error.to_string()))?;
+        Ok(AgentDirectoryLineage::resolve(
+            &records
+                .into_iter()
+                .map(|record| {
+                    parrot_domain::values::lineage::AgentLineageRecord::new(
+                        record.agent_session_id,
+                        record.parent_agent_session_id,
+                        record.name,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn refresh_all(&self) -> ChildResult<()> {
+        let lineage = self.lineage().await?;
+        for directory in lineage.directories() {
+            let path: Vec<_> = directory.name_path.iter().map(String::as_str).collect();
+            let scratch = self
+                .services
+                .resources
+                .agent_scratch(&path)
+                .map_err(child_io)?;
+            let file = AgentHistoryFile::new(
+                self.services.lease.selected_root().clone(),
+                scratch.history_path(),
+                directory.session_ids.clone(),
+            )
+            .map_err(|error| child(error.to_string()))?;
+            file.refresh(&self.repository, directory.session_ids.last().unwrap())
+                .await
+                .map_err(|error| child(error.to_string()))?;
+        }
+        for agent in self
+            .repository
+            .agent_history_session_ids()
+            .await
+            .map_err(|error| child(error.to_string()))?
+        {
+            if !lineage.contains(&agent) {
+                let mut diagnostic = DiagnosticEvent::new(
+                    "session",
+                    "agent_history_unresolved",
+                    DiagnosticSeverity::Warning,
+                );
+                diagnostic.agent_session_id = Some(agent);
+                self.services.diagnostic(&diagnostic);
+            }
+        }
+        Ok(())
+    }
+}
 impl<S: RestrictableAccessSnapshot + 'static> HistoryPreparer for Histories<S> {
     fn prepare<'a>(
         &'a self,
@@ -296,25 +359,7 @@ impl<S: RestrictableAccessSnapshot + 'static> HistoryPreparer for Histories<S> {
                 .resources
                 .agent_scratch(&path)
                 .map_err(child_io)?;
-            let records = self
-                .services
-                .lease
-                .events
-                .agent_lineage()
-                .await
-                .map_err(|error| child(error.to_string()))?;
-            let lineage = AgentDirectoryLineage::resolve(
-                &records
-                    .into_iter()
-                    .map(|record| {
-                        parrot_domain::values::lineage::AgentLineageRecord::new(
-                            record.agent_session_id,
-                            record.parent_agent_session_id,
-                            record.name,
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            );
+            let lineage = self.lineage().await?;
             let occupants = lineage.occupants_of(&identity.name_path, &identity.session.session_id);
             let file = AgentHistoryFile::new(
                 self.services.lease.selected_root().clone(),
@@ -455,7 +500,7 @@ impl Drop for CancelObservation {
 pub struct UserSessionCore<S: RestrictableAccessSnapshot + 'static> {
     pub services: Arc<UserServices<S>>,
     pub registry: Arc<AgentRegistry<S>>,
-    modes: UserSessionModes<S>,
+    modes: Arc<UserSessionModes<S>>,
     materializer: Arc<dyn RetainedModePolicyMaterializer<S>>,
     repository: ConversationRepository,
     main: Mutex<Main<S>>,
@@ -497,8 +542,10 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             initialization.root_agent_name.clone(),
             config.templates.clone(),
         );
-        let modes = UserSessionModes::new(config.modes.clone(), config.workflows.clone())
-            .map_err(invalid)?;
+        let modes = Arc::new(
+            UserSessionModes::new(config.modes.clone(), config.workflows.clone())
+                .map_err(invalid)?,
+        );
         let names: Vec<_> = identity.name_path.iter().map(String::as_str).collect();
         modes.attach(resources.agent_scratch(&names).map_err(internal)?);
         let mode = modes.resolve(&mode_id).map_err(invalid)?;
@@ -516,6 +563,12 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             )
             .map_err(invalid)?,
         );
+        std::fs::create_dir_all(resources.scratch_directory()).map_err(internal)?;
+        let statistics = lease
+            .events
+            .get_runtime_statistics()
+            .await
+            .map_err(internal)?;
         *settled_on_error = false;
         let permissions = (config.permissions)(
             lease.clone(),
@@ -533,18 +586,14 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             skills: (config.skills)(resources.workspace())?,
             lifetime: lifetime.clone(),
             standing: StandingInstruction::new(config.templates.clone()),
-            statistics: lease
-                .events
-                .get_runtime_statistics()
-                .await
-                .map_err(internal)?,
+            statistics,
             root_identity: identity.clone(),
+            modes: modes.clone(),
             registry: OnceLock::new(),
         });
         let mut cleanup_registry = None;
         let mut cleanup_scope = None;
         let initialized = async {
-            std::fs::create_dir_all(resources.scratch_directory()).map_err(internal)?;
             let source = config.source.create(services.clone())?;
             let histories = Arc::new(Histories {
                 services: services.clone(),
@@ -552,6 +601,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             });
             let bind = source.bind.clone();
             let registry = AgentRegistry::new(RegistryConfig {
+                agent_limits: config.agent_limits,
                 profiles: config.profiles.clone(),
                 factory: source.factory.clone(),
                 histories: histories.clone(),
@@ -569,6 +619,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 .registry
                 .set(Arc::downgrade(&registry))
                 .map_err(|_| internal("user registry already bound"))?;
+            histories.refresh_all().await.map_err(internal)?;
             let history = histories.prepare(&identity).await.map_err(internal)?;
             history.refresh().await.map_err(internal)?;
             let selection = modes
@@ -1445,10 +1496,12 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                         }
                     })?;
                 let status = scope
-                    .get_service::<super::scope::ScopedTurnStatus>()
+                    .get_service::<super::scope::ScopedTurnStatus<S>>()
                     .map_err(internal)?;
                 let query = status.query(&observed.selection);
-                let profile = status.profile_prompt(&observed.selection);
+                let profile = status
+                    .profile_prompt(&observed.selection)
+                    .map_err(internal)?;
                 let full = status
                     .runtime
                     .observe_with_context(&query, &profile, observed.context, cancellation.as_ref())

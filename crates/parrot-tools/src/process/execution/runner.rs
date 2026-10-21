@@ -216,6 +216,20 @@ impl<S: ProcessSandbox> ProcessRunner<S> {
         }
     }
 
+    /// Materialize policy only after selecting the sandbox once for this start.
+    pub async fn start_with_policy(
+        &self,
+        request: &ProcessStartRequest,
+        policy_factory: impl FnOnce() -> io::Result<S::Policy>,
+    ) -> io::Result<ShellProcessExecution> {
+        if self.gate.enabled() {
+            let policy = policy_factory()?;
+            self.sandbox.start(request, &policy).await
+        } else {
+            UnsandboxedProcessSandbox.start(request, &()).await
+        }
+    }
+
     pub async fn run(
         &self,
         request: &ProcessStartRequest,

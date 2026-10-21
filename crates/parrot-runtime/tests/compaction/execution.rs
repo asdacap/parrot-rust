@@ -199,6 +199,7 @@ impl Fixture {
         let provider: Arc<dyn Provider> = Arc::new(FakeProvider(state.clone()));
         let mut model = Model::new("model", "provider");
         model.context_window = limit;
+        model.max_output_tokens = 1;
         let registry = Arc::new(
             ProviderRegistry::new(
                 vec![provider],
