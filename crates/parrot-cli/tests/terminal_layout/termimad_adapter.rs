@@ -77,6 +77,27 @@ fn repeated_inline_code_keeps_style_output_linear() {
 }
 
 #[test]
+fn highlighting_limits_include_the_boundary_and_count_utf16_newlines() {
+    let source = format!("```rust\n{}```", "// x\n".repeat(10_000));
+    let lines = MarkdownRenderer::render("", &source, 80, true);
+    assert_eq!(lines.len(), 10_000);
+    assert!(lines.iter().all(|line| line.contains("\x1b[38;2;")));
+
+    let line = format!("//{}a", "😀".repeat((512 * 1024 - 4) / 2));
+    assert_eq!(line.encode_utf16().count() + 1, 512 * 1024);
+    for suffix in ["", "a"] {
+        let code = format!("{line}{suffix}");
+        let source = format!("```rust\n{code}\n```");
+        let rows = MarkdownRenderer::render("", &source, 80, true);
+        assert_eq!(
+            rows.iter().any(|row| row.contains('\x1b')),
+            suffix.is_empty()
+        );
+        assert_eq!(rows.iter().map(|row| plain(row)).collect::<String>(), code);
+    }
+}
+
+#[test]
 fn ordinary_markdown_uses_termimad_layout() {
     let source = "# Heading\n\n* one\n* two\n\n1. alpha\n1. beta";
     let expected = termimad::MadSkin::default()

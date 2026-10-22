@@ -101,6 +101,54 @@ fn help_runs_on_retained_actual_runtime_without_runtime_command_or_signal_regist
 }
 
 #[test]
+fn enhanced_terminal_color_honors_no_color_with_termimad() {
+    use parrot_cli::terminal_layout::MarkdownRenderer;
+    const EXPECTED: &str = "PARROT_TEST_TERMIMAD_COLOR";
+    if let Ok(expected) = std::env::var(EXPECTED) {
+        let color = enhanced_terminal_color_enabled();
+        assert_eq!(color, expected == "enabled");
+        let rows = MarkdownRenderer::render("", "**answer**", 80, color);
+        assert_eq!(rows.len(), 1);
+        if color {
+            assert!(rows[0].contains("\x1b["));
+            assert!(rows[0].contains("answer"));
+        } else {
+            assert_eq!(rows, ["answer"]);
+        }
+        return;
+    }
+    for value in [None, Some(""), Some("1"), Some("0"), Some("false")] {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "tests::enhanced_terminal_color_honors_no_color_with_termimad",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env(
+                EXPECTED,
+                if value.is_none() {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+            );
+        if let Some(value) = value {
+            command.env("NO_COLOR", value);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "NO_COLOR={value:?}: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+#[ignore = "Legacy exact ANSI palette; NO_COLOR behavior has an active Termimad test"]
 fn enhanced_terminal_color_honors_no_color_existence() {
     use parrot_cli::terminal_layout::MarkdownRenderer;
     const EXPECTED: &str = "PARROT_TEST_ENHANCED_COLOR";
