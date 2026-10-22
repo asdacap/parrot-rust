@@ -148,6 +148,7 @@ fn output_reservation_clamps_only_the_trigger_after_resolving_targets() {
 }
 
 #[test]
+#[ignore = "Ported UTF-16 heuristic superseded by o200k_base tokenization"]
 fn estimates_tokens_as_quarters_rounded_up() {
     for (text, expected) in [
         (String::new(), 0),
@@ -159,6 +160,24 @@ fn estimates_tokens_as_quarters_rounded_up() {
         ("🙂".to_owned(), 1),
     ] {
         assert_eq!(TokenEstimator::estimate_tokens(&text), expected);
+    }
+}
+
+#[test]
+fn counts_o200k_base_ordinary_text() {
+    for (text, expected) in [
+        (String::new(), 0),
+        ("Hello, world!".to_owned(), 4),
+        ("fn main() { println!(\"hello\"); }".to_owned(), 9),
+        ("日本語のテキスト".to_owned(), 6),
+        ("🙂🙂a".to_owned(), 3),
+        ("éééé".to_owned(), 4),
+        ("a".repeat(4_001), 501),
+        ("<|endoftext|>".to_owned(), 7),
+    ] {
+        for _ in 0..3 {
+            assert_eq!(TokenEstimator::estimate_tokens(&text), expected);
+        }
     }
 }
 
@@ -193,6 +212,7 @@ fn scales_maximum_trigger_without_intermediate_overflow() {
 }
 
 #[test]
+#[ignore = "Ported UTF-16 heuristic superseded by o200k_base tokenization"]
 fn estimates_utf16_units_rather_than_bytes_or_scalar_values() {
     assert_eq!(TokenEstimator::estimate_tokens("🙂🙂a"), 2);
     assert_eq!(TokenEstimator::estimate_tokens("éééé"), 1);

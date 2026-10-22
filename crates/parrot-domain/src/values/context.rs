@@ -348,6 +348,8 @@ pub struct TokenEstimator;
 
 impl TokenEstimator {
     pub fn estimate_tokens(text: &str) -> i64 {
-        (text.encode_utf16().count() as i64 + 3) / 4
+        tiktoken_rs::o200k_base_singleton()
+            .encode_ordinary(text)
+            .len() as i64
     }
 }

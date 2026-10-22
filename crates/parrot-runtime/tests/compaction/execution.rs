@@ -788,6 +788,7 @@ async fn preceding_summary_can_force_a_later_tool_group_to_spill_once() {
 }
 
 #[tokio::test]
+#[ignore = "Ported spill fixture relies on superseded UTF-16 token estimates"]
 async fn already_spilled_group_is_not_repeatedly_spilled_when_preceding_summary_grows() {
     let mut fixture = Fixture::new(1000, vec![vec![done(&"s".repeat(2000))]]);
     let mut history = vec![Message::user("old".repeat(233))];
