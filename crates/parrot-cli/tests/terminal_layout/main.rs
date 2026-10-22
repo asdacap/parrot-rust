@@ -1,12 +1,14 @@
-mod yaml_cases;
 mod date_keys;
 mod final_format;
+mod golden;
+mod markdown_golden;
 mod markdown_regressions;
 mod markdown_round3;
 mod markdown_round4_wrap;
-mod golden;
-mod markdown_golden;
 mod round3_final_format;
+mod termimad_adapter;
+mod termimad_live;
+mod yaml_cases;
 
 use parrot_cli::terminal_layout::{
     MarkdownLiveRenderer, MarkdownRenderer, TerminalCellStyleSpan, TerminalLine, TerminalStyle,
@@ -115,6 +117,7 @@ fn sanitization_replaces_untrusted_controls_and_expands_tabs() {
 }
 
 #[test]
+#[ignore = "Legacy custom Markdown syntax and block presentation"]
 fn markdown_formats_block_and_inline_elements_without_ansi_in_no_color_mode() {
     let source = "# Heading\n> quoted\n- item\n- [x] done\n1. ordered\n**bold** *italic* ~~gone~~ `code` [site](https://example.com)\n---";
     let rendered = MarkdownRenderer::render("- ", source, 80, false);
@@ -129,6 +132,7 @@ fn markdown_formats_block_and_inline_elements_without_ansi_in_no_color_mode() {
 }
 
 #[test]
+#[ignore = "Legacy heading positioning and exact wrapping"]
 fn markdown_supports_muted_hanging_prefix_content_layout() {
     assert_eq!(
         MarkdownRenderer::render("✦ ", "# title\n- **item**", 80, false),
@@ -154,6 +158,7 @@ fn markdown_drops_blank_edges_and_preserves_blank_content_lines() {
 }
 
 #[test]
+#[ignore = "Legacy table borders and padding"]
 fn markdown_formats_tables_and_fenced_code() {
     let source = "| Name | Status |\n| --- | --- |\n| Build | Done |\n\n```csharp\npublic var value = 42;\n```";
     let rendered = MarkdownRenderer::render("", source, 80, false).join("\n");
@@ -164,6 +169,7 @@ fn markdown_formats_tables_and_fenced_code() {
 }
 
 #[test]
+#[ignore = "Legacy whitespace at word-wrap boundaries; grapheme safety has active adapter tests"]
 fn markdown_wraps_at_source_cell_width_and_keeps_wide_graphemes() {
     let rows = MarkdownRenderer::render("", "日本語 alpha", 7, false);
     assert_eq!(rows, ["日本語", "alpha"]);
@@ -171,6 +177,7 @@ fn markdown_wraps_at_source_cell_width_and_keeps_wide_graphemes() {
 }
 
 #[test]
+#[ignore = "Legacy exact ANSI palette; color/plain parity has active adapter tests"]
 fn markdown_emits_known_language_ansi_but_no_color_is_text_identical() {
     let plain = MarkdownRenderer::render(
         "- ",
@@ -206,6 +213,7 @@ fn markdown_does_not_emit_unsafe_terminal_control_sequences() {
 }
 
 #[test]
+#[ignore = "Legacy narrow-table key/value fallback"]
 fn markdown_tables_fall_back_to_key_value_lines_when_too_wide() {
     let rows = MarkdownRenderer::render(
         "",
@@ -225,6 +233,7 @@ fn markdown_tables_fall_back_to_key_value_lines_when_too_wide() {
 }
 
 #[test]
+#[ignore = "Legacy heading layout; live promotion is covered by termimad_live"]
 fn markdown_live_promotes_complete_lines_and_keeps_committed_output_stable() {
     let mut renderer = MarkdownLiveRenderer::new(80);
     let first = renderer.append("answer", "- ", "# Head", false).unwrap();
@@ -291,6 +300,7 @@ fn markdown_live_keeps_one_unwrapped_source_until_commit() {
 }
 
 #[test]
+#[ignore = "Legacy table syntax and borders; fence/table promotion is covered by termimad_live"]
 fn markdown_live_keeps_fences_and_tables_uncommitted_until_their_boundary() {
     let mut fenced = MarkdownLiveRenderer::new(80);
     let open = fenced

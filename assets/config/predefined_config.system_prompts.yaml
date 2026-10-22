@@ -335,16 +335,13 @@ prompt_templates:
     allowed_arguments: [active_work]
     required_arguments: [active_work]
   agent-session.nonempty-queues-reminder:
+    engine: minijinja
     template: |-
       This turn must not exit while queues owned by this agent contain items.
-      {queues}
-      Drain every listed queue before finishing, even when asked to stop. Use queue_take to consume items or coordinate consumers and wait until all owned queues are empty. Closing a queue does not drain it. There is no waiver or abandon action. Parent-owned queues do not block completion; an empty open queue does not block completion.
+      {% for queue in queues %}- {{ queue.name }} (remaining items: {{ queue.size }})
+      {% endfor %}Drain every listed queue before finishing, even when asked to stop. Use queue_take to consume items or coordinate consumers and wait until all owned queues are empty. Closing a queue does not drain it. There is no waiver or abandon action. Parent-owned queues do not block completion; an empty open queue does not block completion.
     allowed_arguments: [queues]
     required_arguments: [queues]
-  agent-session.nonempty-queue-item:
-    template: '- {name} (remaining items: {size})'
-    allowed_arguments: [name, size]
-    required_arguments: [name, size]
   agent-session.active-work-agent-tasks-heading:
     template: 'Running AgentTask graphs'
     allowed_arguments: []
@@ -369,34 +366,27 @@ prompt_templates:
     template: 'Context usage entered the {percentage}% notification band ({estimated_tokens} estimated tokens / {context_limit} configured limit). Notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger}%.'
     allowed_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger]
     required_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger]
-  compact-context-tool.compacted:
-    template: 'Compacted this calling agent session. Context is now {usage}% used ({estimated_tokens} estimated tokens / {context_limit} limit); notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger}%.'
-    allowed_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger]
-    required_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger]
-  compact-context-tool.no-op:
-    template: 'No eligible context was compacted in this calling agent session. Context is {usage}% used ({estimated_tokens} estimated tokens / {context_limit} limit); notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger}%.'
-    allowed_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger]
-    required_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger]
-  compact-context-tool.unavailable:
-    template: 'Context compaction is unavailable for this calling agent session because the selected model has no positive context limit ({estimated_tokens} estimated tokens / {context_limit} limit); notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger}%.'
-    allowed_arguments: [estimated_tokens, context_limit, notification_interval, trigger]
-    required_arguments: [estimated_tokens, context_limit, notification_interval, trigger]
+  compact-context-tool.result:
+    engine: minijinja
+    template: |-
+      {% if outcome == "unavailable" -%}
+      Context compaction is unavailable for this calling agent session because the selected model has no positive context {{ "window" if has_context_limit_override else "limit" }} (
+      {%- elif outcome == "compacted" -%}
+      Compacted this calling agent session. Context is now {{ usage }}% used (
+      {%- else -%}
+      No eligible context was compacted in this calling agent session. Context is {{ usage }}% used (
+      {%- endif -%}
+      {{ estimated_tokens }} estimated tokens / {{ context_limit }} {{ "model context window" if has_context_limit_override else "limit" }}); notifications occur every {{ notification_interval }}%;
+      {%- if has_context_limit_override and outcome == "unavailable" %} automatic compaction trigger: {{ trigger_tokens }} tokens.
+      {%- elif has_context_limit_override %} automatic compaction triggers strictly above {{ trigger_tokens }} tokens.
+      {%- else %} automatic compaction triggers strictly above {{ trigger }}%.
+      {%- endif %}
+    allowed_arguments: [outcome, has_context_limit_override, usage, estimated_tokens, context_limit, notification_interval, trigger, trigger_tokens]
+    required_arguments: [outcome, has_context_limit_override, usage, estimated_tokens, context_limit, notification_interval, trigger, trigger_tokens]
   agent-session.context-limit-reminder:
     template: 'Context usage entered the {percentage}% notification band ({estimated_tokens} estimated tokens / {context_limit} model context window). Notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger_tokens} tokens.'
     allowed_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger, trigger_tokens]
     required_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger_tokens]
-  compact-context-tool.compacted-with-limit:
-    template: 'Compacted this calling agent session. Context is now {usage}% used ({estimated_tokens} estimated tokens / {context_limit} model context window); notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger_tokens} tokens.'
-    allowed_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger, trigger_tokens]
-    required_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger_tokens]
-  compact-context-tool.no-op-with-limit:
-    template: 'No eligible context was compacted in this calling agent session. Context is {usage}% used ({estimated_tokens} estimated tokens / {context_limit} model context window); notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger_tokens} tokens.'
-    allowed_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger, trigger_tokens]
-    required_arguments: [usage, estimated_tokens, context_limit, notification_interval, trigger_tokens]
-  compact-context-tool.unavailable-with-limit:
-    template: 'Context compaction is unavailable for this calling agent session because the selected model has no positive context window ({estimated_tokens} estimated tokens / {context_limit} model context window); notifications occur every {notification_interval}%; automatic compaction trigger: {trigger_tokens} tokens.'
-    allowed_arguments: [estimated_tokens, context_limit, notification_interval, trigger, trigger_tokens]
-    required_arguments: [estimated_tokens, context_limit, notification_interval, trigger_tokens]
   goal.root-reminder:
     template: 'User set goal is {goal}. Clear exit reminder "goal" if end condition met.'
     allowed_arguments: [goal]

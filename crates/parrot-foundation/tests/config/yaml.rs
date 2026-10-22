@@ -129,7 +129,7 @@ fn replace_validation_recurses_through_unknown_mappings_and_sequence_items() {
 }
 
 #[test]
-fn compose_combines_only_disjoint_ids_and_preserves_resource_order() {
+fn compose_combines_only_disjoint_leaves_and_preserves_resource_order() {
     let sources = [
         (
             "prompts",
@@ -176,13 +176,27 @@ fn compose_combines_only_disjoint_ids_and_preserves_resource_order() {
         (
             "tools: {shared: {description: first}}",
             "tools: {shared: {description: second}}",
-            "tools.shared",
+            "tools.shared.description",
         ),
         (
             "prompt_templates: {shared: {template: first}}",
-            "prompt_templates: {shared: {allowed_arguments: []}}",
-            "prompt_templates.shared",
+            "prompt_templates: {shared: {template: second}}",
+            "prompt_templates.shared.template",
         ),
+        (
+            "profiles: {shared: {prompt: first}}",
+            "profiles: {shared: {prompt: second}}",
+            "profiles.shared.prompt",
+        ),
+        (
+            "arbitrary: {nested: {value: first}}",
+            "arbitrary: {nested: {value: second}}",
+            "arbitrary.nested.value",
+        ),
+        ("arbitrary: [first]", "arbitrary: [second]", "arbitrary"),
+        ("arbitrary: []", "arbitrary: []", "arbitrary"),
+        ("arbitrary: {}", "arbitrary: scalar", "arbitrary"),
+        ("arbitrary: scalar", "arbitrary: {}", "arbitrary"),
     ] {
         assert_eq!(
             compose(&[("first.yaml", Some(first)), ("second.yaml", Some(second))])
@@ -193,6 +207,46 @@ fn compose_combines_only_disjoint_ids_and_preserves_resource_order() {
             )
         );
     }
+}
+
+#[test]
+fn compose_recursively_merges_arbitrary_mappings_in_resource_order() {
+    let text = compose(&[
+        (
+            "first.yaml",
+            Some("arbitrary: {nested: {first: one}, empty: {}}\nprofiles: {first: {prompt: initial}}"),
+        ),
+        (
+            "second.yaml",
+            Some("arbitrary: {nested: {second: [two, three]}, empty: {child: value}}\nprofiles: {first: {usage: later}, second: {prompt: another}}"),
+        ),
+    ])
+    .unwrap();
+    let root = parse_root(&text).unwrap();
+    assert_eq!(
+        scalar_values(&root),
+        [
+            "arbitrary",
+            "nested",
+            "first",
+            "one",
+            "second",
+            "two",
+            "three",
+            "empty",
+            "child",
+            "value",
+            "profiles",
+            "first",
+            "prompt",
+            "initial",
+            "usage",
+            "later",
+            "second",
+            "prompt",
+            "another",
+        ]
+    );
 }
 
 #[test]
@@ -215,9 +269,6 @@ fn compose_invalid_sources_report_resource_and_reason() {
             "",
             "predefined configuration must contain exactly one mapping document",
         ),
-        ("prompt_templates: []", "prompt_templates must be a mapping"),
-        ("system_prompts: []", "system_prompts must be a mapping"),
-        ("tools: []", "tools must be a mapping"),
         (
             "tools:\n  ? [one, two]\n  : value",
             "configuration mapping keys at tools must be strings",

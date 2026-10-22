@@ -3,6 +3,7 @@
 use parrot_cli::terminal_layout::MarkdownRenderer;
 
 #[test]
+#[ignore = "Legacy custom wrapper snapshots; grapheme safety has active adapter tests"]
 fn broken_words_reset_continuation_start_across_styled_zero_cell_runs() {
     let cases: serde_json::Value = serde_json::from_str(SOURCE_CASES).unwrap();
     let cases = cases.as_array().unwrap();

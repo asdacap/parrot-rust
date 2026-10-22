@@ -360,25 +360,49 @@ fn validate_composer_keys(node: &Node, name: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn add_owner(
-    owners: &mut BTreeMap<String, String>,
-    key: &str,
+fn compose_mapping(
+    target: &mut Vec<(Node, Node)>,
+    source: &[(Node, Node)],
     name: &str,
-    path: &str,
+    path: &mut Vec<String>,
+    owners: &mut BTreeMap<Vec<String>, String>,
 ) -> Result<()> {
-    if let Some(previous) = owners.get(key) {
-        return Err(ConfigError::invalid_data(format!(
-            "duplicate predefined configuration at {path} in \"{previous}\" and \"{name}\""
-        )));
+    for (key, value) in source {
+        path.push(key.as_str().expect("keys checked").to_owned());
+        if let Some((_, current)) = target
+            .iter_mut()
+            .find(|(existing, _)| equivalent(existing, key))
+        {
+            if let (Kind::Mapping(current), Kind::Mapping(incoming)) =
+                (&mut current.kind, &value.kind)
+            {
+                compose_mapping(current, incoming, name, path, owners)?;
+            } else {
+                let previous = owners.get(path).expect("existing node has an owner");
+                return Err(ConfigError::invalid_data(format!(
+                    "duplicate predefined configuration at {} in \"{previous}\" and \"{name}\"",
+                    path.join(".")
+                )));
+            }
+        } else {
+            owners.insert(path.clone(), name.to_owned());
+            let mut copied = value.clone();
+            if let (Kind::Mapping(current), Kind::Mapping(incoming)) =
+                (&mut copied.kind, &value.kind)
+            {
+                current.clear();
+                compose_mapping(current, incoming, name, path, owners)?;
+            }
+            target.push((key.clone(), copied));
+        }
+        path.pop();
     }
-    owners.insert(key.to_owned(), name.to_owned());
     Ok(())
 }
 
 pub fn compose(sources: &[(&str, Option<&str>)]) -> Result<String> {
-    let mut combined = Node::mapping(Vec::new());
+    let mut combined = Vec::new();
     let mut owners = BTreeMap::new();
-    let mut mapping_owners: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     for (name, content) in sources {
         let content = content.ok_or_else(|| {
             ConfigError::invalid_data(format!(
@@ -395,36 +419,15 @@ pub fn compose(sources: &[(&str, Option<&str>)]) -> Result<String> {
         }
         let root = &documents[0];
         validate_composer_keys(root, name, "")?;
-        for (key, value) in root.as_mapping().expect("mapping checked") {
-            let key_text = key.as_str().expect("keys checked");
-            if matches!(key_text, "prompt_templates" | "system_prompts" | "tools") {
-                let entries = value.as_mapping().ok_or_else(|| {
-                    ConfigError::invalid_data(format!("{name}: {key_text} must be a mapping"))
-                })?;
-                if combined.get(key_text).is_none() {
-                    combined.set(key_text, Node::mapping(Vec::new()));
-                }
-                let item_owners = mapping_owners.entry(key_text.to_owned()).or_default();
-                for (id, item) in entries {
-                    let id_text = id.as_str().expect("keys checked");
-                    add_owner(item_owners, id_text, name, &format!("{key_text}.{id_text}"))?;
-                    if let Some(Node {
-                        kind: Kind::Mapping(target),
-                        ..
-                    }) = combined.get_mut(key_text)
-                    {
-                        target.push((id.clone(), item.clone()));
-                    }
-                }
-            } else {
-                add_owner(&mut owners, key_text, name, key_text)?;
-                if let Kind::Mapping(target) = &mut combined.kind {
-                    target.push((key.clone(), value.clone()));
-                }
-            }
-        }
+        compose_mapping(
+            &mut combined,
+            root.as_mapping().expect("mapping checked"),
+            name,
+            &mut Vec::new(),
+            &mut owners,
+        )?;
     }
-    Ok(compose_with_end(&combined))
+    Ok(compose_with_end(&Node::mapping(combined)))
 }
 
 fn spaces(indent: usize) -> String {

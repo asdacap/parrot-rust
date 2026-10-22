@@ -668,6 +668,45 @@ async fn assert_pending<F: Future>(mut future: std::pin::Pin<&mut F>) {
 }
 
 #[tokio::test]
+async fn queue_blocker_formats_sorted_structured_queues_and_omits_empty_queues() {
+    let h = Harness::new();
+    let _scope = h.scope(None, "root").await;
+    let built = h.factory.get("root");
+    let blocker = QueueBlocker {
+        queues: built.queues.clone(),
+        templates: super::templates(),
+    };
+    assert!(blocker.observe().await.unwrap().is_none());
+    push(&built.queues, "empty", false, false);
+    assert!(blocker.observe().await.unwrap().is_none());
+    push(&built.queues, "zulu", true, true);
+    push(&built.queues, "alpha", true, false);
+    built
+        .queues
+        .push(
+            "alpha",
+            &["second".into()],
+            Direction::Back,
+            false,
+            &NeverCancelled,
+        )
+        .unwrap();
+    let observation = blocker.observe().await.unwrap().unwrap();
+    assert_eq!(observation.work_section, None);
+    assert_eq!(
+        observation.reminder.as_deref(),
+        Some(
+            "This turn must not exit while queues owned by this agent contain items.\n- alpha (remaining items: 2)\n- zulu (remaining items: 1)\nDrain every listed queue before finishing, even when asked to stop. Use queue_take to consume items or coordinate consumers and wait until all owned queues are empty. Closing a queue does not drain it. There is no waiver or abandon action. Parent-owned queues do not block completion; an empty open queue does not block completion."
+        )
+    );
+    for name in ["alpha", "zulu"] {
+        built.queues.try_take(name, 2, Direction::Front).unwrap();
+    }
+    assert!(blocker.observe().await.unwrap().is_none());
+    h.close().await;
+}
+
+#[tokio::test]
 async fn owned_queues_block_only_when_populated_for_all_four_closed_empty_combinations() {
     for closed in [false, true] {
         for populated in [false, true] {

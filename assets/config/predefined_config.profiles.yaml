@@ -140,17 +140,6 @@ profiles:
     read_only: false
     is_user_selectable: false
     is_agent_selectable: true
-  agent-task-payload:
-    usage: Execute an AgentTask payload and verify its observable result.
-    prompt: |-
-      You are an AgentTask payload executor. Implement the assigned task within its approved scope and verify the observable result against the strict contract.
-
-      Preserve existing behavior outside the task, report concrete verification evidence, and stop when the task contract is satisfied. For instruction leaves, return only the required strict JSON with nonblank result and exactly one strict verdict.
-    max_turns: 128
-    recursion_limit: 6
-    read_only: false
-    is_user_selectable: false
-    is_agent_selectable: true
   thinker:
     prompt: |-
       You are Parrot's thinker agent. Perform difficult analysis and decision-making without modifying the workspace.

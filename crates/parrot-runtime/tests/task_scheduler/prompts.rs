@@ -41,9 +41,66 @@ fn composite_assignment_uses_the_same_default_precedence_without_reinterpreting_
 }
 
 #[test]
-fn user_header_override_remains_authoritative_and_interpolation_stays_literal() {
+fn assignment_context_formats_empty_and_multiple_siblings_and_dependencies() {
+    let runner = TaskRunner::new(
+        TaskConfiguration::defaults(templates()),
+        Arc::new(Parser::default()),
+    );
+    let current = task("current");
+    let siblings = [task("sibling-one"), task("sibling-two")];
+    let mut dependencies = [task("first"), task("second")];
+    dependencies[0].result = Some("answer {{ literal }}\nnext".into());
+    for include_siblings in [false, true] {
+        for include_dependencies in [false, true] {
+            let siblings = if include_siblings { &siblings[..] } else { &[] };
+            let dependencies = if include_dependencies {
+                &dependencies[..]
+            } else {
+                &[]
+            };
+            let rendered = runner
+                .build_prompt(&current, siblings, dependencies, &[], None)
+                .unwrap();
+            let sibling_text = if include_siblings {
+                "Sibling tasks (out of scope):\nThese tasks belong to other agents. Do not implement or duplicate their work. You may consume dependency results for your assigned task.\n[sibling-one] Do sibling-one\n[sibling-two] Do sibling-two\n"
+            } else {
+                ""
+            };
+            let dependency_text = if include_dependencies {
+                "\nDirect dependency summaries:\n[first] Do first\nResult: answer {{ literal }}\nnext\n[second] Do second\nResult: "
+            } else {
+                ""
+            };
+            let expected = format!(
+                "{sibling_text}Task: current\nDescription: Do current\nAcceptance criteria: current works{dependency_text}\n{PRECEDENCE}AgentTask role: payload executor"
+            );
+            assert!(rendered.starts_with(&expected), "{rendered}");
+        }
+    }
+}
+
+#[test]
+fn assignment_context_bounds_sibling_descriptions_before_rendering() {
+    let runner = TaskRunner::new(
+        TaskConfiguration::defaults(templates()),
+        Arc::new(Parser::default()),
+    );
+    let mut sibling = task("sibling");
+    sibling.description = format!("{}tail", "😀".repeat(8 * 1024));
+    let rendered = runner
+        .build_prompt(&task("current"), &[sibling], &[], &[], None)
+        .unwrap();
+    assert!(rendered.contains(&format!(
+        "[sibling] {}\n[truncated]\nTask: current",
+        "😀".repeat(8 * 1024)
+    )));
+    assert!(!rendered.contains("tail"));
+}
+
+#[test]
+fn assignment_context_override_receives_lists_and_interpolation_stays_literal() {
     let catalog = templates_with_content(
-        "prompt_templates:\n  agent-task.header:\n    template: 'CUSTOM {task_name}|{description}|{acceptance_criteria}|{dependencies}'\n",
+        "prompt_templates:\n  agent-task.assignment-context:\n    template: 'CUSTOM {{ task_name }}|{{ description }}|{{ acceptance_criteria }}|{{ dependencies|length }}|{{ siblings|length }}'\n",
     );
     let runner = TaskRunner::new(
         TaskConfiguration::defaults(catalog),
@@ -52,7 +109,7 @@ fn user_header_override_remains_authoritative_and_interpolation_stays_literal() 
     let mut current = task("current");
     current.description = "literal {task_name}".into();
     let rendered = runner.build_prompt(&current, &[], &[], &[], None).unwrap();
-    assert!(rendered.starts_with("CUSTOM current|literal {task_name}|current works|"));
+    assert!(rendered.starts_with("CUSTOM current|literal {task_name}|current works|0|0"));
     assert!(!rendered.contains(PRECEDENCE));
     assert!(rendered.contains("Inspect, implement, and verify this instruction:\nWork on current"));
 }
