@@ -20,6 +20,63 @@ fn plain(value: &str) -> String {
 }
 
 #[test]
+fn narrow_list_markers_use_safe_grapheme_wrapping() {
+    for source in [
+        "  * hello",
+        "9. first\n1. tenth\n1. eleventh",
+        "      1. nested",
+    ] {
+        for width in [0, 1, 2, 3, 4, 5] {
+            let plain_lines = MarkdownRenderer::render("", source, width, false);
+            let colored = MarkdownRenderer::render("", source, width, true);
+            assert_eq!(
+                colored.iter().map(|line| plain(line)).collect::<Vec<_>>(),
+                plain_lines
+            );
+            assert!(
+                plain_lines
+                    .iter()
+                    .all(|line| TerminalText::width(line) <= width.max(1))
+            );
+            assert!(
+                plain_lines
+                    .concat()
+                    .replace(' ', "")
+                    .contains(if source.contains("tenth") {
+                        "10.tenth"
+                    } else if source.contains("hello") {
+                        "hello"
+                    } else {
+                        "nested"
+                    })
+            );
+        }
+    }
+}
+
+#[test]
+fn repeated_inline_code_keeps_style_output_linear() {
+    for color in [false, true] {
+        let render = |count| {
+            let source = format!("e\u{301} {}", "`x` ".repeat(count));
+            let lines = MarkdownRenderer::render("", &source, 80, color);
+            assert_eq!(
+                lines.iter().map(|line| plain(line)).collect::<String>(),
+                format!("e\u{301} {}", "x ".repeat(count))
+            );
+            lines.iter().map(String::len).sum::<usize>()
+        };
+        let small = render(128);
+        let large = render(1024);
+        assert!(
+            large <= small * 9,
+            "nonlinear output with color={color}: {small} -> {large}"
+        );
+        assert!(large < 64 * 1024);
+    }
+}
+
+#[test]
 fn ordinary_markdown_uses_termimad_layout() {
     let source = "# Heading\n\n* one\n* two\n\n1. alpha\n1. beta";
     let expected = termimad::MadSkin::default()

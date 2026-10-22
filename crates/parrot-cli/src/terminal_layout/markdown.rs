@@ -86,7 +86,11 @@ fn render_ordinary(
     };
     let needs_fallback = width < 3
         || text.lines.iter().any(|line| match line {
-            Line::Normal(composite) => contains_cluster(composite),
+            Line::Normal(composite) => {
+                let (first, continuation) =
+                    termimad::wrap::composite_kind_widths(composite.style.into(), skin);
+                first >= width || continuation >= width || contains_cluster(composite)
+            }
             Line::TableRow(row) => {
                 row.cells.len() * 4 + 1 > width || row.cells.iter().any(contains_cluster)
             }
@@ -185,10 +189,13 @@ fn syntax_style(style: Style) -> String {
 fn trusted_sgr_spans(line: &str) -> Vec<(String, &str)> {
     let mut spans = Vec::new();
     let mut remaining = line;
-    let mut style = String::new();
+    let mut style: Vec<(u16, &str)> = Vec::new();
     while let Some(escape) = remaining.find('\x1b') {
         if escape > 0 {
-            spans.push((style.clone(), &remaining[..escape]));
+            spans.push((
+                style.iter().map(|(_, command)| *command).collect(),
+                &remaining[..escape],
+            ));
         }
         remaining = &remaining[escape..];
         let end = remaining.find('m').expect("Termimad emits SGR styling");
@@ -202,14 +209,36 @@ fn trusted_sgr_spans(line: &str) -> Vec<(String, &str)> {
         if command == "\x1b[0m" || command == "\x1b[m" {
             style.clear();
         } else {
-            style.push_str(command);
+            let selector = command[2..end]
+                .split(';')
+                .next()
+                .unwrap()
+                .parse::<u16>()
+                .expect("Termimad emits numeric SGR selectors");
+            let group = classify_sgr_selector(selector);
+            style.retain(|previous| classify_sgr_selector(previous.0) != group);
+            if !matches!(selector, 39 | 49 | 59) {
+                style.push((selector, command));
+            }
         }
         remaining = &remaining[end + 1..];
     }
     if !remaining.is_empty() {
-        spans.push((style, remaining));
+        spans.push((
+            style.iter().map(|(_, command)| *command).collect(),
+            remaining,
+        ));
     }
     spans
+}
+
+fn classify_sgr_selector(selector: u16) -> u16 {
+    match selector {
+        30..=39 | 90..=97 => 38,
+        40..=49 | 100..=107 => 48,
+        58 | 59 => 58,
+        selector => selector,
+    }
 }
 
 fn wrap_spans(spans: &[(String, &str)], width: usize, color: bool) -> Vec<String> {

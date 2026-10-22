@@ -1,5 +1,8 @@
 //! Source runtime assertions against actual presenters, not a replacement stream driver.
 
+#[path = "turn_termimad_live.rs"]
+mod termimad_live;
+
 use std::sync::Arc;
 
 use parrot_cli::presenters::{EnhancedSessionPresenter, EnhancedTurnRenderer};
@@ -521,6 +524,7 @@ fn enhanced_turn_ignores_agent_statistics_events() {
 }
 
 #[test]
+#[ignore = "Legacy word wrapping; foreground/child lifecycle is covered by termimad_live"]
 fn child_turn_completion_does_not_complete_the_foreground_turn() {
     let mut renderer = EnhancedTurnRenderer::new(8, false);
     let mut output = String::new();

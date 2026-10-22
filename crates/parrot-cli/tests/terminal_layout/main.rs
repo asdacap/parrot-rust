@@ -1,4 +1,5 @@
 mod termimad_adapter;
+mod termimad_live;
 mod yaml_cases;
 mod date_keys;
 mod final_format;
@@ -226,6 +227,7 @@ fn markdown_tables_fall_back_to_key_value_lines_when_too_wide() {
 }
 
 #[test]
+#[ignore = "Legacy heading layout; live promotion is covered by termimad_live"]
 fn markdown_live_promotes_complete_lines_and_keeps_committed_output_stable() {
     let mut renderer = MarkdownLiveRenderer::new(80);
     let first = renderer.append("answer", "- ", "# Head", false).unwrap();
@@ -292,6 +294,7 @@ fn markdown_live_keeps_one_unwrapped_source_until_commit() {
 }
 
 #[test]
+#[ignore = "Legacy table syntax and borders; fence/table promotion is covered by termimad_live"]
 fn markdown_live_keeps_fences_and_tables_uncommitted_until_their_boundary() {
     let mut fenced = MarkdownLiveRenderer::new(80);
     let open = fenced

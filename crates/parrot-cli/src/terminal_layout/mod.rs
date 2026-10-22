@@ -277,39 +277,9 @@ fn grapheme_width(g: &str) -> usize {
     }
 }
 
-fn fence(s: &str) -> Option<(char, usize, String)> {
-    let t = s.trim_start_matches(' ');
-    if s.len() - t.len() > 3 {
-        return None;
-    }
-    let marker = t.chars().next()?;
-    if !matches!(marker, '`' | '~') {
-        return None;
-    }
-    let n = t.chars().take_while(|c| *c == marker).count();
-    if n < 3 {
-        return None;
-    }
-    let lang = t[n..]
-        .trim()
-        .split(' ')
-        .find(|part| !part.is_empty())
-        .unwrap_or("")
-        .trim_matches(['{', '}', '.'])
-        .to_ascii_lowercase();
-    Some((marker, n, lang))
-}
-fn fence_close(s: &str, m: char, n: usize) -> bool {
-    let t = s.trim_start_matches(' ');
-    if s.len() - t.len() > 3 {
-        return false;
-    }
-    let k = t.chars().take_while(|c| *c == m).count();
-    k >= n && t[k..].trim().is_empty()
-}
-
 /// Small live-stream accumulator: only newline-complete safe regions are
-/// promoted; incomplete fences/tables remain preview text until a boundary or commit.
+/// promoted; incomplete fences, tables and ordered lists remain preview text until
+/// a boundary or commit.
 pub struct MarkdownLiveRenderer {
     id: String,
     prefix: String,
@@ -421,36 +391,45 @@ impl MarkdownLiveRenderer {
     }
 }
 fn promotable_boundary(s: &str) -> usize {
+    use termimad::minimad::{CompositeStyle, Line};
+
     let mut safe = 0;
     let mut pos = 0;
-    let mut open_fence: Option<(char, usize)> = None;
+    let mut open_fence = false;
     let mut table = false;
+    let mut ordered_list = false;
     while let Some(rel) = s[pos..].find('\n') {
         let nl = pos + rel;
-        let line = s[pos..nl].trim_end_matches('\r');
-        if let Some((m, n)) = open_fence {
-            if fence_close(line, m, n) {
-                open_fence = None;
+        let line = &s[pos..nl];
+        if open_fence {
+            if line.starts_with("```") {
+                open_fence = false;
                 safe = nl + 1;
             }
             pos = nl + 1;
             continue;
         }
-        if let Some((m, n, _)) = fence(line) {
-            open_fence = Some((m, n));
-            pos = nl + 1;
-            continue;
+        let parsed = Line::from(line);
+        let ordered_item = matches!(
+            &parsed,
+            Line::Normal(composite)
+                if matches!(composite.style, CompositeStyle::OrderedListItem { .. })
+        );
+        let table_part = matches!(&parsed, Line::TableRow(_) | Line::TableRule(_));
+        if (ordered_list && !ordered_item && !line.is_empty() && !line.starts_with(' '))
+            || (table && !table_part)
+        {
+            return pos;
         }
-        if line.contains('|') {
+        if matches!(parsed, Line::CodeFence(_)) {
+            open_fence = true;
+        } else if table_part {
             table = true;
-            pos = nl + 1;
-            continue;
+        } else if ordered_item || ordered_list {
+            ordered_list = true;
+        } else {
+            safe = nl + 1;
         }
-        if table {
-            safe = pos;
-            return safe;
-        }
-        safe = nl + 1;
         pos = nl + 1;
     }
     safe
