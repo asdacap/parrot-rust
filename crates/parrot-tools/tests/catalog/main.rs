@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 use std::sync::{Arc, atomic::Ordering};
 
 #[tokio::test]
-async fn native_configuration_and_all_thirty_retained_factories_preserve_source_order_and_definitions()
- {
+async fn native_configuration_and_retained_factories_preserve_evolved_source_order_and_definitions()
+{
     let fixture = Fixture::new("", true, 0);
     let definitions = catalog::configured_definitions(&fixture.configuration);
     let original_order: Value =
@@ -23,7 +23,10 @@ async fn native_configuration_and_all_thirty_retained_factories_preserve_source_
             .as_array()
             .unwrap()
             .iter()
-            .map(|row| row["name"].as_str().unwrap())
+            .flat_map(|row| match row["name"].as_str().unwrap() {
+                "answer" => vec!["ask", "reply"],
+                name => vec![name],
+            })
             .collect::<Vec<_>>(),
         BUILTIN_NAMES
     );
@@ -31,7 +34,7 @@ async fn native_configuration_and_all_thirty_retained_factories_preserve_source_
         include_bytes!("fixtures/predefined_config.runtime.source.yaml"),
         include_bytes!("../../../../assets/config/predefined_config.runtime.yaml")
     );
-    assert_eq!(definitions.definitions().len(), 30);
+    assert_eq!(definitions.definitions().len(), 31);
     assert_eq!(
         fixture
             .catalog
@@ -74,6 +77,8 @@ async fn native_configuration_and_all_thirty_retained_factories_preserve_source_
         &snapshot.find("exec_command").unwrap().create()
     ));
     assert!(snapshot.find("Bash").is_none());
+    assert!(snapshot.find("answer").is_none());
+    assert!(!fixture.configuration.runtime.tools.contains_key("answer"));
     assert!(!snapshot.definitions().iter().any(|d| d.name == "bash"));
     assert!(fixture.services.calls().is_empty());
     fixture.close().await;
@@ -137,10 +142,14 @@ async fn exact_t26_native_configuration_actual_read_glob_catalog_to_real_provide
 async fn source_support_send_definition_and_interruption_flags_are_bound_without_recreating_tools()
 {
     let fixture = Fixture::new("", false, 1);
-    assert_eq!(fixture.catalog.factories().len(), 30);
+    assert_eq!(fixture.catalog.factories().len(), 31);
     let snapshot = fixture.catalog.snapshot().unwrap();
     assert_eq!(snapshot.factories().len(), 29);
     assert!(snapshot.find("request_write_permission").is_none());
+    assert!(snapshot.find("question").is_none());
+    assert!(snapshot.find("answer").is_none());
+    assert!(snapshot.find("ask").is_some());
+    assert!(snapshot.find("reply").is_some());
     let source = &fixture.configuration.runtime.tools["agent_send"];
     let send = snapshot.find("agent_send").unwrap();
     assert_eq!(send.definition().parameters_json, source.parameters_json);
@@ -165,8 +174,8 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
             .collect::<Vec<_>>(),
         vec![
             "interrupt_process",
-            "question",
-            "answer",
+            "ask",
+            "reply",
             "agent_send",
             "agent_interrupt",
             "agent_status",
@@ -199,6 +208,34 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
             ParallelSafety::ParallelSafe
         );
     }
+    for name in [
+        "parent",
+        "parent/sibling",
+        "/root-name/child",
+        "child/grandchild",
+    ] {
+        assert_eq!(
+            fixture
+                .invoke("ask", json!({"name":name,"message":"question"}))
+                .await
+                .unwrap()
+                .text,
+            "catalog reply"
+        );
+        assert!(
+            fixture.services.calls().iter().any(|call| {
+                call.operation == "ask" && call.detail == format!("{name} question")
+            })
+        );
+    }
+    assert_eq!(
+        fixture
+            .invoke("reply", json!({"request_id":"request","message":"yes"}))
+            .await
+            .unwrap()
+            .text,
+        "Replied to ask request."
+    );
     fixture.close().await;
 }
 
@@ -214,7 +251,11 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
             json!({"command":"printf catalog","name":"watch","description":"Catalog monitor"}),
         ),
         ("question", json!({"questions":[{"prompt":"Which?"}]})),
-        ("answer", json!({"agent_name":"child","answers":["yes"]})),
+        ("ask", json!({"name":"parent/sibling","message":"Which?"})),
+        (
+            "reply",
+            json!({"request_id":"catalog-request","message":"yes"}),
+        ),
         ("read", json!({"path":"file.txt"})),
         ("read_image", json!({"path":"pixel.png"})),
         (
@@ -343,7 +384,8 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         "mutation_write",
         "spawn",
         "question",
-        "answer",
+        "ask",
+        "reply",
         "wait",
         "checkpoint",
         "runtime_status",

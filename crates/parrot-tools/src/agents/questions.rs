@@ -3,14 +3,13 @@ use std::sync::Arc;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, OperationError};
 use parrot_domain::contracts::interactions::{
-    ChildQuestionAnswers, QuestionDefinition, QuestionOption, QuestionReply, QuestionReplyKind,
-    QuestionRequester,
+    AgentCommunication, QuestionDefinition, QuestionOption, QuestionReplyKind, QuestionRequester,
 };
 use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 
-use super::input::{parse_answers, parse_questions};
+use super::input::{AskInput, ReplyInput, parse_questions};
 use super::{AgentSelection, AgentToolError, ResultTemplates, ToolInvocation, render};
 
 pub struct QuestionTool<Q, S> {
@@ -123,32 +122,101 @@ where
     }
 }
 
-pub struct AnswerTool<A, S> {
+pub struct AskTool<A, S> {
     definition: ConfiguredToolDefinition,
-    answers: Arc<A>,
+    communication: Arc<A>,
     templates: Option<Arc<dyn ResultTemplates>>,
     security: PhantomData<fn() -> S>,
 }
-impl<A, S> AnswerTool<A, S> {
+impl<A, S> AskTool<A, S> {
     pub fn new(
         definition: ConfiguredToolDefinition,
-        answers: Arc<A>,
+        communication: Arc<A>,
         templates: Option<Arc<dyn ResultTemplates>>,
     ) -> Self {
         Self {
             definition,
-            answers,
+            communication,
             templates,
             security: PhantomData,
         }
     }
     pub fn name(&self) -> &'static str {
-        "answer"
+        "ask"
     }
 }
-impl<A, S> Tool for AnswerTool<A, S>
+impl<A, S> Tool for AskTool<A, S>
 where
-    A: ChildQuestionAnswers<Error = AgentToolError>,
+    A: AgentCommunication<Error = AgentToolError>,
+    S: AccessSnapshot + 'static,
+{
+    type Definition = ConfiguredToolDefinition;
+    type Invocation = ToolInvocation;
+    type Selection = AgentSelection;
+    type Security = S;
+    type Output = String;
+    type Error = AgentToolError;
+
+    fn definition(&self) -> &Self::Definition {
+        &self.definition
+    }
+    fn parallel_safety(&self, _: &Self::Invocation) -> ParallelSafety {
+        ParallelSafety::Sequential
+    }
+    fn enabled_after_interruption(&self) -> bool {
+        true
+    }
+    fn invoke<'a>(
+        &'a self,
+        invocation: Self::Invocation,
+        context: InvocationContext<'a, S, AgentSelection>,
+    ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
+        Box::pin(async move {
+            let input = match AskInput::parse(&invocation.arguments_json) {
+                Ok(input) => input,
+                Err(error) => return error_result(self.templates.as_deref(), &error.0),
+            };
+            let message = self
+                .communication
+                .ask(&input.name, input.message, context.cancellation())
+                .await?;
+            render(
+                self.templates.as_deref(),
+                "tool-result.ask-reply",
+                &[("message", &message)],
+                || message.clone(),
+            )
+            .map_err(OperationError::Failed)
+        })
+    }
+}
+
+pub struct ReplyTool<A, S> {
+    definition: ConfiguredToolDefinition,
+    communication: Arc<A>,
+    templates: Option<Arc<dyn ResultTemplates>>,
+    security: PhantomData<fn() -> S>,
+}
+impl<A, S> ReplyTool<A, S> {
+    pub fn new(
+        definition: ConfiguredToolDefinition,
+        communication: Arc<A>,
+        templates: Option<Arc<dyn ResultTemplates>>,
+    ) -> Self {
+        Self {
+            definition,
+            communication,
+            templates,
+            security: PhantomData,
+        }
+    }
+    pub fn name(&self) -> &'static str {
+        "reply"
+    }
+}
+impl<A, S> Tool for ReplyTool<A, S>
+where
+    A: AgentCommunication<Error = AgentToolError>,
     S: AccessSnapshot + 'static,
 {
     type Definition = ConfiguredToolDefinition;
@@ -177,26 +245,20 @@ where
                 .cancellation()
                 .check()
                 .map_err(|_| OperationError::Cancelled)?;
-            let (agent_name, answers) = match parse_answers(&invocation.arguments_json) {
+            let input = match ReplyInput::parse(&invocation.arguments_json) {
                 Ok(input) => input,
                 Err(error) => return error_result(self.templates.as_deref(), &error.0),
             };
-            match self
-                .answers
-                .reply(&agent_name, QuestionReply::answered(answers))
-            {
-                Ok(()) => render(
-                    self.templates.as_deref(),
-                    "tool-result.question-replied",
-                    &[("agent_name", &agent_name)],
-                    || format!("Answered the pending question from child agent {agent_name}."),
-                )
-                .map_err(OperationError::Failed),
-                Err(error) if caught(&error) => {
-                    error_result(self.templates.as_deref(), &error.to_string())
-                }
-                Err(error) => Err(OperationError::Failed(error)),
-            }
+            self.communication
+                .reply(&input.request_id, input.message)
+                .map_err(OperationError::Failed)?;
+            render(
+                self.templates.as_deref(),
+                "tool-result.ask-replied",
+                &[("request_id", &input.request_id)],
+                || format!("Replied to ask {}.", input.request_id),
+            )
+            .map_err(OperationError::Failed)
         })
     }
 }

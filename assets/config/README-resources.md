@@ -35,6 +35,31 @@ used. The retained `agent-session.nonempty-queues-reminder` key now receives a
 list rather than preformatted text. Old overrides are not automatically migrated
 or supported through aliases.
 
+## Agent questions and asks
+
+`question` retains its structured user-question schema and user-away behavior,
+but is advertised only to root agents. All agents use `ask` and `reply` for
+plain-text inter-agent requests. `ask` accepts any valid relative or absolute
+agent path in the same user session, independently of `agent_send` security
+restrictions, and blocks until the recipient replies. `reply` settles the exact
+request immediately; it does not wait for the recipient's turn to finish.
+Pending incoming asks prevent recipient completion, and cycles fail explicitly.
+The former `answer` tool is removed without an alias.
+
+Both system-prompt resources expose these configurable descriptors:
+
+| Template | Arguments |
+| --- | --- |
+| `agent-session.agent-ask` | `asker_name`, `request_id`, `message` |
+| `agent-session.pending-ask-reminder` | `requests`, preformatted pending-request text including request IDs |
+| `tool-result.ask-reply` | `message`, the returned plain-text reply |
+| `tool-result.ask-replied` | `request_id`, the settled request |
+
+The former `agent-session.child-question`,
+`agent-session.pending-child-question-reminder`, and `tool-result.question-replied`
+keys are removed. Custom overrides must migrate to the new descriptors; old
+keys are not supported through aliases.
+
 These are first-party application resources from the pinned source. No per-file
 license header or root source-repository LICENSE was found for these resources;
 no license grant is inferred from third-party skill licenses. See

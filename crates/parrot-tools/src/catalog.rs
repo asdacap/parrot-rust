@@ -7,7 +7,7 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Clock, OperationError},
         filesystem::{AuthorizedMutationService, AuthorizedReadService},
-        interactions::{ChildQuestionAnswers, QuestionRequester},
+        interactions::{AgentCommunication, QuestionRequester},
         runtime::{AgentRuntime, TaskController},
         security::{AccessSnapshot, InvocationContext},
         tools::{ParallelSafety, Tool},
@@ -21,7 +21,7 @@ use crate::{
     agents::{
         self, AgentSelection, AgentTool, AgentToolError, AgentToolKind, ModelSelector,
         ResultTemplates,
-        questions::{AnswerTool, QuestionTool},
+        questions::{AskTool, QuestionTool, ReplyTool},
     },
     files::{
         self, EditTool, FileToolError, FileToolOutcome, GlobTool, ReadImageTool, ReadTool,
@@ -42,13 +42,14 @@ use crate::{
     },
 };
 
-pub const BUILTIN_NAMES: [&str; 30] = [
+pub const BUILTIN_NAMES: [&str; 31] = [
     "exec_command",
     "write_stdin",
     "interrupt_process",
     "monitor",
     "question",
-    "answer",
+    "ask",
+    "reply",
     "read",
     "read_image",
     "imagegen",
@@ -507,7 +508,8 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> ProcessFacto
 
 pub struct AgentFactories<S, T> {
     question: Factory<S, T>,
-    answer: Factory<S, T>,
+    ask: Factory<S, T>,
+    reply: Factory<S, T>,
     spawn: Factory<S, T>,
     send: Factory<S, T>,
     interrupt: Factory<S, T>,
@@ -518,7 +520,8 @@ pub struct AgentServices<R, M, Q, A> {
     pub runtime: Arc<R>,
     pub models: Arc<M>,
     pub questions: Arc<Q>,
-    pub answers: Arc<A>,
+    pub communication: Arc<A>,
+    pub agent_depth: i32,
     pub templates: Arc<dyn ResultTemplates>,
     pub allow_parent: bool,
 }
@@ -544,7 +547,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
             > + 'static,
         M: ModelSelector + 'static,
         Q: QuestionRequester<Error = AgentToolError> + 'static,
-        A: ChildQuestionAnswers<Error = AgentToolError> + 'static,
+        A: AgentCommunication<Error = AgentToolError> + 'static,
     {
         let definition = |name| {
             definitions
@@ -580,7 +583,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
             question: bind(
                 "question",
                 &[],
-                true,
+                services.agent_depth == 0,
                 QuestionTool::<_, S>::new(
                     definition("question")?,
                     services.questions,
@@ -588,13 +591,24 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 ),
                 agent,
             ),
-            answer: bind(
-                "answer",
+            ask: bind(
+                "ask",
                 &[],
                 true,
-                AnswerTool::<_, S>::new(
-                    definition("answer")?,
-                    services.answers,
+                AskTool::<_, S>::new(
+                    definition("ask")?,
+                    services.communication.clone(),
+                    Some(services.templates.clone()),
+                ),
+                agent,
+            ),
+            reply: bind(
+                "reply",
+                &[],
+                true,
+                ReplyTool::<_, S>::new(
+                    definition("reply")?,
+                    services.communication,
                     Some(services.templates.clone()),
                 ),
                 agent,
@@ -810,7 +824,8 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
                 interrupt_process,
                 monitor,
                 agents.question,
-                agents.answer,
+                agents.ask,
+                agents.reply,
                 files.read,
                 files.image,
                 session.image,

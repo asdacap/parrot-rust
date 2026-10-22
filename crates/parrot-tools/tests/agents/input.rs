@@ -181,13 +181,6 @@ fn repeated_wire_fields_keep_the_last_source_serializer_value() {
     let questions = parse_questions(r#"{"questions":[],"questions":[{"prompt":"first","prompt":"last","options":[{"label":"old","label":"new"}]}]}"#).unwrap();
     assert_eq!(questions[0].prompt.as_deref(), Some("last"));
     assert_eq!(questions[0].options.as_ref().unwrap()[0].label, "new");
-    assert_eq!(
-        parse_answers(
-            r#"{"agent_name":"old","agent_name":"worker","answers":[],"answers":["yes"]}"#
-        )
-        .unwrap(),
-        ("worker".into(), vec!["yes".into()])
-    );
 }
 
 #[test]
@@ -208,8 +201,6 @@ fn invalid_earlier_deserialized_fields_cannot_be_repaired_by_duplicate_later_val
     ] {
         assert!(parse_questions(arguments).is_err(), "{arguments}");
     }
-    assert!(parse_answers(r#"{"agent_name":"worker","answers":7,"answers":["yes"]}"#).is_err());
-    assert!(parse_answers(r#"{"agent_name":7,"agent_name":"worker","answers":["yes"]}"#).is_err());
     // Wait uses JsonDocument/TryGetProperty, unlike the deserialized tool inputs.
     assert_eq!(
         WaitInput::parse(r#"{"duration_ms":"bad","duration_ms":10000}"#)
@@ -220,22 +211,48 @@ fn invalid_earlier_deserialized_fields_cannot_be_repaired_by_duplicate_later_val
 }
 
 #[test]
-fn answers_null_text_is_preserved_for_coordinator_validation() {
-    assert_eq!(
-        parse_answers(r#"{"agent_name":"child","answers":[null,"yes"]}"#).unwrap(),
-        ("child".into(), vec![String::new(), "yes".into()])
-    );
-    assert_eq!(
-        parse_answers(r#"{"agent_name":"child","answers":[]}"#).unwrap(),
-        ("child".into(), vec![])
-    );
-    for args in [
-        "not-json",
-        "{}",
-        r#"{"agent_name":"child"}"#,
-        r#"{"agent_name":"child","answers":[{"text":"yes"}]}"#,
-        r#"{"agent_name":"child","answers":["yes"],"extra":true}"#,
+fn ask_and_reply_require_nonblank_plain_text_and_preserve_resolver_paths() {
+    for name in [
+        "parent",
+        "parent/sibling",
+        "/root-name/child",
+        "child/grandchild",
     ] {
-        assert!(parse_answers(args).is_err());
+        let input = AskInput::parse(
+            &serde_json::json!({"name":name,"message":"  plain\ntext  "}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(input.name, name);
+        assert_eq!(input.message, "  plain\ntext  ");
     }
+    assert_eq!(
+        ReplyInput::parse(r#"{"request_id":"request","message":"  yes  "}"#)
+            .unwrap()
+            .message,
+        "  yes  "
+    );
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(""),
+        serde_json::json!(" \n "),
+        serde_json::json!(42),
+        serde_json::json!(["yes"]),
+    ] {
+        for field in ["name", "message"] {
+            let mut args = serde_json::json!({"name":"parent","message":"question"});
+            args[field] = value.clone();
+            assert!(AskInput::parse(&args.to_string()).is_err());
+        }
+        for field in ["request_id", "message"] {
+            let mut args = serde_json::json!({"request_id":"request","message":"yes"});
+            args[field] = value.clone();
+            assert!(ReplyInput::parse(&args.to_string()).is_err());
+        }
+    }
+    assert!(AskInput::parse(r#"{"name":"parent","message":"x","extra":true}"#).is_err());
+    assert!(ReplyInput::parse(r#"{"request_id":"request","message":"x","extra":true}"#).is_err());
+    assert!(AskInput::parse(r#"{"name":"parent","message":7,"message":"valid"}"#).is_err());
+    assert!(
+        ReplyInput::parse(r#"{"request_id":7,"request_id":"request","message":"valid"}"#).is_err()
+    );
 }
