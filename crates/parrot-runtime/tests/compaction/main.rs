@@ -4,7 +4,7 @@ mod execution;
 
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
-    values::config::{ModelProfileConfig, ModelProfiles},
+    values::config::ModelProfiles,
 };
 use parrot_provider::{
     catalogs::Model,
@@ -262,55 +262,6 @@ fn original_context_usage_rows_strict_boundary() {
     }
 }
 #[test]
-#[ignore = "Ported UTF-16 token estimates superseded by o200k_base tokenization"]
-fn actual_messages_tools_utf16_and_input_limits() {
-    let selected = model(1000);
-    let history = [Message::user("x".repeat(2000))];
-    let tools = [Tool {
-        name: "tool".into(),
-        description: "description".into(),
-        parameters_json: "s".repeat(2000),
-    }];
-    let planner = planner(90, 30, 60000);
-    assert!(
-        !planner
-            .estimate_context(&selected, "", &[], &history)
-            .unwrap()
-            .exceeds_trigger()
-    );
-    assert!(
-        planner
-            .estimate_context(&model(500), "", &[], &history)
-            .unwrap()
-            .exceeds_trigger()
-    );
-    assert!(
-        planner
-            .estimate_context(&selected, &"i".repeat(2000), &[], &history)
-            .unwrap()
-            .exceeds_trigger()
-    );
-    assert!(
-        planner
-            .estimate_context(&selected, "", &tools, &history)
-            .unwrap()
-            .exceeds_trigger()
-    );
-    assert_eq!(
-        CompactionPlanner::estimate_input_tokens(&selected, "😀😀😀", &[], &[]).unwrap(),
-        6
-    );
-    let mut narrow = selected;
-    narrow.model.max_input_tokens = 100;
-    let snapshot = planner
-        .estimate_context(&narrow, "", &[], &history)
-        .unwrap();
-    assert_eq!(snapshot.context_limit, 1000);
-    assert_eq!(snapshot.input_limit, 100);
-    assert_eq!(snapshot.trigger_tokens, Some(90));
-    assert_eq!(snapshot.usage_percent, Some(51));
-}
-#[test]
 fn image_estimation_calls_real_provider_api_without_loading_missing_file() {
     let provider = Arc::new(ImageProvider {
         tokens: 123,
@@ -384,82 +335,6 @@ fn actual_selected_policy_and_override_preserve_total_window() {
         .unwrap();
     assert_eq!(plan.keep_group_from, 1);
     assert_eq!(plan.input_budget, 1000);
-}
-#[test]
-#[ignore = "Ported input-size fixture relies on superseded UTF-16 token estimates"]
-fn selected_and_raw_planning_reserve_output_without_recomputing_targets() {
-    for (limit, window, input, output, trigger, expected) in [
-        (None, 180_000, 0, 0, 95, 140_220),
-        (None, 180_000, 0, 65_536, 95, 140_220),
-        (None, 180_000, 0, 8_192, 95, 163_626),
-        (None, 180_000, 0, 0, 50, 90_000),
-        (Some("100k"), 180_000, 0, 0, 95, 100_000),
-        (Some("95%"), 180_000, 0, 0, 95, 140_220),
-        (Some("180k"), 180_000, 0, 0, 95, 140_220),
-        (None, 180_000, 100_000, 0, 95, 95_000),
-        (Some("180k"), 180_000, 100_000, 0, 95, 100_000),
-        (None, 0, 100_000, 0, 95, 95_000),
-        (Some("100k"), 0, 100_000, 0, 95, 100_000),
-        (None, 1_000, 0, 0, 95, 0),
-        (None, i32::MAX, 0, 0, 100, 2_045_191_313),
-    ] {
-        let mut canonical = model(window);
-        canonical.model.max_input_tokens = input;
-        canonical.model.max_output_tokens = output;
-        let registry = Arc::new(
-            ProviderRegistry::new(
-                vec![canonical.provider.clone()],
-                BTreeMap::from([("provider".into(), vec![canonical.model.clone()])]),
-            )
-            .unwrap(),
-        );
-        let mut alias = ModelAliasDefinition::new("selected", "provider/model", "test alias");
-        alias.context_limit = limit.map(|text| ContextSize::parse(text).unwrap());
-        let catalog = Arc::new(ModelAliasCatalog::new(registry.clone(), [alias]).unwrap());
-        let selected = ModelRouter::new(
-            registry,
-            Arc::new(ModelRouting::new(catalog, "provider/model")),
-        )
-        .resolve("selected")
-        .unwrap();
-        let planner = planner(trigger, 50, 60000);
-        let snapshot = planner
-            .estimate_selected_context(&selected, "", &[], &[])
-            .unwrap();
-        assert_eq!(snapshot.trigger_tokens, Some(expected));
-        if limit.is_none() {
-            let raw = planner.estimate_context(&canonical, "", &[], &[]).unwrap();
-            assert_eq!(raw.trigger_tokens, Some(expected));
-        }
-        if window == 180_000 && input == 0 && output == 0 && trigger == 95 {
-            let expected_target = match limit {
-                Some("100k") => 50_000,
-                Some("95%") => 85_500,
-                _ => 90_000,
-            };
-            assert_eq!(
-                planner.resolve_policy(&selected, None).target_tokens,
-                Some(expected_target)
-            );
-            assert_eq!(
-                planner
-                    .resolve_policy(&selected, Some(&ContextSize::parse("160k").unwrap()))
-                    .target_tokens,
-                Some(160_000)
-            );
-            if limit.is_none() {
-                let snapshot = planner
-                    .estimate_context(&canonical, &"x".repeat((160_000 - 4) * 4), &[], &[])
-                    .unwrap();
-                assert_eq!(snapshot.estimated_tokens, 160_000);
-                assert!(snapshot.exceeds_trigger());
-            }
-        }
-    }
-    let unknown = planner(95, 50, 60000)
-        .estimate_context(&model(0), "", &[], &[])
-        .unwrap();
-    assert_eq!(unknown.trigger_tokens, None);
 }
 
 #[test]
@@ -620,61 +495,6 @@ fn spill_plans_only_complete_assistant_tool_groups_and_preserves_watermark() {
         planner(90, 30, 100).plan(&selected, Some(300), &input),
         Err(PlanningError::GroupExceedsBudget)
     );
-}
-#[test]
-#[ignore = "Ported summary request totals rely on superseded UTF-16 token estimates"]
-fn actual_profiles_control_input_and_summary_output_without_provider_calls() {
-    let profiles = ModelProfiles::new(&BTreeMap::from([(
-        "provider".into(),
-        ModelProfileConfig {
-            maximum_input_tokens: Some(50),
-            summary_output_tokens: Some(77),
-            ..Default::default()
-        },
-    )]));
-    let planner = CompactionPlanner::new(
-        CompactionSettings {
-            trigger_percent: 90,
-            target_percent: 30,
-            maximum_input_tokens: 600,
-            summary_output_tokens: 100,
-            summary_instructions: "".into(),
-            summary_prefix: "prefix".into(),
-        },
-        profiles,
-    );
-    let history = [Message::user("first"), Message::user("last")];
-    let groups = group_messages(&history);
-    let fixed = Message::user("fixed");
-    let input = PlanningInput {
-        instructions: "",
-        tools: &[],
-        groups: &groups,
-        base_watermark: 0,
-        fixed_message: &fixed,
-    };
-    let plan = planner
-        .plan(&model(1000), Some(300), &input)
-        .unwrap()
-        .unwrap();
-    assert_eq!((plan.input_budget, plan.summary_output_tokens), (50, 77));
-    assert_eq!(
-        planner
-            .estimate_summary_request_tokens(&model(1000), "", 0, &history[..1])
-            .unwrap(),
-        18
-    );
-    assert_eq!(
-        planner
-            .estimate_summary_request_tokens(&model(1000), "summary", 5, &history[..1])
-            .unwrap(),
-        35
-    );
-    assert_eq!(
-        planner.plan(&model(0), Some(300), &input),
-        Err(PlanningError::NoCompactionCapacity)
-    );
-    assert!(planner.plan(&model(1000), None, &input).unwrap().is_none());
 }
 #[test]
 fn cadence_and_retained_budget_are_the_existing_domain_values() {

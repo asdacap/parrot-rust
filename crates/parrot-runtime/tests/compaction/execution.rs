@@ -788,26 +788,6 @@ async fn preceding_summary_can_force_a_later_tool_group_to_spill_once() {
 }
 
 #[tokio::test]
-#[ignore = "Ported spill fixture relies on superseded UTF-16 token estimates"]
-async fn already_spilled_group_is_not_repeatedly_spilled_when_preceding_summary_grows() {
-    let mut fixture = Fixture::new(1000, vec![vec![done(&"s".repeat(2000))]]);
-    let mut history = vec![Message::user("old".repeat(233))];
-    history.extend(tool_group(&"x".repeat(4000)));
-    history.push(Message::user("tail"));
-    let error = fixture
-        .compact(&compactor(200), &history)
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        CompactionError::Planning(PlanningError::GroupExceedsBudget)
-    ));
-    assert_eq!(fixture.blob_files().len(), 1);
-    assert_eq!(fixture.requests().len(), 1);
-    fixture.close().await;
-}
-
-#[tokio::test]
 async fn summary_and_fixed_retained_history_are_checked_against_final_selected_input_limit() {
     let mut fixture = Fixture::new(100, vec![vec![done(&"s".repeat(500))]]);
     let error = fixture

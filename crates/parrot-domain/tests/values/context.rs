@@ -148,22 +148,6 @@ fn output_reservation_clamps_only_the_trigger_after_resolving_targets() {
 }
 
 #[test]
-#[ignore = "Ported UTF-16 heuristic superseded by o200k_base tokenization"]
-fn estimates_tokens_as_quarters_rounded_up() {
-    for (text, expected) in [
-        (String::new(), 0),
-        ("a".to_owned(), 1),
-        ("abcd".to_owned(), 1),
-        ("abcde".to_owned(), 2),
-        ("a".repeat(4_001), 1_001),
-        ("日本語のテキスト".to_owned(), 2),
-        ("🙂".to_owned(), 1),
-    ] {
-        assert_eq!(TokenEstimator::estimate_tokens(&text), expected);
-    }
-}
-
-#[test]
 fn counts_o200k_base_ordinary_text() {
     for (text, expected) in [
         (String::new(), 0),
@@ -209,13 +193,6 @@ fn scales_maximum_trigger_without_intermediate_overflow() {
     let legacy = ContextCompactionPolicy::resolve(None, None, 0, i32::MAX, 100, 100, None);
     assert_eq!(legacy.trigger_tokens, Some(i64::from(i32::MAX)));
     assert_eq!(legacy.target_tokens, Some(i64::from(i32::MAX)));
-}
-
-#[test]
-#[ignore = "Ported UTF-16 heuristic superseded by o200k_base tokenization"]
-fn estimates_utf16_units_rather_than_bytes_or_scalar_values() {
-    assert_eq!(TokenEstimator::estimate_tokens("🙂🙂a"), 2);
-    assert_eq!(TokenEstimator::estimate_tokens("éééé"), 1);
 }
 
 #[test]
