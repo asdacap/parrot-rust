@@ -1,8 +1,9 @@
-//! Session-owned question and permission coordination.
+//! Session-owned user questions, inter-agent asks, and permission coordination.
 //!
 //! Filesystem approval is supplied through [`TargetApproval`]; this module does
 //! not resolve paths or confer authority independently of that adapter.
 
+mod asks;
 mod children;
 mod pending;
 mod permissions;
@@ -10,6 +11,7 @@ mod protocol;
 mod questions;
 mod values;
 
+pub use asks::*;
 pub use children::*;
 pub use permissions::*;
 pub use protocol::*;
