@@ -54,7 +54,7 @@ async fn installer_receives_every_original_asset_once_and_preserves_existing_tar
         path.join(first.relative_path),
         (b"local edits".to_vec(), false),
     );
-    assert_eq!(PACKAGED_SKILL_ASSETS.len(), 76);
+    assert_eq!(PACKAGED_SKILL_ASSETS.len(), 77);
     extract_packaged_skills(path, &installer, &Snapshot)
         .await
         .unwrap();

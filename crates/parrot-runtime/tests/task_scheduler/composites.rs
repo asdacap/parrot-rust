@@ -123,7 +123,10 @@ async fn nested_graph_is_owned_by_child_and_receives_dependency_history_only_whe
     assert_eq!(h.registry.snapshot_scopes().len(), 2);
     let first = task_requests(&h.provider, "parent");
     assert!(prompt(&first[0]).contains("AgentTask role: composite owner"));
-    assert!(prompt(&first[0]).contains("use set_agent_tasks to declare and manage this work"));
+    assert!(
+        prompt(&first[0])
+            .contains("use set_agent_tasks to declare and manage the supplied provisional work")
+    );
     // Explicit child declaration, never auto-execution of the parent's delivered payload.
     set(&parent, children).await;
     source_gate.entered().await;
@@ -186,7 +189,7 @@ async fn recursive_composite_prompt_preserves_all_fields_without_auto_registerin
         .unwrap()
         + "The following inner task list is provided:\n".len();
     let end = prompt[start..]
-        .find("\nPrepare common resource or context")
+        .find("\nReuse supplied context and preparation results.")
         .unwrap()
         + start;
     // JSON decoding here inspects the serializer's output, not T49's task parser.
