@@ -19,6 +19,13 @@ Never run .NET and Rust against the same workspace concurrently. Existing .NET
 cannot observe ownership records in the new Rust root, so there is **no global
 cross-version locking or simultaneous same-workspace safety guarantee**.
 
+## Design philosophy
+
+See [Design philosophy](docs/design-philosophy.md) for the original principles
+on bounded agent scope, delegation, parent attention and model-tier selection,
+ported from the .NET repository. Repository contributor guidance is in
+[AGENTS.md](AGENTS.md).
+
 ## Operator guide
 
 - [Installation and platform requirements](docs/operator/installation.md)
