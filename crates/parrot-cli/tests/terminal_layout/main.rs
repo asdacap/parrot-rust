@@ -1,3 +1,4 @@
+mod termimad_adapter;
 mod yaml_cases;
 mod date_keys;
 mod final_format;
