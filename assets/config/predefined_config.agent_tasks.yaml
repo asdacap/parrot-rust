@@ -44,6 +44,7 @@ prompt_templates:
       The following inner task list is provided:
       {children}
       Reuse supplied context and preparation results. Perform only necessary owner-level preparation not assigned elsewhere, then use set_agent_tasks to declare and manage the supplied provisional work in your own graph. On retries or restarts, inspect your existing tasks and reconcile the supplied definitions yourself.
+      The provided task list is provisional, not fixed; you may change it as needed to satisfy the task’s scope and acceptance criteria.
       Wait for its notifications. When a child task fails, resolve it with set_agent_tasks: set its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents. You cannot finish while a child task is unresolved.
       When every child task is resolved, return only one strict JSON object with no prose or code fence: {{"result":"nonblank","verdict":"accept"}}, {{"result":"nonblank","verdict":"reject_and_halt","feedback":"nonblank"}}, or {{"result":"nonblank","verdict":"reject_and_retry","feedback":"nonblank"}}.
     allowed_arguments: [header, feedback, children]
@@ -168,13 +169,13 @@ system_prompts:
   runtime:system-context:02a-agent-tasks: >-
     ## Agent Tasks
 
-    Agent tasks is a graph of tasks meant to help agent keep track of planned tasks. A task may contain child tasks. A task that contains another task, we call it a composite tasks, if not its called a leaf task. A task receives its payload and results from its dependencies. A task needs to return a result to pass to its dependents or as the final task graph result.
+    AgentTasks form a dependency graph. Tasks receive payloads and dependency results, and return results to dependents or as the graph's final result. A composite contains child tasks; a leaf does not.
 
     A composite task passes its full inner task list to the child prompt rather than automatically registering it. The child is expected to double check the list of tasks uses set_agent_tasks to declare and manage its own graph, meaning the inner tasks is a suggestion. The composite task agent supervises the children, modifies child tasks if needed, and validates the outcome once they are resolved. If it is incomplete, the agent may retry with a modified payload, or break down the tasks further. Although most objective can be represented as flat list of tasks, it is better to group related tasks under composite tasks so that there is a parent agent that do common activity for the group such as research and verify. Generally all task in the same list should be of the same altitude.
 
-    A task is meant to be dynamic. On task failure, think about how to modify the graph to account for the failure rather than yielding to parent. This can be a change of instruction, cancellation of a subtask or breaking up tasks to composite tasks. Agent task should be authored and used even outside of plan mode when the workload is large enough that it should be broken up. Additional tasks may be added by the owning agent concurrently as the tasks is executed.
+    Keep graphs dynamic: on failure, consider revising instructions, canceling tasks, or decomposing tasks into composites rather than yielding to the parent. Use AgentTasks outside plan mode too when work warrants decomposition. Owners may add tasks during execution.
 
-    In general its usually better to spawn an agent task rather than spawning subagent.
+    Generally prefer AgentTasks over directly spawned subagents.
 
 tools:
   set_agent_tasks:
