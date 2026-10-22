@@ -1,5 +1,5 @@
 use super::*;
-use parrot_runtime::prompt_context::PACKAGED_SKILL_ASSETS;
+use parrot_runtime::prompt_context::{PACKAGED_SKILL_ASSETS, hash_packaged_skills};
 
 fn skill(root: &Path, name: &str, description: &str) -> PathBuf {
     let path = root.join(name).join("SKILL.md");
@@ -152,6 +152,10 @@ async fn production_installs_packaged_assets_and_preserves_local_edits_and_modes
             );
         }
     }
+    assert_eq!(
+        std::fs::read(root.join("VERSION")).unwrap(),
+        hash_packaged_skills().as_bytes()
+    );
     bounded(host.close()).await.unwrap();
     let edited = PACKAGED_SKILL_ASSETS
         .iter()
@@ -177,6 +181,91 @@ async fn production_installs_packaged_assets_and_preserves_local_edits_and_modes
 }
 
 #[test]
+fn missing_or_outdated_version_refreshes_all_packaged_files_and_preserves_custom_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for installed_version in [None, Some(b"outdated version".as_slice())] {
+        let fixture = Fixture::new();
+        let root = fixture.roots.current().skills_directory();
+        for asset in PACKAGED_SKILL_ASSETS {
+            let target = root.join(asset.relative_path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(&target, "local edited asset").unwrap();
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        if let Some(version) = installed_version {
+            std::fs::write(root.join("VERSION"), version).unwrap();
+        }
+        let custom_skill = skill(&root, "custom-skill", "user skill");
+        let custom_support = root.join("domain-modeling/custom-notes.md");
+        std::fs::write(&custom_support, "user notes").unwrap();
+        let custom_skill_contents = std::fs::read(&custom_skill).unwrap();
+
+        crate::production::skills::install_packaged_skills(&root).unwrap();
+
+        for asset in PACKAGED_SKILL_ASSETS {
+            let target = root.join(asset.relative_path);
+            assert_eq!(std::fs::read(&target).unwrap(), asset.bytes);
+            if asset.executable {
+                assert_eq!(
+                    std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+                    0o755
+                );
+            }
+        }
+        assert_eq!(
+            std::fs::read(root.join("VERSION")).unwrap(),
+            hash_packaged_skills().as_bytes()
+        );
+        assert_eq!(std::fs::read(custom_skill).unwrap(), custom_skill_contents);
+        assert_eq!(std::fs::read(custom_support).unwrap(), b"user notes");
+        std::fs::remove_dir_all(&fixture.root).unwrap();
+    }
+}
+
+#[test]
+fn failed_refresh_does_not_advance_or_create_version_marker() {
+    for installed_version in [None, Some(b"outdated version".as_slice())] {
+        let fixture = Fixture::new();
+        let root = fixture.roots.current().skills_directory();
+        let first = &PACKAGED_SKILL_ASSETS[0];
+        let blocked = &PACKAGED_SKILL_ASSETS[1];
+        std::fs::create_dir_all(root.join(blocked.relative_path)).unwrap();
+        std::fs::create_dir_all(root.join(first.relative_path).parent().unwrap()).unwrap();
+        std::fs::write(root.join(first.relative_path), "old asset").unwrap();
+        let version_path = root.join("VERSION");
+        if let Some(version) = installed_version {
+            std::fs::write(&version_path, version).unwrap();
+        }
+
+        let error = crate::production::skills::install_packaged_skills(&root).unwrap_err();
+
+        assert!(matches!(
+            error,
+            parrot_runtime::prompt_context::PackagedSkillsError::Write(_)
+        ));
+        assert_eq!(
+            std::fs::read(root.join(first.relative_path)).unwrap(),
+            first.bytes
+        );
+        match installed_version {
+            Some(version) => assert_eq!(std::fs::read(version_path).unwrap(), version),
+            None => assert!(!version_path.exists()),
+        }
+        assert!(
+            std::fs::read_dir(root.join(blocked.relative_path).parent().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".packaged-"))
+        );
+        std::fs::remove_dir_all(&fixture.root).unwrap();
+    }
+}
+
+#[test]
 fn concurrent_packaged_installers_preserve_winners_and_leave_no_temporary_files() {
     let fixture = Fixture::new();
     let root = fixture.roots.current().skills_directory();
@@ -191,7 +280,11 @@ fn concurrent_packaged_installers_preserve_winners_and_leave_no_temporary_files(
             });
         }
     });
-    let mut directories = std::collections::BTreeSet::new();
+    assert_eq!(
+        std::fs::read(root.join("VERSION")).unwrap(),
+        hash_packaged_skills().as_bytes()
+    );
+    let mut directories = std::collections::BTreeSet::from([root.clone()]);
     for asset in PACKAGED_SKILL_ASSETS {
         let path = root.join(asset.relative_path);
         assert_eq!(std::fs::read(&path).unwrap(), asset.bytes);

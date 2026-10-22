@@ -17,7 +17,7 @@ mod model;
 mod packaged;
 pub use packaged::{
     PACKAGED_SKILL_ASSETS, PackagedSkillAsset, PackagedSkillsError, extract_packaged_skills,
-    extract_packaged_skills_sync,
+    extract_packaged_skills_sync, hash_packaged_skills,
 };
 mod sections;
 mod skills_discovery;

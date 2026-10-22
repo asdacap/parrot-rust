@@ -1555,6 +1555,7 @@ dependencies = [
  "parrot-storage",
  "protobuf",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
