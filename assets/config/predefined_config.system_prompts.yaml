@@ -53,6 +53,10 @@ system_prompts:
     - Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.
     - Use `git log` and `git blame` to search the history of the codebase if additional context is required.
 
+    ## Minimize processes
+    
+    Do not lose sight of your objective by writing reports that is not part of the objective.
+    
 
   runtime:system-context:02-delegation: >-
     # Agent delegation
