@@ -61,7 +61,17 @@ system_prompts:
 
     ## Choosing a model alias
 
-    Use configured aliases and their usage descriptions to choose the lowest tier capable of the required depth and judgment. Lower tiers need fewer unresolved decisions, not necessarily less work: settle surrounding design and tradeoffs first. Distinguish explicit evidence retrieval from interpretation or inference; answering questions may require the latter. Delegate retrieval to lower tiers and interpretation to suitably capable models. Specificity or extra thinking cannot overcome capability limits. Use higher tiers for broad perspective, ambiguity, and deciding what is worth doing—including when less is better. If capability is insufficient, revise the assignment or raise the tier rather than repeatedly demanding more thought.
+    Use the configured aliases and their usage descriptions to choose the lowest tier capable of handling the task’s depth and judgment.
+
+    A lower tier does not necessarily need less work; it needs fewer unresolved decisions. Give it specific assignments with the surrounding design and tradeoffs already settled. A large workload or a narrow, technically deep problem can be appropriate, provided it is within that tier’s capability.
+
+    Determining an answer can itself require choosing among alternatives or resolving ambiguity, so apply the same capability rules as for decision-making. Lower-tier models are weaker at these judgments, including inferring facts that are not explicitly stated in the code. Distinguish retrieving explicit evidence from interpreting it: delegate the former to a lower tier, and use a suitably capable model for the latter.
+
+    Specificity does not remove capability limits. Do not choose a lower tier when the required depth exceeds what it can handle; additional thinking cannot reliably overcome that limit.
+
+    Choose a higher tier when the task needs broader perspective, resolution of ambiguity, or judgment about what is worth doing. Stronger judgment can mean recognizing that checks, elaboration, or changes are unnecessary—not simply doing more.
+
+    If the work reveals a capability gap, reconsider the assignment or choose a higher suitable alias rather than repeatedly asking the same model to think harder.
 
     ## Queues
 
@@ -72,7 +82,52 @@ system_prompts:
 
     Note: These are advisory
 
-    Spawn independent workers while doing separate work, then wait or ask for results. Use consultants with distinct perspectives or adversarial focus for demanding work. For delicate reasoning, run a council from different perspectives: each round, collect reports verbatim in a new scratch file, restart participants with that file, then synthesize after the final round. For many items, create a work queue, have equivalent workers consume their direct parent's queue, and wait for completion. Pipelines connect parallel worker groups with queues; for example, request producers → workers → verifiers → results, with optional verification bypass and failures returned for rework. Consume the result queue.
+    ## Spawner
+
+    - Agent A spawn Agent B or more agent to do indepandent work.
+    - Agent A continue doing separate work.
+    - Agent A uses 'wait' until Agent B send result or ask B directly if needed.
+    - This is basic delegation, please clearly specify role or scope.
+
+    ## Consultant
+
+    - Agent A spawn Agent B or more agent that act as consultant to agent A.
+      - Agent B may act like adversary or focuses on certain aspec only.
+      - The subagent should have diferent role or focus than Agent A.
+    - Agent A discuss with Agent B.
+    - Useful for more demanding task.
+
+    ## Council
+
+    - Agent A starts N subagent to think about a topic. Each subagent think from different perspective.
+    - For M round:
+       - subagents think and send their report to Agent A.
+       - Agent A compile all their reports to a scratch file, word-by-word without any alteration.
+       - Agent A starts another round by sending a message to every subagent again, restarting them, but pointing at the current scratch file for more context.
+    - Agent A then compile the final subagent reports and form a conclusion.
+    - Use different scratch file for different round.
+    - Use for very-very delicate reasoning.
+
+    ## Work Queue
+
+    - Agent A creates a work-item queue and spawns N equivalent agents.
+    - Each subagent is instructed to keep taking work items from its direct parent's queue.
+    - Agent A waits until all agents are finished.
+    - This is useful for many work items and unnecessary for a small task.
+
+    ## Pipeline graph
+
+    - Agent A creates a graph whose edges are queues and whose nodes are groups of parallel agents.
+    - For example:
+      - Agent A creates three queues:
+        - request queue
+        - verify queue
+        - result queue
+      - It then creates three sets of agents:
+        - request spawners create requests
+        - workers take requests and push them to the verify queue, or skip directly to the result queue
+        - verifiers take items from the verify queue and send them to results or back to requests for more work
+      - Agent A takes from the result queue.
 
   runtime:system-context:04-behavior-guideline: >-
 
