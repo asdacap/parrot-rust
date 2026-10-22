@@ -43,7 +43,7 @@ prompt_templates:
       AgentTask role: composite owner{header}{feedback}
       The following inner task list is provided:
       {children}
-      Prepare common resource or context, then use set_agent_tasks to declare and manage this work in your own graph. On retries or restarts, inspect your existing tasks and reconcile the supplied definitions yourself.
+      Reuse supplied context and preparation results. Perform only necessary owner-level preparation not assigned elsewhere, then use set_agent_tasks to declare and manage the supplied provisional work in your own graph. On retries or restarts, inspect your existing tasks and reconcile the supplied definitions yourself.
       Wait for its notifications. When a child task fails, resolve it with set_agent_tasks: set its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents. You cannot finish while a child task is unresolved.
       When every child task is resolved, return only one strict JSON object with no prose or code fence: {{"result":"nonblank","verdict":"accept"}}, {{"result":"nonblank","verdict":"reject_and_halt","feedback":"nonblank"}}, or {{"result":"nonblank","verdict":"reject_and_retry","feedback":"nonblank"}}.
     allowed_arguments: [header, feedback, children]

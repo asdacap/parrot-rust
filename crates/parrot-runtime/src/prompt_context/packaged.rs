@@ -7,6 +7,11 @@ pub struct PackagedSkillAsset {
 }
 pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
     PackagedSkillAsset {
+        relative_path: "agent-task-graph/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/agent-task-graph/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
         relative_path: "domain-modeling/ADR-FORMAT.md",
         bytes: include_bytes!("../../../../assets/skills/domain-modeling/ADR-FORMAT.md"),
         executable: false,
