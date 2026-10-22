@@ -29,11 +29,42 @@ pub fn environment() -> BTreeMap<String, String> {
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
     .collect()
 }
+pub const CONSOLIDATED_SOURCE_IDS: [&str; 13] = [
+    "agent-task.dependency-header",
+    "agent-task.dependency-item",
+    "agent-task.sibling-scope",
+    "agent-task.sibling-item",
+    "agent-task.header",
+    "agent-session.nonempty-queues-reminder",
+    "agent-session.nonempty-queue-item",
+    "compact-context-tool.compacted",
+    "compact-context-tool.no-op",
+    "compact-context-tool.unavailable",
+    "compact-context-tool.compacted-with-limit",
+    "compact-context-tool.no-op-with-limit",
+    "compact-context-tool.unavailable-with-limit",
+];
+pub const CONSOLIDATED_IDS: [&str; 3] = [
+    "agent-task.assignment-context",
+    "agent-session.nonempty-queues-reminder",
+    "compact-context-tool.result",
+];
+
 fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
     let root = yaml::parse_root(&source_predefined_content()?)?;
-    // Test-only descriptor admission does not compile or render native templates.
     let actual = templates::read_templates(&root, &mut |_| Ok(()))?;
-    if actual != a008_fixture::specs()? {
+    let mut expected = a008_fixture::specs()?;
+    expected.retain(|id, _| !CONSOLIDATED_SOURCE_IDS.contains(&id.as_str()));
+    for id in CONSOLIDATED_IDS {
+        let spec = actual.get(id).ok_or_else(|| {
+            ConfigError::invalid_data(format!("consolidated template {id} is missing"))
+        })?;
+        parrot_foundation::template_minijinja::MiniJinjaPromptTemplateEngine::compile(
+            &spec.path, &spec.text,
+        )?;
+        expected.insert(id.to_owned(), spec.clone());
+    }
+    if actual != expected {
         return Err(ConfigError::invalid_data(
             "A008 fixture catalog differs from pinned source/migration descriptors".into(),
         ));
@@ -272,4 +303,3 @@ fn run_config(input: &Value, work: &Path, known: &BTreeMap<String, TemplateSpec>
     }
     Ok(result)
 }
-

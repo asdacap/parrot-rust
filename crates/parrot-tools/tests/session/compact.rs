@@ -172,7 +172,7 @@ async fn predefined_compaction_templates_cover_reduced_noop_unavailable_and_limi
 async fn injected_compaction_template_is_used_directly_with_all_source_arguments() {
     let mut fixture = Fixture::new();
     fixture.templates = catalog(
-        "prompt_templates:\n  compact-context-tool.compacted-with-limit:\n    template: 'custom {estimated_tokens}|{context_limit}|{notification_interval}|{trigger}|{trigger_tokens}|{usage}'\n",
+        "prompt_templates:\n  compact-context-tool.result:\n    template: 'custom {{ outcome }}|{{ has_context_limit_override }}|{{ estimated_tokens }}|{{ context_limit }}|{{ notification_interval }}|{{ trigger }}|{{ trigger_tokens }}|{{ usage }}'\n",
     );
     {
         let mut state = fixture.services.0.lock().unwrap();
@@ -183,7 +183,7 @@ async fn injected_compaction_template_is_used_directly_with_all_source_arguments
         state.compaction.context.has_context_limit_override = true;
         state.compaction.context.trigger_tokens = Some(555);
     }
-    let expected = "custom 987|4321|10|73|555|17";
+    let expected = "custom compacted|True|987|4321|10|73|555|17";
     assert_eq!(
         text(
             fixture

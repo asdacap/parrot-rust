@@ -204,26 +204,15 @@ impl<S: RestrictableAccessSnapshot + 'static> ActiveWorkBlocker for QueueBlocker
             if queues.is_empty() {
                 return Ok(None);
             }
-            let mut items = Vec::new();
-            for queue in queues {
-                items.push(
-                    self.templates
-                        .render(
-                            "agent-session.nonempty-queue-item",
-                            &[
-                                ("name".into(), queue.name.into()),
-                                ("size".into(), queue.size.to_string().into()),
-                            ],
-                            &NeverCancelled,
-                        )
-                        .map_err(|error| TurnError::Service(error.to_string()))?,
-                );
-            }
+            let queues = queues
+                .into_iter()
+                .map(|queue| serde_json::json!({ "name": queue.name, "size": queue.size }))
+                .collect::<Vec<_>>();
             let reminder = self
                 .templates
                 .render(
                     "agent-session.nonempty-queues-reminder",
-                    &[("queues".into(), items.join("\n").into())],
+                    &[("queues".into(), queues.into())],
                     &NeverCancelled,
                 )
                 .map_err(|error| TurnError::Service(error.to_string()))?;

@@ -46,8 +46,14 @@ fn a008_native_descriptor_required_arguments_retain_source_declaration_order() {
 }
 
 #[test]
-fn a008_shipped_descriptor_order_matches_source_inventory_with_exact_ten_mappings() {
-    let expected = crate::fixtures::migrated_fixture_inventory().unwrap();
+fn a008_retained_descriptor_order_matches_source_inventory_with_exact_ten_mappings() {
+    let expected = crate::fixtures::migrated_fixture_inventory()
+        .unwrap()
+        .into_iter()
+        .filter(|row| {
+            !crate::fixtures::CONSOLIDATED_SOURCE_IDS.contains(&row["id"].as_str().unwrap())
+        })
+        .collect::<Vec<_>>();
     let root = yaml::parse_root(&source_predefined_content().unwrap()).unwrap();
     let mut descriptors = Vec::new();
     templates::read_templates(&root, &mut |spec| {
@@ -59,6 +65,10 @@ fn a008_shipped_descriptor_order_matches_source_inventory_with_exact_ten_mapping
         Ok(())
     })
     .unwrap();
+    assert_eq!(descriptors.len(), 97);
+    descriptors
+        .retain(|row| !crate::fixtures::CONSOLIDATED_IDS.contains(&row["id"].as_str().unwrap()));
+    assert_eq!(descriptors.len(), 94);
     assert_eq!(descriptors, expected);
 }
 

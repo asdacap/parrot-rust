@@ -227,65 +227,45 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
         Ok(self.bound(&prompt, available)? + &suffix)
     }
     fn header(&self, task: &Task, siblings: &[Task], dependencies: &[Task]) -> ChildResult<String> {
-        let mut dependency_text = String::new();
-        if !dependencies.is_empty() {
-            dependency_text.push_str(&render(
-                &self.configuration,
-                "agent-task.dependency-header",
-                &[],
-            )?);
-            for dependency in dependencies {
-                dependency_text.push_str(&render(
-                    &self.configuration,
-                    "agent-task.dependency-item",
-                    &[
-                        ("name", &dependency.name),
-                        ("description", &dependency.description),
-                        (
-                            "result",
-                            &self.bound(
-                                dependency.result.as_deref().unwrap_or(""),
-                                MAX_SUMMARY_CHARACTERS,
-                            )?,
-                        ),
-                    ],
-                )?);
-            }
-        }
-        let mut sibling_text = String::new();
-        for sibling in siblings {
-            sibling_text.push_str(&render(
-                &self.configuration,
-                "agent-task.sibling-item",
+        let dependencies = dependencies
+            .iter()
+            .map(|dependency| {
+                Ok(serde_json::json!({
+                    "name": dependency.name,
+                    "description": dependency.description,
+                    "result": self.bound(
+                        dependency.result.as_deref().unwrap_or(""),
+                        MAX_SUMMARY_CHARACTERS,
+                    )?,
+                }))
+            })
+            .collect::<ChildResult<Vec<_>>>()?;
+        let siblings = siblings
+            .iter()
+            .map(|sibling| {
+                Ok(serde_json::json!({
+                    "name": sibling.name,
+                    "description": self.bound(&sibling.description, MAX_SUMMARY_CHARACTERS)?,
+                }))
+            })
+            .collect::<ChildResult<Vec<_>>>()?;
+        self.configuration
+            .templates
+            .render(
+                "agent-task.assignment-context",
                 &[
-                    ("name", &sibling.name),
+                    ("task_name".into(), task.name.clone().into()),
+                    ("description".into(), task.description.clone().into()),
                     (
-                        "description",
-                        &self.bound(&sibling.description, MAX_SUMMARY_CHARACTERS)?,
+                        "acceptance_criteria".into(),
+                        task.acceptance_criteria.clone().into(),
                     ),
+                    ("dependencies".into(), dependencies.into()),
+                    ("siblings".into(), siblings.into()),
                 ],
-            )?);
-        }
-        let mut header = if siblings.is_empty() {
-            String::new()
-        } else {
-            render(
-                &self.configuration,
-                "agent-task.sibling-scope",
-                &[("items", &sibling_text)],
-            )?
-        };
-        header.push_str(&render(
-            &self.configuration,
-            "agent-task.header",
-            &[
-                ("task_name", &task.name),
-                ("description", &task.description),
-                ("acceptance_criteria", &task.acceptance_criteria),
-                ("dependencies", &dependency_text),
-            ],
-        )?);
-        Ok(header)
+                &parrot_storage::events::NeverCancelled,
+            )
+            .map_err(|error| ChildError::failure("argument", error.to_string()))
     }
     fn bound(&self, text: &str, limit: usize) -> ChildResult<String> {
         if text.encode_utf16().count() <= limit {

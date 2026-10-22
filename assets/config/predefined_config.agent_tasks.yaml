@@ -1,30 +1,19 @@
 prompt_templates:
-  agent-task.dependency-header:
-    template: "\nDirect dependency summaries:"
-    allowed_arguments: []
-    required_arguments: []
-  agent-task.dependency-item:
-    template: "\n[{name}] {description}\nResult: {result}"
-    allowed_arguments: [name, description, result]
-    required_arguments: [name, description, result]
-  agent-task.sibling-scope:
-    template: |
-      Sibling tasks (out of scope):
-      These tasks belong to other agents. Do not implement or duplicate their work. You may consume dependency results for your assigned task.{items}
-    allowed_arguments: [items]
-    required_arguments: [items]
-  agent-task.sibling-item:
-    template: "\n[{name}] {description}"
-    allowed_arguments: [name, description]
-    required_arguments: [name, description]
-  agent-task.header:
+  agent-task.assignment-context:
+    engine: minijinja
     template: |-
-      Task: {task_name}
-      Description: {description}
-      Acceptance criteria: {acceptance_criteria}{dependencies}
+      {% if siblings %}Sibling tasks (out of scope):
+      These tasks belong to other agents. Do not implement or duplicate their work. You may consume dependency results for your assigned task.{% for sibling in siblings %}
+      [{{ sibling.name }}] {{ sibling.description }}{% endfor %}
+      {% endif %}Task: {{ task_name }}
+      Description: {{ description }}
+      Acceptance criteria: {{ acceptance_criteria }}{% if dependencies %}
+      Direct dependency summaries:{% for dependency in dependencies %}
+      [{{ dependency.name }}] {{ dependency.description }}
+      Result: {{ dependency.result }}{% endfor %}{% endif %}
       This task is your current assignment and supersedes prior task instructions. Inherited parent history is context, not additional assignments.
-    allowed_arguments: [task_name, description, acceptance_criteria, dependencies]
-    required_arguments: [task_name, description, acceptance_criteria, dependencies]
+    allowed_arguments: [task_name, description, acceptance_criteria, dependencies, siblings]
+    required_arguments: [task_name, description, acceptance_criteria, dependencies, siblings]
   agent-task.result:
     template: |-
       Prior leaf result:

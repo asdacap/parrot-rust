@@ -264,48 +264,52 @@ impl<S: SessionServices> SessionTool<S> {
         reduced: bool,
         context: &ContextSnapshot,
     ) -> OperationResult<String, Failure> {
-        let mut arguments = vec![
-            ("estimated_tokens", context.estimated_tokens.to_string()),
-            ("context_limit", context.context_limit.to_string()),
-            (
-                "notification_interval",
-                ContextCadence::NOTIFICATION_INTERVAL.to_string(),
-            ),
-            ("trigger", context.trigger_percent.to_string()),
-        ];
-        if context.has_context_limit_override {
-            arguments.push((
-                "trigger_tokens",
-                context
-                    .trigger_tokens
-                    .map_or_else(|| "unavailable".into(), |value| value.to_string()),
-            ));
-        }
-        let suffix = if context.has_context_limit_override {
-            "-with-limit"
-        } else {
-            ""
-        };
-        let state = if !context.is_available() {
+        let outcome = if !context.is_available() {
             "unavailable"
         } else if reduced {
             "compacted"
         } else {
             "no-op"
         };
-        if context.is_available() {
-            arguments.push((
-                "usage",
-                context
-                    .usage_percent
-                    .map_or_else(|| "unavailable".into(), |value| value.to_string()),
-            ));
-        }
-        render(
-            &self.templates,
-            &format!("compact-context-tool.{state}{suffix}"),
-            &arguments,
-        )
+        self.templates
+            .render(
+                "compact-context-tool.result",
+                &[
+                    ("outcome".into(), outcome.into()),
+                    (
+                        "has_context_limit_override".into(),
+                        context.has_context_limit_override.into(),
+                    ),
+                    ("estimated_tokens".into(), context.estimated_tokens.into()),
+                    ("context_limit".into(), context.context_limit.into()),
+                    (
+                        "notification_interval".into(),
+                        ContextCadence::NOTIFICATION_INTERVAL.into(),
+                    ),
+                    ("trigger".into(), context.trigger_percent.into()),
+                    (
+                        "trigger_tokens".into(),
+                        context
+                            .trigger_tokens
+                            .map_or_else(|| "unavailable".into(), |value| value.to_string())
+                            .into(),
+                    ),
+                    (
+                        "usage".into(),
+                        context
+                            .usage_percent
+                            .map_or_else(|| "unavailable".into(), |value| value.to_string())
+                            .into(),
+                    ),
+                ],
+                &RenderCancellation,
+            )
+            .map_err(|error| match error {
+                OperationError::Cancelled => OperationError::Cancelled,
+                OperationError::Failed(error) => {
+                    OperationError::Failed(Failure::new(FailureKind::Argument, error.to_string()))
+                }
+            })
     }
 }
 

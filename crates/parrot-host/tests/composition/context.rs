@@ -436,6 +436,18 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
         .unwrap();
     assert!(estimated.is_available());
     let arguments = [
+        ("outcome".into(), "compacted".into()),
+        (
+            "has_context_limit_override".into(),
+            estimated.has_context_limit_override.into(),
+        ),
+        (
+            "trigger_tokens".into(),
+            estimated
+                .trigger_tokens
+                .map_or_else(|| "unavailable".into(), |value| value.to_string())
+                .into(),
+        ),
         (
             "estimated_tokens".into(),
             estimated.estimated_tokens.to_string().into(),
@@ -458,11 +470,7 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
         ),
     ];
     let expected = templates()
-        .render(
-            "compact-context-tool.compacted",
-            &arguments,
-            &NeverCancelled,
-        )
+        .render("compact-context-tool.result", &arguments, &NeverCancelled)
         .unwrap();
     assert_eq!(
         output.text, expected,

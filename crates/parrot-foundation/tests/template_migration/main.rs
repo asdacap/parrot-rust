@@ -115,7 +115,7 @@ fn new_resource_changes_only_the_ten_explicit_engine_template_values() {
     .map(str::to_owned)
     .collect();
     assert_eq!(approved, expected);
-    assert_eq!(mapping(old_templates).len(), 78);
+    assert_eq!(mapping(old_templates).len(), 72);
     assert_eq!(mapping(old_templates).len(), mapping(new_templates).len());
     for ((old_id, old_fields), (new_id, new_fields)) in
         mapping(old_templates).iter().zip(mapping(new_templates))
@@ -169,7 +169,7 @@ fn new_resource_changes_only_the_ten_explicit_engine_template_values() {
                 .unwrap_or("scalar")
                 == "scalar")
             .count(),
-        68
+        60
     );
 }
 
@@ -205,14 +205,45 @@ fn all_thirty_m2_cases_match_independent_original_net_golden_outputs() {
     assert!(counts.values().all(|count| *count == 3));
 }
 
+const CONSOLIDATED_SOURCE_IDS: [&str; 13] = [
+    "agent-task.dependency-header",
+    "agent-task.dependency-item",
+    "agent-task.sibling-scope",
+    "agent-task.sibling-item",
+    "agent-task.header",
+    "agent-session.nonempty-queues-reminder",
+    "agent-session.nonempty-queue-item",
+    "compact-context-tool.compacted",
+    "compact-context-tool.no-op",
+    "compact-context-tool.unavailable",
+    "compact-context-tool.compacted-with-limit",
+    "compact-context-tool.no-op-with-limit",
+    "compact-context-tool.unavailable-with-limit",
+];
+const CONSOLIDATED_IDS: [&str; 3] = [
+    "agent-task.assignment-context",
+    "agent-session.nonempty-queues-reminder",
+    "compact-context-tool.result",
+];
+
 #[test]
-fn all_107_names_arguments_and_order_match_the_independent_source_inventory() {
+fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let inventory = fixture("catalog-inventory.json");
     let expected = inventory["entries"].as_array().unwrap();
     assert_eq!(expected.len(), 107);
     let goldens = fixture("catalog-render-goldens.json");
     let golden_rows = goldens["entries"].as_array().unwrap();
     assert_eq!(golden_rows.len(), 107);
+    let expected = expected
+        .iter()
+        .filter(|row| !CONSOLIDATED_SOURCE_IDS.contains(&row["id"].as_str().unwrap()))
+        .collect::<Vec<_>>();
+    let golden_rows = golden_rows
+        .iter()
+        .filter(|row| !CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(expected.len(), 94);
+    assert_eq!(golden_rows.len(), 94);
     let system_old =
         include_str!("../../../../assets/config/predefined_config.system_prompts.yaml");
     let system_new =
@@ -240,12 +271,32 @@ fn all_107_names_arguments_and_order_match_the_independent_source_inventory() {
     let new = yaml::parse_root(&compose(system_new)).unwrap();
     let old_templates = mapping(field(&old, "prompt_templates"));
     let new_templates = mapping(field(&new, "prompt_templates"));
-    assert_eq!(old_templates.len(), 107);
-    assert_eq!(new_templates.len(), 107);
+    assert_eq!(old_templates.len(), 97);
+    assert_eq!(new_templates.len(), 97);
+    let expected_ids = expected
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .chain(CONSOLIDATED_IDS)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        new_templates
+            .iter()
+            .map(|(id, _)| scalar(id).unwrap())
+            .collect::<BTreeSet<_>>(),
+        expected_ids
+    );
+    let old_templates = old_templates
+        .iter()
+        .filter(|(id, _)| !CONSOLIDATED_IDS.contains(&scalar(id).unwrap()))
+        .collect::<Vec<_>>();
+    let new_templates = new_templates
+        .iter()
+        .filter(|(id, _)| !CONSOLIDATED_IDS.contains(&scalar(id).unwrap()))
+        .collect::<Vec<_>>();
     let mut scalar_count = 0;
     let mut minijinja_count = 0;
     for (index, ((old_id, old_template), (new_id, new_template))) in
-        old_templates.iter().zip(new_templates).enumerate()
+        old_templates.into_iter().zip(new_templates).enumerate()
     {
         let id = expected[index]["id"].as_str().unwrap();
         assert_eq!(scalar(old_id), Some(id));
@@ -312,7 +363,7 @@ fn all_107_names_arguments_and_order_match_the_independent_source_inventory() {
         };
         assert_eq!(output, expected_output, "source-golden M6: {id}");
     }
-    assert_eq!(scalar_count, 97);
+    assert_eq!(scalar_count, 84);
     assert_eq!(minijinja_count, 10);
 }
 
@@ -398,4 +449,3 @@ fn each_engine_is_separate_and_never_mutates_argument_json() {
         assert_eq!(input["arguments"], before, "{id} arguments immutable");
     }
 }
-
