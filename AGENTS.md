@@ -135,6 +135,10 @@ A commit message for a migrated component names the upstream .NET components or
 source paths it absorbed. Check `git status` for unexpected changes before
 committing; if there are any, do not commit.
 
+When the user says “commit”, also clean generated build, test, and dependency
+artifacts from this worktree before committing. Preserve user files and unrelated
+changes; do not use broad cleanup commands.
+
 ## Analogy
 
 A good software is like a nice garden. There are distinct clear trees, each tree can be of different shape,
