@@ -5,9 +5,7 @@ use std::sync::{Arc, OnceLock, Weak};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
-        interactions::{
-            ChildQuestionAnswers, QuestionDefinition, QuestionReply, QuestionRequester,
-        },
+        interactions::{AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester},
         runtime::AgentRuntime,
         security::RestrictableAccessSnapshot,
         status::ProcessStatusSource,
@@ -31,9 +29,8 @@ use parrot_runtime::{
         Scope,
     },
     interactions::{
-        ChildIdentity, ChildQuestion, ChildQuestionCoordinator, ChildQuestionDelivery,
-        ChildQuestionRegistry, ChildQuestionTemplates, InteractionError, InteractionErrorKind,
-        QuestionBroker,
+        AgentAskDelivery, AgentAskTemplates, AgentAsks, InteractionError, InteractionErrorKind,
+        PendingAgentAsk, QuestionBroker,
     },
     tool_settlement::{SharedSecurity, ToolSettlement},
 };
@@ -116,24 +113,6 @@ impl<S: RestrictableAccessSnapshot + 'static> ScopedAgentRuntime<S> {
 
     fn services(scope: &Arc<Scope<S>>) -> Result<Arc<AgentSessionServices<S>>, ChildError> {
         scope.get_service::<AgentSessionServices<S>>()
-    }
-
-    fn coordinator(
-        scope: &Arc<Scope<S>>,
-    ) -> Result<Arc<ChildQuestionCoordinator>, InteractionError> {
-        scope
-            .get_service::<ChildQuestionCoordinator>()
-            .map_err(interaction_child)
-    }
-
-    pub fn child_question(
-        identity: &parrot_runtime::children::AgentIdentity,
-    ) -> Arc<ChildQuestion> {
-        Arc::new(ChildQuestion::new(Arc::new(ChildIdentity {
-            session_id: identity.session.session_id.clone(),
-            name: identity.session.name.clone(),
-            parent_session_id: identity.session.parent_session_id.clone(),
-        })))
     }
 }
 
@@ -351,85 +330,83 @@ impl<S: RestrictableAccessSnapshot + 'static> QuestionRequester for ScopedAgentR
     ) -> BoxFuture<'a, Result<QuestionReply, OperationError<AgentToolError>>> {
         Box::pin(async move {
             let owner = self.owner().map_err(operation_child)?;
-            if owner.identity().session.depth == 0 {
-                return self
-                    .user_questions
-                    .ask(questions, cancellation)
-                    .await
-                    .map_err(operation_interaction);
+            if owner.identity().session.depth != 0 {
+                return Err(OperationError::Failed(AgentToolError::QuestionRejected(
+                    "only root agents may ask the user; use ask for inter-agent communication"
+                        .into(),
+                )));
             }
-            let parent = owner.parent_scope().parent().ok_or_else(|| {
-                OperationError::Failed(AgentToolError::Registry(
-                    "child agent parent scope not found".into(),
-                ))
-            })?;
-            let child = owner
-                .get_service::<ChildQuestion>()
-                .map_err(operation_child)?;
-            Self::coordinator(&parent)
-                .map_err(operation_interaction_failure)?
-                .ask(child.identity.clone(), questions, cancellation)
+            self.user_questions
+                .ask(questions, cancellation)
                 .await
                 .map_err(operation_interaction)
         })
     }
 }
 
-impl<S: RestrictableAccessSnapshot + 'static> ChildQuestionAnswers for ScopedAgentRuntime<S> {
+impl<S: RestrictableAccessSnapshot + 'static> AgentCommunication for ScopedAgentRuntime<S> {
     type Error = AgentToolError;
-    fn reply(&self, agent_name: &str, reply: QuestionReply) -> Result<(), AgentToolError> {
-        let owner = self.owner().map_err(agent_child)?;
-        Self::coordinator(&owner)
-            .map_err(agent_interaction)?
-            .reply(agent_name, reply)
+    fn ask<'a>(
+        &'a self,
+        name: &'a str,
+        message: String,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
+        Box::pin(async move {
+            cancellation
+                .check()
+                .map_err(|_| OperationError::Cancelled)?;
+            let owner = self.owner().map_err(operation_child)?;
+            let resolver = self.resolver(&owner).map_err(operation_child)?;
+            let recipient = resolver.resolve_recipient(name).map_err(operation_child)?;
+            let scope = if owner
+                .parent_scope()
+                .parent()
+                .is_some_and(|parent| Arc::ptr_eq(parent.session(), &recipient))
+            {
+                owner.parent_scope().parent().expect("parent checked")
+            } else {
+                resolver
+                    .resolve_status_scope(name)
+                    .map_err(operation_child)?
+            };
+            let caller = owner.get_service::<AgentAsks>().map_err(operation_child)?;
+            let target = scope.get_service::<AgentAsks>().map_err(operation_child)?;
+            caller
+                .ask(&target, message, cancellation)
+                .await
+                .map_err(operation_interaction)
+        })
+    }
+    fn reply(&self, request_id: &str, message: String) -> Result<(), AgentToolError> {
+        self.owner()
+            .map_err(agent_child)?
+            .get_service::<AgentAsks>()
+            .map_err(agent_child)?
+            .reply(request_id, message)
             .map_err(agent_interaction)
     }
 }
 
-impl<S: RestrictableAccessSnapshot + 'static> ChildQuestionRegistry for ScopedAgentRuntime<S> {
-    fn find(&self, name: &str) -> Option<Arc<ChildQuestion>> {
-        self.owner()
-            .ok()?
-            .children()
-            .find(name)?
-            .get_service::<ChildQuestion>()
-            .ok()
-    }
-    fn snapshot(&self) -> Vec<Arc<ChildQuestion>> {
-        self.owner().map_or_else(
-            |_| Vec::new(),
-            |owner| {
-                owner
-                    .children()
-                    .snapshot_children()
-                    .into_iter()
-                    .filter_map(|child| child.get_service::<ChildQuestion>().ok())
-                    .collect()
-            },
-        )
-    }
-}
-
-impl<S: RestrictableAccessSnapshot + 'static> ChildQuestionDelivery for ScopedAgentRuntime<S> {
+impl<S: RestrictableAccessSnapshot + 'static> AgentAskDelivery for ScopedAgentRuntime<S> {
     fn steer<'a>(
         &'a self,
-        owner_session_id: &'a str,
-        request_id: &'a str,
+        request: &'a PendingAgentAsk,
         text: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>> {
         Box::pin(async move {
             let owner = self.owner().map_err(interaction_child)?;
-            if owner.identity().session.session_id != owner_session_id {
+            if owner.identity().session.session_id != request.recipient.session_id {
                 return Err(InteractionError::new(
                     InteractionErrorKind::Registry,
-                    "question delivery must target its owning parent",
+                    "ask delivery must target its addressed recipient",
                 ));
             }
             owner
                 .session()
                 .send(
                     vec![ConversationPart::text(text)],
-                    request_id.into(),
+                    request.id.clone(),
                     Delivery::DELIVERY_STEER,
                     IncomingActivity::default(),
                     Arc::new(Signal::new()),
@@ -443,14 +420,15 @@ impl<S: RestrictableAccessSnapshot + 'static> ChildQuestionDelivery for ScopedAg
     }
 }
 
-impl<S: RestrictableAccessSnapshot + 'static> ChildQuestionTemplates for ScopedAgentRuntime<S> {
-    fn question(&self, agent_name: &str, questions: &str) -> Result<String, InteractionError> {
+impl<S: RestrictableAccessSnapshot + 'static> AgentAskTemplates for ScopedAgentRuntime<S> {
+    fn ask(&self, request: &PendingAgentAsk) -> Result<String, InteractionError> {
         self.templates
             .render(
-                "agent-session.child-question",
+                "agent-session.agent-ask",
                 &[
-                    ("agent_name".into(), agent_name.into()),
-                    ("questions".into(), questions.into()),
+                    ("asker_name".into(), request.asker.name.as_str().into()),
+                    ("request_id".into(), request.id.as_str().into()),
+                    ("message".into(), request.message.as_str().into()),
                 ],
                 &NeverCancelled,
             )
@@ -458,11 +436,20 @@ impl<S: RestrictableAccessSnapshot + 'static> ChildQuestionTemplates for ScopedA
                 InteractionError::new(InteractionErrorKind::Delivery, error.to_string())
             })
     }
-    fn reminder(&self, children: &str) -> Result<String, InteractionError> {
+    fn reminder(&self, requests: &[PendingAgentAsk]) -> Result<String, InteractionError> {
+        let mut pending = String::new();
+        for request in requests {
+            pending.push_str("\n- ");
+            pending.push_str(&request.id);
+            pending.push_str(" from ");
+            pending.push_str(&request.asker.name);
+            pending.push_str(": ");
+            pending.push_str(&request.message);
+        }
         self.templates
             .render(
-                "agent-session.pending-child-question-reminder",
-                &[("children".into(), children.into())],
+                "agent-session.pending-ask-reminder",
+                &[("requests".into(), pending.into())],
                 &NeverCancelled,
             )
             .map_err(|error| {
@@ -532,14 +519,11 @@ fn agent_interaction(error: InteractionError) -> AgentToolError {
         _ => AgentToolError::Service(error.message),
     }
 }
-fn operation_interaction_failure(error: InteractionError) -> OperationError<AgentToolError> {
-    OperationError::Failed(agent_interaction(error))
-}
 fn operation_interaction(
     error: OperationError<InteractionError>,
 ) -> OperationError<AgentToolError> {
     match error {
         OperationError::Cancelled => OperationError::Cancelled,
-        OperationError::Failed(error) => operation_interaction_failure(error),
+        OperationError::Failed(error) => OperationError::Failed(agent_interaction(error)),
     }
 }

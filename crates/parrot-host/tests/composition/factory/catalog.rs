@@ -30,7 +30,7 @@ mod fixture_support {
                 MutationRequest, MutationTarget, ReadRequest,
             },
             interactions::{
-                ChildQuestionAnswers, QuestionDefinition, QuestionReply, QuestionRequester,
+                AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
             },
             paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
             runtime::{AgentQueues, AgentRuntime, TaskController},
@@ -492,10 +492,22 @@ mod fixture_support {
             })
         }
     }
-    impl ChildQuestionAnswers for Services {
+    impl AgentCommunication for Services {
         type Error = AgentToolError;
-        fn reply(&self, agent_name: &str, reply: QuestionReply) -> Result<(), AgentToolError> {
-            self.record("answer", format!("{agent_name} {reply:?}"), None, None);
+        fn ask<'a>(
+            &'a self,
+            name: &'a str,
+            message: String,
+            cancellation: &'a dyn Cancellation,
+        ) -> BoxFuture<'a, OperationResult<String, AgentToolError>> {
+            Box::pin(async move {
+                cancelled(cancellation)?;
+                self.record("ask", format!("{name} {message}"), None, None);
+                Ok("catalog reply".into())
+            })
+        }
+        fn reply(&self, request_id: &str, message: String) -> Result<(), AgentToolError> {
+            self.record("reply", format!("{request_id} {message}"), None, None);
             Ok(())
         }
     }
@@ -1211,7 +1223,8 @@ mod fixture_binding {
                     runtime: shared.clone(),
                     models: shared.clone(),
                     questions: shared.clone(),
-                    answers: shared.clone(),
+                    communication: shared.clone(),
+                    agent_depth: 0,
                     templates: templates.clone(),
                     allow_parent,
                 },

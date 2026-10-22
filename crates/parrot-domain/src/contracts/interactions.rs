@@ -48,11 +48,11 @@ impl QuestionReply {
     }
 }
 
-/// Already scoped to the actual invoking agent by the host. The tool cannot
-/// choose a child identity or parent scope; this is not the user-session broker.
+/// Caller-scoped user questioning. The host rejects non-root invoking agents.
 pub trait QuestionRequester: Send + Sync {
     type Error: Send + Sync + 'static;
 
+    /// Waits for the user's answers without routing to another agent.
     fn ask<'a>(
         &'a self,
         questions: Vec<QuestionDefinition>,
