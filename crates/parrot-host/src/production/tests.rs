@@ -126,21 +126,32 @@ impl Fixture {
         launch_directory: impl AsRef<Path>,
         provider: Arc<dyn Provider>,
     ) -> ProductionHost {
-        ProductionHost::new(ProductionHostConfig {
-            configuration: self.configuration.clone(),
-            templates: self.templates.clone(),
-            roots: self.roots.clone(),
-            launch_directory: launch_directory.as_ref().to_owned(),
-            providers: Arc::new(
-                ProviderRegistry::new(
-                    vec![provider],
-                    BTreeMap::from([("local".into(), NoCallProvider::models())]),
-                )
-                .unwrap(),
-            ),
-            diagnostics: self.diagnostics.clone(),
-            owner_runtime: tokio::runtime::Handle::current(),
-        })
+        self.host_at_with_progress(launch_directory, provider, None)
+    }
+    fn host_at_with_progress(
+        &self,
+        launch_directory: impl AsRef<Path>,
+        provider: Arc<dyn Provider>,
+        progress: Option<SessionEventLoadProgress>,
+    ) -> ProductionHost {
+        ProductionHost::with_event_load_progress(
+            ProductionHostConfig {
+                configuration: self.configuration.clone(),
+                templates: self.templates.clone(),
+                roots: self.roots.clone(),
+                launch_directory: launch_directory.as_ref().to_owned(),
+                providers: Arc::new(
+                    ProviderRegistry::new(
+                        vec![provider],
+                        BTreeMap::from([("local".into(), NoCallProvider::models())]),
+                    )
+                    .unwrap(),
+                ),
+                diagnostics: self.diagnostics.clone(),
+                owner_runtime: tokio::runtime::Handle::current(),
+            },
+            progress,
+        )
         .unwrap()
     }
 }
@@ -208,8 +219,17 @@ async fn real_production_host_creates_resumes_and_joins_local_transports() {
         "per-user listener was not joined and removed"
     );
     assert!(host.open_local_client(&NeverCancelled).await.is_err());
-    let resumed = fixture.host();
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let observed = observations.clone();
+    let resumed = fixture.host_at_with_progress(
+        fixture.root.join("workspace"),
+        Arc::new(NoCallProvider::default()),
+        Some(Arc::new(move |id, count| {
+            observed.lock().unwrap().push((id.to_owned(), count))
+        })),
+    );
     let mut client = resumed.open_local_client(&NeverCancelled).await.unwrap();
+    assert!(observations.lock().unwrap().is_empty());
     let result = bounded(
         client.resume_session(wire::ResumeSessionRequest {
             user_session_id: session.id.clone(),
@@ -225,6 +245,11 @@ async fn real_production_host_creates_resumes_and_joins_local_transports() {
     .unwrap()
     .into_inner();
     assert_eq!(result.id, session.id);
+    assert_eq!(
+        *observations.lock().unwrap(),
+        [(session.id.clone(), 0)],
+        "resume must report the empty history before returning"
+    );
     bounded(resumed.close()).await.unwrap();
     assert!(!socket.exists());
 }

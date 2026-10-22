@@ -5,7 +5,7 @@
 #![cfg(unix)]
 
 use parrot_cli::dispatch::startup::{
-    ConfigureFresh, LocalChatStartup, OpenLocalClient, StartupError,
+    ConfigureFresh, LocalChatStartup, OpenLocalClient, RestoreProgress, StartupError,
 };
 use parrot_domain::{
     contracts::{
@@ -85,6 +85,7 @@ struct Context {
     runtime: RuntimeIdentity,
     diagnostics: Arc<FileDiagnosticLog>,
     progress: Arc<Mutex<Vec<u8>>>,
+    restore_progress: Arc<RestoreProgress>,
     opens: Arc<AtomicUsize>,
     configurations: Arc<AtomicUsize>,
 }
@@ -119,12 +120,15 @@ impl Context {
         .with_proven_comparable_process_start_tokens();
         let diagnostics =
             Arc::new(FileDiagnosticLog::open_global(root.join("logs"), "startup", |_| {}).unwrap());
+        let progress = Arc::new(Mutex::new(Vec::new()));
+        let restore_progress = Arc::new(RestoreProgress::new(progress.clone()));
         Self {
             root,
             roots,
             runtime,
             diagnostics,
-            progress: Arc::default(),
+            progress,
+            restore_progress,
             opens: Arc::default(),
             configurations: Arc::default(),
         }
@@ -235,6 +239,7 @@ impl Context {
             take_over,
         )
         .unwrap()
+        .with_restore_progress(self.restore_progress.clone())
     }
     fn text(&self) -> String {
         String::from_utf8(self.progress.lock().unwrap().clone()).unwrap()
@@ -311,6 +316,8 @@ struct Endpoint {
     attach_started: Arc<Notify>,
     resume_started: Arc<Notify>,
     retry_started: Arc<Notify>,
+    progress: parrot_host::composition::factory::user::SessionEventLoadProgress,
+    event_count: usize,
 }
 impl Endpoint {
     fn new(context: &Context, scenario: &'static str) -> Self {
@@ -323,6 +330,8 @@ impl Endpoint {
             attach_started: Arc::default(),
             resume_started: Arc::default(),
             retry_started: Arc::default(),
+            progress: context.restore_progress.observer(),
+            event_count: 3,
         }
     }
     async fn create(
@@ -342,6 +351,9 @@ impl Endpoint {
         request: wire::ResumeSessionRequest,
     ) -> Result<wire::UserSession, Status> {
         self.calls.lock().unwrap().resumed.push(request.clone());
+        for count in 0..=self.event_count {
+            (self.progress)(&request.user_session_id, count);
+        }
         self.resume_started.notify_one();
         match self.scenario {
             "cancel-recovery" => return std::future::pending().await,
@@ -553,6 +565,20 @@ async fn run_case(scenario: &'static str, interactive: bool, expected_opens: usi
         fresh == 0 && !matches!(scenario, "load" | "recover" | "foreign-take-over")
     );
     let text = context.text();
+    (endpoint.progress)("existing", 100);
+    assert_eq!(
+        context.text(),
+        text,
+        "observer must be inactive after startup"
+    );
+    if matches!(scenario, "load" | "recover" | "foreign-take-over") {
+        assert!(text.contains("existing... 0 events loaded"), "{text}");
+        assert!(text.contains("existing... 1 events loaded"), "{text}");
+        assert!(
+            text.contains("loaded existing user session existing (3 events loaded)"),
+            "{text}"
+        );
+    }
     assert!(text.contains("looking for the workspace's latest user session..."));
     assert_eq!(text.contains("creating a new user session..."), fresh == 1);
     assert_eq!(
@@ -608,6 +634,26 @@ scenario_tests! {
     foreign_take_over: "foreign-take-over", false, 1, 0;
 }
 
+#[tokio::test]
+async fn empty_restore_reports_zero_events() {
+    let context = Context::new();
+    context.admit(false).release().unwrap();
+    let mut endpoint = Endpoint::new(&context, "load");
+    endpoint.event_count = 0;
+    let mut server = context.server(endpoint, false).await;
+    let mut local = context.client(&server);
+    let startup = context.startup(local.client().unwrap().clone(), false);
+    let opened = bounded(startup.open(false, &Stop::new())).await.unwrap();
+    assert!(
+        context
+            .text()
+            .contains("loaded existing user session existing (0 events loaded)")
+    );
+    drop(opened);
+    local.close();
+    bounded(server.close()).await.unwrap();
+}
+
 async fn cancellation_case(during_attach: bool) {
     let context = Context::new();
     let _activation = context.admit(false);
@@ -661,6 +707,8 @@ async fn recovery_failure_case(scenario: &'static str, expected: Code) {
     let stop = Stop::new();
     let (result, ()) = tokio::join!(bounded(startup.open(true, &stop)), async {
         bounded(endpoint.resume_started.notified()).await;
+        assert!(context.text().contains("existing... 1 events loaded"));
+        assert!(!context.text().contains("loaded existing user session"));
         if scenario == "cancel-retry" {
             bounded(endpoint.retry_started.notified()).await;
         }
@@ -669,6 +717,13 @@ async fn recovery_failure_case(scenario: &'static str, expected: Code) {
         }
     });
     assert!(matches!(result, Err(StartupError::Rpc(status)) if status.code() == expected));
+    let before = context.text();
+    (endpoint.progress)("existing", 100);
+    assert_eq!(
+        context.text(),
+        before,
+        "late progress after a failed resume"
+    );
     assert_eq!(context.opens.load(Ordering::SeqCst), 1);
     assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
     {

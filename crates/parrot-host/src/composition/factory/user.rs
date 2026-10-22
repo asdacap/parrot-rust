@@ -66,6 +66,8 @@ use tokio::sync::{Mutex as AsyncMutex, oneshot};
 
 pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S, ToolSettlement<S>>>;
 pub type ScopeBinder<S> = Arc<dyn Fn(&Arc<Scope<S>>) -> ChildResult<()> + Send + Sync>;
+/// Observes saved events loaded during session initialization, keyed by user session.
+pub type SessionEventLoadProgress = Arc<dyn Fn(&str, usize) + Send + Sync>;
 
 pub struct AgentFactoryParts<S: RestrictableAccessSnapshot + 'static> {
     pub factory: Arc<dyn ScopeFactory<S>>,
@@ -265,6 +267,7 @@ pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
 pub struct UserSessionFactory<S: RestrictableAccessSnapshot + 'static> {
     config: Arc<UserSessionFactoryConfig<S>>,
     question_clock: Arc<dyn Clock>,
+    event_load_progress: Option<SessionEventLoadProgress>,
     pending: Mutex<HashMap<String, Weak<UserSessionCore<S>>>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> UserSessionFactory<S> {
@@ -277,8 +280,14 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionFactory<S> {
         Self {
             config: Arc::new(config),
             question_clock: clock,
+            event_load_progress: None,
             pending: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn with_event_load_progress(mut self, progress: Option<SessionEventLoadProgress>) -> Self {
+        self.event_load_progress = progress;
+        self
     }
 }
 
@@ -513,6 +522,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
     async fn create(
         config: Arc<UserSessionFactoryConfig<S>>,
         question_clock: Arc<dyn Clock>,
+        event_load_progress: Option<SessionEventLoadProgress>,
         lease: Arc<SessionResourceLease>,
         initialization: SessionInitialization,
         settled_on_error: &mut bool,
@@ -564,9 +574,13 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             .map_err(invalid)?,
         );
         std::fs::create_dir_all(resources.scratch_directory()).map_err(internal)?;
+        let progress = event_load_progress.map(|observe| {
+            let id = initialization.id.value().to_owned();
+            Arc::new(move |count| observe(&id, count)) as parrot_storage::events::EventLoadProgress
+        });
         let statistics = lease
             .events
-            .get_runtime_statistics()
+            .get_runtime_statistics_with_progress(progress)
             .await
             .map_err(internal)?;
         *settled_on_error = false;
@@ -1135,11 +1149,13 @@ impl<S: RestrictableAccessSnapshot + 'static> StoredUserSessionFactory for UserS
     ) -> BoxFuture<'_, Result<Box<dyn StoredUserSession>, SessionStoreError>> {
         let config = self.config.clone();
         let question_clock = self.question_clock.clone();
+        let event_load_progress = self.event_load_progress.clone();
         Box::pin(async move {
             let mut settled_on_error = true;
             let core = match UserSessionCore::create(
                 config,
                 question_clock,
+                event_load_progress,
                 lease.clone(),
                 initialization,
                 &mut settled_on_error,
