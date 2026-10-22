@@ -289,6 +289,7 @@ async fn actual_file_observer_flushes_completion_and_preserves_event_metadata() 
     let fixture = Fixture::new("a\nb\npartial".as_bytes(), true);
     let sink = Sink::default();
     let mut monitor = ShellProcessMonitor::new(Duration::from_secs(60));
+    assert!(monitor.blocks_turn());
     monitor
         .observe(
             &fixture.identity,
@@ -297,7 +298,6 @@ async fn actual_file_observer_flushes_completion_and_preserves_event_metadata() 
             &fixture.lifetime,
         )
         .await;
-    assert!(!monitor.blocks_turn());
     assert_eq!(
         monitor.activity_kind(),
         ShellProcessActivityKind::SHELL_PROCESS_ACTIVITY_KIND_MONITOR

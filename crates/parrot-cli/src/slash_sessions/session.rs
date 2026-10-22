@@ -10,6 +10,8 @@ use parrot_domain::{
 use parrot_foundation::config::Configuration;
 use parrot_host::web::router::WebClient;
 
+use crate::dispatch::arguments::ChatOptions;
+
 use super::{
     ExistingSessionBinding, SlashActivity, SlashFailure, SlashSession, SlashSessionBinding,
     native_call,
@@ -194,15 +196,21 @@ impl SlashSession for RpcSlashSession {
     }
     fn start_new<'a>(
         &'a mut self,
-        model: &'a str,
-        mode: &'a str,
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
+            let mut options = ChatOptions::default();
+            {
+                let configuration = self.configuration.lock().expect("configuration poisoned");
+                options.apply_configuration(
+                    &configuration.model,
+                    &configuration.runtime.default_profile,
+                );
+            }
             let replacement = native_call(
                 self.client.create_session(wire::CreateSessionRequest {
-                    model: model.into(),
-                    mode: mode.into(),
+                    model: options.model,
+                    mode: options.mode,
                     interactive_permissions: self.interactive_permissions,
                     ..Default::default()
                 }),

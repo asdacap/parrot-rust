@@ -280,8 +280,6 @@ impl SlashSession for Session {
     }
     fn start_new<'a>(
         &'a mut self,
-        _: &'a str,
-        _: &'a str,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async { panic!("unexpected new session") })

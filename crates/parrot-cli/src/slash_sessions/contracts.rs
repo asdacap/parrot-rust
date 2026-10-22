@@ -140,10 +140,9 @@ pub trait SlashSession: Send {
         mode: &'a str,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>>;
+    /// Start a fresh session using the configured default model and mode.
     fn start_new<'a>(
         &'a mut self,
-        model: &'a str,
-        mode: &'a str,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>>;
     fn load_existing<'a>(

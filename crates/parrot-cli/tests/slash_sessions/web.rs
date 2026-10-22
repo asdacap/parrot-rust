@@ -221,32 +221,13 @@ async fn web_mode_dispatch_answers_same_registry_and_emits_authoritative_session
 }
 
 #[tokio::test]
-async fn web_clear_uses_real_model_and_mode_wizards_then_emits_replacement_not_update() {
+async fn web_clear_uses_defaults_without_prompts_then_emits_replacement_not_update() {
     let mut fixture = Fixture::start(|method, bytes| match method {
         "attach_session" => Ok(attach(bytes)),
-        "list_models" => Ok(wire::ListModelsResponse {
-            models: vec![wire::Model {
-                id: "new".into(),
-                provider_id: "provider".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-        .write_to_bytes()
-        .unwrap()),
-        "list_modes" => Ok(wire::ListModesResponse {
-            modes: vec![wire::Mode {
-                id: "plan".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-        .write_to_bytes()
-        .unwrap()),
         "create_session" => {
             let request = wire::CreateSessionRequest::parse_from_bytes(bytes).unwrap();
-            assert_eq!(request.model, "provider/new");
-            assert_eq!(request.mode, "plan");
+            assert_eq!(request.model, "provider/current");
+            assert_eq!(request.mode, "coordinator");
             assert!(request.interactive_permissions);
             Ok(wire::UserSession {
                 id: "replacement".into(),
@@ -262,9 +243,15 @@ async fn web_clear_uses_real_model_and_mode_wizards_then_emits_replacement_not_u
     .await;
     let service = service(&mut fixture);
     let config = std::fs::read(fixture.root.join("config.yaml")).unwrap();
-    let frames = drive(&service, "/clear", &["provider", "new", "plan"])
-        .await
-        .unwrap();
+    let frames = drive(&service, "/clear", &[]).await.unwrap();
+    assert!(matches!(
+        frames.as_slice(),
+        [
+            web::slash_frame::Payload::Started(_),
+            web::slash_frame::Payload::SessionReplaced(_),
+            web::slash_frame::Payload::Show(_)
+        ]
+    ));
     let replacements: Vec<_> = frames
         .iter()
         .filter_map(|frame| {
@@ -277,8 +264,8 @@ async fn web_clear_uses_real_model_and_mode_wizards_then_emits_replacement_not_u
         .collect();
     assert_eq!(replacements.len(), 1);
     assert_eq!(replacements[0].id, "replacement");
-    assert_eq!(replacements[0].model, "provider/new");
-    assert_eq!(replacements[0].mode, "plan");
+    assert_eq!(replacements[0].model, "provider/current");
+    assert_eq!(replacements[0].mode, "coordinator");
     assert!(
         !frames
             .iter()

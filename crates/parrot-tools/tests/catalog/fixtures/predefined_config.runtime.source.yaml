@@ -408,7 +408,7 @@ tools:
       - name
   monitor:
     description: |-
-      Start a background monitor whose stdout lines stream to you as notifications while you keep working. Each stdout line is an event; lines arriving within 200ms are batched into one notification; exit ends the watch and reports the exit code. Unlike exec_command, a running monitor does not keep the turn open. Notifications are not replies from the user.
+      Start a background monitor whose stdout lines stream to you as notifications while you keep working. Each stdout line is an event; lines arriving within 200ms are batched into one notification; exit ends the watch and reports the exit code. Like exec_command, a running monitor keeps the turn open. Notifications are not replies from the user.
       For a single notification ("tell me when the build finishes"), use exec_command with yield_after_ms instead. Use a monitor for one notification per occurrence, such as `tail -f app.log | grep --line-buffered ERROR` or a poll loop that prints one line per new item.
       Every pipe stage must flush per line (grep --line-buffered, awk fflush()); `| head` delivers nothing until it ends. Only stdout is the event stream, so merge stderr with 2>&1 when the command's own failures matter. In poll loops tolerate transient failures (`|| true`) and poll remote APIs at 30s or slower.
       Silence is not success: the filter must match every terminal state (for example `Traceback|Error|FAILED|Killed`), not just the happy path. Filter to the lines you would act on; a monitor that emits too many events is stopped automatically.

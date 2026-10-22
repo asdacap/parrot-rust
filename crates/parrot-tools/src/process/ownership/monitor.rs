@@ -129,7 +129,7 @@ impl ShellProcessMonitor {
     }
 
     pub fn blocks_turn(&self) -> bool {
-        false
+        true
     }
 
     pub fn activity_kind(&self) -> ShellProcessActivityKind {

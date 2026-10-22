@@ -64,7 +64,7 @@ impl MonitorExecution for ObservedExecution {
 
 impl ProcessReport for MonitorProcessReport {
     fn blocks_turn(&self) -> bool {
-        false
+        true
     }
 
     fn activity_kind(&self) -> ActivityKind {

@@ -84,7 +84,7 @@ impl CompletionSink for RecordingSink {
 }
 
 #[tokio::test]
-async fn actual_owner_monitor_events_precede_one_terminal_delivery_without_turn_blocker() {
+async fn actual_owner_monitor_blocks_turn_until_terminal_delivery() {
     let directory = std::env::temp_dir().join(format!(
         "parrot-owner-monitor-{}",
         Identifier::event_id().unwrap()
@@ -134,7 +134,10 @@ async fn actual_owner_monitor_events_precede_one_terminal_delivery_without_turn_
     assert_eq!(yielded.activity_kind, ActivityKind::Monitor);
     assert!(yielded.stdout_path.as_ref().unwrap().is_absolute());
     assert!(yielded.stderr_path.as_ref().unwrap().is_absolute());
-    assert!(owner.active().await.is_empty());
+    let active = owner.active().await;
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].id, "agent-id/watch");
+    assert_eq!(active[0].name, "watch");
     assert_eq!(owner.capture_inventory().processes.len(), 1);
 
     let completed = tokio::time::timeout(Duration::from_secs(10), async {
@@ -143,10 +146,12 @@ async fn actual_owner_monitor_events_precede_one_terminal_delivery_without_turn_
         }
     })
     .await;
+    let active_after_completion = owner.active().await;
     // Always join the actual child, report, delivery and inventory lifetimes.
     let disposed = owner.dispose().await;
     completed.unwrap();
     disposed.unwrap();
+    assert!(active_after_completion.is_empty());
 
     assert_eq!(
         *sink.messages.lock().unwrap(),

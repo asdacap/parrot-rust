@@ -14,15 +14,7 @@ use super::{
     WorkspaceNavigation, WorkspaceSessionsCommand,
 };
 
-pub struct ClearCommand {
-    models: ModelWizard,
-    modes: ModeSelection,
-}
-impl ClearCommand {
-    pub fn new(models: ModelWizard, modes: ModeSelection) -> Self {
-        Self { models, modes }
-    }
-}
+pub struct ClearCommand;
 impl SlashCommand for ClearCommand {
     fn name(&self) -> &str {
         "/clear"
@@ -37,14 +29,8 @@ impl SlashCommand for ClearCommand {
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            let Some(model) = self.models.select(None, context.dialog, c).await? else {
-                return Ok(());
-            };
-            let Some(mode) = self.modes.select(context.dialog, c).await? else {
-                return Ok(());
-            };
             context.activity.wait_until_idle(c).await?;
-            context.session.start_new(&model, &mode, c).await?;
+            context.session.start_new(c).await?;
             context
                 .dialog
                 .show(&[format!("new session {}", context.session.id())], c)
@@ -184,7 +170,7 @@ impl SlashCommands {
             Box::new(AuthCommand::new(services.auth.clone())),
             Box::new(AuthPresetSelectCommand::new(services.auth.clone())),
             Box::new(AuthPresetSetCommand::new(services.auth)),
-            Box::new(ClearCommand::new(models.clone(), modes.clone())),
+            Box::new(ClearCommand),
             Box::new(CompactCommand),
             Box::new(EffortCommand::new(client.clone())),
         ];

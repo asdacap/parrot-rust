@@ -377,8 +377,6 @@ impl SlashSession for Session {
     }
     fn start_new<'a>(
         &'a mut self,
-        _: &'a str,
-        _: &'a str,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         unused_session(cancellation)

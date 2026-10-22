@@ -1418,13 +1418,14 @@ async fn monitor_case(arguments: Value, interrupt: bool, expected: &[&str]) {
     assert_eq!(
         started.text,
         format!(
-            "Monitor watch started. Each stdout line arrives as a notification while you keep working; a running monitor does not keep this turn open. Stop it early with interrupt_process.\nstderr does not produce events and is written to {}",
+            "Monitor watch started. Each stdout line arrives as a notification while you keep working; a running monitor keeps this turn open. Stop it early with interrupt_process.\nstderr does not produce events and is written to {}",
             stderr.display()
         )
     );
-    assert!(
-        fixture.owner.active().await.is_empty(),
-        "monitor must not keep the turn open"
+    assert_eq!(
+        fixture.owner.active().await.len(),
+        1,
+        "monitor must keep the turn open while running"
     );
     assert_eq!(
         fixture.launcher.records.lock().unwrap()[0]

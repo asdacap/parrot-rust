@@ -370,7 +370,7 @@ prompt_templates:
     required_arguments: [command_length]
   monitor.started:
     template: |-
-      Monitor {name} started. Each stdout line arrives as a notification while you keep working; a running monitor does not keep this turn open. Stop it early with interrupt_process.
+      Monitor {name} started. Each stdout line arrives as a notification while you keep working; a running monitor keeps this turn open. Stop it early with interrupt_process.
       stderr does not produce events and is written to {stderr_path}
     allowed_arguments: [name, stderr_path]
     required_arguments: [name, stderr_path]

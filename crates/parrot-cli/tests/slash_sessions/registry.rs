@@ -151,16 +151,6 @@ async fn empty_real_model_and_mode_catalogs_report_in_order_without_opening_pick
 #[tokio::test]
 async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
     let mut fixture = Fixture::start(|method, bytes| match method {
-        "list_models" => Ok(wire::ListModelsResponse {
-            models: vec![wire::Model {
-                id: "model".into(),
-                provider_id: "provider".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-        .write_to_bytes()
-        .unwrap()),
         "list_modes" => Ok(wire::ListModesResponse {
             modes: ["build", "plan", "query"]
                 .into_iter()
@@ -236,11 +226,6 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
         .await
         .unwrap();
     let mut clear_dialog = RecordingDialog::default();
-    clear_dialog.selections.extend([
-        Some("provider".into()),
-        Some("model".into()),
-        Some("query".into()),
-    ]);
     registry
         .dispatch(
             "/clear",
@@ -270,8 +255,9 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
         .await
         .unwrap();
     assert_eq!(session.id(), "session-1");
-    assert_eq!(session.model(), "provider/model");
-    assert_eq!(session.mode(), "query");
+    assert_eq!(session.model(), "provider/current");
+    assert_eq!(session.mode(), "coordinator");
+    assert!(clear_dialog.pickers.is_empty());
     assert_eq!(
         record
             .events()

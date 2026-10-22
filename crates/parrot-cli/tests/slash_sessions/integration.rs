@@ -316,31 +316,12 @@ async fn registry_dispatches_first_exact_token_preserving_argument_tail() {
 }
 
 #[tokio::test]
-async fn clear_uses_same_real_model_wizard_and_mode_selection_before_new_binding() {
+async fn clear_uses_configured_defaults_without_model_or_mode_prompts_before_new_binding() {
     let mut fixture = Fixture::start(|method, bytes| match method {
-        "list_models" => Ok(wire::ListModelsResponse {
-            models: vec![wire::Model {
-                id: "model".into(),
-                provider_id: "provider".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-        .write_to_bytes()
-        .unwrap()),
-        "list_modes" => Ok(wire::ListModesResponse {
-            modes: vec![wire::Mode {
-                id: "query".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-        .write_to_bytes()
-        .unwrap()),
         "create_session" => {
             let request = wire::CreateSessionRequest::parse_from_bytes(bytes).unwrap();
-            assert_eq!(request.model, "provider/model");
-            assert_eq!(request.mode, "query");
+            assert_eq!(request.model, "provider/default");
+            assert_eq!(request.mode, "coordinator");
             assert!(request.interactive_permissions);
             Ok(wire::UserSession {
                 id: "fresh".into(),
@@ -355,6 +336,7 @@ async fn clear_uses_same_real_model_wizard_and_mode_selection_before_new_binding
     })
     .await;
     let configuration = configuration(&fixture.root);
+    configuration.lock().unwrap().model = "provider/default".into();
     let original_config = std::fs::read(fixture.root.join("config.yaml")).unwrap();
     let bound = Arc::new(Mutex::new(Vec::new()));
     let observed = bound.clone();
@@ -375,11 +357,6 @@ async fn clear_uses_same_real_model_wizard_and_mode_selection_before_new_binding
         "version",
     );
     let mut dialog = RecordingDialog::default();
-    dialog.selections.extend([
-        Some("provider".into()),
-        Some("model".into()),
-        Some("query".into()),
-    ]);
     let activity = PollingSlashActivity(Arc::new(|| false));
     let refresh = refresh_noop();
     registry
@@ -397,8 +374,10 @@ async fn clear_uses_same_real_model_wizard_and_mode_selection_before_new_binding
         .await
         .unwrap();
     assert_eq!(session.id(), "fresh");
-    assert_eq!(session.model(), "provider/model");
-    assert_eq!(session.mode(), "query");
+    assert_eq!(session.model(), "provider/default");
+    assert_eq!(session.mode(), "coordinator");
+    assert!(dialog.pickers.is_empty());
+    assert!(dialog.loads.is_empty());
     assert_eq!(dialog.shown, ["new session fresh"]);
     assert_eq!(bound.lock().unwrap().len(), 1);
     assert_eq!(
@@ -413,8 +392,45 @@ async fn clear_uses_same_real_model_wizard_and_mode_selection_before_new_binding
             .iter()
             .map(|call| call.method)
             .collect::<Vec<_>>(),
-        ["list_models", "list_modes", "create_session"]
+        ["create_session"]
     );
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn new_session_uses_fallback_model_and_configured_default_mode() {
+    let mut fixture = Fixture::start(|method, bytes| {
+        assert_eq!(method, "create_session");
+        let request = wire::CreateSessionRequest::parse_from_bytes(bytes).unwrap();
+        assert_eq!(
+            request.model,
+            parrot_cli::dispatch::arguments::DEFAULT_MODEL
+        );
+        assert_eq!(request.mode, "plan");
+        Ok(wire::UserSession {
+            id: "fresh".into(),
+            model: request.model,
+            mode: request.mode,
+            ..Default::default()
+        }
+        .write_to_bytes()
+        .unwrap())
+    })
+    .await;
+    let configuration = configuration(&fixture.root);
+    {
+        let mut configuration = configuration.lock().unwrap();
+        configuration.model.clear();
+        configuration.runtime.default_profile = "plan".into();
+    }
+    let mut session = session(fixture.client(), configuration, inert_binding());
+    session.start_new(&Stop::new()).await.unwrap();
+    assert_eq!(session.id(), "fresh");
+    assert_eq!(
+        session.model(),
+        parrot_cli::dispatch::arguments::DEFAULT_MODEL
+    );
+    assert_eq!(session.mode(), "plan");
     fixture.close().await;
 }
 
@@ -612,7 +628,7 @@ async fn native_session_new_and_existing_binding_failures_restore_complete_previ
     );
     let previous = session.current_session().clone();
     let stop = Stop::new();
-    assert!(session.start_new("model", "mode", &stop).await.is_err());
+    assert!(session.start_new(&stop).await.is_err());
     assert_eq!(*session.current_session(), previous);
     for commit in [false, true] {
         assert!(
@@ -683,12 +699,9 @@ async fn dropping_pending_new_binding_restores_session_without_discarding_previo
     );
     let previous = session.current_session().clone();
     assert!(
-        tokio::time::timeout(
-            Duration::from_millis(30),
-            session.start_new("model", "mode", &Stop::new())
-        )
-        .await
-        .is_err()
+        tokio::time::timeout(Duration::from_millis(30), session.start_new(&Stop::new()))
+            .await
+            .is_err()
     );
     assert_eq!(*session.current_session(), previous);
     assert_eq!(fixture.calls.lock().unwrap().len(), 1);
