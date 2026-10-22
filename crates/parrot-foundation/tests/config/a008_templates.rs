@@ -47,7 +47,7 @@ fn a008_scriban_is_rejected_with_manual_guide_and_user_yaml_is_not_rewritten() {
 }
 
 #[test]
-fn a008_active_catalog_retains_source_descriptors_except_three_consolidations() {
+fn a008_active_catalog_retains_source_descriptors_except_explicit_migrations() {
     let expected = fixtures::migrated_fixture_inventory().unwrap();
     assert_eq!(expected.len(), 107);
     assert_eq!(
@@ -66,13 +66,15 @@ fn a008_active_catalog_retains_source_descriptors_except_three_consolidations() 
     );
     assert!(!expected.iter().any(|row| row["engine"] == "scriban"));
     let configuration = fixtures::fixture_configuration("").unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 97);
+    assert_eq!(configuration.prompt_templates.len(), 98);
     for id in fixtures::CONSOLIDATED_IDS {
         assert_eq!(configuration.prompt_templates[id].engine, "minijinja");
     }
     for row in expected {
         let id = row["id"].as_str().unwrap();
-        if fixtures::CONSOLIDATED_SOURCE_IDS.contains(&id) {
+        if fixtures::CONSOLIDATED_SOURCE_IDS.contains(&id)
+            || fixtures::AGENT_COMMUNICATION_SOURCE_IDS.contains(&id)
+        {
             continue;
         }
         let actual = &configuration.prompt_templates[id];

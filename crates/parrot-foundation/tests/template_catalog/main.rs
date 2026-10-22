@@ -47,19 +47,30 @@ const CONSOLIDATED_SOURCE_IDS: [&str; 13] = [
     "compact-context-tool.unavailable-with-limit",
 ];
 
+const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
+    "agent-session.child-question",
+    "agent-session.pending-child-question-reminder",
+    "tool-result.question-replied",
+    "agent-session.final-request",
+    "agent-session.final-request-interrupted",
+];
+
 #[test]
 fn m6_full_configuration_compiles_and_renders_retained_independent_source_models() {
     let (configuration, catalog) = PromptTemplateCatalog::from_content("", &environment()).unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 97);
+    assert_eq!(configuration.prompt_templates.len(), 98);
     let inventory = fixture(&(A.to_owned() + "catalog-inventory.json"));
     let migration = fixture(&(A.to_owned() + "bundled-migration-map.json"));
     let actual: Vec<_> = catalog.descriptors().collect();
-    assert_eq!(actual.len(), 97);
+    assert_eq!(actual.len(), 98);
     let expected = inventory["entries"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|row| !CONSOLIDATED_SOURCE_IDS.contains(&row["id"].as_str().unwrap()))
+        .filter(|row| {
+            !CONSOLIDATED_SOURCE_IDS.contains(&row["id"].as_str().unwrap())
+                && !AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["id"].as_str().unwrap())
+        })
         .collect::<Vec<_>>();
     let expected_ids = expected
         .iter()
@@ -69,7 +80,7 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
         .into_iter()
         .filter(|(id, _)| expected_ids.contains(id))
         .collect::<Vec<_>>();
-    assert_eq!(actual.len(), 94);
+    assert_eq!(actual.len(), 89);
     for ((id, spec), original) in actual.iter().zip(expected) {
         assert_eq!(*id, original["id"].as_str().unwrap());
         assert_eq!(
@@ -97,7 +108,9 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
     let goldens = fixture(&(A.to_owned() + "catalog-render-goldens.json"));
     assert_eq!(goldens["entries"].as_array().unwrap().len(), 107);
     for row in goldens["entries"].as_array().unwrap() {
-        if CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap()) {
+        if CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
+            || AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
+        {
             continue;
         }
         let rendered = catalog
@@ -286,7 +299,7 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
             .render("agent-task.stop-succeeded", &[], &CancelAt::never())
             .unwrap()
     );
-    assert_eq!(config.prompt_templates.len(), 97);
+    assert_eq!(config.prompt_templates.len(), 98);
 }
 
 #[test]
@@ -633,7 +646,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     let new = "prompt_templates:\n  custom.structured:\n    engine: minijinja\n    template: '{{ value }}'\n    allowed_arguments: [value]\n    required_arguments: [value]\n";
     std::fs::write(&path, new).unwrap();
     let (config, catalog) = PromptTemplateCatalog::load(&path, &predefined, &env).unwrap();
-    assert_eq!(config.prompt_templates.len(), 98);
+    assert_eq!(config.prompt_templates.len(), 99);
     assert_eq!(
         catalog
             .render(
@@ -651,7 +664,9 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     );
     let goldens = fixture(&(A.to_owned() + "catalog-render-goldens.json"));
     for row in goldens["entries"].as_array().unwrap() {
-        if CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap()) {
+        if CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
+            || AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
+        {
             continue;
         }
         assert_eq!(

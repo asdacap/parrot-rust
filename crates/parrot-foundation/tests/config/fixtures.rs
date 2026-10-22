@@ -50,17 +50,47 @@ pub const CONSOLIDATED_IDS: [&str; 3] = [
     "compact-context-tool.result",
 ];
 
+pub const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
+    "agent-session.child-question",
+    "agent-session.pending-child-question-reminder",
+    "tool-result.question-replied",
+    "agent-session.final-request",
+    "agent-session.final-request-interrupted",
+];
+pub const AGENT_COMMUNICATION_IDS: [&str; 6] = [
+    "agent-session.agent-ask",
+    "agent-session.pending-ask-reminder",
+    "tool-result.ask-reply",
+    "tool-result.ask-replied",
+    "agent-session.final-request",
+    "agent-session.final-request-interrupted",
+];
+
 fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
     let root = yaml::parse_root(&source_predefined_content()?)?;
     let actual = templates::read_templates(&root, &mut |_| Ok(()))?;
     let mut expected = a008_fixture::specs()?;
-    expected.retain(|id, _| !CONSOLIDATED_SOURCE_IDS.contains(&id.as_str()));
+    expected.retain(|id, _| {
+        !CONSOLIDATED_SOURCE_IDS.contains(&id.as_str())
+            && !AGENT_COMMUNICATION_SOURCE_IDS.contains(&id.as_str())
+    });
     for id in CONSOLIDATED_IDS {
         let spec = actual.get(id).ok_or_else(|| {
             ConfigError::invalid_data(format!("consolidated template {id} is missing"))
         })?;
         parrot_foundation::template_minijinja::MiniJinjaPromptTemplateEngine::compile(
             &spec.path, &spec.text,
+        )?;
+        expected.insert(id.to_owned(), spec.clone());
+    }
+    for id in AGENT_COMMUNICATION_IDS {
+        let spec = actual.get(id).ok_or_else(|| {
+            ConfigError::invalid_data(format!("agent communication template {id} is missing"))
+        })?;
+        parrot_foundation::template_scalar::ScalarPromptTemplateEngine::compile(
+            &spec.path,
+            &spec.text,
+            &spec.allowed.iter().cloned().collect(),
         )?;
         expected.insert(id.to_owned(), spec.clone());
     }

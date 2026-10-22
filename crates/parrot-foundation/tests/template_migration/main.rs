@@ -115,7 +115,7 @@ fn new_resource_changes_only_the_ten_explicit_engine_template_values() {
     .map(str::to_owned)
     .collect();
     assert_eq!(approved, expected);
-    assert_eq!(mapping(old_templates).len(), 72);
+    assert_eq!(mapping(old_templates).len(), 73);
     assert_eq!(mapping(old_templates).len(), mapping(new_templates).len());
     for ((old_id, old_fields), (new_id, new_fields)) in
         mapping(old_templates).iter().zip(mapping(new_templates))
@@ -169,7 +169,7 @@ fn new_resource_changes_only_the_ten_explicit_engine_template_values() {
                 .unwrap_or("scalar")
                 == "scalar")
             .count(),
-        60
+        61
     );
 }
 
@@ -226,6 +226,22 @@ const CONSOLIDATED_IDS: [&str; 3] = [
     "compact-context-tool.result",
 ];
 
+const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
+    "agent-session.child-question",
+    "agent-session.pending-child-question-reminder",
+    "tool-result.question-replied",
+    "agent-session.final-request",
+    "agent-session.final-request-interrupted",
+];
+const AGENT_COMMUNICATION_IDS: [&str; 6] = [
+    "agent-session.agent-ask",
+    "agent-session.pending-ask-reminder",
+    "tool-result.ask-reply",
+    "tool-result.ask-replied",
+    "agent-session.final-request",
+    "agent-session.final-request-interrupted",
+];
+
 #[test]
 fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let inventory = fixture("catalog-inventory.json");
@@ -236,14 +252,20 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     assert_eq!(golden_rows.len(), 107);
     let expected = expected
         .iter()
-        .filter(|row| !CONSOLIDATED_SOURCE_IDS.contains(&row["id"].as_str().unwrap()))
+        .filter(|row| {
+            !CONSOLIDATED_SOURCE_IDS.contains(&row["id"].as_str().unwrap())
+                && !AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["id"].as_str().unwrap())
+        })
         .collect::<Vec<_>>();
     let golden_rows = golden_rows
         .iter()
-        .filter(|row| !CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap()))
+        .filter(|row| {
+            !CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
+                && !AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
+        })
         .collect::<Vec<_>>();
-    assert_eq!(expected.len(), 94);
-    assert_eq!(golden_rows.len(), 94);
+    assert_eq!(expected.len(), 89);
+    assert_eq!(golden_rows.len(), 89);
     let system_old =
         include_str!("../../../../assets/config/predefined_config.system_prompts.yaml");
     let system_new =
@@ -271,12 +293,13 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let new = yaml::parse_root(&compose(system_new)).unwrap();
     let old_templates = mapping(field(&old, "prompt_templates"));
     let new_templates = mapping(field(&new, "prompt_templates"));
-    assert_eq!(old_templates.len(), 97);
-    assert_eq!(new_templates.len(), 97);
+    assert_eq!(old_templates.len(), 98);
+    assert_eq!(new_templates.len(), 98);
     let expected_ids = expected
         .iter()
         .map(|row| row["id"].as_str().unwrap())
         .chain(CONSOLIDATED_IDS)
+        .chain(AGENT_COMMUNICATION_IDS)
         .collect::<BTreeSet<_>>();
     assert_eq!(
         new_templates
@@ -287,11 +310,17 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     );
     let old_templates = old_templates
         .iter()
-        .filter(|(id, _)| !CONSOLIDATED_IDS.contains(&scalar(id).unwrap()))
+        .filter(|(id, _)| {
+            !CONSOLIDATED_IDS.contains(&scalar(id).unwrap())
+                && !AGENT_COMMUNICATION_IDS.contains(&scalar(id).unwrap())
+        })
         .collect::<Vec<_>>();
     let new_templates = new_templates
         .iter()
-        .filter(|(id, _)| !CONSOLIDATED_IDS.contains(&scalar(id).unwrap()))
+        .filter(|(id, _)| {
+            !CONSOLIDATED_IDS.contains(&scalar(id).unwrap())
+                && !AGENT_COMMUNICATION_IDS.contains(&scalar(id).unwrap())
+        })
         .collect::<Vec<_>>();
     let mut scalar_count = 0;
     let mut minijinja_count = 0;
@@ -363,7 +392,7 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
         };
         assert_eq!(output, expected_output, "source-golden M6: {id}");
     }
-    assert_eq!(scalar_count, 84);
+    assert_eq!(scalar_count, 79);
     assert_eq!(minijinja_count, 10);
 }
 
