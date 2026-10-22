@@ -440,7 +440,26 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
 use parrot_domain::contracts::packaged_files::{
     InstallMissingError, InstallMissingOutcome, InstallMissingRequest, PackagedFileInstaller,
 };
+use sha2::{Digest, Sha256};
 use std::{fmt, path::Path};
+
+/// Hashes embedded paths, contents and executable intent in fixed manifest order.
+pub fn hash_packaged_skills() -> String {
+    hash_assets(PACKAGED_SKILL_ASSETS)
+}
+
+fn hash_assets(assets: &[PackagedSkillAsset]) -> String {
+    let mut hash = Sha256::new();
+    hash.update((assets.len() as u64).to_le_bytes());
+    for asset in assets {
+        hash.update((asset.relative_path.len() as u64).to_le_bytes());
+        hash.update(asset.relative_path.as_bytes());
+        hash.update((asset.bytes.len() as u64).to_le_bytes());
+        hash.update(asset.bytes);
+        hash.update([u8::from(asset.executable)]);
+    }
+    format!("{:x}", hash.finalize())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PackagedSkillsError {
@@ -515,5 +534,55 @@ fn install_error(error: InstallMissingError) -> PackagedSkillsError {
         PackagedSkillsError::Write(error)
     } else {
         PackagedSkillsError::InvalidOperation(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundle_hash_tracks_paths_contents_executable_intent_and_membership() {
+        let asset = PackagedSkillAsset {
+            relative_path: "skill/SKILL.md",
+            bytes: b"instructions",
+            executable: false,
+        };
+        let original = hash_assets(&[asset]);
+        assert_eq!(original, hash_assets(&[asset]));
+        for changed in [
+            PackagedSkillAsset {
+                relative_path: "renamed/SKILL.md",
+                ..asset
+            },
+            PackagedSkillAsset {
+                bytes: b"updated instructions",
+                ..asset
+            },
+            PackagedSkillAsset {
+                executable: true,
+                ..asset
+            },
+        ] {
+            assert_ne!(original, hash_assets(&[changed]));
+        }
+        assert_ne!(original, hash_assets(&[]));
+        assert_ne!(original, hash_assets(&[asset, asset]));
+    }
+
+    #[test]
+    fn bundle_hash_frames_paths_and_contents_without_concatenation_ambiguity() {
+        let first = PackagedSkillAsset {
+            relative_path: "a",
+            bytes: b"bc",
+            executable: false,
+        };
+        let second = PackagedSkillAsset {
+            relative_path: "ab",
+            bytes: b"c",
+            executable: false,
+        };
+        assert_ne!(hash_assets(&[first]), hash_assets(&[second]));
+        assert_ne!(hash_assets(&[first, second]), hash_assets(&[second, first]));
     }
 }
