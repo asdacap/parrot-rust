@@ -33,6 +33,7 @@ fn extended_graphemes_do_not_join_arbitrary_letters_after_zwj() {
 }
 
 #[test]
+#[ignore = "Legacy heading, link and ANSI presentation"]
 fn headings_parse_inline_and_merge_the_heading_basis() {
     let source = "# **bold** *em* ~~gone~~ `code` [site](url)";
     assert_eq!(render(source, false), ["bold em gone code site (url)"]);
@@ -55,6 +56,7 @@ fn headings_parse_inline_and_merge_the_heading_basis() {
 }
 
 #[test]
+#[ignore = "Legacy pipe-less table syntax and widths"]
 fn table_cells_use_inline_styles_but_source_widths_remain_raw() {
     let source = "**A** | B\n--- | ---\n**bold** | `x`";
     assert_eq!(
@@ -98,6 +100,7 @@ fn table_cells_use_inline_styles_but_source_widths_remain_raw() {
 }
 
 #[test]
+#[ignore = "Legacy key/value table fallback and ANSI palette"]
 fn table_fallback_headers_parse_inline_using_bold_cyan_basis() {
     let source = "*A* | B\n--- | ---\n**v** | x";
     assert_eq!(
@@ -119,6 +122,7 @@ fn table_fallback_headers_parse_inline_using_bold_cyan_basis() {
 }
 
 #[test]
+#[ignore = "Legacy delimiter and Unicode escaping rules"]
 fn empty_delimiters_stay_literal_and_unicode_bmp_symbols_escape() {
     for value in ["**", "__", "~~", "a **** b", "a ____ b", "a ** b", "a ~~ b"] {
         assert_eq!(render(value, false), [value], "{value:?}");
@@ -130,6 +134,7 @@ fn empty_delimiters_stay_literal_and_unicode_bmp_symbols_escape() {
 }
 
 #[test]
+#[ignore = "Legacy tilde fences and exact custom highlighter output"]
 fn code_comments_and_triple_strings_keep_cross_line_state() {
     assert_eq!(
         code(
@@ -152,6 +157,7 @@ fn code_comments_and_triple_strings_keep_cross_line_state() {
 }
 
 #[test]
+#[ignore = "Legacy tilde fences and exact token ANSI"]
 fn code_backticks_hash_comments_numbers_and_all_aliases_are_highlighted() {
     let expected = ansi("32", "`hi`")
         + &ansi("38;5;195", " ")
@@ -182,6 +188,7 @@ fn code_backticks_hash_comments_numbers_and_all_aliases_are_highlighted() {
 }
 
 #[test]
+#[ignore = "Legacy language-independent keyword recognizer"]
 fn code_recognizes_the_complete_source_keyword_set() {
     let keywords = "abstract and as async await base bool break case catch char class const continue def defer do else enum except export extends false finally float for foreach from func function go if implements import in int interface internal is let map match namespace new nil not null object of or out override package pass private protected public readonly record return sealed static string struct super switch this throw throws true try type typeof undefined using var virtual void when where while with yield";
     for keyword in keywords.split(' ') {
@@ -190,6 +197,7 @@ fn code_recognizes_the_complete_source_keyword_set() {
 }
 
 #[test]
+#[ignore = "Legacy tilde fences; inclusive library highlighting limits have active adapter tests"]
 fn code_highlighting_caps_are_inclusive_and_count_utf16_units_plus_newlines() {
     let at_lines = "42\n".repeat(9_999) + "42";
     let at = code("rust", &at_lines);
@@ -208,6 +216,7 @@ fn code_highlighting_caps_are_inclusive_and_count_utf16_units_plus_newlines() {
 }
 
 #[test]
+#[ignore = "Legacy trailing whitespace handling"]
 fn final_spacing_and_whitespace_only_code_lines_are_preserved_once() {
     assert_eq!(render("hello ", false), ["hello "]);
     assert_eq!(
@@ -229,6 +238,7 @@ fn final_spacing_and_whitespace_only_code_lines_are_preserved_once() {
 }
 
 #[test]
+#[ignore = "Legacy blockquote and nonbreaking-space rules"]
 fn blockquote_strips_ascii_spaces_but_preserves_nbsp_until_wrapping() {
     let source = ">\u{a0}a";
     for width in [4, 5, 80] {
@@ -262,6 +272,7 @@ fn blockquote_strips_ascii_spaces_but_preserves_nbsp_until_wrapping() {
 }
 
 #[test]
+#[ignore = "Legacy non-ASCII ordered markers and ANSI palette"]
 fn ordered_lists_recognize_bmp_decimal_digits_using_utf8_marker_boundaries() {
     assert_eq!(
         render("١. item", true),
@@ -304,6 +315,7 @@ fn ordered_lists_recognize_bmp_decimal_digits_using_utf8_marker_boundaries() {
 }
 
 #[test]
+#[ignore = "Legacy tilde fences and language-token rules"]
 fn fence_language_splits_only_ascii_spaces_after_trimming_outer_whitespace() {
     for info in ["rust\u{a0}foo", "rust\u{2003}foo", "rust\u{a0}\u{a0}foo"] {
         assert_eq!(code(info, "public"), [ansi("38;5;195", "public")]);

@@ -90,6 +90,8 @@ test pass. Intel macOS, Windows and Linux ARM64 are not supported package target
 interfaces. Top-level `sessions` reads metadata from the **new state root**; it is
 not a merged legacy-session listing or evidence that local resume succeeded.
 `parrot chat --basic` selects the minimal renderer, not a security bypass.
+See [enhanced CLI Markdown output](markdown.md) for the enhanced renderer's syntax,
+highlighting and streaming behavior.
 
 `parrot chat --connect <address> [--token-file <owner-only-file>]` is an explicit
 experimental attach interface for a separately authorized compatible server, not
