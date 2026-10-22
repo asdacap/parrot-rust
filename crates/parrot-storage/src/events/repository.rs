@@ -154,7 +154,14 @@ impl EventRepository {
     pub async fn replay_statistics(
         &self,
     ) -> Result<crate::diagnostics::statistics::AgentStatisticsReplay, EventError> {
-        self.transaction(statistics::replay_statistics).await
+        self.replay_statistics_with_progress(None).await
+    }
+    pub async fn replay_statistics_with_progress(
+        &self,
+        progress: Option<EventLoadProgress>,
+    ) -> Result<crate::diagnostics::statistics::AgentStatisticsReplay, EventError> {
+        self.transaction(move |tx| statistics::replay_statistics_with_progress(tx, progress))
+            .await
     }
     pub async fn append_tool_terminal(
         &self,

@@ -14,9 +14,9 @@ use crate::{
         factory::{
             scope::{AgentSourceConfig, AuthoritativeAgentSource},
             user::{
-                AgentFactoryParts, AgentFactorySource, CatalogUserSkills, UserServices,
-                UserSessionFactory, UserSessionFactoryConfig, durable_permission_factory,
-                ordinary_workspace_resolver,
+                AgentFactoryParts, AgentFactorySource, CatalogUserSkills, SessionEventLoadProgress,
+                UserServices, UserSessionFactory, UserSessionFactoryConfig,
+                durable_permission_factory, ordinary_workspace_resolver,
             },
         },
         protocol::{
@@ -162,6 +162,13 @@ struct LocalTransport {
 }
 impl ProductionHost {
     pub fn new(config: ProductionHostConfig) -> protocol::Result<Self> {
+        Self::with_event_load_progress(config, None)
+    }
+
+    pub fn with_event_load_progress(
+        config: ProductionHostConfig,
+        progress: Option<SessionEventLoadProgress>,
+    ) -> protocol::Result<Self> {
         let workspace = ordinary_workspace_resolver()(&config.launch_directory)?;
         let skill_directory = config.roots.current().skills_directory();
         skills::install_packaged_skills(&skill_directory).map_err(internal)?;
@@ -220,7 +227,7 @@ impl ProductionHost {
         let diagnostics = Arc::new(ProductionDiagnostics(config.diagnostics.clone()));
         let timeout = (configuration.runtime.user_input_timeout_ms >= 0)
             .then(|| Duration::from_millis(configuration.runtime.user_input_timeout_ms as u64));
-        let factory = Arc::new(UserSessionFactory::new(UserSessionFactoryConfig {
+        let factory = UserSessionFactory::new(UserSessionFactoryConfig {
             agent_limits: configuration.runtime.agent_limits,
             router: router.clone(),
             modes,
@@ -286,7 +293,8 @@ impl ProductionHost {
             }),
             permissions: durable_permission_factory(timeout, diagnostics),
             user_input_timeout: timeout,
-        }));
+        });
+        let factory = Arc::new(factory.with_event_load_progress(progress));
         let runtime = capture_runtime_identity(&host_key().map_err(internal)?).map_err(internal)?;
         let current_state = config.roots.current().state().to_owned();
         let admissions = Arc::new(SessionAdmissions::new(

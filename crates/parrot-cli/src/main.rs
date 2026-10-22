@@ -15,7 +15,7 @@ use parrot_cli::{
         basic_loop::{BasicChatRequest, BasicCli, NativeLineInput},
         dialog::DialogInput,
         interrupts::Interrupts,
-        startup::{LocalChatStartup, OpenLocalClient},
+        startup::{LocalChatStartup, OpenLocalClient, RestoreProgress},
     },
     slash_sessions::WebCommandFactory,
     slash_settings::{AuthServices, ModelSelection, model_alias},
@@ -305,6 +305,7 @@ impl Application {
             directory,
             auth,
             diagnostics: self.diagnostics.clone(),
+            event_load_progress: Mutex::new(None),
             owner: tokio::sync::Mutex::new(None),
         })
     }
@@ -546,16 +547,23 @@ impl Application {
                 )
                 .with_legacy_path_read_fallback(legacy),
             ));
+            let progress = Arc::new(Mutex::new(io::stderr()));
+            let restore_progress = Arc::new(RestoreProgress::new(progress.clone()));
+            *local
+                .event_load_progress
+                .lock()
+                .expect("local host progress poisoned") = Some(restore_progress.observer());
             let startup = LocalChatStartup::new(
                 roots,
                 workspace,
                 capture_runtime_identity(&host_key()?)?,
-                Arc::new(Mutex::new(io::stderr())),
+                progress,
                 self.diagnostics.clone(),
                 open_local,
                 configure,
                 options.take_over,
             )
+            .with_restore_progress(restore_progress)
             .with_legacy_path_read_fallback(legacy);
             let result = async {
                 let opened = match startup.open(options.prompt.is_empty(), cancellation).await {
@@ -755,6 +763,8 @@ struct LocalHost {
     directory: std::path::PathBuf,
     auth: Arc<AuthServices>,
     diagnostics: Arc<FileDiagnosticLog>,
+    event_load_progress:
+        Mutex<Option<parrot_host::composition::factory::user::SessionEventLoadProgress>>,
     owner: tokio::sync::Mutex<Option<LocalHostOwner>>,
 }
 
@@ -786,15 +796,21 @@ impl LocalHost {
                 cancellation,
             )
             .await?;
-            let host = ProductionHost::new(ProductionHostConfig {
-                configuration: self.configuration.clone(),
-                templates: self.templates.clone(),
-                roots: self.roots.clone(),
-                launch_directory: self.directory.clone(),
-                providers: providers.shared_registry(),
-                diagnostics: self.diagnostics.clone(),
-                owner_runtime: tokio::runtime::Handle::current(),
-            });
+            let host = ProductionHost::with_event_load_progress(
+                ProductionHostConfig {
+                    configuration: self.configuration.clone(),
+                    templates: self.templates.clone(),
+                    roots: self.roots.clone(),
+                    launch_directory: self.directory.clone(),
+                    providers: providers.shared_registry(),
+                    diagnostics: self.diagnostics.clone(),
+                    owner_runtime: tokio::runtime::Handle::current(),
+                },
+                self.event_load_progress
+                    .lock()
+                    .expect("local host progress poisoned")
+                    .clone(),
+            );
             match host {
                 Ok(host) => *owner = Some(LocalHostOwner { host, providers }),
                 Err(failure) => {

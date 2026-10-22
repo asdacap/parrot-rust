@@ -607,7 +607,25 @@ fn executable_creates_then_resumes_real_local_session_and_joins_owners() {
     assert!(String::from_utf8_lossy(&first.stderr).contains("created user session"));
     let second = fixture.chat("second synthetic prompt");
     assert_success(&second);
-    assert!(String::from_utf8_lossy(&second.stderr).contains("loaded existing user session"));
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(stderr.contains("... 0 events loaded"), "{stderr}");
+    assert!(stderr.contains("... 1 events loaded"), "{stderr}");
+    let loaded = stderr
+        .lines()
+        .find(|line| line.contains("loaded existing user session"))
+        .unwrap();
+    let count: usize = loaded
+        .split_once(" (")
+        .unwrap()
+        .1
+        .strip_suffix(" events loaded)")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        count > 0,
+        "restoration should read the first turn's events: {stderr}"
+    );
     let requests = fixture.chat_requests();
     assert_eq!(requests.len(), 2, "provider at {}", fixture.address);
     assert!(requests[0].contains("first synthetic prompt"));

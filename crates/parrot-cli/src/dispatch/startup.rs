@@ -13,7 +13,7 @@ use parrot_domain::{
 };
 use parrot_foundation::paths::{ApplicationRoots, UserSessionResources};
 use parrot_host::{
-    composition::factory::user::ordinary_workspace_resolver,
+    composition::factory::user::{SessionEventLoadProgress, ordinary_workspace_resolver},
     grpc::{
         address::TransportAddress,
         transport::{AttachError, GrpcTransportClient},
@@ -31,7 +31,7 @@ use std::{
     io::{self, Write},
     path::Path,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tonic::{Code, Status};
 
@@ -47,6 +47,92 @@ pub type ConfigureFresh = Arc<
         + Sync,
 >;
 pub type StartupProgress = Arc<Mutex<dyn Write + Send>>;
+
+/// A local host may retain the observer, but only an active resume can write.
+pub struct RestoreProgress {
+    writer: StartupProgress,
+    active: Mutex<Option<RestoreState>>,
+}
+struct RestoreState {
+    id: String,
+    count: usize,
+    last_output: Option<Instant>,
+    error: Option<io::Error>,
+}
+impl RestoreProgress {
+    pub fn new(writer: StartupProgress) -> Self {
+        Self {
+            writer,
+            active: Mutex::new(None),
+        }
+    }
+
+    pub fn observer(self: &Arc<Self>) -> SessionEventLoadProgress {
+        let progress = self.clone();
+        Arc::new(move |id, count| progress.observe(id, count, Instant::now()))
+    }
+
+    fn begin(self: &Arc<Self>, id: &str) -> RestoreAttempt {
+        *self.active.lock().expect("restore progress poisoned") = Some(RestoreState {
+            id: id.into(),
+            count: 0,
+            last_output: None,
+            error: None,
+        });
+        RestoreAttempt(self.clone())
+    }
+
+    fn observe(&self, id: &str, count: usize, now: Instant) {
+        let mut active = self.active.lock().expect("restore progress poisoned");
+        let Some(state) = active.as_mut() else {
+            return;
+        };
+        if state.id != id || count <= state.count {
+            return;
+        }
+        state.count = count;
+        if state.error.is_some()
+            || state
+                .last_output
+                .is_some_and(|last| now.duration_since(last) < Duration::from_millis(250))
+        {
+            return;
+        }
+        let mut writer = self.writer.lock().expect("startup progress poisoned");
+        state.error = writeln!(
+            writer,
+            "parrot: restoring existing user session {id}... {count} events loaded"
+        )
+        .and_then(|()| writer.flush())
+        .err();
+        state.last_output = Some(now);
+    }
+}
+struct RestoreAttempt(Arc<RestoreProgress>);
+impl RestoreAttempt {
+    fn finish(self) -> Result<usize, StartupError> {
+        let state = self
+            .0
+            .active
+            .lock()
+            .expect("restore progress poisoned")
+            .take()
+            .expect("active restore attempt");
+        match state.error {
+            Some(error) => Err(error.into()),
+            None => Ok(state.count),
+        }
+    }
+}
+impl Drop for RestoreAttempt {
+    fn drop(&mut self) {
+        self.0
+            .active
+            .lock()
+            .expect("restore progress poisoned")
+            .take();
+    }
+}
 
 /// Owns the remote connection until the native caller retains it or the web
 /// router adopts it. A cloned generated client alone is not that ownership.
@@ -105,6 +191,7 @@ pub struct LocalChatStartup {
     workspace: ProjectWorkspace,
     runtime: RuntimeIdentity,
     error: StartupProgress,
+    restore_progress: Option<Arc<RestoreProgress>>,
     diagnostics: Arc<FileDiagnosticLog>,
     open_local_client: OpenLocalClient,
     configure_fresh: ConfigureFresh,
@@ -130,12 +217,18 @@ impl LocalChatStartup {
             workspace,
             runtime,
             error,
+            restore_progress: None,
             diagnostics,
             open_local_client,
             configure_fresh,
             take_over,
             legacy_path_read_fallback: true,
         }
+    }
+
+    pub fn with_restore_progress(mut self, progress: Arc<RestoreProgress>) -> Self {
+        self.restore_progress = Some(progress);
+        self
     }
 
     /// Bind the actual application config flag before sharing this startup.
@@ -265,10 +358,19 @@ impl LocalChatStartup {
             if attached.is_none() {
                 check(cancellation)?;
                 let mut client = (self.open_local_client)(cancellation).await?;
+                let count_suffix = if self.restore_progress.is_some() {
+                    " 0 events loaded"
+                } else {
+                    ""
+                };
                 self.progress(
-                    &format!("restoring existing user session {id}..."),
+                    &format!("restoring existing user session {id}...{count_suffix}"),
                     cancellation,
                 )?;
+                let attempt = self
+                    .restore_progress
+                    .as_ref()
+                    .map(|progress| progress.begin(id.value()));
                 let request = wire::ResumeSessionRequest {
                     user_session_id: id.value().into(),
                     working_directory: directory.to_string_lossy().into_owned(),
@@ -281,11 +383,21 @@ impl LocalChatStartup {
                     _ = cancellation.cancelled() => return Err(cancelled().into()),
                     result = client.resume_session(request) => result,
                 };
+                let count = match (resumed.is_ok(), attempt) {
+                    (true, Some(attempt)) => Some(attempt.finish()?),
+                    (_, attempt) => {
+                        drop(attempt);
+                        None
+                    }
+                };
                 match resumed {
                     Ok(response) => {
                         let session = response.into_inner();
+                        let count_suffix = count
+                            .map(|count| format!(" ({count} events loaded)"))
+                            .unwrap_or_default();
                         self.progress(
-                            &format!("loaded existing user session {}", session.id),
+                            &format!("loaded existing user session {}{count_suffix}", session.id),
                             cancellation,
                         )?;
                         return Ok(OpenedLocalSession {
@@ -457,5 +569,64 @@ fn attach_status(error: AttachError) -> Status {
         AttachError::DifferentSession | AttachError::Disposed => {
             Status::internal(error.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod restore_progress_tests {
+    use super::*;
+
+    #[test]
+    fn throttles_writes_but_keeps_the_exact_count_and_filters_other_sessions() {
+        let writer = Arc::new(Mutex::new(Vec::new()));
+        let progress = Arc::new(RestoreProgress::new(writer.clone()));
+        let now = Instant::now();
+        progress.observe("session", 99, now);
+        let attempt = progress.begin("session");
+        progress.observe("other", 100, now);
+        progress.observe("session", 0, now);
+        progress.observe("session", 1, now);
+        progress.observe("session", 2, now + Duration::from_millis(249));
+        progress.observe("session", 3, now + Duration::from_millis(250));
+        progress.observe("session", 4, now + Duration::from_millis(251));
+        assert_eq!(attempt.finish().unwrap(), 4);
+        progress.observe("session", 5, now + Duration::from_secs(1));
+        let text = String::from_utf8(writer.lock().unwrap().clone()).unwrap();
+        assert_eq!(text.lines().count(), 2);
+        assert!(text.contains("1 events loaded"));
+        assert!(text.contains("3 events loaded"));
+    }
+
+    #[test]
+    fn dropped_attempt_disables_retained_observers_and_next_attempt_starts_at_zero() {
+        let writer = Arc::new(Mutex::new(Vec::new()));
+        let progress = Arc::new(RestoreProgress::new(writer.clone()));
+        let observer = progress.observer();
+        let attempt = progress.begin("session");
+        observer("session", 1);
+        drop(attempt);
+        let before = writer.lock().unwrap().clone();
+        observer("session", 100);
+        assert_eq!(*writer.lock().unwrap(), before);
+        assert_eq!(progress.begin("session").finish().unwrap(), 0);
+    }
+
+    #[test]
+    fn progress_write_error_is_returned_by_the_attempt() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "fixture"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let progress = Arc::new(RestoreProgress::new(Arc::new(Mutex::new(Broken))));
+        let attempt = progress.begin("session");
+        progress.observer()("session", 1);
+        assert!(
+            matches!(attempt.finish(), Err(StartupError::Io(error)) if error.kind() == io::ErrorKind::BrokenPipe)
+        );
     }
 }
