@@ -18,7 +18,8 @@ fn advertised_schemas_retain_original_fields_defaults_and_limits() {
         "agent_status",
         "wait",
         "question",
-        "answer",
+        "ask",
+        "reply",
     ]
     .into_iter()
     .map(|name| {
@@ -73,8 +74,21 @@ fn advertised_schemas_retain_original_fields_defaults_and_limits() {
         schemas["question"]["properties"]["questions"]["maxItems"],
         32
     );
-    assert_eq!(schemas["answer"]["properties"]["answers"]["minItems"], 1);
-    assert_eq!(schemas["answer"]["properties"]["answers"]["maxItems"], 32);
+    assert!(!configuration.runtime.tools.contains_key("answer"));
+    assert_eq!(
+        schemas["ask"]["required"],
+        serde_json::json!(["name", "message"])
+    );
+    assert_eq!(
+        schemas["reply"]["required"],
+        serde_json::json!(["request_id", "message"])
+    );
+    for (tool, target) in [("ask", "name"), ("reply", "request_id")] {
+        for field in [target, "message"] {
+            assert_eq!(schemas[tool]["properties"][field]["type"], "string");
+            assert_eq!(schemas[tool]["properties"][field]["minLength"], 1);
+        }
+    }
     let name_description = schemas["agent_send"]["properties"]["name"]["description"]
         .as_str()
         .unwrap();
@@ -149,4 +163,54 @@ fn tool_keeps_actual_configured_schema_and_description_without_reconstruction() 
     );
     assert_eq!(schema["properties"]["name"]["type"], "string");
     assert_eq!(schema["required"], serde_json::json!(["name"]));
+}
+
+#[test]
+fn ask_guidance_and_results_are_configurable_with_explicit_request_ids() {
+    use parrot_tools::agents::ResultTemplates;
+    let (_, templates) = PromptTemplateCatalog::from_content(
+        "",
+        &BTreeMap::from([("HOME".into(), "/synthetic/t58-home".into())]),
+    )
+    .unwrap();
+    let request = ResultTemplates::render(
+        &templates,
+        "agent-session.agent-ask",
+        &[
+            ("asker_name", "child"),
+            ("request_id", "req-1"),
+            ("message", "Proceed?"),
+        ],
+    )
+    .unwrap();
+    assert!(request.contains("Agent child"));
+    assert!(request.contains("req-1"));
+    assert!(request.contains("Proceed?"));
+    assert!(request.contains("Use reply"));
+    let reminder = ResultTemplates::render(
+        &templates,
+        "agent-session.pending-ask-reminder",
+        &[("requests", "\n- req-1 from child")],
+    )
+    .unwrap();
+    assert!(reminder.contains("req-1 from child"));
+    assert!(reminder.contains("Use reply"));
+    assert_eq!(
+        ResultTemplates::render(
+            &templates,
+            "tool-result.ask-reply",
+            &[("message", "  yes\nnow  ")]
+        )
+        .unwrap(),
+        "  yes\nnow  "
+    );
+    assert_eq!(
+        ResultTemplates::render(
+            &templates,
+            "tool-result.ask-replied",
+            &[("request_id", "req-1")]
+        )
+        .unwrap(),
+        "Replied to ask req-1."
+    );
 }

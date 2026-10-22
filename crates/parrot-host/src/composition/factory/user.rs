@@ -33,8 +33,9 @@ use parrot_runtime::{
     },
     event_broker::EventBroker,
     interactions::{
-        InteractionDiagnostics, InteractionError, PermissionBroker, PermissionTargetDescription,
-        PermissionTargetDescriptionKind, QuestionBroker, TokioClock, map_pending_permission,
+        AgentAskBroker, InteractionDiagnostics, InteractionError, PermissionBroker,
+        PermissionTargetDescription, PermissionTargetDescriptionKind, QuestionBroker, TokioClock,
+        map_pending_permission,
     },
     plan_mode::{
         ModeCompletionOutcome, ModeRegistry, ModeWorkflowFactory, RetainedModePolicyMaterializer,
@@ -108,6 +109,7 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub broker: Arc<EventBroker>,
     pub templates: Arc<PromptTemplateCatalog>,
     pub questions: Arc<QuestionBroker>,
+    pub asks: Arc<AgentAskBroker>,
     pub permissions: Arc<PermissionBroker<WriteTarget>>,
     pub skills: Arc<dyn UserSkills<S>>,
     pub lifetime: Arc<Signal>,
@@ -596,6 +598,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             broker,
             templates: config.templates.clone(),
             questions,
+            asks: Arc::new(AgentAskBroker::new()),
             permissions,
             skills: (config.skills)(resources.workspace())?,
             lifetime: lifetime.clone(),
@@ -662,6 +665,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 Err(error) => {
                     lifetime.cancel();
                     services.questions.close();
+                    services.asks.close();
                     services.permissions.close().await;
                     let _ = registry.shutdown().join().await;
                     services.broker.complete();
@@ -710,6 +714,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             let mut joined = true;
             lifetime.cancel();
             services.questions.close();
+            services.asks.close();
             services.permissions.close().await;
             if let Some(registry) = cleanup_registry {
                 joined &= registry.shutdown().join().await.is_ok();
@@ -899,6 +904,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         self.mutations.stop();
         self.services.lifetime.cancel();
         self.services.questions.close();
+        self.services.asks.close();
         self.services.permissions.close().await;
         let mut failure = None;
         let shutdown = self.registry.shutdown();

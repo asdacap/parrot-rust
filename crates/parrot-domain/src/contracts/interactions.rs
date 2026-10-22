@@ -1,7 +1,7 @@
 //! Distinct per-user-session brokers supplied by the host, never globals.
 //!
-//! The child coordinator enforces parent scope. Wrong or stale requests must
-//! return explicit errors, never plausible replies or successful no-ops.
+//! Wrong or stale requests must return explicit errors, never plausible replies
+//! or successful no-ops.
 
 use super::async_ops::{BoxFuture, Cancellation, OperationError};
 
@@ -48,11 +48,11 @@ impl QuestionReply {
     }
 }
 
-/// Already scoped to the actual invoking agent by the host. The tool cannot
-/// choose a child identity or parent scope; this is not the user-session broker.
+/// Caller-scoped user questioning. The host rejects non-root invoking agents.
 pub trait QuestionRequester: Send + Sync {
     type Error: Send + Sync + 'static;
 
+    /// Waits for the user's answers without routing to another agent.
     fn ask<'a>(
         &'a self,
         questions: Vec<QuestionDefinition>,
@@ -60,12 +60,20 @@ pub trait QuestionRequester: Send + Sync {
     ) -> BoxFuture<'a, Result<QuestionReply, OperationError<Self::Error>>>;
 }
 
-/// The host binds normal versus parent-scoped coordinator routing. Supplying an
-/// arbitrary parent-session ID through the tool is deliberately not possible.
-pub trait ChildQuestionAnswers: Send + Sync {
+/// Caller-scoped plain-text communication with agents in the same user session.
+pub trait AgentCommunication: Send + Sync {
     type Error: Send + Sync + 'static;
 
-    fn reply(&self, agent_name: &str, reply: QuestionReply) -> Result<(), Self::Error>;
+    /// Resolves an agent path and waits for its reply or cancellation.
+    fn ask<'a>(
+        &'a self,
+        name: &'a str,
+        message: String,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<String, OperationError<Self::Error>>>;
+
+    /// Immediately settles an ask addressed to this agent; stale IDs are errors.
+    fn reply(&self, request_id: &str, message: String) -> Result<(), Self::Error>;
 }
 
 pub trait QuestionBroker: Send + Sync {

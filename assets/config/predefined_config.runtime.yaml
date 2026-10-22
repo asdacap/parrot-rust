@@ -208,27 +208,40 @@ tools:
           type: string
           description: Optional compaction target such as 100k or 20%.
       required: []
-  answer:
-    description: Answer the pending ordered questions from one direct child agent.
+  ask:
+    description: Ask another agent in this user session a plain-text question and wait for its reply. Any valid relative or absolute agent path is allowed, including ancestors and siblings, without agent_send security restrictions. The call blocks until the recipient uses reply, or fails on cancellation, closure, or an ask cycle. Reply to incoming asks before creating a cycle.
     parameters:
       type: object
+      additionalProperties: false
       properties:
-        agent_name:
+        name:
           type: string
           minLength: 1
-          description: Name of the direct child whose pending question is being answered.
-        answers:
-          type: array
-          minItems: 1
-          maxItems: 32
-          description: One nonblank textual answer for every question, in the order shown in the child question steer.
-          items:
-            type: string
-            minLength: 1
+          description: Nonblank agent name or relative or absolute slash-separated agent path, such as parent, parent/sibling, or /root-name/child.
+        message:
+          type: string
+          minLength: 1
+          description: Nonblank plain-text question or request.
       required:
-      - agent_name
-      - answers
+      - name
+      - message
+  reply:
+    description: Immediately answer an ask addressed to this agent using its exact request_id. The nonblank plain-text message settles the waiting ask without waiting for this agent to finish. Wrong, stale, or already settled request IDs fail. Reply to pending asks before finishing your turn.
+    parameters:
+      type: object
       additionalProperties: false
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          description: Exact request identifier supplied in the incoming ask.
+        message:
+          type: string
+          minLength: 1
+          description: Nonblank plain-text reply to the asking agent.
+      required:
+      - request_id
+      - message
   agent_send:
     description: Send a message to an agent in this user session using a direct name or a relative or absolute slash-separated agent path. Paths may traverse children, use parent segments to reach ancestors or siblings, or start with /root-name to address from the root; examples include child/grandchild, parent/sibling, and /root-name/child.
     parameters:
@@ -428,7 +441,7 @@ tools:
       - description
       additionalProperties: false
   question:
-    description: Ask ordered questions when a decision or missing information is needed. The root agent asks the user; a child agent asks its direct parent. Use this instead of asking questions in normal chat.
+    description: Ask the user ordered questions when a decision or missing information is needed. Available only to the root agent. Use this instead of asking the user questions in normal chat; use ask and reply for communication between agents.
     parameters:
       type: object
       properties:

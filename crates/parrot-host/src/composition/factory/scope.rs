@@ -80,7 +80,7 @@ use parrot_runtime::{
         CompactionPlanner, CompactionSettings, Compactor, ContextController, ContextError,
         ContextResult, ContextStatus,
     },
-    interactions::ChildQuestionCoordinator,
+    interactions::{AgentAskIdentity, AgentAsks},
     plan_mode::{ModeResult, UserSessionModes},
     prompt_context::{
         AgentIdentityDescription, AgentPathEnvironment, CompositeSystemPromptProvider,
@@ -1367,13 +1367,19 @@ where
                 self.user.questions.clone(),
                 self.user.templates.clone(),
             ));
-            let question = ScopedAgentRuntime::<S>::child_question(&identity);
-            let questions = Arc::new(ChildQuestionCoordinator::new(
-                identity.session.session_id.clone(),
-                agents.clone(),
-                agents.clone(),
-                agents.clone(),
-            ));
+            let asks = Arc::new(
+                self.user
+                    .asks
+                    .register(
+                        AgentAskIdentity {
+                            session_id: identity.session.session_id.clone(),
+                            name: identity.session.name.clone(),
+                        },
+                        agents.clone(),
+                        agents.clone(),
+                    )
+                    .map_err(child)?,
+            );
             let mut session: Option<Arc<RuntimeSession<S>>> = None;
             let mut controller: Option<Arc<ScopedTaskController<S, ContextSelection<S>>>> = None;
             let constructed = async {
@@ -1567,7 +1573,7 @@ where
                 })
                 .map_err(child)?;
                 let completion = Arc::new(SessionCompletion {
-                    questions: Some(questions.clone()),
+                    asks: Some(asks.clone()),
                     active_work: active_work.clone(),
                     reminders: reminders.clone(),
                     history: prepared.history.clone(),
@@ -1721,7 +1727,8 @@ where
                                 runtime: catalog_agents.clone(),
                                 models: config.router.clone(),
                                 questions: catalog_agents.clone(),
-                                answers: catalog_agents.clone(),
+                                communication: catalog_agents.clone(),
+                                agent_depth: scope.identity().session.depth,
                                 templates: user.templates.clone(),
                                 allow_parent: config.configuration.runtime.agent_send_to_parent,
                             },
@@ -1788,8 +1795,7 @@ where
                         ServiceRegistration::new(processes.clone()),
                         ServiceRegistration::new::<dyn ProcessStatusSource>(process_status),
                         ServiceRegistration::new(agents.clone()),
-                        ServiceRegistration::new(question.clone()),
-                        ServiceRegistration::new(questions.clone()),
+                        ServiceRegistration::new(asks.clone()),
                         ServiceRegistration::new(runtime_status),
                         ServiceRegistration::new(status),
                         ServiceRegistration::new(context_control),
@@ -1813,12 +1819,9 @@ where
                     ],
                     resources: vec![
                         Arc::new(ProcessWork(processes.clone())),
-                        Arc::new(QuestionsClose(questions.clone())),
+                        Arc::new(AsksClose(asks.clone())),
                     ],
-                    final_resources: vec![
-                        queues.clone(),
-                        Arc::new(QuestionClose(question.clone())),
-                    ],
+                    final_resources: vec![queues.clone()],
                 })
             }
             .await;
@@ -1846,11 +1849,10 @@ where
                     if let Err(error) = processes.dispose().await {
                         failure = io_child(error);
                     }
-                    questions.close();
+                    asks.close();
                     if let Err(error) = queues.dispose() {
                         failure = error.into();
                     }
-                    question.close();
                     Err(failure)
                 }
             }
@@ -1858,17 +1860,8 @@ where
     }
 }
 
-struct QuestionsClose(Arc<ChildQuestionCoordinator>);
-impl ScopeLifetime for QuestionsClose {
-    type Error = ChildError;
-    fn close(&self) -> BoxFuture<'_, ChildResult<()>> {
-        self.0.close();
-        Box::pin(async { Ok(()) })
-    }
-}
-
-struct QuestionClose(Arc<parrot_runtime::interactions::ChildQuestion>);
-impl ScopeLifetime for QuestionClose {
+struct AsksClose(Arc<AgentAsks>);
+impl ScopeLifetime for AsksClose {
     type Error = ChildError;
     fn close(&self) -> BoxFuture<'_, ChildResult<()>> {
         self.0.close();

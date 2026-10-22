@@ -3,7 +3,7 @@ use super::{blockers::ActiveWorkReminder, exit_reminders::ExitReminders};
 use crate::{
     agent_turn::services::{CompletionCandidate, CompletionDecision, TurnCompletion, TurnError},
     event_broker::{BrokerError, EventBroker},
-    interactions::ChildQuestionCoordinator,
+    interactions::AgentAsks,
 };
 use parrot_domain::{
     contracts::{
@@ -26,7 +26,7 @@ use std::sync::Arc;
 /// The T46 drain owns this callback and joins its reminder mutations at the
 /// terminal boundary. Cancellation does not clear any of the observed work.
 pub struct SessionCompletion<P: EventPublisher<Event = Event, Error = BrokerError> + ?Sized> {
-    pub questions: Option<Arc<ChildQuestionCoordinator>>,
+    pub asks: Option<Arc<AgentAsks>>,
     pub active_work: Arc<ActiveWorkReminder>,
     pub reminders: Arc<ExitReminders<P>>,
     pub history: AgentHistoryView,
@@ -45,8 +45,8 @@ where
     ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| TurnError::Cancelled)?;
-            if let Some(questions) = &self.questions {
-                if let Some(reminder) = questions
+            if let Some(asks) = &self.asks {
+                if let Some(reminder) = asks
                     .completion_reminder()
                     .map_err(|error| TurnError::Service(error.to_string()))?
                 {
@@ -54,8 +54,8 @@ where
                         .retained(
                             candidate,
                             reminder,
-                            "pending_child_question_reminder",
-                            "Retrying with pending child question reminder",
+                            "pending_ask_reminder",
+                            "Retrying with pending ask reminder",
                             cancellation,
                         )
                         .await;

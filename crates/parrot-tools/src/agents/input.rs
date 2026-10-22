@@ -371,53 +371,44 @@ pub fn parse_questions(arguments: &str) -> Result<Vec<WireQuestion>, InputError>
         .ok_or_else(|| InputError("Tool arguments require an array 'questions'.".into()))
 }
 
-struct AnswerInput {
-    agent_name: Option<String>,
-    answers: Option<Vec<Option<String>>>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AskInput {
+    pub name: String,
+    pub message: String,
 }
-impl<'de> Deserialize<'de> for AnswerInput {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct AnswersVisitor;
-        impl<'de> Visitor<'de> for AnswersVisitor {
-            type Value = AnswerInput;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("an answer request object")
-            }
-            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
-                let mut input = AnswerInput {
-                    agent_name: None,
-                    answers: None,
-                };
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "agent_name" => input.agent_name = map.next_value()?,
-                        "answers" => input.answers = map.next_value()?,
-                        _ => {
-                            return Err(de::Error::custom(format!(
-                                "unknown answer property: {key}"
-                            )));
-                        }
-                    }
-                }
-                Ok(input)
-            }
-        }
-        deserializer.deserialize_map(AnswersVisitor)
+impl AskInput {
+    pub fn parse(arguments: &str) -> Result<Self, InputError> {
+        let properties = object(arguments)?;
+        validate_string_fields(&properties, &["name", "message"])?;
+        Ok(Self {
+            name: nonblank_string(&properties, "name")?,
+            message: nonblank_string(&properties, "message")?,
+        })
     }
 }
 
-pub fn parse_answers(arguments: &str) -> Result<(String, Vec<String>), InputError> {
-    object(arguments)?;
-    let input: AnswerInput =
-        serde_json::from_str(arguments).map_err(|error| InputError(error.to_string()))?;
-    let name = input
-        .agent_name
-        .ok_or_else(|| InputError("Tool arguments require a string 'agent_name'.".into()))?;
-    let answers = input
-        .answers
-        .ok_or_else(|| InputError("Tool arguments require an array 'answers'.".into()))?
-        .into_iter()
-        .map(Option::unwrap_or_default)
-        .collect();
-    Ok((name, answers))
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReplyInput {
+    pub request_id: String,
+    pub message: String,
+}
+impl ReplyInput {
+    pub fn parse(arguments: &str) -> Result<Self, InputError> {
+        let properties = object(arguments)?;
+        validate_string_fields(&properties, &["request_id", "message"])?;
+        Ok(Self {
+            request_id: nonblank_string(&properties, "request_id")?,
+            message: nonblank_string(&properties, "message")?,
+        })
+    }
+}
+
+fn nonblank_string(properties: &Properties, name: &str) -> Result<String, InputError> {
+    let value = required_string(properties, name)?;
+    if value.trim().is_empty() {
+        return Err(InputError(format!(
+            "Tool argument '{name}' cannot be blank."
+        )));
+    }
+    Ok(value)
 }

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -5,16 +6,16 @@ use parrot_domain::contracts::async_ops::{
     BoxFuture, Cancellation, Cancelled, Clock, OperationError,
 };
 use parrot_domain::contracts::interactions::{
-    ChildQuestionAnswers, QuestionDefinition, QuestionReply, QuestionRequester,
+    AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
 };
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_runtime::interactions::{
-    BrokerDiagnostic, ChildIdentity, ChildQuestion, ChildQuestionCoordinator,
-    ChildQuestionDelivery, ChildQuestionRegistry, ChildQuestionTemplates, InteractionDiagnostics,
-    InteractionError, InteractionErrorKind, QuestionBroker,
+    AgentAskBroker, AgentAskDelivery, AgentAskIdentity, AgentAskTemplates, AgentAsks,
+    BrokerDiagnostic, InteractionDiagnostics, InteractionError, InteractionErrorKind,
+    PendingAgentAsk, QuestionBroker,
 };
-use parrot_tools::agents::questions::{AnswerTool, QuestionTool};
+use parrot_tools::agents::questions::{AskTool, QuestionTool, ReplyTool};
 use parrot_tools::agents::{AgentToolError, ResultTemplates};
 
 use super::{CANCELLED, NEVER, Security, context, invocation};
@@ -245,56 +246,47 @@ async fn question_cancellation_is_not_an_error_result_and_registration_is_remove
     assert!(broker.pending().is_empty());
 }
 
-struct Children(Vec<Arc<ChildQuestion>>);
-impl ChildQuestionRegistry for Children {
-    fn find(&self, name: &str) -> Option<Arc<ChildQuestion>> {
-        self.0
-            .iter()
-            .find(|child| child.identity.name == name)
-            .cloned()
-    }
-    fn snapshot(&self) -> Vec<Arc<ChildQuestion>> {
-        self.0.clone()
-    }
-}
 #[derive(Default)]
-struct Delivery(Mutex<Vec<String>>);
-impl ChildQuestionDelivery for Delivery {
+struct Delivery(Mutex<Vec<PendingAgentAsk>>);
+impl AgentAskDelivery for Delivery {
     fn steer<'a>(
         &'a self,
-        _: &'a str,
-        _: &'a str,
-        text: String,
+        request: &'a PendingAgentAsk,
+        _: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>> {
         Box::pin(async move {
-            self.0.lock().unwrap().push(text);
+            self.0.lock().unwrap().push(request.clone());
             Ok(())
         })
     }
 }
 struct Templates;
-impl ChildQuestionTemplates for Templates {
-    fn question(&self, name: &str, questions: &str) -> Result<String, InteractionError> {
-        Ok(format!("{name}: {questions}"))
+impl AgentAskTemplates for Templates {
+    fn ask(&self, request: &PendingAgentAsk) -> Result<String, InteractionError> {
+        Ok(format!("{}: {}", request.id, request.message))
     }
-    fn reminder(&self, children: &str) -> Result<String, InteractionError> {
-        Ok(children.into())
+    fn reminder(&self, requests: &[PendingAgentAsk]) -> Result<String, InteractionError> {
+        Ok(format!("{} pending asks", requests.len()))
     }
 }
-struct ChildRequester {
-    coordinator: Arc<ChildQuestionCoordinator>,
-    identity: Arc<ChildIdentity>,
+struct Communication {
+    scope: Arc<AgentAsks>,
+    routes: BTreeMap<&'static str, Arc<AgentAsks>>,
 }
-impl QuestionRequester for ChildRequester {
+impl AgentCommunication for Communication {
     type Error = AgentToolError;
     fn ask<'a>(
         &'a self,
-        questions: Vec<QuestionDefinition>,
+        name: &'a str,
+        message: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<QuestionReply, OperationError<AgentToolError>>> {
+    ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
         Box::pin(async move {
-            self.coordinator
-                .ask(self.identity.clone(), questions, cancellation)
+            let recipient = self.routes.get(name).ok_or_else(|| {
+                OperationError::Failed(AgentToolError::Registry("unknown agent".into()))
+            })?;
+            self.scope
+                .ask(recipient, message, cancellation)
                 .await
                 .map_err(|failure| match failure {
                     OperationError::Cancelled => OperationError::Cancelled,
@@ -302,161 +294,212 @@ impl QuestionRequester for ChildRequester {
                 })
         })
     }
+    fn reply(&self, request_id: &str, message: String) -> Result<(), AgentToolError> {
+        self.scope.reply(request_id, message).map_err(error)
+    }
 }
-struct ChildAnswers {
-    coordinator: Arc<ChildQuestionCoordinator>,
-    children: Arc<Children>,
-    parent: String,
+fn register(broker: &Arc<AgentAskBroker>, name: &str) -> Arc<AgentAsks> {
+    Arc::new(
+        broker
+            .register(
+                AgentAskIdentity {
+                    session_id: name.into(),
+                    name: name.into(),
+                },
+                Arc::new(Delivery::default()),
+                Arc::new(Templates),
+            )
+            .unwrap(),
+    )
 }
-impl ChildQuestionAnswers for ChildAnswers {
-    type Error = AgentToolError;
-    fn reply(&self, name: &str, reply: QuestionReply) -> Result<(), AgentToolError> {
-        self.coordinator
-            .reply_from_parent(&self.parent, self.children.as_ref(), name, reply)
-            .map_err(error)
+fn communication(scope: Arc<AgentAsks>) -> Arc<Communication> {
+    Arc::new(Communication {
+        scope,
+        routes: BTreeMap::new(),
+    })
+}
+async fn wait_pending_ask(scope: &AgentAsks) -> PendingAgentAsk {
+    for _ in 0..1000 {
+        if let Some(request) = scope.pending().first() {
+            return request.clone();
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("ask was not registered");
+}
+
+#[tokio::test]
+async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
+    let broker = Arc::new(AgentAskBroker::new());
+    let asker = register(&broker, "child");
+    let recipient = register(&broker, "root");
+    let other = register(&broker, "sibling");
+    let service = Arc::new(Communication {
+        scope: asker,
+        routes: BTreeMap::from([("parent", recipient.clone()), ("/root", recipient.clone())]),
+    });
+    for name in ["parent", "/root"] {
+        let ask: AskTool<_, Security> = AskTool::new(definition(), service.clone(), None);
+        assert!(ask.enabled_after_interruption());
+        assert_eq!(ask.name(), "ask");
+        assert_eq!(ask.definition(), &definition());
+        assert_eq!(
+            ask.parallel_safety(&invocation("{}")),
+            ParallelSafety::Sequential
+        );
+        let args = serde_json::json!({"name":name,"message":"  Proceed?\nDetails  "});
+        let asking = tokio::spawn(async move {
+            ask.invoke(invocation(&args.to_string()), context(&NEVER))
+                .await
+        });
+        let request = wait_pending_ask(&recipient).await;
+        assert!(!asking.is_finished());
+        assert_eq!(request.message, "  Proceed?\nDetails  ");
+        let wrong: ReplyTool<_, Security> =
+            ReplyTool::new(definition(), communication(other.clone()), None);
+        assert!(matches!(
+            wrong
+                .invoke(
+                    invocation(
+                        &serde_json::json!({"request_id":request.id,"message":"yes"}).to_string()
+                    ),
+                    context(&NEVER)
+                )
+                .await,
+            Err(OperationError::Failed(AgentToolError::QuestionRejected(_)))
+        ));
+        assert_eq!(recipient.pending().len(), 1);
+        let reply: ReplyTool<_, Security> =
+            ReplyTool::new(definition(), communication(recipient.clone()), None);
+        assert!(reply.enabled_after_interruption());
+        assert_eq!(reply.name(), "reply");
+        assert_eq!(
+            reply.parallel_safety(&invocation("{}")),
+            ParallelSafety::Sequential
+        );
+        let arguments =
+            serde_json::json!({"request_id":request.id,"message":"  yes\nnow  "}).to_string();
+        assert_eq!(
+            reply
+                .invoke(invocation(&arguments), context(&NEVER))
+                .await
+                .unwrap(),
+            format!("Replied to ask {}.", request.id)
+        );
+        assert!(recipient.pending().is_empty());
+        assert_eq!(asking.await.unwrap().unwrap(), "  yes\nnow  ");
+        assert!(matches!(
+            reply.invoke(invocation(&arguments), context(&NEVER)).await,
+            Err(OperationError::Failed(AgentToolError::QuestionRejected(_)))
+        ));
     }
 }
 
 #[tokio::test]
-async fn real_child_question_answer_routing_rejects_other_parent_and_preserves_pending_on_bad_answers()
- {
-    let identity = Arc::new(ChildIdentity {
-        session_id: "child-id".into(),
-        name: "worker".into(),
-        parent_session_id: "parent-id".into(),
-    });
-    let child = Arc::new(ChildQuestion::new(identity.clone()));
-    let children = Arc::new(Children(vec![child]));
-    let delivery = Arc::new(Delivery::default());
-    let coordinator = Arc::new(ChildQuestionCoordinator::new(
-        "parent-id".into(),
-        children.clone(),
-        delivery.clone(),
-        Arc::new(Templates),
-    ));
-    let user_broker = broker();
-    let question: Arc<QuestionTool<_, Security>> = Arc::new(QuestionTool::new(
+async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies() {
+    let broker = Arc::new(AgentAskBroker::new());
+    let first = register(&broker, "first");
+    let second = register(&broker, "second");
+    let ask: AskTool<_, Security> = AskTool::new(
         definition(),
-        Arc::new(ChildRequester {
-            coordinator: coordinator.clone(),
-            identity,
+        Arc::new(Communication {
+            scope: first.clone(),
+            routes: BTreeMap::from([("second", second.clone())]),
         }),
         None,
-    ));
+    );
+    assert_eq!(
+        ask.invoke(
+            invocation(r#"{"name":"second","message":"hello"}"#),
+            context(&CANCELLED)
+        )
+        .await,
+        Err(OperationError::Cancelled)
+    );
+    assert!(second.pending().is_empty());
     let asking = tokio::spawn(async move {
-        question
-            .invoke(
-                invocation(r#"{"questions":[{"prompt":"Proceed?","options":["yes","no"]}]}"#),
-                context(&NEVER),
-            )
-            .await
+        ask.invoke(
+            invocation(r#"{"name":"second","message":"hello"}"#),
+            context(&NEVER),
+        )
+        .await
     });
-    for _ in 0..1000 {
-        if !coordinator.pending().is_empty() {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    assert_eq!(coordinator.pending().len(), 1);
-    assert!(user_broker.pending().is_empty());
-    assert_eq!(delivery.0.lock().unwrap().len(), 1);
-    let wrong: AnswerTool<_, Security> = AnswerTool::new(
+    let request = wait_pending_ask(&second).await;
+    let reverse: AskTool<_, Security> = AskTool::new(
         definition(),
-        Arc::new(ChildAnswers {
-            coordinator: coordinator.clone(),
-            children: children.clone(),
-            parent: "other-parent".into(),
+        Arc::new(Communication {
+            scope: second.clone(),
+            routes: BTreeMap::from([("first", first)]),
         }),
         None,
     );
+    let cycle = reverse
+        .invoke(
+            invocation(r#"{"name":"first","message":"cycle"}"#),
+            context(&NEVER),
+        )
+        .await;
     assert!(
-        wrong
-            .invoke(
-                invocation(r#"{"agent_name":"worker","answers":["yes"]}"#),
-                context(&NEVER)
-            )
-            .await
-            .unwrap()
-            .starts_with("error: ")
+        matches!(cycle, Err(OperationError::Failed(AgentToolError::QuestionRejected(ref message))) if message.contains("cycle"))
     );
-    assert_eq!(coordinator.pending().len(), 1);
-    let answers: AnswerTool<_, Security> = AnswerTool::new(
-        definition(),
-        Arc::new(ChildAnswers {
-            coordinator: coordinator.clone(),
-            children,
-            parent: "parent-id".into(),
-        }),
-        None,
+    let reply: ReplyTool<_, Security> =
+        ReplyTool::new(definition(), communication(second.clone()), None);
+    assert_eq!(
+        reply
+            .invoke(invocation("not-json"), context(&CANCELLED))
+            .await,
+        Err(OperationError::Cancelled)
     );
+    assert_eq!(second.pending().len(), 1);
+    second.reply(&request.id, "settled".into()).unwrap();
+    assert_eq!(asking.await.unwrap().unwrap(), "settled");
+}
+
+#[tokio::test]
+async fn invalid_ask_and_reply_inputs_do_not_reach_the_service() {
+    let broker = Arc::new(AgentAskBroker::new());
+    let scope = register(&broker, "agent");
+    let ask: AskTool<_, Security> = AskTool::new(definition(), communication(scope.clone()), None);
+    let reply: ReplyTool<_, Security> =
+        ReplyTool::new(definition(), communication(scope.clone()), None);
     for arguments in [
         "not-json",
+        "[]",
         "{}",
-        r#"{"agent_name":"worker"}"#,
-        r#"{"agent_name":"worker","answers":[]}"#,
-        r#"{"agent_name":"worker","answers":[null]}"#,
-        r#"{"agent_name":"worker","answers":[""]}"#,
-        r#"{"agent_name":"worker","answers":["yes","no"]}"#,
-        r#"{"agent_name":"worker","answers":[{"text":"yes"}]}"#,
-        r#"{"agent_name":"worker","answers":["yes"],"extra":true}"#,
+        r#"{"name":"x"}"#,
+        r#"{"name":"x","message":" "}"#,
+        r#"{"name":" ","message":"x"}"#,
+        r#"{"name":"x","message":[]}"#,
+        r#"{"name":"x","message":"x","extra":true}"#,
     ] {
         assert!(
-            answers
+            ask.invoke(invocation(arguments), context(&NEVER))
+                .await
+                .unwrap()
+                .starts_with("error: "),
+            "{arguments}"
+        );
+    }
+    for arguments in [
+        "not-json",
+        "[]",
+        "{}",
+        r#"{"request_id":"x"}"#,
+        r#"{"request_id":"x","message":" "}"#,
+        r#"{"request_id":" ","message":"x"}"#,
+        r#"{"request_id":"x","message":[]}"#,
+        r#"{"request_id":"x","message":"x","extra":true}"#,
+    ] {
+        assert!(
+            reply
                 .invoke(invocation(arguments), context(&NEVER))
                 .await
                 .unwrap()
                 .starts_with("error: "),
             "{arguments}"
         );
-        assert_eq!(coordinator.pending().len(), 1);
     }
-    assert_eq!(
-        answers
-            .invoke(
-                invocation(r#"{"agent_name":"worker","answers":[""]}"#),
-                context(&NEVER)
-            )
-            .await
-            .unwrap(),
-        "error: question answers cannot be empty"
-    );
-    assert_eq!(
-        answers
-            .invoke(invocation("not-json"), context(&CANCELLED))
-            .await,
-        Err(OperationError::Cancelled)
-    );
-    assert_eq!(coordinator.pending().len(), 1);
-    assert_eq!(
-        answers
-            .invoke(
-                invocation(r#"{"agent_name":"worker","answers":["yes"]}"#),
-                context(&NEVER)
-            )
-            .await
-            .unwrap(),
-        "Answered the pending question from child agent worker."
-    );
-    assert_eq!(
-        asking.await.unwrap().unwrap(),
-        "Question: Proceed?\nAnswer: yes"
-    );
-    assert!(coordinator.pending().is_empty());
-    assert!(
-        answers
-            .invoke(
-                invocation(r#"{"agent_name":"worker","answers":["yes"]}"#),
-                context(&NEVER)
-            )
-            .await
-            .unwrap()
-            .starts_with("error: ")
-    );
-    assert!(answers.enabled_after_interruption());
-    assert_eq!(
-        answers.parallel_safety(&invocation("{}")),
-        ParallelSafety::Sequential
-    );
+    assert!(scope.pending().is_empty());
 }
 
 struct Formatting;
@@ -499,5 +542,49 @@ async fn question_uses_selected_result_templates() {
     assert_eq!(
         task.await.unwrap().unwrap(),
         "tool-result.question-answer:question=Pick|answer=yes"
+    );
+}
+
+#[tokio::test]
+async fn ask_and_reply_use_selected_result_templates() {
+    let broker = Arc::new(AgentAskBroker::new());
+    let first = register(&broker, "first");
+    let second = register(&broker, "second");
+    let ask: AskTool<_, Security> = AskTool::new(
+        definition(),
+        Arc::new(Communication {
+            scope: first,
+            routes: BTreeMap::from([("second", second.clone())]),
+        }),
+        Some(Arc::new(Formatting)),
+    );
+    let asking = tokio::spawn(async move {
+        ask.invoke(
+            invocation(r#"{"name":"second","message":"hello"}"#),
+            context(&NEVER),
+        )
+        .await
+    });
+    let request = wait_pending_ask(&second).await;
+    let reply: ReplyTool<_, Security> = ReplyTool::new(
+        definition(),
+        communication(second),
+        Some(Arc::new(Formatting)),
+    );
+    assert_eq!(
+        reply
+            .invoke(
+                invocation(
+                    &serde_json::json!({"request_id":request.id,"message":"yes"}).to_string()
+                ),
+                context(&NEVER)
+            )
+            .await
+            .unwrap(),
+        format!("tool-result.ask-replied:request_id={}", request.id)
+    );
+    assert_eq!(
+        asking.await.unwrap().unwrap(),
+        "tool-result.ask-reply:message=yes"
     );
 }

@@ -156,7 +156,8 @@ profiles:
       - read
       - agent_send
       - question
-      - answer
+      - ask
+      - reply
       - wait
     max_turns: 256
     recursion_limit: 1

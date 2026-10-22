@@ -185,27 +185,11 @@ impl ProcessStatusSource for Processes {
     }
 }
 #[derive(Default)]
-struct Questions(Mutex<Vec<Arc<ChildQuestion>>>);
-impl ChildQuestionRegistry for Questions {
-    fn find(&self, name: &str) -> Option<Arc<ChildQuestion>> {
-        self.0
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|child| child.identity.name == name)
-            .cloned()
-    }
-    fn snapshot(&self) -> Vec<Arc<ChildQuestion>> {
-        self.0.lock().unwrap().clone()
-    }
-}
-#[derive(Default)]
-struct QuestionDelivery(AtomicUsize);
-impl ChildQuestionDelivery for QuestionDelivery {
+struct AskDelivery(AtomicUsize);
+impl AgentAskDelivery for AskDelivery {
     fn steer<'a>(
         &'a self,
-        _: &'a str,
-        _: &'a str,
+        _: &'a PendingAgentAsk,
         _: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>> {
         Box::pin(async {
@@ -214,14 +198,23 @@ impl ChildQuestionDelivery for QuestionDelivery {
         })
     }
 }
-struct QuestionTemplates;
-impl ChildQuestionTemplates for QuestionTemplates {
-    fn question(&self, name: &str, questions: &str) -> Result<String, InteractionError> {
-        Ok(format!("{name}: {questions}"))
-    }
-    fn reminder(&self, children: &str) -> Result<String, InteractionError> {
+struct AskTemplates;
+impl AgentAskTemplates for AskTemplates {
+    fn ask(&self, request: &PendingAgentAsk) -> Result<String, InteractionError> {
         Ok(format!(
-            "Pending child questions:{children}\nReply before finishing."
+            "{} ({}): {}",
+            request.asker.name, request.id, request.message
+        ))
+    }
+    fn reminder(&self, requests: &[PendingAgentAsk]) -> Result<String, InteractionError> {
+        let mut names = requests
+            .iter()
+            .map(|request| request.asker.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        Ok(format!(
+            "Pending asks:\n- {}\nReply before finishing.",
+            names.join("\n- ")
         ))
     }
 }
@@ -256,9 +249,8 @@ struct Built {
     active: Mutex<Option<Arc<ActiveWorkReminder>>>,
     tasks: Arc<Tasks>,
     processes: Arc<Processes>,
-    question_registry: Arc<Questions>,
-    questions: Arc<ChildQuestionCoordinator>,
-    delivery: Arc<QuestionDelivery>,
+    asks: Arc<AgentAsks>,
+    delivery: Arc<AskDelivery>,
 }
 impl Built {
     fn gates(&self, count: usize) -> Vec<Arc<Gate>> {
@@ -312,6 +304,7 @@ impl Built {
 struct Factory {
     histories: Arc<Histories>,
     resources: UserSessionResources<()>,
+    ask_broker: Arc<AgentAskBroker>,
     built: Mutex<BTreeMap<String, Arc<Built>>>,
     providers: Mutex<BTreeMap<String, Scripted>>,
 }
@@ -344,7 +337,7 @@ impl Factory {
         });
         *built.active.lock().unwrap() = Some(active.clone());
         *built.callback.0.lock().unwrap() = Some(Arc::new(SessionCompletion {
-            questions: Some(built.questions.clone()),
+            asks: Some(built.asks.clone()),
             active_work: active,
             reminders: built.session.backend().reminders().clone(),
             history: built.history.clone(),
@@ -387,14 +380,19 @@ impl ScopeFactory<Security> for Factory {
             )
             .unwrap();
             queues.initialize().unwrap();
-            let question_registry = Arc::new(Questions::default());
-            let delivery = Arc::new(QuestionDelivery::default());
-            let questions = Arc::new(ChildQuestionCoordinator::new(
-                identity.session.session_id.clone(),
-                question_registry.clone(),
-                delivery.clone(),
-                Arc::new(QuestionTemplates),
-            ));
+            let delivery = Arc::new(AskDelivery::default());
+            let asks = Arc::new(
+                self.ask_broker
+                    .register(
+                        AgentAskIdentity {
+                            session_id: identity.session.session_id.clone(),
+                            name: identity.session.name.clone(),
+                        },
+                        delivery.clone(),
+                        Arc::new(AskTemplates),
+                    )
+                    .unwrap(),
+            );
             let ancestor_ids = {
                 let built = self.built.lock().unwrap();
                 let mut parent = identity.session.parent_session_id.clone();
@@ -466,8 +464,7 @@ impl ScopeFactory<Security> for Factory {
                 active: Mutex::new(None),
                 tasks: Arc::new(Tasks::default()),
                 processes: Arc::new(Processes::default()),
-                question_registry,
-                questions,
+                asks,
                 delivery,
             });
             let adapter = Arc::new(SessionAdapter::new(
@@ -513,6 +510,7 @@ impl Harness {
         let factory = Arc::new(Factory {
             histories: histories.clone(),
             resources,
+            ask_broker: Arc::new(AgentAskBroker::new()),
             built: Mutex::new(BTreeMap::new()),
             providers: Mutex::new(BTreeMap::new()),
         });
@@ -1175,9 +1173,9 @@ async fn reminder_changed_after_construction_retains_candidate_and_clearing_perm
 }
 
 #[tokio::test]
-async fn pending_child_questions_precede_active_work_and_exit_reminders_and_retain_candidate() {
+async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidate() {
     let h = Harness::new();
-    let scope = h.scope(None, "root").await;
+    let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
     push(&root.queues, "remaining", true, false);
     root.session
@@ -1188,35 +1186,17 @@ async fn pending_child_questions_precede_active_work_and_exit_reminders_and_reta
         .unwrap();
     let mut asks = Vec::new();
     for name in ["zeta", "alpha"] {
-        let identity = Arc::new(ChildIdentity {
-            session_id: id(),
-            name: name.into(),
-            parent_session_id: scope.identity().session.session_id.clone(),
-        });
-        root.question_registry
-            .0
-            .lock()
-            .unwrap()
-            .push(Arc::new(ChildQuestion::new(identity.clone())));
-        let coordinator = root.questions.clone();
+        let _asker_scope = h.scope(None, name).await;
+        let asker = h.factory.get(name).asks.clone();
+        let recipient = root.asks.clone();
         asks.push(tokio::spawn(async move {
-            coordinator
-                .ask(
-                    identity,
-                    vec![QuestionDefinition {
-                        header: "Decision".into(),
-                        prompt: "Choose".into(),
-                        options: vec![],
-                        multiple: false,
-                        custom: true,
-                    }],
-                    &NeverCancelled,
-                )
+            asker
+                .ask(&recipient, "Choose".into(), &NeverCancelled)
                 .await
         }));
     }
     bounded(async {
-        while root.questions.pending().len() != 2 || root.delivery.0.load(Ordering::SeqCst) != 2 {
+        while root.asks.pending().len() != 2 || root.delivery.0.load(Ordering::SeqCst) != 2 {
             tokio::task::yield_now().await;
         }
     })
@@ -1237,7 +1217,7 @@ async fn pending_child_questions_precede_active_work_and_exit_reminders_and_reta
                 .iter()
                 .any(|message| message.role == sessions::Role::System
                     && message.content()
-                        == "Pending child questions:\n- alpha\n- zeta\nReply before finishing.")
+                        == "Pending asks:\n- alpha\n- zeta\nReply before finishing.")
         );
         assert_eq!(
             requests[1]
@@ -1253,7 +1233,7 @@ async fn pending_child_questions_precede_active_work_and_exit_reminders_and_reta
         events
             .iter()
             .filter(|event| event.has_agent_notice()
-                && event.agent_notice().kind == "pending_child_question_reminder")
+                && event.agent_notice().kind == "pending_ask_reminder")
             .count(),
         1
     );
@@ -1261,15 +1241,15 @@ async fn pending_child_questions_precede_active_work_and_exit_reminders_and_reta
     while let Some(event) = subscription.try_next() {
         assert!(!event.has_agent_notice() || event.agent_notice().kind != "active_work_reminder");
     }
-    root.questions
-        .reply("alpha", QuestionReply::answered(vec!["yes".into()]))
-        .unwrap();
-    root.questions
-        .reply("zeta", QuestionReply::answered(vec!["yes".into()]))
-        .unwrap();
-    for ask in asks {
-        assert_eq!(bounded(ask).await.unwrap().unwrap().answers, ["yes"]);
+    let reply = " yes\nplain-text reply ";
+    for request in root.asks.pending() {
+        assert_eq!(request.message, "Choose");
+        root.asks.reply(&request.id, reply.into()).unwrap();
     }
+    for ask in asks {
+        assert_eq!(bounded(ask).await.unwrap().unwrap(), reply);
+    }
+    assert!(root.asks.pending().is_empty());
     root.queues
         .try_take("remaining", 1, Direction::Front)
         .unwrap();
@@ -1544,7 +1524,7 @@ async fn retained_callback_publication_failure_or_cancellation_preserves_committ
             attempts: AtomicUsize::new(0),
         });
         let callback = SessionCompletion {
-            questions: Some(root.questions.clone()),
+            asks: Some(root.asks.clone()),
             active_work: root.active_work(),
             reminders: root.session.backend().reminders().clone(),
             history: root.history.clone(),

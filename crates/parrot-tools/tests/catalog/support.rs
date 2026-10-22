@@ -19,9 +19,7 @@ use parrot_domain::{
             FileReadError, FileReadErrorKind, LinkPolicy, MutationRead, MutationRequest,
             MutationTarget, ReadRequest,
         },
-        interactions::{
-            ChildQuestionAnswers, QuestionDefinition, QuestionReply, QuestionRequester,
-        },
+        interactions::{AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester},
         paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
         runtime::{AgentQueues, AgentRuntime, TaskController},
         security::AccessSnapshot,
@@ -482,10 +480,22 @@ impl QuestionRequester for Services {
         })
     }
 }
-impl ChildQuestionAnswers for Services {
+impl AgentCommunication for Services {
     type Error = AgentToolError;
-    fn reply(&self, agent_name: &str, reply: QuestionReply) -> Result<(), AgentToolError> {
-        self.record("answer", format!("{agent_name} {reply:?}"), None, None);
+    fn ask<'a>(
+        &'a self,
+        name: &'a str,
+        message: String,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<String, AgentToolError>> {
+        Box::pin(async move {
+            cancelled(cancellation)?;
+            self.record("ask", format!("{name} {message}"), None, None);
+            Ok("catalog reply".into())
+        })
+    }
+    fn reply(&self, request_id: &str, message: String) -> Result<(), AgentToolError> {
+        self.record("reply", format!("{request_id} {message}"), None, None);
         Ok(())
     }
 }

@@ -22,7 +22,7 @@ mod fixture {
 
     use parrot_domain::{
         contracts::{
-            async_ops::{BoxFuture, Cancellation, Cancelled, Clock, OperationError},
+            async_ops::{BoxFuture, Cancellation, Cancelled, Clock, OperationError, ScopeLifetime},
             filenames::FilenameGenerator,
             paths::{RootOrigin, SelectedSessionRoot},
             runtime::AgentRuntime,
@@ -392,28 +392,36 @@ mod fixture {
 
     type Backend = RuntimeBackend<Security, ToolSettlement<Security>>;
     type WaitTool = AgentTool<ScopedAgentRuntime<Security>, ModelRouter>;
-    fn definition() -> ConfiguredToolDefinition {
+    fn definition(name: &str) -> ConfiguredToolDefinition {
         use parrot_foundation::config::{
             configuration::source_predefined_content, runtime::read_tool_definitions, yaml,
         };
         let root = yaml::parse_root(&source_predefined_content().unwrap()).unwrap();
         let definitions = read_tool_definitions(&root).unwrap();
-        let definition = definitions.get("wait").unwrap();
+        let definition = definitions.get(name).unwrap();
         ConfiguredToolDefinition::new(&definition.description, &definition.parameters_json)
     }
     fn wait_tool(bridge: Arc<ScopedAgentRuntime<Security>>, models: Arc<ModelRouter>) -> WaitTool {
         AgentTool::new(
             AgentToolKind::Wait,
-            definition(),
+            definition("wait"),
             bridge,
             models,
             None,
             false,
         )
     }
+    type RetainedAgentTool = dyn Tool<
+            Definition = ConfiguredToolDefinition,
+            Invocation = agents::ToolInvocation,
+            Selection = AgentSelection,
+            Security = SharedSecurity<Security>,
+            Output = String,
+            Error = AgentToolError,
+        >;
     struct RetainedTool {
         metadata: ToolMetadata,
-        tool: WaitTool,
+        tool: Arc<RetainedAgentTool>,
         waiting: Arc<Semaphore>,
     }
     impl Tool for RetainedTool {
@@ -430,7 +438,7 @@ mod fixture {
             ParallelSafety::Sequential
         }
         fn enabled_after_interruption(&self) -> bool {
-            true
+            self.tool.enabled_after_interruption()
         }
         fn invoke<'a>(
             &'a self,
@@ -460,9 +468,8 @@ mod fixture {
                 let mut observed = false;
                 std::future::poll_fn(|cx| {
                     let poll = invocation.as_mut().poll(cx);
-                    // The retained tool has no asynchronous edge before the real
-                    // WaitService registers its incoming-input wait. Observe that
-                    // first Pending, not the earlier ToolExecutionStarted event.
+                    // Observe the retained tool's first Pending, not the earlier
+                    // ToolExecutionStarted event.
                     if poll.is_pending() && !observed {
                         observed = true;
                         self.waiting.add_permits(1);
@@ -481,13 +488,63 @@ mod fixture {
             })
         }
     }
-    struct RetainedFactory(Arc<RetainedTool>);
+    struct RetainedFactory(Vec<ToolHandle<Security>>);
+    impl RetainedFactory {
+        fn new(
+            bridge: Arc<ScopedAgentRuntime<Security>>,
+            models: Arc<ModelRouter>,
+            waiting: Arc<Semaphore>,
+        ) -> Self {
+            let tools: Vec<(&str, Arc<RetainedAgentTool>)> = vec![
+                ("wait", Arc::new(wait_tool(bridge.clone(), models))),
+                (
+                    "ask",
+                    Arc::new(
+                        agents::questions::AskTool::<_, SharedSecurity<Security>>::new(
+                            definition("ask"),
+                            bridge.clone(),
+                            None,
+                        ),
+                    ),
+                ),
+                (
+                    "reply",
+                    Arc::new(
+                        agents::questions::ReplyTool::<_, SharedSecurity<Security>>::new(
+                            definition("reply"),
+                            bridge,
+                            None,
+                        ),
+                    ),
+                ),
+            ];
+            Self(
+                tools
+                    .into_iter()
+                    .map(|(name, tool)| {
+                        ToolHandle::Ordinary(Arc::new(RetainedTool {
+                            metadata: ToolMetadata {
+                                name: name.into(),
+                                aliases: vec![],
+                            },
+                            tool,
+                            waiting: waiting.clone(),
+                        }))
+                    })
+                    .collect(),
+            )
+        }
+    }
     impl ToolFactory<Security> for RetainedFactory {
         fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
             Ok(ToolInventory {
-                tools: vec![ToolHandle::Ordinary(self.0.clone())],
-                supported: vec![true],
-                definitions: vec![definition()],
+                tools: self.0.clone(),
+                supported: vec![true; self.0.len()],
+                definitions: self
+                    .0
+                    .iter()
+                    .map(|tool| definition(&tool.definition().name))
+                    .collect(),
             })
         }
     }
@@ -497,7 +554,7 @@ mod fixture {
         pub(super) provider: Scripted,
         pub(super) history: AgentHistoryView,
         pub(super) activity: Arc<AgentSessionActivity>,
-        pub(super) questions: Arc<parrot_runtime::interactions::ChildQuestionCoordinator>,
+        pub(super) asks: Arc<parrot_runtime::interactions::AgentAsks>,
         waiting: Arc<Semaphore>,
     }
     struct InteractionDiagnostics;
@@ -519,6 +576,7 @@ mod fixture {
         built: Mutex<BTreeMap<String, Arc<Built>>>,
         providers: Mutex<BTreeMap<String, Scripted>>,
         user_questions: Arc<parrot_runtime::interactions::QuestionBroker>,
+        asks: Arc<parrot_runtime::interactions::AgentAskBroker>,
     }
     impl Factory {
         async fn build(
@@ -549,24 +607,26 @@ mod fixture {
                 self.user_questions.clone(),
                 templates.clone(),
             ));
-            let question = ScopedAgentRuntime::<Security>::child_question(&prepared.identity);
-            let questions = Arc::new(parrot_runtime::interactions::ChildQuestionCoordinator::new(
-                prepared.identity.session.session_id.clone(),
-                bridge.clone(),
-                bridge.clone(),
-                bridge.clone(),
-            ));
+            let asks = Arc::new(
+                self.asks
+                    .register(
+                        parrot_runtime::interactions::AgentAskIdentity {
+                            session_id: prepared.identity.session.session_id.clone(),
+                            name: prepared.identity.session.name.clone(),
+                        },
+                        bridge.clone(),
+                        bridge.clone(),
+                    )
+                    .unwrap(),
+            );
             let waiting = Arc::new(Semaphore::new(0));
             let tools = Arc::new(
                 ToolSettlement::new(ToolSettlementConfig {
-                    factory: Arc::new(RetainedFactory(Arc::new(RetainedTool {
-                        metadata: ToolMetadata {
-                            name: "wait".into(),
-                            aliases: vec![],
-                        },
-                        tool: wait_tool(bridge.clone(), provider.router()),
-                        waiting: waiting.clone(),
-                    }))),
+                    factory: Arc::new(RetainedFactory::new(
+                        bridge.clone(),
+                        provider.router(),
+                        waiting.clone(),
+                    )),
                     templates: templates.clone(),
                     output_blobs: Arc::new(
                         ToolOutputBlobStore::for_session(
@@ -617,7 +677,7 @@ mod fixture {
                 context: self.histories.controller(prepared.history.clone()),
                 status: Arc::new(Status),
                 completions: vec![Arc::new(SessionCompletion {
-                    questions: Some(questions.clone()),
+                    asks: Some(asks.clone()),
                     active_work: active_work.clone(),
                     reminders: reminders.clone(),
                     history: prepared.history.clone(),
@@ -661,7 +721,7 @@ mod fixture {
                     provider,
                     history: prepared.history,
                     activity,
-                    questions: questions.clone(),
+                    asks: asks.clone(),
                     waiting,
                 }),
             );
@@ -670,15 +730,22 @@ mod fixture {
                 services: vec![
                     ServiceRegistration::new(bound),
                     ServiceRegistration::new(bridge),
-                    ServiceRegistration::new(question),
-                    ServiceRegistration::new(questions),
+                    ServiceRegistration::new(asks.clone()),
                     ServiceRegistration::new(process_port),
                 ],
                 publishers: vec![],
                 work: vec![],
-                resources: vec![],
+                resources: vec![Arc::new(AsksClose(asks))],
                 final_resources: vec![],
             })
+        }
+    }
+    struct AsksClose(Arc<parrot_runtime::interactions::AgentAsks>);
+    impl ScopeLifetime for AsksClose {
+        type Error = ChildError;
+        fn close(&self) -> BoxFuture<'_, ChildResult<()>> {
+            self.0.close();
+            Box::pin(async { Ok(()) })
         }
     }
     impl ScopeFactory<Security> for Factory {
@@ -719,6 +786,7 @@ mod fixture {
                 histories: histories.clone(),
                 built: Mutex::new(BTreeMap::new()),
                 providers: Mutex::new(BTreeMap::new()),
+                asks: Arc::new(parrot_runtime::interactions::AgentAskBroker::new()),
                 user_questions: Arc::new(
                     parrot_runtime::interactions::QuestionBroker::new(
                         None,
@@ -907,7 +975,7 @@ mod fixture {
 use fixture::{Harness, bounded, done_completion, wait_completion};
 use parrot_domain::contracts::{
     async_ops::OperationError,
-    interactions::{ChildQuestionAnswers, QuestionRequester},
+    interactions::{AgentCommunication, QuestionRequester},
     runtime::AgentRuntime,
 };
 use parrot_provider::sessions;
@@ -928,7 +996,7 @@ fn assert_waking_request(h: &Harness, text: &str) {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
-        ["wait"]
+        ["wait", "ask", "reply"]
     );
     assert_eq!(
         requests[1]
@@ -1222,13 +1290,13 @@ fn questions(header: &str) -> Vec<QuestionDefinition> {
     }]
 }
 
-async fn two_child_questions_guard_completion(promoted_before_completion: bool) {
+async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
     use parrot_domain::contracts::{security::InvocationContext, tools::Tool};
     use parrot_domain::values::tools::ConfiguredToolDefinition;
     use parrot_runtime::tool_settlement::SharedSecurity;
     use parrot_tools::agents::{
         AgentSelection, ToolInvocation,
-        questions::{AnswerTool, QuestionTool},
+        questions::{AskTool, ReplyTool},
     };
     let h = Harness::new().await;
     h.child("first").await;
@@ -1262,22 +1330,20 @@ async fn two_child_questions_guard_completion(promoted_before_completion: bool) 
     } else {
         premature.entered().await;
     }
-    let first_tool = QuestionTool::<_, SharedSecurity<support::Security>>::new(
-        ConfiguredToolDefinition::new("question", "{}"),
+    let first_tool = AskTool::<_, SharedSecurity<support::Security>>::new(
+        ConfiguredToolDefinition::new("ask", "{}"),
         first_child.bridge.clone(),
         None,
     );
-    let second_tool = QuestionTool::<_, SharedSecurity<support::Security>>::new(
-        ConfiguredToolDefinition::new("question", "{}"),
+    let second_tool = AskTool::<_, SharedSecurity<support::Security>>::new(
+        ConfiguredToolDefinition::new("ask", "{}"),
         second_child.bridge.clone(),
         None,
     );
     let invocation = |header: &str| ToolInvocation {
-        arguments_json: format!(
-            "{{\"questions\":[{{\"header\":\"{header}\",\"prompt\":\"Continue?\",\"options\":[\"Yes\"],\"custom\":false}}]}}"
-        ),
+        arguments_json: format!("{{\"name\":\"parent\",\"message\":\"Continue? {header}\"}}"),
         assistant_sequence: 0,
-        call_id: format!("question-{header}"),
+        call_id: format!("ask-{header}"),
     };
     let context = || {
         InvocationContext::new(
@@ -1293,7 +1359,7 @@ async fn two_child_questions_guard_completion(promoted_before_completion: bool) 
     tokio::pin!(first, second);
     let observe = async {
         bounded(async {
-            while h.built.questions.pending().len() != 2 {
+            while h.built.asks.pending().len() != 2 {
                 tokio::task::yield_now().await;
             }
         })
@@ -1321,7 +1387,7 @@ async fn two_child_questions_guard_completion(promoted_before_completion: bool) 
                 .filter(
                     |event| event.agent_session_id == h.root.identity().session.session_id
                         && event.has_agent_notice()
-                        && event.agent_notice().kind == "pending_child_question_reminder"
+                        && event.agent_notice().kind == "pending_ask_reminder"
                 )
                 .count(),
             1
@@ -1339,9 +1405,9 @@ async fn two_child_questions_guard_completion(promoted_before_completion: bool) 
                 last.messages
                     .iter()
                     .any(|message| message.role == sessions::Role::System
-                        && message.content().contains("- first")
-                        && message.content().contains("- second")
-                        && message.content().contains("answer"))
+                        && message.content().contains("first")
+                        && message.content().contains("second")
+                        && message.content().contains("reply"))
             );
             // Real parent-steer inputs are request-ID deduplicated and stay in
             // this parent, rather than being broadcast to another agent.
@@ -1349,37 +1415,51 @@ async fn two_child_questions_guard_completion(promoted_before_completion: bool) 
                 last.messages
                     .iter()
                     .filter(|message| message.role == sessions::Role::User
-                        && message.content().contains("Child agent first"))
+                        && message.content().contains("Continue? first"))
                     .count(),
                 1
             );
         }
-        let answer = AnswerTool::<_, SharedSecurity<support::Security>>::new(
-            ConfiguredToolDefinition::new("answer", "{}"),
+        let reply = ReplyTool::<_, SharedSecurity<support::Security>>::new(
+            ConfiguredToolDefinition::new("reply", "{}"),
             h.built.bridge.clone(),
             None,
         );
         for name in ["first", "second"] {
-            let result = answer
+            let request_id = h
+                .built
+                .asks
+                .pending()
+                .into_iter()
+                .find(|request| request.asker.name == name)
+                .unwrap()
+                .id;
+            let result = reply
                 .invoke(
                     ToolInvocation {
                         arguments_json: format!(
-                            "{{\"agent_name\":\"{name}\",\"answers\":[\"Yes\"]}}"
+                            "{{\"request_id\":\"{request_id}\",\"message\":\"Yes\"}}"
                         ),
                         assistant_sequence: 0,
-                        call_id: format!("answer-{name}"),
+                        call_id: format!("reply-{name}"),
                     },
                     context(),
                 )
                 .await
                 .unwrap();
-            assert!(result.contains("Answered the pending question"));
+            assert!(!result.is_empty());
+            let remaining = h.built.asks.pending();
+            assert!(remaining.iter().all(|request| request.asker.name != name));
+            assert_eq!(
+                h.built.asks.completion_reminder().unwrap().is_some(),
+                !remaining.is_empty()
+            );
         }
         finished.open();
     };
     let (first, second, ()) = tokio::join!(first, second, observe);
-    assert!(first.unwrap().contains("Answer: Yes"));
-    assert!(second.unwrap().contains("Answer: Yes"));
+    assert!(first.unwrap().contains("Yes"));
+    assert!(second.unwrap().contains("Yes"));
     assert_eq!(
         bounded(sent.execution.join()).await.unwrap().output,
         "finished"
@@ -1407,18 +1487,19 @@ async fn two_child_questions_guard_completion(promoted_before_completion: bool) 
     );
 }
 #[tokio::test]
-async fn host_parent_questions_guard_completion_before_promotion() {
-    two_child_questions_guard_completion(false).await;
+async fn host_incoming_asks_guard_completion_before_promotion() {
+    two_agent_asks_guard_completion(false).await;
 }
 #[tokio::test]
-async fn host_parent_questions_guard_completion_after_promotion() {
-    two_child_questions_guard_completion(true).await;
+async fn host_incoming_asks_guard_completion_after_promotion() {
+    two_agent_asks_guard_completion(true).await;
 }
 
 #[tokio::test]
-async fn host_root_question_uses_only_user_broker_and_cancellation_withdraws_child_question() {
+async fn host_root_question_is_user_only_and_cancellation_withdraws_agent_ask() {
     let h = Harness::new().await;
-    let asking_user = h.built.bridge.ask(questions("root"), &NeverCancelled);
+    let asking_user =
+        QuestionRequester::ask(h.built.bridge.as_ref(), questions("root"), &NeverCancelled);
     let reply_user = async {
         bounded(async {
             while h.user_questions().pending().is_empty() {
@@ -1426,7 +1507,7 @@ async fn host_root_question_uses_only_user_broker_and_cancellation_withdraws_chi
             }
         })
         .await;
-        assert!(h.built.questions.pending().is_empty());
+        assert!(h.built.asks.pending().is_empty());
         assert!(!h.built.session.is_active());
         let pending = h.user_questions().pending();
         assert_eq!(pending.len(), 1);
@@ -1448,20 +1529,32 @@ async fn host_root_question_uses_only_user_broker_and_cancellation_withdraws_chi
     let first = h.built("first");
     let cancelled = Signal::new();
     let gate = h.built.provider.step(done_completion());
-    let asking = first.bridge.ask(questions("child"), &cancelled);
+    assert!(
+        matches!(QuestionRequester::ask(first.bridge.as_ref(), questions("child"), &NeverCancelled).await,
+        Err(OperationError::Failed(error)) if error.to_string().contains("only root agents"))
+    );
+    assert!(h.user_questions().pending().is_empty());
+    let asking = AgentCommunication::ask(
+        first.bridge.as_ref(),
+        "parent",
+        "Continue?".into(),
+        &cancelled,
+    );
     tokio::pin!(asking);
     let cancel = async {
         bounded(async {
-            while h.built.questions.pending().len() != 1 {
+            while h.built.asks.pending().len() != 1 {
                 tokio::task::yield_now().await;
             }
         })
         .await;
+        let id = h.built.asks.pending()[0].id.clone();
         cancelled.cancel();
+        id
     };
-    let (result, ()) = tokio::join!(asking, cancel);
+    let (result, withdrawn_id) = tokio::join!(asking, cancel);
     assert_eq!(result, Err(OperationError::Cancelled));
-    assert!(h.built.questions.pending().is_empty());
+    assert!(h.built.asks.pending().is_empty());
     gate.entered().await;
     gate.open();
     bounded(async {
@@ -1471,13 +1564,292 @@ async fn host_root_question_uses_only_user_broker_and_cancellation_withdraws_chi
     })
     .await;
     assert!(
-        first
-            .bridge
-            .reply(
-                "first",
-                parrot_domain::contracts::interactions::QuestionReply::answered(vec!["Yes".into()])
-            )
-            .is_err()
+        AgentCommunication::reply(h.built.bridge.as_ref(), &withdrawn_id, "Yes".into()).is_err()
     );
+    h.close().await;
+}
+
+#[tokio::test]
+async fn host_asks_resolve_all_agent_paths_without_send_permission_gates() {
+    let h = Harness::new().await;
+    h.child("first").await;
+    h.child("second").await;
+    let first = h.built("first");
+    let second = h.built("second");
+    for (asker, path, recipient) in [
+        (h.built.clone(), "first", first.clone()),
+        (first.clone(), "parent", h.built.clone()),
+        (first.clone(), "main", h.built.clone()),
+        (first.clone(), "../second", second.clone()),
+        (second.clone(), "/main/first", first.clone()),
+        (second.clone(), "..", h.built.clone()),
+        (second.clone(), "/main", h.built.clone()),
+    ] {
+        let gate = h.built.provider.step(done_completion());
+        let asking = AgentCommunication::ask(
+            asker.bridge.as_ref(),
+            path,
+            format!("message for {path}"),
+            &NeverCancelled,
+        );
+        let replying = async {
+            gate.entered().await;
+            let pending = recipient.asks.pending();
+            assert_eq!(pending.len(), 1);
+            let request = &pending[0];
+            assert_eq!(request.asker.session_id, asker.asks.identity().session_id);
+            assert_eq!(
+                request.recipient.session_id,
+                recipient.asks.identity().session_id
+            );
+            assert_eq!(request.message, format!("message for {path}"));
+            assert!(
+                AgentCommunication::reply(
+                    asker.bridge.as_ref(),
+                    &request.id,
+                    "wrong recipient".into()
+                )
+                .is_err()
+            );
+            assert!(
+                AgentCommunication::reply(recipient.bridge.as_ref(), &request.id, " ".into())
+                    .is_err()
+            );
+            assert_eq!(recipient.asks.pending().len(), 1);
+            AgentCommunication::reply(recipient.bridge.as_ref(), &request.id, "exact reply".into())
+                .unwrap();
+            assert!(
+                AgentCommunication::reply(recipient.bridge.as_ref(), &request.id, "stale".into())
+                    .is_err()
+            );
+            gate.open();
+        };
+        let (reply, ()) = tokio::join!(asking, replying);
+        assert_eq!(reply.unwrap(), "exact reply");
+        assert!(recipient.asks.pending().is_empty());
+        bounded(async {
+            while recipient.session.is_active() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+    }
+    for path in ["missing", "../missing", "/missing", "/main//first", "."] {
+        assert!(
+            AgentCommunication::ask(
+                h.built.bridge.as_ref(),
+                path,
+                "invalid path".into(),
+                &NeverCancelled
+            )
+            .await
+            .is_err()
+        );
+    }
+    let cycle = AgentCommunication::ask(
+        h.built.bridge.as_ref(),
+        "/main",
+        "self".into(),
+        &NeverCancelled,
+    )
+    .await
+    .unwrap_err();
+    assert!(cycle.to_string().contains("reply to existing asks first"));
+    assert!(h.user_questions().pending().is_empty());
+    h.close().await;
+}
+
+#[tokio::test]
+async fn host_disposal_withdraws_asks_and_rejects_stale_agent_views() {
+    let h = Harness::new().await;
+    let child = h.child("first").await;
+    let first = h.built("first");
+    let gate = h.built.provider.step(done_completion());
+    let asking = AgentCommunication::ask(
+        h.built.bridge.as_ref(),
+        "first",
+        "pending at disposal".into(),
+        &NeverCancelled,
+    );
+    let closing = async {
+        gate.entered().await;
+        let id = first.asks.pending()[0].id.clone();
+        bounded(child.close().join()).await.unwrap();
+        assert!(first.asks.pending().is_empty());
+        assert!(
+            AgentCommunication::reply(first.bridge.as_ref(), &id, "stale reply".into()).is_err()
+        );
+    };
+    let (result, ()) = tokio::join!(asking, closing);
+    assert!(result.is_err());
+    assert!(
+        AgentCommunication::ask(
+            first.bridge.as_ref(),
+            "parent",
+            "stale caller".into(),
+            &NeverCancelled
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        AgentCommunication::ask(
+            h.built.bridge.as_ref(),
+            "first",
+            "stale target".into(),
+            &NeverCancelled
+        )
+        .await
+        .is_err()
+    );
+    h.close().await;
+}
+
+#[tokio::test]
+async fn host_real_ask_tool_wait_keeps_queued_steers_and_replies_without_deadlock() {
+    let h = Harness::new().await;
+    h.child("first").await;
+    h.child("second").await;
+    let first = h.built("first");
+    let second = h.built("second");
+    let ask_gate = h.built.provider.step(sessions::Completion {
+        finish_reason: "tool_calls".into(),
+        tool_calls: vec![sessions::ToolCall {
+            id: "actual-ask".into(),
+            name: "ask".into(),
+            arguments_json: "{\"name\":\"first\",\"message\":\"answer the root\"}".into(),
+        }],
+        ..sessions::Completion::default()
+    });
+    let premature = h.built.provider.step(sessions::Completion {
+        finish_reason: "stop".into(),
+        assistant_text: "must reply first".into(),
+        ..sessions::Completion::default()
+    });
+    let sent = h.send("start real ask", "real-ask-message").await;
+    ask_gate.entered().await;
+    ask_gate.open();
+    premature.entered().await;
+    let first_request = first.asks.pending()[0].clone();
+    assert_eq!(first_request.message, "answer the root");
+    assert!(h.built.session.is_active());
+    let cycle = AgentCommunication::ask(
+        first.bridge.as_ref(),
+        "parent",
+        "would deadlock".into(),
+        &NeverCancelled,
+    )
+    .await
+    .unwrap_err();
+    assert!(cycle.to_string().contains("reply to existing asks first"));
+    let queued = AgentCommunication::ask(
+        second.bridge.as_ref(),
+        "parent",
+        "queued while root waits".into(),
+        &NeverCancelled,
+    );
+    tokio::pin!(queued);
+    let settle_queued = async {
+        bounded(async {
+            while h.built.asks.pending().len() != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        let incoming = h.built.asks.pending()[0].clone();
+        let steer = parrot_runtime::interactions::AgentAskTemplates::ask(
+            h.built.bridge.as_ref(),
+            &incoming,
+        )
+        .unwrap();
+        // Request-ID deduplicated admission must return while execution is blocked.
+        bounded(parrot_runtime::interactions::AgentAskDelivery::steer(
+            h.built.bridge.as_ref(),
+            &incoming,
+            steer,
+        ))
+        .await
+        .unwrap();
+        assert_eq!(first.asks.pending()[0].id, first_request.id);
+        assert_eq!(h.built.provider.requests.lock().unwrap().len(), 2);
+        let admitted = h.events().await;
+        assert_eq!(
+            admitted
+                .iter()
+                .filter(|event| event.has_input_admitted()
+                    && event.agent_session_id == h.root.identity().session.session_id
+                    && event.input_admitted().message_id == incoming.id
+                    && event
+                        .input_admitted()
+                        .content
+                        .contains("queued while root waits"))
+                .count(),
+            1
+        );
+        AgentCommunication::reply(h.built.bridge.as_ref(), &incoming.id, "queued reply".into())
+            .unwrap();
+    };
+    let (queued_result, ()) = tokio::join!(queued, settle_queued);
+    assert_eq!(queued_result.unwrap(), "queued reply");
+    assert_eq!(first.asks.pending()[0].id, first_request.id);
+    let reply_gate = h.built.provider.step(sessions::Completion {
+        finish_reason: "tool_calls".into(),
+        tool_calls: vec![sessions::ToolCall {
+            id: "actual-reply".into(),
+            name: "reply".into(),
+            arguments_json:
+                serde_json::json!({"request_id": first_request.id, "message": "root reply"})
+                    .to_string(),
+        }],
+        ..sessions::Completion::default()
+    });
+    let finish_a = h.built.provider.step(done_completion());
+    let finish_b = h.built.provider.step(done_completion());
+    premature.open();
+    reply_gate.entered().await;
+    assert_eq!(first.asks.pending().len(), 1);
+    reply_gate.open();
+    finish_a.entered().await;
+    finish_b.entered().await;
+    assert!(first.asks.pending().is_empty());
+    finish_a.open();
+    finish_b.open();
+    assert_eq!(bounded(sent.execution.join()).await.unwrap().output, "done");
+    bounded(async {
+        while first.session.is_active() || h.built.session.is_active() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    let conversation = h.built.history.conversation().await.unwrap();
+    assert_eq!(
+        conversation
+            .iter()
+            .filter(
+                |entry| entry.message.role == parrot_storage::conversation::MessageRole::User
+                    && parrot_storage::events::content(&entry.message.parts)
+                        .contains("queued while root waits")
+            )
+            .count(),
+        1
+    );
+    assert!(
+        h.built
+            .provider
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request
+                .messages
+                .iter()
+                .any(|message| message.role == sessions::Role::User
+                    && message.content().contains("queued while root waits")))
+    );
+    let events = h.events().await;
+    assert!(events.iter().any(
+        |event| event.has_agent_notice() && event.agent_notice().kind == "pending_ask_reminder"
+    ));
+    assert!(h.user_questions().pending().is_empty());
     h.close().await;
 }

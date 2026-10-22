@@ -315,19 +315,19 @@ prompt_templates:
       {result}
     allowed_arguments: [agent_name, result]
     required_arguments: [agent_name, result]
-  agent-session.child-question:
+  agent-session.agent-ask:
     template: |-
-      Child agent {agent_name} is waiting for an answer to these structured questions:
-      {questions}
-      Use answer with the agent_name shown above and one nonblank textual answer for every question in the order shown. Invalid or partial answers leave the request pending.
-    allowed_arguments: [agent_name, questions]
-    required_arguments: [agent_name, questions]
-  agent-session.pending-child-question-reminder:
+      Agent {asker_name} is waiting for your reply to ask {request_id}:
+      {message}
+      Use reply with the request_id shown above and a nonblank plain-text message. Reply settles the waiting ask immediately; do not wait until your final response. Use ask, not question, to ask another agent.
+    allowed_arguments: [asker_name, request_id, message]
+    required_arguments: [asker_name, request_id, message]
+  agent-session.pending-ask-reminder:
     template: |-
-      This turn must not exit while direct child agents are waiting for answers.{children}
-      Use answer for every listed child before finishing this turn. Each request remains pending until one nonblank textual answer is submitted for every question in the order shown.
-    allowed_arguments: [children]
-    required_arguments: [children]
+      This turn must not exit while agents are waiting for replies to asks.{requests}
+      Use reply with the exact request_id and a nonblank plain-text message for every listed ask before finishing this turn. Each ask remains pending until replied to, withdrawn, or closed. Reply to pending asks before issuing an ask that would create a cycle.
+    allowed_arguments: [requests]
+    required_arguments: [requests]
   agent-session.active-work-reminder:
     template: |-
       This turn must not exit while direct subagents, AgentTask graphs, or processes are still running.{active_work}
@@ -445,11 +445,11 @@ prompt_templates:
     allowed_arguments: []
     required_arguments: []
   agent-session.final-request:
-    template: 'This is the final provider request allowed for the current turn. Tools are unavailable except the settlement tools (wait, agent_send, interrupt_process, agent_status, answer, question). Do not start new work. Settle anything still running if needed, then provide the best possible final answer using the information already available.'
+    template: 'This is the final provider request allowed for the current turn. Tools are unavailable except the settlement tools (wait, agent_send, interrupt_process, agent_status, ask, reply, question). Do not start new work. Settle anything still running if needed, then provide the best possible final answer using the information already available.'
     allowed_arguments: []
     required_arguments: []
   agent-session.final-request-interrupted:
-    template: 'This is the final provider request allowed for the current turn because the turn was interrupted. Tools are unavailable except the settlement tools (wait, agent_send, interrupt_process, agent_status, answer, question). Do not start new work. Settle anything still running if needed, then provide the best possible final answer using the information already available.'
+    template: 'This is the final provider request allowed for the current turn because the turn was interrupted. Tools are unavailable except the settlement tools (wait, agent_send, interrupt_process, agent_status, ask, reply, question). Do not start new work. Settle anything still running if needed, then provide the best possible final answer using the information already available.'
     allowed_arguments: []
     required_arguments: []
   agent-session.tools-restored:
@@ -482,10 +482,14 @@ prompt_templates:
     template: "Question: {question}\nAnswer: {answer}"
     allowed_arguments: [question, answer]
     required_arguments: [question, answer]
-  tool-result.question-replied:
-    template: 'Answered the pending question from child agent {agent_name}.'
-    allowed_arguments: [agent_name]
-    required_arguments: [agent_name]
+  tool-result.ask-reply:
+    template: '{message}'
+    allowed_arguments: [message]
+    required_arguments: [message]
+  tool-result.ask-replied:
+    template: 'Replied to ask {request_id}.'
+    allowed_arguments: [request_id]
+    required_arguments: [request_id]
   tool-result.error:
     template: 'error: {message}'
     allowed_arguments: [message]

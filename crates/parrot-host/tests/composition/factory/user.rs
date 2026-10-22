@@ -584,6 +584,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
         broker,
         templates: catalog.clone(),
         questions: Arc::new(QuestionBroker::new(None, diagnostics).unwrap()),
+        asks: Arc::new(parrot_runtime::interactions::AgentAskBroker::new()),
         permissions,
         skills,
         lifetime: Arc::new(Signal::new()),

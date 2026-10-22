@@ -282,10 +282,10 @@ fn profile_selection_allowed_tools_and_ignored_status_follow_source_validation()
     let mut node = root();
     let profile = node.get_mut("profiles").unwrap().get_mut("build").unwrap();
     profile.set("status", scalar("legacy ignored field"));
-    profile.set("allowed_tools", strings(&["question", "answer"]));
+    profile.set("allowed_tools", strings(&["ask", "reply"]));
     assert_eq!(
         read(&node).unwrap().profiles["build"].allowed_tools,
-        Some(vec!["question".to_owned(), "answer".to_owned()])
+        Some(vec!["ask".to_owned(), "reply".to_owned()])
     );
     node.get_mut("profiles")
         .unwrap()
