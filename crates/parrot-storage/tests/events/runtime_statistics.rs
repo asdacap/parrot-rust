@@ -42,6 +42,42 @@ async fn seeded(repository: &EventRepository) {
     repository.append(event, None).await.unwrap();
 }
 #[tokio::test]
+async fn runtime_statistics_progress_observes_loading_only_during_initialization() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    seeded(&repository).await;
+    repository
+        .append_usage_fact(request("usage"))
+        .await
+        .unwrap();
+    let expected = repository.replay_statistics().await.unwrap();
+    let counts = Arc::new(Mutex::new(Vec::new()));
+    let observed = counts.clone();
+    let statistics = repository
+        .get_runtime_statistics_with_progress(Some(Arc::new(move |count| {
+            observed.lock().unwrap().push(count);
+        })))
+        .await
+        .unwrap();
+    assert_eq!(*counts.lock().unwrap(), [1, 2]);
+    assert_eq!(
+        statistics.get_agent_statistics("root").capture(),
+        expected.agents["root"]
+    );
+    let cached = repository
+        .clone()
+        .get_runtime_statistics_with_progress(Some(Arc::new(|_| {
+            panic!("cached statistics must not replay events")
+        })))
+        .await
+        .unwrap();
+    let without_observer = repository.get_runtime_statistics().await.unwrap();
+    assert!(Arc::ptr_eq(&statistics, &cached));
+    assert!(Arc::ptr_eq(&statistics, &without_observer));
+    repository.database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn one_cached_t23_coordinator_real_commit_before_apply_and_publish_reopens() {
     let fixture = Fixture::new();
     let repository = fixture.repository();

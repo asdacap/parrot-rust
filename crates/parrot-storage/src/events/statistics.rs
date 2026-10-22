@@ -1,7 +1,7 @@
 //! Durable usage facts, legacy replacement projections and source replay.
 //! All functions execute inside the caller's whole repository transaction.
 
-use super::{AgentLineageRecord, EventError, SessionUsage};
+use super::{AgentLineageRecord, EventError, EventLoadProgress, SessionUsage};
 use crate::diagnostics::statistics::AgentStatisticsReplay;
 use parrot_domain::protocol::messages::parrot::{
     AgentStatisticsUpdatedEvent, Event, RequestUsageRecorded,
@@ -153,7 +153,10 @@ pub fn agent_lineage(tx: &Transaction<'_>) -> Result<Vec<AgentLineageRecord>, Ev
         .collect::<Result<_, _>>()?)
 }
 
-fn read_statistics_events(tx: &Transaction<'_>) -> Result<Vec<(i64, Event)>, EventError> {
+fn read_statistics_events(
+    tx: &Transaction<'_>,
+    progress: Option<&EventLoadProgress>,
+) -> Result<Vec<(i64, Event)>, EventError> {
     let mut read = tx.prepare("SELECT sequence, payload FROM event ORDER BY sequence;")?;
     let mut rows = read.query([])?;
     let mut events = Vec::new();
@@ -162,6 +165,14 @@ fn read_statistics_events(tx: &Transaction<'_>) -> Result<Vec<(i64, Event)>, Eve
             row.get(0)?,
             Event::parse_from_bytes(&row.get::<_, Vec<u8>>(1)?)?,
         ));
+        if let Some(progress) = progress {
+            progress(events.len());
+        }
+    }
+    if events.is_empty() {
+        if let Some(progress) = progress {
+            progress(0);
+        }
     }
     Ok(events)
 }
@@ -199,7 +210,14 @@ fn ensure_agent(
 }
 
 pub fn replay_statistics(tx: &Transaction<'_>) -> Result<AgentStatisticsReplay, EventError> {
-    let facts = read_statistics_events(tx)?;
+    replay_statistics_with_progress(tx, None)
+}
+
+pub fn replay_statistics_with_progress(
+    tx: &Transaction<'_>,
+    progress: Option<EventLoadProgress>,
+) -> Result<AgentStatisticsReplay, EventError> {
+    let facts = read_statistics_events(tx, progress.as_ref())?;
     let mut parents = HashMap::new();
     let mut parent_order = Vec::new();
     let mut agents = HashMap::new();

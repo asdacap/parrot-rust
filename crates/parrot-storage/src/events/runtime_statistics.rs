@@ -8,11 +8,19 @@ impl EventRepository {
     /// Shared by repository clones. The coordinator's synchronous append callback
     /// is used by record_usage below on a blocking-pool thread, never the executor.
     pub async fn get_runtime_statistics(&self) -> Result<Arc<UserSessionStatistics>, EventError> {
+        self.get_runtime_statistics_with_progress(None).await
+    }
+
+    /// Observes event loading only when initializing the shared coordinator.
+    pub async fn get_runtime_statistics_with_progress(
+        &self,
+        progress: Option<EventLoadProgress>,
+    ) -> Result<Arc<UserSessionStatistics>, EventError> {
         let statistics = self
             .inner
             .runtime_statistics
             .get_or_try_init(|| async {
-                let replay = self.replay_statistics().await?;
+                let replay = self.replay_statistics_with_progress(progress).await?;
                 let database = self.database().clone();
                 let context = self.context().clone();
                 let runtime = tokio::runtime::Handle::try_current()

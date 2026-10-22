@@ -3,9 +3,10 @@ use parrot_domain::protocol::messages::parrot::{
     AgentFailed, AgentFinished, AgentStarted, AgentStatisticsUpdatedEvent, Event,
     RequestUsageRecorded, ToolExecutionStarted, ToolFinished, ToolStarted,
 };
-use parrot_storage::events::{EventError, SessionUsage, record, statistics::*};
+use parrot_storage::events::{EventError, EventLoadProgress, SessionUsage, record, statistics::*};
 use protobuf::Message;
 use rusqlite::params;
+use std::sync::{Arc, Mutex};
 
 const AT: &str = "2026-01-02T03:04:05.0000000+00:00";
 fn clock() -> String {
@@ -320,6 +321,124 @@ async fn usage_projection_failures_roll_back_and_checked_totals_reject_overflow(
         })
         .await
         .unwrap();
+    repository.database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn replay_progress_observes_each_decoded_row_without_changing_statistics() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    repository
+        .transaction(|tx| {
+            for event in [
+                start("start", "agent", ""),
+                request("request", "agent", "", "repeat", 7),
+                request("duplicate", "agent", "", "repeat", 100),
+                envelope("nonusage", "observer"),
+            ] {
+                record(tx, &event, None, AT)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let expected = repository.replay_statistics().await.unwrap();
+    let counts = Arc::new(Mutex::new(Vec::new()));
+    let observed = counts.clone();
+    let progress: EventLoadProgress = Arc::new(move |count| observed.lock().unwrap().push(count));
+    let replay = repository
+        .replay_statistics_with_progress(Some(progress))
+        .await
+        .unwrap();
+    assert_eq!(*counts.lock().unwrap(), [1, 2, 3, 4]);
+    assert_eq!(replay.revision, expected.revision);
+    assert_eq!(replay.agents, expected.agents);
+    assert_eq!(replay.parents, expected.parents);
+    assert_eq!(
+        replay.incomplete_legacy_tool_counts,
+        expected.incomplete_legacy_tool_counts
+    );
+    assert_eq!(replay.agents["agent"].own.totals.input_tokens, 7);
+    repository.database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn empty_replay_progress_observes_zero_once() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    let counts = Arc::new(Mutex::new(Vec::new()));
+    let observed = counts.clone();
+    let replay = repository
+        .replay_statistics_with_progress(Some(Arc::new(move |count| {
+            observed.lock().unwrap().push(count);
+        })))
+        .await
+        .unwrap();
+    assert_eq!(*counts.lock().unwrap(), [0]);
+    assert_eq!(replay.revision, 0);
+    assert!(replay.agents.is_empty());
+    assert!(replay.parents.is_empty());
+    assert!(replay.incomplete_legacy_tool_counts.is_empty());
+    repository.database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn replay_progress_stops_before_malformed_row_without_reporting_empty_success() {
+    for malformed in [0, 2] {
+        let fixture = Fixture::new();
+        let repository = fixture.repository();
+        repository
+            .transaction(move |tx| {
+                for index in 0..4 {
+                    record(tx, &envelope(&format!("event-{index}"), "agent"), None, AT)?;
+                }
+                tx.execute(
+                    "UPDATE event SET payload = ?1 WHERE id = ?2;",
+                    params![vec![0xff_u8], format!("event-{malformed}")],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let counts = Arc::new(Mutex::new(Vec::new()));
+        let observed = counts.clone();
+        assert!(
+            repository
+                .replay_statistics_with_progress(Some(Arc::new(move |count| {
+                    observed.lock().unwrap().push(count);
+                })))
+                .await
+                .is_err()
+        );
+        assert_eq!(*counts.lock().unwrap(), (1..=malformed).collect::<Vec<_>>());
+        assert!(repository.replay_statistics().await.is_err());
+        repository.database().close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn replay_progress_counts_are_not_a_replay_success_marker() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    repository
+        .transaction(|tx| {
+            record(tx, &start("first", "agent", "parent"), None, AT)?;
+            record(tx, &start("conflict", "agent", "other-parent"), None, AT)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let counts = Arc::new(Mutex::new(Vec::new()));
+    let observed = counts.clone();
+    assert!(matches!(
+        repository
+            .replay_statistics_with_progress(Some(Arc::new(move |count| {
+                observed.lock().unwrap().push(count);
+            })))
+            .await,
+        Err(EventError::Invalid(_))
+    ));
+    assert_eq!(*counts.lock().unwrap(), [1, 2]);
     repository.database().close().await.unwrap();
 }
 

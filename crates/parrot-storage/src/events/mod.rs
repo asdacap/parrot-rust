@@ -23,6 +23,10 @@ use protobuf::Message;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Observes cumulative decoded event counts, including zero for an empty replay.
+/// Counts do not indicate that statistics replay or restoration has completed.
+pub type EventLoadProgress = Arc<dyn Fn(usize) + Send + Sync>;
+
 /// Injected only for source-equivalent ID/time generation and deterministic captures.
 #[derive(Clone)]
 pub struct RepositoryContext {
