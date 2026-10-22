@@ -779,6 +779,7 @@ pub struct Fixture {
     pub service: Arc<ParrotService>,
     pub factory: Arc<Factory>,
     pub store: Arc<SessionStore>,
+    pub admissions: Arc<SessionAdmissions>,
     pub host: Arc<Host>,
     pub claim: Arc<WorkingDirectoryClaim>,
     pub diagnostics: Arc<FileDiagnosticLog>,
@@ -856,7 +857,7 @@ impl Fixture {
         );
         let factory = Arc::new(Factory::default());
         let store = Arc::new(SessionStore::new(
-            admissions,
+            admissions.clone(),
             workspace.clone(),
             "default".into(),
             factory.clone(),
@@ -884,6 +885,7 @@ impl Fixture {
             service,
             factory,
             store,
+            admissions,
             host,
             claim,
             diagnostics,

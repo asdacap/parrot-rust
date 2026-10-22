@@ -2,7 +2,7 @@ use super::{
     ActivationStatus, AdmissionResult, ClaimDisposition, OpenIntent, OpenOperation,
     RuntimeIdentity, WorkingDirectoryClaim,
 };
-use crate::history_files::{SessionCatalog, SessionCatalogState};
+use crate::history_files::{SessionCatalog, SessionCatalogEntry, SessionCatalogState};
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::values::identifiers::UserSessionId;
 use std::collections::BTreeMap;
@@ -205,14 +205,7 @@ impl SessionAdmissions {
         id: &UserSessionId,
         take_over: bool,
     ) -> io::Result<SessionAdmission> {
-        let current = self.roots.current.join("sessions").join(id.value());
-        let origin = if directory_exists(&current)? || !self.legacy_path_read_fallback() {
-            RootOrigin::Current
-        } else if directory_exists(&self.roots.legacy.join("sessions").join(id.value()))? {
-            RootOrigin::Legacy
-        } else {
-            RootOrigin::Current
-        };
+        let origin = self.resume_origin(id)?;
         let root = self.selected_root(id, origin)?;
         if let Some(disposition) = self.safety(id, workspace, take_over)? {
             return Ok(refused(root, disposition, id));
@@ -222,6 +215,23 @@ impl SessionAdmissions {
             selected_root: Some(root),
             admission: claim.resume(workspace, id, take_over)?,
         })
+    }
+
+    /// Read metadata from the same eligible root that a resume would select.
+    pub fn resume_metadata(&self, id: &UserSessionId) -> io::Result<Option<SessionCatalogEntry>> {
+        let origin = self.resume_origin(id)?;
+        Ok(SessionCatalog::new(self.claim(origin).state_directory()).find(id))
+    }
+
+    fn resume_origin(&self, id: &UserSessionId) -> io::Result<RootOrigin> {
+        let current = self.roots.current.join("sessions").join(id.value());
+        if directory_exists(&current)? || !self.legacy_path_read_fallback() {
+            Ok(RootOrigin::Current)
+        } else if directory_exists(&self.roots.legacy.join("sessions").join(id.value()))? {
+            Ok(RootOrigin::Legacy)
+        } else {
+            Ok(RootOrigin::Current)
+        }
     }
 
     fn claim(&self, origin: RootOrigin) -> &WorkingDirectoryClaim {

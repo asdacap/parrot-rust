@@ -323,8 +323,9 @@ impl ParrotService {
                 .lock()
                 .expect("protocol trace poisoned") = Some(id.value().into());
             let metadata = self
-                .catalog
-                .find(&id)
+                .store
+                .resume_metadata(&id)
+                .map_err(|error| store_error(error, true))?
                 .ok_or_else(|| RpcError::new(RpcCode::NotFound, format!("no user session {id}")))?;
             if metadata.state == SessionCatalogState::Corrupt {
                 return Err(RpcError::new(

@@ -1976,6 +1976,133 @@ async fn closed_storage_session_resumes_exact_identity_and_new_create_is_always_
     assert_eq!(SessionCatalog::new(&f.state).list().len(), 2);
 }
 
+#[tokio::test]
+async fn legacy_only_resume_uses_eligible_metadata_and_preserves_validation_and_history() {
+    let f = Fixture::new();
+    f.admissions.set_legacy_path_read_fallback(true);
+    let original = f.create().await;
+    let id = original.id();
+    let sent = f
+        .service
+        .send_message(&prompt(&id, "before-legacy-resume"), active())
+        .await
+        .unwrap();
+    f.close().await;
+    let legacy = f.root.join("legacy/sessions").join(&id);
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::rename(f.state.join("sessions").join(&id), &legacy).unwrap();
+    std::fs::rename(f.state.join("owners"), f.root.join("legacy/owners")).unwrap();
+    let discovered = f.store.discover_latest().unwrap();
+    assert_eq!(discovered.selected_root.unwrap().path(), legacy);
+    let service = f.new_service();
+    let request = wire::ResumeSessionRequest {
+        user_session_id: id.clone(),
+        working_directory: f.workspace.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
+    let metadata = std::fs::read(legacy.join("meta.json")).unwrap();
+    std::fs::write(legacy.join("meta.json"), "not json").unwrap();
+    let error = bounded(service.resume_session(&request, active()))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RpcCode::FailedPrecondition);
+    assert_eq!(error.message, "session metadata is corrupt");
+    std::fs::write(legacy.join("meta.json"), metadata).unwrap();
+    let other = f.root.join("other-workspace");
+    std::fs::create_dir(&other).unwrap();
+    code(
+        bounded(service.resume_session(
+            &wire::ResumeSessionRequest {
+                working_directory: other.to_string_lossy().into_owned(),
+                ..request.clone()
+            },
+            active(),
+        ))
+        .await,
+        RpcCode::FailedPrecondition,
+    );
+    let resumed = bounded(service.resume_session(&request, active()))
+        .await
+        .unwrap();
+    assert_eq!(resumed.id, id);
+    assert!(resumed.loaded);
+    let retry = service
+        .send_message(&prompt(&id, "before-legacy-resume"), active())
+        .await
+        .unwrap();
+    assert_eq!(retry.input_id, sent.input_id);
+    assert!(!retry.created);
+    let hosted = f.factory.created.lock().unwrap().get(&id).unwrap().clone();
+    assert_eq!(hosted.resources.selected_root().path(), legacy);
+    assert!(!f.state.join("sessions").join(&id).exists());
+    bounded(service.close()).await.unwrap();
+}
+
+#[tokio::test]
+async fn legacy_only_resume_is_not_found_when_fallback_is_disabled() {
+    let f = Fixture::new();
+    let id = f.create().await.id();
+    f.close().await;
+    let legacy = f.root.join("legacy/sessions").join(&id);
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::rename(f.state.join("sessions").join(&id), &legacy).unwrap();
+    std::fs::rename(f.state.join("owners"), f.root.join("legacy/owners")).unwrap();
+    let service = f.new_service();
+    code(
+        bounded(service.resume_session(
+            &wire::ResumeSessionRequest {
+                user_session_id: id,
+                working_directory: f.workspace.to_string_lossy().into_owned(),
+                ..Default::default()
+            },
+            active(),
+        ))
+        .await,
+        RpcCode::NotFound,
+    );
+    bounded(service.close()).await.unwrap();
+}
+
+#[tokio::test]
+async fn resume_metadata_prefers_current_even_when_current_metadata_is_corrupt() {
+    for corrupt_current in [false, true] {
+        let f = Fixture::new();
+        f.admissions.set_legacy_path_read_fallback(true);
+        let id = f.create().await.id();
+        f.close().await;
+        let current = f.state.join("sessions").join(&id);
+        let legacy = f.root.join("legacy/sessions").join(&id);
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("meta.json"),
+            std::fs::read(current.join("meta.json")).unwrap(),
+        )
+        .unwrap();
+        let corrupt = if corrupt_current { &current } else { &legacy };
+        std::fs::write(corrupt.join("meta.json"), "not json").unwrap();
+        let service = f.new_service();
+        let result = bounded(service.resume_session(
+            &wire::ResumeSessionRequest {
+                user_session_id: id.clone(),
+                working_directory: f.workspace.to_string_lossy().into_owned(),
+                ..Default::default()
+            },
+            active(),
+        ))
+        .await;
+        if corrupt_current {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, RpcCode::FailedPrecondition);
+            assert_eq!(error.message, "session metadata is corrupt");
+        } else {
+            assert_eq!(result.unwrap().id, id);
+            let hosted = f.factory.created.lock().unwrap().get(&id).unwrap().clone();
+            assert_eq!(hosted.resources.selected_root().path(), current);
+        }
+        bounded(service.close()).await.unwrap();
+    }
+}
+
 // Source model cases are thoroughly owned by models.rs; this only checks that
 // all model RPC entry points of actual ParrotService delegate to those concrete
 // operations and that session-scoped presets use the selected live owner.

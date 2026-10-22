@@ -4,7 +4,7 @@ use crate::artifacts::{ImageArtifactRepository, ImageArtifactStore};
 use crate::database::{DatabaseError, SessionDatabase};
 use crate::diagnostics::{DiagnosticEvent, DiagnosticSeverity, FileDiagnosticLog};
 use crate::events::{EventRepository, RepositoryContext};
-use crate::history_files::{SessionIndex, SessionMeta};
+use crate::history_files::{SessionCatalogEntry, SessionIndex, SessionMeta};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::paths::SelectedSessionRoot;
 use parrot_domain::values::identifiers::UserSessionId;
@@ -755,6 +755,14 @@ impl SessionStore {
             self.acquire(Some(&id), || self.admissions.create_fresh(&workspace, &id))?;
         self.open_admitted(workspace, admission, Some(model), mode, interactive)
             .await
+    }
+    pub fn resume_metadata(
+        &self,
+        id: &UserSessionId,
+    ) -> Result<Option<SessionCatalogEntry>, SessionStoreError> {
+        self.admissions
+            .resume_metadata(id)
+            .map_err(SessionStoreError::failure)
     }
     pub async fn resume(
         &self,
