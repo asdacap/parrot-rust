@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
 bytes = "=1.12.1"
 protobuf = "=3.7.2"
 tiktoken-rs = "=0.12.1"

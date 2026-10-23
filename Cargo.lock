@@ -1448,6 +1448,7 @@ dependencies = [
  "protobuf",
  "protobuf-codegen",
  "protobuf-parse",
+ "serde",
  "tiktoken-rs",
  "tonic",
  "tonic-build",

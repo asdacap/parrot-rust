@@ -1,0 +1,15 @@
+# Agent-local recovery snapshots
+
+`FileAgentStateStore` persists one versioned `agent-state.json` in an existing private agent directory. It does not construct agents, activate tasks, or recover conversations. The domain `AgentStateStore` trait is the boundary used by composition and runtime consumers.
+
+Create one store per agent scope and share it between section owners. `initialize` only accepts an absent snapshot. `load` returns `None` for absence and distinct errors for corrupt data, unsupported versions, and another owner's state. `update` holds the scoped gate across read, section replacement, revision increment, and atomic write. Section updates preserve other sections. Callers updating the same section must coordinate their own transitions.
+
+Operations return `BoxFuture` and require a Tokio runtime. Once polled, an operation acquires the scoped async gate and submits a blocking worker. That submission admits the operation. Dropping the observer before admission prevents it from starting; after admission the worker owns the gate until the operation finishes, even if its observer is dropped. Filesystem I/O and serialization run on blocking workers. No operation starts an agent execution or emits a notification.
+
+The typed snapshot contains the owner's reconstruction descriptor, references to retained direct children, full task graphs and runner checkpoints, and execution/result/notification correlations. Each child's snapshot belongs in that child's own directory. A parent stores references, never copies of descendant snapshots. History message IDs and sequence numbers refer to durable conversation history rather than duplicating conversation bodies.
+
+Writes use `agent-state.json.tmp` in the same directory, sync its contents, and rename it over the destination. Stale staging files are discarded on the next write, not interpreted as committed snapshots. A pre-commit failure leaves the previous snapshot intact. On Unix the directory is opened component-by-component without following links, all operations use its pinned directory descriptor, the snapshot is private, and the containing directory is synced after rename. A directory-sync error after rename means the new snapshot may already be visible; callers must treat that error as uncertain durability, not retry by launching unrecorded work. Other platforms use existing path/link validation conventions and do not claim Unix descriptor-level race confinement or directory-sync durability.
+
+The file and staging basename are reserved against child-agent names. Existing data is never replaced merely because decoding failed. There is no cross-process writer coordination; the selected-session owner and the single scoped store remain responsible for exclusive lifecycle ownership.
+
+This file is an internal recovery format. Its task payload serialization is not the `set_agent_tasks` input artifact format. Runtime consumers must record stable intent before execution admission and reconcile snapshots with SQLite history at restart. Atomic file replacement is not a transaction with conversation storage and does not promise exactly-once external tool effects.
