@@ -4,6 +4,155 @@ use parrot_foundation::paths::AgentScratchDirectory;
 use parrot_runtime::agent_turn::lifecycle::{AgentSession, Execution};
 use parrot_storage::agent_state::FileAgentStateStore;
 
+struct CounterTool {
+    recording: RecordingTool,
+    effects: Arc<AtomicUsize>,
+}
+impl Tool for CounterTool {
+    type Definition = ToolMetadata;
+    type Invocation = ToolInvocation;
+    type Selection = TurnSelection<Security>;
+    type Security = SharedSecurity<Security>;
+    type Output = ToolOutput;
+    type Error = ToolFailure;
+    fn definition(&self) -> &ToolMetadata {
+        self.recording.definition()
+    }
+    fn parallel_safety(&self, invocation: &ToolInvocation) -> ParallelSafety {
+        self.recording.parallel_safety(invocation)
+    }
+    fn enabled_after_interruption(&self) -> bool {
+        self.recording.enabled_after_interruption()
+    }
+    fn invoke<'a>(
+        &'a self,
+        invocation: ToolInvocation,
+        context: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+    ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
+        Box::pin(async move {
+            self.effects.fetch_add(1, Ordering::SeqCst);
+            self.recording.invoke(invocation, context).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn uncommitted_tool_effect_can_repeat_but_committed_terminal_survives_reopening() {
+    let fixture = Arc::new(Fixture::new());
+    fixture.batch(vec![call("effect", "counter")]).await;
+    let effects = Arc::new(AtomicUsize::new(0));
+    let gate = Gate::new();
+    let mut recording = RecordingTool::new(&fixture, "counter", ParallelSafety::Sequential);
+    recording.gate = Some(gate.clone());
+    let tool = Arc::new(CounterTool {
+        recording,
+        effects: effects.clone(),
+    });
+    let mut harness = Harness::new(&fixture, vec![ToolHandle::Ordinary(tool.clone())]).await;
+    let task_fixture = fixture.clone();
+    let mut tasks = tokio::task::JoinSet::new();
+    tasks.spawn(async move { harness.run(&task_fixture, &NeverCancelled).await });
+    gate.entered().await;
+    tasks.abort_all();
+    assert!(
+        bounded(tasks.join_next())
+            .await
+            .unwrap()
+            .unwrap_err()
+            .is_cancelled()
+    );
+    assert!(tasks.is_empty());
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    assert!(tool.recording.completed.lock().unwrap().is_empty());
+    assert!(
+        fixture
+            .history
+            .tool_terminals_of_calls(vec!["effect".into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        fixture
+            .events()
+            .await
+            .iter()
+            .filter(|event| event.has_tool_started())
+            .count(),
+        1
+    );
+    drop(tool);
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+
+    let repository = Fixture::open(&fixture.path);
+    let restarted = Fixture {
+        path: fixture.path.clone(),
+        history: Fixture::history_for(&fixture.path, &repository),
+        repository,
+    };
+    let tool = Arc::new(CounterTool {
+        recording: RecordingTool::new(&restarted, "counter", ParallelSafety::Sequential),
+        effects: effects.clone(),
+    });
+    let mut harness = Harness::new(&restarted, vec![ToolHandle::Ordinary(tool.clone())]).await;
+    bounded(harness.run(&restarted, &NeverCancelled))
+        .await
+        .unwrap();
+    assert_eq!(effects.load(Ordering::SeqCst), 2);
+    assert_eq!(*tool.recording.completed.lock().unwrap(), ["effect"]);
+    let terminals = restarted
+        .history
+        .tool_terminals_of_calls(vec!["effect".into()])
+        .await
+        .unwrap();
+    assert_eq!(terminals.len(), 1);
+    assert_eq!(terminals[0].status, ToolExecutionStatus::Finished);
+    assert_eq!(terminals[0].message, "result:counter");
+    drop(harness);
+    drop(tool);
+    restarted
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+
+    let repository = Fixture::open(&fixture.path);
+    let recovered = Fixture {
+        path: fixture.path.clone(),
+        history: Fixture::history_for(&fixture.path, &repository),
+        repository,
+    };
+    let tool = Arc::new(CounterTool {
+        recording: RecordingTool::new(&recovered, "counter", ParallelSafety::Sequential),
+        effects: effects.clone(),
+    });
+    let mut harness = Harness::new(&recovered, vec![ToolHandle::Ordinary(tool.clone())]).await;
+    bounded(harness.run(&recovered, &NeverCancelled))
+        .await
+        .unwrap();
+    assert_eq!(effects.load(Ordering::SeqCst), 2);
+    assert!(tool.recording.calls.lock().unwrap().is_empty());
+    assert_eq!(
+        recovered
+            .history
+            .conversation()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|item| item.message.role == MessageRole::Tool)
+            .count(),
+        1
+    );
+}
+
 #[tokio::test]
 async fn owned_recovery_restores_settled_tool_and_invokes_only_unresolved_call() {
     let fixture = Fixture::new();
