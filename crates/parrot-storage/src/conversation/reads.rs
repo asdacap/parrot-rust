@@ -145,6 +145,20 @@ impl ConversationRepository {
         }).await
     }
 
+    /// Checks pending input or owned promoted input beyond the sealed conversation boundary.
+    pub async fn has_recovery_work_after(
+        &self,
+        agent: String,
+        watermark: i64,
+    ) -> Result<bool, EventError> {
+        self.events.transaction(move |tx| {
+            Ok(tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'pending') OR (EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'promoted') AND COALESCE((SELECT item.sequence > ?2 AND item.role IN ('user', 'tool') FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.role != 'system' AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence DESC LIMIT 1), 0));",
+                params![agent, watermark], |row| row.get(0),
+            )?)
+        }).await
+    }
+
     /// Reads one exact execution result reference without scanning its history.
     pub async fn execution_message(
         &self,

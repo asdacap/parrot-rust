@@ -225,6 +225,8 @@ pub struct ExecutionTerminal {
     pub event_id: String,
     /// The authoritative conversation result reference, not the lifecycle event.
     pub history_sequence: i64,
+    /// The conversation boundary sealed by this terminal, captured before later input.
+    pub recovery_watermark: i64,
     pub outcome: ExecutionOutcome,
 }
 

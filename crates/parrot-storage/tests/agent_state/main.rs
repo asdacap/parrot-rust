@@ -153,6 +153,7 @@ fn snapshot() -> AgentStateSnapshot {
         terminal: Some(ExecutionTerminal {
             event_id: "execution-1.finished".into(),
             history_sequence: 93,
+            recovery_watermark: 95,
             outcome: ExecutionOutcome::Failed("failure".into()),
         }),
         parent_notification: Some(notification()),

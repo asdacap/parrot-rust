@@ -224,6 +224,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     }),
                     startup: Completion::new(),
                     result_reference: Mutex::new(ExecutionResultReference::Missing),
+                    recovery_watermark: Mutex::new(0),
                 });
                 let selected = self.wake_locked(&mut state, None, Some(owned.clone())).1;
                 (owned, selected)

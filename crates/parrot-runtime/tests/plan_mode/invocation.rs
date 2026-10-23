@@ -65,7 +65,7 @@ impl DrainBackend for Consumer {
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async { Ok(()) })
     }
-    fn has_recovery_work(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+    fn has_recovery_work_after(&self, _: i64) -> BoxFuture<'_, Result<bool, LifecycleError>> {
         self.has_pending_inputs()
     }
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
@@ -116,6 +116,7 @@ impl DrainBackend for Consumer {
             if let Err(error) = selected.security.check_write(&self.target) {
                 return Ok(DrainPass {
                     execution: Execution::failed(error),
+                    recovery_watermark: 0,
                     result_reference: ExecutionResultReference::Missing,
                 });
             }
@@ -127,6 +128,7 @@ impl DrainBackend for Consumer {
             self.expected.trace.lock().unwrap().push("joined".into());
             Ok(DrainPass {
                 execution: Execution::succeeded("done"),
+                recovery_watermark: 0,
                 result_reference: ExecutionResultReference::Missing,
             })
         })
@@ -156,7 +158,7 @@ impl DrainBackend for Consumer {
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         panic!("fixture does not use durable owned execution")
     }
-    fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
+    fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<i64, LifecycleError>> {
         panic!("fixture does not use durable owned execution")
     }
     fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
@@ -173,6 +175,7 @@ impl DrainBackend for Consumer {
         _: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
         _: &'a mut Execution,
         _: ExecutionResultReference,
+        _: i64,
     ) -> BoxFuture<'a, Result<parrot_domain::values::agent_state::ExecutionTerminal, LifecycleError>>
     {
         panic!("fixture does not use durable owned execution")

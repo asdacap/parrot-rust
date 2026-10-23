@@ -1391,12 +1391,16 @@ where
             Ok(())
         })
     }
-    fn has_recovery_work(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+    fn has_recovery_work_after(
+        &self,
+        watermark: i64,
+    ) -> BoxFuture<'_, Result<bool, LifecycleError>> {
         Box::pin(async move {
-            if self.state.lock().await.conversation.is_answerable() {
-                return Ok(true);
-            }
-            self.has_pending_inputs().await
+            self.history
+                .repository()
+                .has_recovery_work_after(self.identity.session_id.clone(), watermark)
+                .await
+                .map_err(|error| LifecycleError::Failed(error.to_string()))
         })
     }
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
@@ -1527,9 +1531,11 @@ where
             } else {
                 ExecutionResultReference::Missing
             };
+            let recovery_watermark = self.execution_watermark().await?;
             Ok(DrainPass {
                 execution,
                 result_reference,
+                recovery_watermark,
             })
         })
     }
@@ -1561,9 +1567,10 @@ where
     fn cancel_execution_input(
         &self,
         message_id: &str,
-    ) -> BoxFuture<'_, Result<(), LifecycleError>> {
+    ) -> BoxFuture<'_, Result<i64, LifecycleError>> {
         let message_id = message_id.to_owned();
         Box::pin(async move {
+            let _state = self.state.lock().await;
             if let Some(input) = self
                 .history
                 .repository()
@@ -1574,7 +1581,7 @@ where
             {
                 self.cancel_pending_input(input.id).await?;
             }
-            Ok(())
+            self.execution_watermark().await
         })
     }
     fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
@@ -1628,6 +1635,7 @@ where
         checkpoint: &'a ExecutionCheckpoint,
         execution: &'a mut Execution,
         reference: ExecutionResultReference,
+        recovery_watermark: i64,
     ) -> BoxFuture<'a, Result<ExecutionTerminal, LifecycleError>> {
         Box::pin(async move {
             let candidate = match reference {
@@ -1658,6 +1666,7 @@ where
             Ok(ExecutionTerminal {
                 event_id: format!("{}.finished", checkpoint.execution_id),
                 history_sequence: candidate.as_ref().map_or(0, |item| item.sequence),
+                recovery_watermark,
                 outcome: match execution.status {
                     ExecutionStatus::Succeeded => ExecutionOutcome::Succeeded,
                     ExecutionStatus::Failed => ExecutionOutcome::Failed(execution.error.clone()),

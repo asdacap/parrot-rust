@@ -9,6 +9,8 @@ mod cancellation;
 mod claim_regressions;
 #[path = "owned_claims.rs"]
 mod claims;
+#[path = "recovery_provenance.rs"]
+mod provenance;
 #[path = "startup_activation.rs"]
 mod startup;
 
@@ -1423,7 +1425,8 @@ async fn success_without_a_captured_assistant_reference_fails_before_snapshot_co
             .capture_execution(
                 &checkpoint,
                 &mut execution,
-                ExecutionResultReference::Missing
+                ExecutionResultReference::Missing,
+                0,
             )
             .await
             .is_err()

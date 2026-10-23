@@ -206,7 +206,7 @@ impl DrainBackend for FakeBackend {
         })
     }
 
-    fn has_recovery_work(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+    fn has_recovery_work_after(&self, _: i64) -> BoxFuture<'_, Result<bool, LifecycleError>> {
         self.has_pending_inputs()
     }
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
@@ -271,7 +271,7 @@ impl DrainBackend for FakeBackend {
                         plan.cancellation_join.wait().await;
                         self.active.fetch_sub(1, Ordering::SeqCst);
                         plan.exited.release();
-                        return Ok(DrainPass { execution: Execution::canceled(), result_reference: ExecutionResultReference::Missing });
+                        return Ok(DrainPass { execution: Execution::canceled(), recovery_watermark: 0, result_reference: ExecutionResultReference::Missing });
                     }
                 }
             } else {
@@ -289,6 +289,7 @@ impl DrainBackend for FakeBackend {
                     || Execution::succeeded("answer"),
                     |plan| plan.result.clone(),
                 ),
+                recovery_watermark: 0,
                 result_reference: ExecutionResultReference::Missing,
             })
         })
@@ -340,7 +341,7 @@ impl DrainBackend for FakeBackend {
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async { panic!("not a persistent backend") })
     }
-    fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
+    fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<i64, LifecycleError>> {
         Box::pin(async { panic!("not a persistent backend") })
     }
     fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
@@ -357,6 +358,7 @@ impl DrainBackend for FakeBackend {
         _: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
         _: &'a mut Execution,
         _: ExecutionResultReference,
+        _: i64,
     ) -> BoxFuture<'a, Result<parrot_domain::values::agent_state::ExecutionTerminal, LifecycleError>>
     {
         Box::pin(async { panic!("not a persistent backend") })

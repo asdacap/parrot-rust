@@ -273,6 +273,7 @@ impl<B: DrainBackend> AgentSession<B> {
         &self,
         execution: &mut Execution,
         reference: ExecutionResultReference,
+        recovery_watermark: i64,
     ) -> Result<bool, LifecycleError> {
         let Some(store) = &self.inner.recovery else {
             return Ok(false);
@@ -289,7 +290,12 @@ impl<B: DrainBackend> AgentSession<B> {
         let terminal = self
             .inner
             .backend
-            .capture_execution(&checkpoint, execution, reference)
+            .capture_execution(
+                &checkpoint,
+                execution,
+                reference,
+                recovery_watermark.max(checkpoint.history_watermark),
+            )
             .await?;
         *execution = bounded(execution.clone());
         checkpoint.phase = if execution.status == ExecutionStatus::Canceled {
@@ -429,6 +435,7 @@ impl<B: DrainBackend> AgentSession<B> {
             cancellation,
             startup: Completion::new(),
             result_reference: Mutex::new(ExecutionResultReference::Missing),
+            recovery_watermark: Mutex::new(0),
         });
         let selected = self.wake_locked(state, None, Some(owned.clone())).1;
         let session = self.clone();
@@ -551,15 +558,20 @@ impl<B: DrainBackend> AgentSession<B> {
             return Ok(execution);
         }
         if checkpoint.phase == ExecutionPhase::Canceled {
-            self.inner
+            let recovery_watermark = self
+                .inner
                 .backend
                 .cancel_execution_input(&checkpoint.initial_message_id)
                 .await?;
             owned.startup.finish(Ok(false));
             let _ = selected.join().await;
             let mut execution = Execution::canceled();
-            self.finish_durable_execution(&mut execution, ExecutionResultReference::Missing)
-                .await?;
+            self.finish_durable_execution(
+                &mut execution,
+                ExecutionResultReference::Missing,
+                recovery_watermark,
+            )
+            .await?;
             reserved.finish(Ok(()));
             return Ok(execution);
         }
@@ -609,7 +621,11 @@ impl<B: DrainBackend> AgentSession<B> {
             Ok(())
         });
         let execution = self
-            .finish_execution(selected.join().await, owned.capture_result_reference())
+            .finish_execution(
+                selected.join().await,
+                owned.capture_result_reference(),
+                owned.capture_recovery_watermark(),
+            )
             .await;
         Ok(execution)
     }
