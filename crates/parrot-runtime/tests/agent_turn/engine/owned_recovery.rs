@@ -5,6 +5,8 @@ use parrot_storage::agent_state::FileAgentStateStore;
 
 #[path = "owned_cancellation.rs"]
 mod cancellation;
+#[path = "owned_claim_regressions.rs"]
+mod claim_regressions;
 #[path = "owned_claims.rs"]
 mod claims;
 

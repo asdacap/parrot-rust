@@ -3,6 +3,7 @@ use parrot_domain::values::identifiers::Identifier;
 
 enum RecoveryRequest {
     Resume,
+    ResumeClaimed(Arc<dyn Cancellation>),
     Cancel(String),
 }
 
@@ -283,11 +284,12 @@ impl<B: DrainBackend> AgentSession<B> {
         self.start_owned_recovery_locked(&mut state, request)
     }
 
-    pub(super) fn recover_owned_locked(
+    pub(super) fn recover_claimed_locked(
         &self,
         state: &mut State<B>,
+        caller: Arc<dyn Cancellation>,
     ) -> Result<ExecutionHandle, LifecycleError> {
-        self.start_owned_recovery_locked(state, RecoveryRequest::Resume)
+        self.start_owned_recovery_locked(state, RecoveryRequest::ResumeClaimed(caller))
     }
 
     fn start_owned_recovery_locked(
@@ -319,9 +321,19 @@ impl<B: DrainBackend> AgentSession<B> {
         state.execution = handle.clone();
         let claim_ready = Completion::new();
         state.execution_claim = claim_ready.clone();
+        let stop = Arc::new(Signal::new());
+        state.execution_stop = Some(stop.clone());
+        let cancellation: Arc<dyn Cancellation> = match &request {
+            RecoveryRequest::ResumeClaimed(caller) => Arc::new(LinkedCancellation {
+                lifetime: caller.clone(),
+                stop,
+                owner: None,
+            }),
+            _ => stop,
+        };
         let owned = Arc::new(OwnedReservation {
             admission: Mutex::new(None),
-            cancellation: Arc::new(Signal::new()),
+            cancellation,
             startup: Completion::new(),
             result_reference: Mutex::new(ExecutionResultReference::Missing),
         });
@@ -389,7 +401,7 @@ impl<B: DrainBackend> AgentSession<B> {
             .finish(Ok(saved
                 .as_ref()
                 .and_then(|checkpoint| checkpoint.result_claim.clone())));
-        let Some(mut checkpoint) = saved else {
+        let Some(checkpoint) = saved else {
             self.inner.state.lock().expect("session poisoned").started = false;
             return Ok(Execution::succeeded(""));
         };
@@ -405,7 +417,26 @@ impl<B: DrainBackend> AgentSession<B> {
                     .execution_finished_correlated(&execution, &checkpoint.execution_id)
                     .await?;
                 let _gate = self.inner.checkpoint_gate.lock().await;
-                if let Some(notification) = &mut checkpoint.parent_notification {
+                let mut current = self.execution_checkpoint().await?.ok_or_else(|| {
+                    LifecycleError::Failed("execution disappeared during parent delivery".into())
+                })?;
+                if current.execution_id != checkpoint.execution_id
+                    || current.initial_message_id != checkpoint.initial_message_id
+                    || current.terminal != checkpoint.terminal
+                    || current
+                        .parent_notification
+                        .as_ref()
+                        .map(|notification| &notification.message_id)
+                        != checkpoint
+                            .parent_notification
+                            .as_ref()
+                            .map(|notification| &notification.message_id)
+                {
+                    return Err(LifecycleError::Failed(
+                        "execution identity changed during parent delivery".into(),
+                    ));
+                }
+                if let Some(notification) = &mut current.parent_notification {
                     notification.admitted = true;
                     notification.delivery_error = None;
                 }
@@ -413,7 +444,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     .recovery
                     .as_ref()
                     .expect("recovery store")
-                    .update(AgentStateUpdate::Execution(Some(checkpoint)))
+                    .update(AgentStateUpdate::Execution(Some(current)))
                     .await
                     .map_err(storage_error)?;
             }

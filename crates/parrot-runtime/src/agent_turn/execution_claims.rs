@@ -115,8 +115,15 @@ impl<B: DrainBackend> AgentSession<B> {
         reserved: Arc<Completion<Result<(), LifecycleError>>>,
     ) -> Result<Execution, LifecycleError> {
         loop {
+            if caller.is_cancelled() {
+                return Err(canceled());
+            }
             let gate = self.inner.checkpoint_gate.lock().await;
-            if let Some(checkpoint) = self.execution_checkpoint().await? {
+            let saved = self.execution_checkpoint().await?;
+            if caller.is_cancelled() {
+                return Err(canceled());
+            }
+            if let Some(checkpoint) = saved {
                 if checkpoint.initial_message_id == message_id
                     && checkpoint.result_claim.as_ref() == Some(&claim)
                 {
@@ -124,11 +131,18 @@ impl<B: DrainBackend> AgentSession<B> {
                         let mut state = self.inner.state.lock().expect("session poisoned");
                         if state.started && !state.execution.is_finished() {
                             (
-                                Some((state.execution.clone(), state.execution_claim.clone())),
+                                Some((
+                                    state.execution.clone(),
+                                    state.execution_claim.clone(),
+                                    state.execution_stop.clone(),
+                                )),
                                 None,
                             )
                         } else {
-                            (None, Some(self.recover_owned_locked(&mut state)?))
+                            (
+                                None,
+                                Some(self.recover_claimed_locked(&mut state, caller.clone())?),
+                            )
                         }
                     };
                     drop(gate);
@@ -136,10 +150,28 @@ impl<B: DrainBackend> AgentSession<B> {
                         reserved.finish(Ok(()));
                         return restored.join().await;
                     }
-                    if let Some((active, ready)) = active {
-                        if ready.wait().await?.as_ref() == Some(&claim) {
+                    if let Some((active, ready, stop)) = active {
+                        let actual_claim = tokio::select! {
+                            result = ready.wait() => result?,
+                            _ = caller.cancelled() => {
+                                reserved.finish(Err(canceled()));
+                                if let Some(stop) = stop { stop.cancel(); return active.join().await; }
+                                let _ = active.join().await;
+                                return Err(canceled());
+                            }
+                        };
+                        if actual_claim.as_ref() == Some(&claim) {
                             reserved.finish(Ok(()));
-                            return active.join().await;
+                            let stop = stop.ok_or_else(|| {
+                                LifecycleError::Failed(
+                                    "claimed execution has no cancellation owner".into(),
+                                )
+                            })?;
+                            return tokio::select! {
+                                biased;
+                                result = active.join() => result,
+                                _ = caller.cancelled() => { stop.cancel(); active.join().await }
+                            };
                         }
                         let _ = active.join().await;
                         continue;
@@ -173,9 +205,15 @@ impl<B: DrainBackend> AgentSession<B> {
                     completion: completion.clone(),
                 };
                 state.execution_claim = Completion::ready(Ok(Some(claim.clone())));
+                let stop = Arc::new(Signal::new());
+                state.execution_stop = Some(stop.clone());
                 let owned = Arc::new(OwnedReservation {
                     admission: Mutex::new(None),
-                    cancellation: caller,
+                    cancellation: Arc::new(LinkedCancellation {
+                        lifetime: caller,
+                        stop,
+                        owner: None,
+                    }),
                     startup: Completion::new(),
                     result_reference: Mutex::new(ExecutionResultReference::Missing),
                 });

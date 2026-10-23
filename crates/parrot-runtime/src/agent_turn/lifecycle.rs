@@ -395,6 +395,7 @@ struct State<B: DrainBackend> {
     started: bool,
     execution: ExecutionHandle,
     execution_claim: Arc<Completion<Result<Option<TaskResultClaim>, LifecycleError>>>,
+    execution_stop: Option<Arc<Signal>>,
     tail: Arc<Completion<()>>,
     incoming: Option<IncomingWait>,
     scheduled: VecDeque<WorkRequest<B>>,
@@ -541,6 +542,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     started: false,
                     execution: initial,
                     execution_claim: Completion::ready(Ok(None)),
+                    execution_stop: None,
                     tail: Completion::ready(()),
                     incoming: None,
                     scheduled: VecDeque::new(),
@@ -820,6 +822,7 @@ impl<B: DrainBackend> AgentSession<B> {
                 completion: completed.clone(),
             };
             state.execution_claim = Completion::ready(Ok(None));
+            state.execution_stop = None;
             let reservation = self.inner.recovery.as_ref().map(|_| {
                 let owned = Arc::new(OwnedReservation {
                     admission: Mutex::new(None),
@@ -1045,6 +1048,7 @@ impl<B: DrainBackend> AgentSession<B> {
                         completion: completion.clone(),
                     };
                     state.execution_claim = Completion::ready(Ok(None));
+                    state.execution_stop = None;
                     // Reserve the slot before the first asynchronous durable
                     // admission. Raw wakes must reuse this startup-gated drain,
                     // not create an unowned drain while the actor commits.
@@ -1316,10 +1320,31 @@ impl<B: DrainBackend> AgentSession<B> {
         state.scheduled.push_back(WorkRequest {
             execute: Box::new(execute),
             cancellation: caller,
-            completion,
+            completion: completion.clone(),
         });
         drop(state);
-        self.wake(None);
+        let wake = self.wake(None).1;
+        let session = self.clone();
+        let mut state = self.inner.state.lock().expect("session poisoned");
+        spawn_tracked(&mut state, async move {
+            let failure = match wake.join().await {
+                Err(error) => Some(error),
+                Ok(execution) if execution.status == ExecutionStatus::Canceled => Some(canceled()),
+                Ok(_) => None,
+            };
+            if let Some(error) = failure {
+                let mut state = session.inner.state.lock().expect("session poisoned");
+                if let Some(index) = state
+                    .scheduled
+                    .iter()
+                    .position(|request| Arc::ptr_eq(&request.completion, &completion))
+                {
+                    if let Some(request) = state.scheduled.remove(index) {
+                        request.completion.finish(Err(error));
+                    }
+                }
+            }
+        });
         Ok(handle)
     }
 
