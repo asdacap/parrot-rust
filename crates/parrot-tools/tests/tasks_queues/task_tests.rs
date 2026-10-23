@@ -228,6 +228,7 @@ struct Selection;
 struct RecordingController {
     updates: Mutex<Vec<TaskUpdate<Arc<Selection>>>>,
     attempts: AtomicUsize,
+    lookups: AtomicUsize,
     queries: Mutex<Vec<TaskQuery>>,
     tasks: Vec<Task>,
     update_failure: Option<OperationError<ToolFailure>>,
@@ -241,6 +242,28 @@ impl TaskController for RecordingController {
     type Snapshot = TaskSnapshot;
     type Error = ToolFailure;
 
+    fn lookup_accepted<'a>(
+        &'a self,
+        identity: &'a parrot_domain::values::agent_tasks::TaskCallIdentity,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<Option<usize>, ToolFailure>> {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move {
+            cancellation
+                .check()
+                .map_err(|_| OperationError::Cancelled)?;
+            Ok(self
+                .updates
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|update| {
+                    update.history_boundary.assistant_sequence == identity.assistant_sequence
+                        && update.history_boundary.call_id == identity.call_id
+                })
+                .map(|update| update.tasks.len()))
+        })
+    }
     fn update<'a>(
         &'a self,
         update: Self::Update,
@@ -635,7 +658,8 @@ async fn set_forwards_cancelled_inline_invocation_to_controller_without_mutation
         )
         .await;
     assert_eq!(result, Err(OperationError::Cancelled));
-    assert_eq!(fixture.controller.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.controller.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.controller.attempts.load(Ordering::SeqCst), 0);
     assert!(fixture.reader.reads.lock().unwrap().is_empty());
     fixture.assert_no_update();
 }
@@ -1003,4 +1027,42 @@ fn both_task_tools_use_configured_definitions_are_sequential_and_disabled_after_
         );
         assert!(!tool.enabled_after_interruption());
     }
+}
+
+#[tokio::test]
+async fn accepted_path_replay_returns_original_count_before_any_new_argument_or_file_read() {
+    let fixture = Fixture::default();
+    let tool = fixture.tool(TaskToolKind::Set);
+    let original = tool
+        .invoke(
+            invocation(r#"{"path":"artifact.json"}"#),
+            InvocationContext::new(
+                DomainAccessSnapshot::new(false),
+                Arc::new(Selection),
+                &Never,
+            ),
+        )
+        .await
+        .unwrap();
+    for arguments in [
+        r#"{"path":"missing.json"}"#,
+        r#"{"path":"malformed.json"}"#,
+        "not JSON",
+    ] {
+        let replay = tool
+            .invoke(
+                invocation(arguments),
+                InvocationContext::new(
+                    DomainAccessSnapshot::new(true),
+                    Arc::new(Selection),
+                    &Never,
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay, original);
+    }
+    assert_eq!(fixture.reader.reads.lock().unwrap().len(), 1);
+    assert_eq!(fixture.controller.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.controller.updates.lock().unwrap().len(), 1);
 }

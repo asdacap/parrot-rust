@@ -16,6 +16,7 @@ fn config(h: &Harness, owner: &Arc<Scope<Security>>) -> SchedulerConfig<Security
     let built = h.factory.get(&owner.identity().session.name);
     SchedulerConfig {
         owner_identity: owner.identity().clone(),
+        state: owner.agent_state().clone(),
         registry: Arc::downgrade(&h.registry),
         owner_session: built.task_session.clone(),
         history: owner.history().clone(),
@@ -48,11 +49,13 @@ async fn scheduler_rejects_owner_identity_and_same_named_registered_service_mism
     let mut mismatch = config(&h, &owner);
     mismatch.owner_identity = forged;
     let error = TaskScheduler::new(mismatch)
+        .await
         .err()
         .expect("same ID is insufficient without exact owner identity");
     assert!(error.to_string().contains("does not match owner identity"));
-    let alien_service = TaskScheduler::new(config(&h, &owner)).unwrap();
-    bounded(
+    let alien_service = TaskScheduler::new(config(&h, &owner)).await.unwrap();
+    let before = owner.agent_state().load().await.unwrap().unwrap();
+    let error = bounded(
         alien_service
             .set_tasks(
                 vec![task("a")],
@@ -63,19 +66,14 @@ async fn scheduler_rejects_owner_identity_and_same_named_registered_service_mism
             .join(),
     )
     .await
-    .unwrap();
-    let tasks = alien_service.snapshot().await;
-    assert_eq!(
-        tasks[0].state,
-        parrot_domain::values::agent_tasks::ExecutionStatus::Failed
-    );
+    .unwrap_err();
     assert!(
-        tasks[0]
-            .failure
-            .as_deref()
-            .unwrap()
+        error
+            .to_string()
             .contains("owner service does not match registered scope")
     );
+    assert!(alien_service.snapshot().await.is_empty());
+    assert_eq!(owner.agent_state().load().await.unwrap().unwrap(), before);
     assert!(snapshot(&owner).await.is_empty());
     assert_eq!(h.registry.snapshot_scopes().len(), 1);
     bounded(alien_service.settle().join()).await.unwrap();

@@ -254,6 +254,37 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
         }
         Ok(scope)
     }
+    /// Finds an already retained named scope without constructing or activating one.
+    pub async fn find_retained(&self, requested: &str) -> ChildResult<Option<Arc<Scope<S>>>> {
+        let owner = self.owner()?;
+        let name = sanitize(requested);
+        if let Some(scope) = owner.children().find(&name) {
+            return Ok(Some(scope));
+        }
+        let saved = owner
+            .agent_state()
+            .load()
+            .await
+            .map_err(state::state_error)?
+            .ok_or_else(|| ChildError::registry("parent agent state is missing"))?;
+        let mut matches = saved
+            .children
+            .iter()
+            .filter(|child| child.requested_name == name)
+            .filter_map(|child| {
+                owner
+                    .children()
+                    .find(&child.name)
+                    .filter(|scope| scope.identity().session.session_id == child.session_id)
+            });
+        let selected = matches.next();
+        if matches.next().is_some() {
+            return Err(ChildError::registry(
+                "retained task worker name is ambiguous",
+            ));
+        }
+        Ok(selected)
+    }
     async fn find_suffix_child(
         &self,
         requested: &str,

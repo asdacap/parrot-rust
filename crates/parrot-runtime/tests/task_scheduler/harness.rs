@@ -40,13 +40,14 @@ impl Harness {
         Self::with_capacity(32)
     }
     pub fn with_capacity(capacity: usize) -> Self {
-        let histories = Histories::new();
+        Self::with_history(capacity, Histories::new(), Scripted::default())
+    }
+    pub fn with_history(capacity: usize, histories: Arc<Histories>, provider: Scripted) -> Self {
         let factory = Arc::new(Factory::default());
         *factory.histories.lock().unwrap() = Some(histories.clone());
         let diagnostics = Arc::new(Diagnostics::default());
         let lifetime = Arc::new(Signal::new());
         let budget = RetainedAgentBudget::new(capacity.try_into().unwrap());
-        let provider = Scripted::default();
         let registry = AgentRegistry::new(RegistryConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
@@ -89,6 +90,21 @@ impl Harness {
     }
     pub async fn unregistered_root(&self, name: &str) -> Arc<Scope<Security>> {
         let identity = AgentIdentity::root(id(), name.into(), templates());
+        self.build_root(identity).await
+    }
+    pub async fn reopen_root(&self, identity: Arc<AgentIdentity>) -> Arc<Scope<Security>> {
+        let scope = self.build_root(identity).await;
+        self.registry.register_root(scope.clone()).unwrap();
+        scope
+            .spawner()
+            .restore_children()
+            .unwrap()
+            .join()
+            .await
+            .unwrap();
+        scope
+    }
+    async fn build_root(&self, identity: Arc<AgentIdentity>) -> Arc<Scope<Security>> {
         let history = self.histories.history(&identity);
         let lineage = PolicyLineage::root();
         let selection = Arc::new(SelectionCell::new(

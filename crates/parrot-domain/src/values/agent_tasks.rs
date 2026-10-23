@@ -66,3 +66,10 @@ pub enum AcceptanceVerdict {
         replacement_result: Option<String>,
     },
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskCallIdentity {
+    pub assistant_sequence: i64,
+    pub call_id: String,
+}

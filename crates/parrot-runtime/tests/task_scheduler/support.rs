@@ -470,6 +470,7 @@ pub struct Factory {
     pub router: Arc<Router>,
     pub task_diagnostics: Arc<TaskLog>,
     pub configuration: Mutex<Option<TaskConfiguration>>,
+    pub graph_faults: Arc<GraphFaults>,
 }
 #[derive(Default)]
 pub struct ScopePlan {
@@ -586,29 +587,41 @@ impl Factory {
         })
         .await
         .unwrap();
-        let session = AgentSession::new(backend, prepared.lifetime.clone());
+        let session = AgentSession::with_state(
+            backend,
+            prepared.lifetime.clone(),
+            prepared.agent_state.clone(),
+        );
         let task_session = Arc::new(RecordingSession::new(Arc::new(TaskSessionAdapter::new(
             prepared.identity.clone(),
             session.clone(),
+            prepared.agent_state.clone(),
         ))));
+        let registry = self.registry.lock().unwrap().clone();
+        let configuration = self
+            .configuration
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| {
+                let mut configuration =
+                    TaskConfiguration::defaults(prepared.identity.templates.clone());
+                configuration.fork_history_mode = ForkHistoryMode::Empty;
+                configuration
+            });
         let scheduler = TaskScheduler::new(SchedulerConfig {
             owner_identity: prepared.identity.clone(),
-            registry: self.registry.lock().unwrap().clone(),
+            state: GraphState::bind(
+                prepared.agent_state.clone(),
+                self.graph_faults.clone(),
+                name.clone(),
+            ),
+            registry,
             owner_session: task_session.clone(),
             history: history.clone(),
             parser: self.parser.clone(),
             router: self.router.clone(),
-            configuration: self
-                .configuration
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or_else(|| {
-                    let mut configuration =
-                        TaskConfiguration::defaults(prepared.identity.templates.clone());
-                    configuration.fork_history_mode = ForkHistoryMode::Empty;
-                    configuration
-                }),
+            configuration,
             output_blobs: Arc::new(
                 parrot_storage::artifacts::output_blobs::ToolOutputBlobStore::for_session(
                     histories.repository.events().database().selected_root(),
@@ -620,7 +633,8 @@ impl Factory {
             publisher: publisher.clone(),
             diagnostics: self.task_diagnostics.clone(),
             lifetime: prepared.lifetime,
-        })?;
+        })
+        .await?;
         let adapter = Arc::new(SessionAdapter::new(
             prepared.identity,
             prepared.selection.clone(),

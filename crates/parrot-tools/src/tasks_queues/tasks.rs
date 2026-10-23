@@ -9,7 +9,7 @@ use parrot_domain::{
         tools::{ParallelSafety, Tool},
     },
     values::{
-        agent_tasks::{ExecutionStatus, Task, TaskPayload},
+        agent_tasks::{ExecutionStatus, Task, TaskCallIdentity, TaskPayload},
         tools::{ConfiguredToolDefinition, MissingToolDefinition, ToolDefinitionCatalog},
     },
 };
@@ -117,6 +117,22 @@ where
         invocation: ToolInvocation,
         context: InvocationContext<'_, R::Security, S>,
     ) -> OperationResult<ToolOutput, ToolFailure> {
+        let identity = TaskCallIdentity {
+            assistant_sequence: invocation.assistant_sequence,
+            call_id: invocation.call_id.clone(),
+        };
+        match self
+            .controller
+            .lookup_accepted(&identity, context.cancellation())
+            .await
+        {
+            Ok(Some(count)) => return self.render_accepted_count(count),
+            Ok(None) => {}
+            Err(OperationError::Failed(error)) if error.task_caught() => {
+                return Ok(ToolOutput::error(error));
+            }
+            Err(error) => return Err(error),
+        }
         let input = match InputObject::parse(&invocation.arguments_json, &["path", "tasks"]) {
             Ok(input) => input,
             Err(error) => return Ok(ToolOutput::error(error)),
@@ -141,7 +157,6 @@ where
             Err(OperationError::Cancelled) => return Err(OperationError::Cancelled),
             Err(OperationError::Failed(error)) => return task_input_failure(error),
         };
-        let count = tasks.len();
         let update = TaskUpdate {
             tasks,
             selection: context.selection().clone(),
@@ -151,15 +166,33 @@ where
             },
         };
         match self.controller.update(update, context.cancellation()).await {
-            Ok(_) => match (self.render_accepted)(count) {
-                Ok(text) => Ok(ToolOutput::text(text)),
-                Err(error) if error.task_caught() => Ok(ToolOutput::error(error)),
-                Err(error) => Err(OperationError::Failed(error)),
+            Ok(_) => match self
+                .controller
+                .lookup_accepted(&identity, context.cancellation())
+                .await
+            {
+                Ok(Some(count)) => self.render_accepted_count(count),
+                Ok(None) => Err(OperationError::Failed(ToolFailure::new(
+                    FailureKind::InvalidOperation,
+                    "Accepted task update has no durable receipt.",
+                ))),
+                Err(OperationError::Failed(error)) if error.task_caught() => {
+                    Ok(ToolOutput::error(error))
+                }
+                Err(error) => Err(error),
             },
             Err(OperationError::Failed(error)) if error.task_caught() => {
                 Ok(ToolOutput::error(error))
             }
             Err(error) => Err(error),
+        }
+    }
+
+    fn render_accepted_count(&self, count: usize) -> OperationResult<ToolOutput, ToolFailure> {
+        match (self.render_accepted)(count) {
+            Ok(text) => Ok(ToolOutput::text(text)),
+            Err(error) if error.task_caught() => Ok(ToolOutput::error(error)),
+            Err(error) => Err(OperationError::Failed(error)),
         }
     }
 

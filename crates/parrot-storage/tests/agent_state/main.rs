@@ -83,11 +83,18 @@ fn entry(state: ExecutionStatus) -> TaskEntrySnapshot {
             attempt: 2,
             repair_attempt: 1,
             phase: TaskRunnerPhase::AwaitingResponse,
-            execution_id: "execution-1".into(),
+            generation_id: "generation-1".into(),
             prompt_message_id: "prompt-1".into(),
-            response_message_id: Some("response-1".into()),
+            prompt: "saved prompt".into(),
+            maximum_attempts: 5,
+            maximum_response_repairs: 3,
+            assignment_header: "assignment context".into(),
+            outcome: None,
+            response_reference: None,
         }),
         terminal_notification: Some(notification()),
+        fork_mode: TaskForkModeSnapshot::Dependency,
+        pending_stop: None,
     }
 }
 fn notification() -> NotificationCheckpoint {
@@ -129,6 +136,8 @@ fn snapshot() -> AgentStateSnapshot {
         complete: true,
         all_resolved: true,
         completion_notification: Some(notification()),
+        notifications: vec![],
+        accepted_calls: vec![],
     };
     snapshot.tasks.entries[0].task.payload =
         TaskPayload::Tasks(vec![task(ExecutionStatus::Succeeded)]);

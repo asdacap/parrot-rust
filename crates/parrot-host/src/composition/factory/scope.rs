@@ -1165,6 +1165,100 @@ impl<S: RestrictableAccessSnapshot + 'static> TaskSession for ScopedTaskSession<
     fn identity(&self) -> &Arc<AgentIdentity> {
         &self.identity
     }
+    fn capture_execution(
+        &self,
+    ) -> BoxFuture<'_, ChildResult<Option<parrot_domain::values::agent_state::ExecutionCheckpoint>>>
+    {
+        Box::pin(async move {
+            Ok(self
+                .link
+                .scope()?
+                .agent_state()
+                .load()
+                .await
+                .map_err(|error| ChildError::failure("io", error.to_string()))?
+                .ok_or_else(|| ChildError::registry("worker state is missing"))?
+                .execution)
+        })
+    }
+    fn recover(&self) -> ChildResult<Operation<parrot_runtime::agent_turn::lifecycle::Execution>> {
+        let execution = self.link.session()?.recover_owned()?;
+        Ok(Operation::start(async move {
+            execution.join().await.map_err(Into::into)
+        }))
+    }
+    fn cancel_recovered(
+        &self,
+        prompt_id: &str,
+    ) -> ChildResult<Operation<parrot_runtime::agent_turn::lifecycle::Execution>> {
+        let execution = self.link.session()?.cancel_recovered_execution(prompt_id)?;
+        Ok(Operation::start(async move {
+            execution.join().await.map_err(Into::into)
+        }))
+    }
+    fn suspend(&self) -> BoxFuture<'_, ChildResult<()>> {
+        Box::pin(async move { self.link.session()?.suspend().await.map_err(Into::into) })
+    }
+    fn enqueue_claimed(
+        &self,
+        parts: Vec<parrot_storage::events::ConversationPart>,
+        message_id: String,
+        claim: parrot_domain::values::agent_state::TaskResultClaim,
+        cancellation: Arc<dyn Cancellation>,
+    ) -> ChildResult<parrot_runtime::task_scheduler::TaskExecution> {
+        let handles = self.link.session()?.enqueue_claimed_execution(
+            parts,
+            message_id,
+            claim,
+            cancellation,
+        )?;
+        Ok(parrot_runtime::task_scheduler::TaskExecution {
+            execution: Operation::start(async move {
+                handles.execution.join().await.map_err(Into::into)
+            }),
+            reservation: Operation::start(async move {
+                handles.reservation.join().await.map_err(Into::into)
+            }),
+        })
+    }
+    fn capture_result<'a>(
+        &'a self,
+        prompt_id: &'a str,
+        claim: &'a parrot_domain::values::agent_state::TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<parrot_domain::values::agent_state::TaskResponseReference>> {
+        Box::pin(async move {
+            self.link
+                .session()?
+                .capture_claimed_result(prompt_id, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn acknowledge_result<'a>(
+        &'a self,
+        reference: &'a parrot_domain::values::agent_state::TaskResponseReference,
+        claim: &'a parrot_domain::values::agent_state::TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.link
+                .session()?
+                .acknowledge_claimed_result(reference, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn restore_response<'a>(
+        &'a self,
+        reference: &'a parrot_domain::values::agent_state::TaskResponseReference,
+    ) -> BoxFuture<'a, ChildResult<parrot_runtime::agent_turn::lifecycle::Execution>> {
+        Box::pin(async move {
+            self.link
+                .session()?
+                .restore_saved_response(reference)
+                .await
+                .map_err(Into::into)
+        })
+    }
     fn enqueue(
         &self,
         parts: Vec<parrot_storage::events::ConversationPart>,
@@ -1394,6 +1488,7 @@ where
                 let tasks = ScopedTaskController::new(
                     SchedulerConfig {
                         owner_identity: identity.clone(),
+                        state: prepared.agent_state.clone(),
                         registry: Arc::downgrade(&registry),
                         owner_session: task_session.clone(),
                         history: prepared.history.clone(),
@@ -1419,7 +1514,8 @@ where
                         lifetime: prepared.lifetime.clone(),
                     },
                     |selection: &ContextSelection<S>| selection.turn.clone(),
-                )?;
+                )
+                .await?;
                 controller = Some(tasks.clone());
                 let child_work = Arc::new(BoundWork::new());
                 let active_work = Arc::new(ActiveWorkReminder {
@@ -1638,8 +1734,11 @@ where
                 )
                 .await
                 .map_err(child)?;
-                let actual_session =
-                    Arc::new(AgentSession::new(backend, prepared.lifetime.clone()));
+                let actual_session = Arc::new(AgentSession::with_state(
+                    backend,
+                    prepared.lifetime.clone(),
+                    prepared.agent_state.clone(),
+                ));
                 session = Some(actual_session.clone());
                 link.session
                     .set(Arc::downgrade(&actual_session))

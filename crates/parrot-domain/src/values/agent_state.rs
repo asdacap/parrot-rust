@@ -1,6 +1,6 @@
 //! Agent-owned recovery state, separate from conversation and event history.
 
-use super::agent_tasks::Task;
+use super::agent_tasks::{Task, TaskCallIdentity};
 use serde::{Deserialize, Serialize};
 
 pub const AGENT_STATE_VERSION: u64 = 1;
@@ -72,6 +72,15 @@ pub struct TaskGraphSnapshot {
     pub complete: bool,
     pub all_resolved: bool,
     pub completion_notification: Option<NotificationCheckpoint>,
+    pub notifications: Vec<TaskNotificationSnapshot>,
+    pub accepted_calls: Vec<AcceptedTaskCall>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcceptedTaskCall {
+    pub identity: TaskCallIdentity,
+    pub accepted_count: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -84,6 +93,36 @@ pub struct TaskEntrySnapshot {
     pub worker_session_id: Option<String>,
     pub runner: Option<TaskRunnerCheckpoint>,
     pub terminal_notification: Option<NotificationCheckpoint>,
+    pub fork_mode: TaskForkModeSnapshot,
+    pub pending_stop: Option<TaskStopCheckpoint>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskForkModeSnapshot {
+    Dependency,
+    Parent,
+    Empty,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskStopCheckpoint {
+    pub generation_id: String,
+    pub prompt_message_id: String,
+    pub worker_session_id: String,
+    pub notice_message_id: String,
+    pub stopped: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskNotificationSnapshot {
+    pub message_id: String,
+    pub target_session_id: String,
+    pub text: String,
+    pub wake: bool,
+    pub ready: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -107,9 +146,14 @@ pub struct TaskRunnerCheckpoint {
     pub attempt: u64,
     pub repair_attempt: u64,
     pub phase: TaskRunnerPhase,
-    pub execution_id: String,
+    pub generation_id: String,
     pub prompt_message_id: String,
-    pub response_message_id: Option<String>,
+    pub prompt: String,
+    pub maximum_attempts: u64,
+    pub maximum_response_repairs: u64,
+    pub assignment_header: String,
+    pub outcome: Option<Task>,
+    pub response_reference: Option<TaskResponseReference>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

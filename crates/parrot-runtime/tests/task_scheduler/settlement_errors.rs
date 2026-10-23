@@ -22,10 +22,6 @@ async fn final_publish_failure_remains_primary_while_actual_execution_and_failin
         .map(|index| state(&format!("task-{index:04}-{}", "x".repeat(70)), Canceled))
         .collect();
     set(&owner, tasks).await;
-    // A real synthetic storage failure, not a notifier mock returning a value.
-    let blobs = h.histories.path.join("scratch/blobs");
-    std::fs::remove_dir(&blobs).unwrap();
-    std::fs::write(&blobs, "PRIVATE spill body").unwrap();
     let worker = h.factory.get("a");
     *worker.task_session.record_gate.lock().unwrap() = Some(stop_record.clone());
     built
@@ -57,11 +53,33 @@ async fn final_publish_failure_remains_primary_while_actual_execution_and_failin
         }
     })
     .await;
+    bounded(async {
+        loop {
+            let saved = owner.agent_state().load().await.unwrap().unwrap();
+            if saved
+                .tasks
+                .entries
+                .iter()
+                .all(|entry| entry.pending_stop.is_none())
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
     assert!(
         std::future::poll_fn(|cx| Poll::Ready(matches!(joined.as_mut().poll(cx), Poll::Pending)))
             .await,
         "settlement skipped the still-gated initial notifier record"
     );
+    // The body is already committed. Fail its acknowledgement with a real
+    // staging-path obstacle, after the worker stop record and acknowledgement.
+    let staging = h
+        .histories
+        .path
+        .join("root-agents/owner/agent-state.json.tmp");
+    std::fs::create_dir(&staging).unwrap();
     initial_notification.open();
     let primary = bounded(joined).await.unwrap_err();
     assert!(

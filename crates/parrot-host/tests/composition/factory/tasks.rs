@@ -114,13 +114,17 @@ async fn root_with_controller(
         .await
         .unwrap();
     let built = h.factory.get(owner);
-    let task_session: Arc<dyn parrot_runtime::task_scheduler::TaskSession> = Arc::new(
-        TaskSessionAdapter::new(identity.clone(), built.adapter.session().clone()),
-    );
+    let task_session: Arc<dyn parrot_runtime::task_scheduler::TaskSession> =
+        Arc::new(TaskSessionAdapter::new(
+            identity.clone(),
+            built.adapter.session().clone(),
+            agent_state.clone(),
+        ));
     let mut configuration = TaskConfiguration::defaults(support::templates());
     configuration.fork_history_mode = mode;
     let controller = Controller::new(SchedulerConfig {
         owner_identity: identity.clone(),
+        state: agent_state.clone(),
         registry: Arc::downgrade(&h.registry),
         owner_session: task_session.clone(),
         history: built.history.clone(),
@@ -134,7 +138,7 @@ async fn root_with_controller(
         publisher: built.publisher.clone(),
         diagnostics: h.factory.task_diagnostics.clone(),
         lifetime: h.registry.lifetime(),
-    }, Clone::clone).unwrap();
+    }, Clone::clone).await.unwrap();
     parts.services = vec![
         ServiceRegistration::new(controller.scheduler().clone()),
         ServiceRegistration::new(task_session),
@@ -263,7 +267,7 @@ fn tool(kind: TaskToolKind, controller: &Arc<Controller>, reader: Arc<Reader>) -
 }
 fn invocation(arguments: &str) -> ToolInvocation {
     ToolInvocation {
-        call_id: "set-call".into(),
+        call_id: support::id(),
         arguments_json: arguments.into(),
         assistant_sequence: 17,
     }

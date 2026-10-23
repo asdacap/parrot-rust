@@ -1,4 +1,4 @@
-//! In-memory retained task graphs with durable progress events and ordered owner notifications.
+//! Agent-local retained task graphs, recoverable attempts, and durable ordered notifications.
 mod notifier;
 mod ports;
 mod runner;

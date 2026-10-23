@@ -268,14 +268,14 @@ pub struct Router {
 impl TaskModelRouter for Router {
     fn resolve(&self, selector: &str) -> ChildResult<ResolvedModelSelection> {
         self.selectors.lock().unwrap().push(selector.into());
-        match selector {
+        match selector.strip_prefix("scripted/").unwrap_or(selector) {
             "first" | "second" => Ok(self
                 .provider
                 .lock()
                 .unwrap()
                 .as_ref()
                 .unwrap()
-                .selection(selector)),
+                .selection(selector.strip_prefix("scripted/").unwrap_or(selector))),
             _ => Err(ChildError::failure(
                 "argument",
                 format!("PRIVATE invalid selector {selector}"),
@@ -300,6 +300,7 @@ pub struct RecordingSession {
     pub actual: Arc<TaskSessionAdapter<Backend>>,
     pub calls: Mutex<Vec<DeliveryCall>>,
     pub send_failures: AtomicUsize,
+    pub ack_failures: AtomicUsize,
     pub record_gate: Mutex<Option<Arc<Gate>>>,
     pub enqueue_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub changed: tokio::sync::Notify,
@@ -310,6 +311,7 @@ impl RecordingSession {
             actual,
             calls: Mutex::new(vec![]),
             send_failures: AtomicUsize::new(0),
+            ack_failures: AtomicUsize::new(0),
             record_gate: Mutex::new(None),
             enqueue_hook: Mutex::new(None),
             changed: tokio::sync::Notify::new(),
@@ -348,6 +350,68 @@ impl RecordingSession {
 impl TaskSession for RecordingSession {
     fn identity(&self) -> &Arc<AgentIdentity> {
         self.actual.identity()
+    }
+    fn capture_execution(
+        &self,
+    ) -> BoxFuture<'_, ChildResult<Option<parrot_domain::values::agent_state::ExecutionCheckpoint>>>
+    {
+        self.actual.capture_execution()
+    }
+    fn recover(&self) -> ChildResult<Operation<Execution>> {
+        self.actual.recover()
+    }
+    fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>> {
+        self.actual.cancel_recovered(prompt_id)
+    }
+    fn suspend(&self) -> BoxFuture<'_, ChildResult<()>> {
+        self.actual.suspend()
+    }
+    fn enqueue_claimed(
+        &self,
+        parts: Vec<ConversationPart>,
+        id: String,
+        claim: parrot_domain::values::agent_state::TaskResultClaim,
+        cancellation: Arc<dyn Cancellation>,
+    ) -> ChildResult<TaskExecution> {
+        if let Some(hook) = self.enqueue_hook.lock().unwrap().take() {
+            hook();
+        }
+        self.capture("enqueue", &id, &parts);
+        self.actual.enqueue_claimed(parts, id, claim, cancellation)
+    }
+    fn capture_result<'a>(
+        &'a self,
+        prompt_id: &'a str,
+        claim: &'a parrot_domain::values::agent_state::TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<parrot_domain::values::agent_state::TaskResponseReference>> {
+        self.actual.capture_result(prompt_id, claim)
+    }
+    fn acknowledge_result<'a>(
+        &'a self,
+        reference: &'a parrot_domain::values::agent_state::TaskResponseReference,
+        claim: &'a parrot_domain::values::agent_state::TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            if self
+                .ack_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(ChildError::failure(
+                    "io",
+                    "claim acknowledgement write failed",
+                ));
+            }
+            self.actual.acknowledge_result(reference, claim).await
+        })
+    }
+    fn restore_response<'a>(
+        &'a self,
+        reference: &'a parrot_domain::values::agent_state::TaskResponseReference,
+    ) -> BoxFuture<'a, ChildResult<Execution>> {
+        self.actual.restore_response(reference)
     }
     fn enqueue(
         &self,
@@ -401,6 +465,118 @@ impl TaskSession for RecordingSession {
                 ));
             }
             self.actual.send(parts, id, delivery, activity).await
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct GraphFaults {
+    pub owner: Mutex<String>,
+    pub fail_before: std::sync::atomic::AtomicBool,
+    pub fail_after: std::sync::atomic::AtomicBool,
+    pub fail_ack: std::sync::atomic::AtomicBool,
+    pub fail_response: std::sync::atomic::AtomicBool,
+    pub fail_stopped: std::sync::atomic::AtomicBool,
+}
+pub struct GraphState {
+    inner: Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>,
+    faults: Arc<GraphFaults>,
+    owner: String,
+}
+impl GraphState {
+    pub fn bind(
+        inner: Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>,
+        faults: Arc<GraphFaults>,
+        owner: String,
+    ) -> Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore> {
+        Arc::new(Self {
+            inner,
+            faults,
+            owner,
+        })
+    }
+}
+impl parrot_domain::contracts::agent_state::AgentStateStore for GraphState {
+    fn load(
+        &self,
+    ) -> BoxFuture<
+        '_,
+        Result<
+            Option<parrot_domain::values::agent_state::AgentStateSnapshot>,
+            parrot_domain::contracts::agent_state::AgentStateError,
+        >,
+    > {
+        self.inner.load()
+    }
+    fn initialize(
+        &self,
+        value: parrot_domain::values::agent_state::AgentStateSnapshot,
+    ) -> BoxFuture<'_, Result<(), parrot_domain::contracts::agent_state::AgentStateError>> {
+        self.inner.initialize(value)
+    }
+    fn retire(
+        &self,
+    ) -> BoxFuture<'_, Result<(), parrot_domain::contracts::agent_state::AgentStateError>> {
+        self.inner.retire()
+    }
+    fn update(
+        &self,
+        value: parrot_domain::values::agent_state::AgentStateUpdate,
+    ) -> BoxFuture<
+        '_,
+        Result<
+            parrot_domain::values::agent_state::AgentStateSnapshot,
+            parrot_domain::contracts::agent_state::AgentStateError,
+        >,
+    > {
+        Box::pin(async move {
+            let selected = *self.faults.owner.lock().unwrap() == self.owner;
+            let graph = matches!(
+                &value,
+                parrot_domain::values::agent_state::AgentStateUpdate::Tasks(_)
+            );
+            let failure = || {
+                parrot_domain::contracts::agent_state::AgentStateError::new(
+                    parrot_domain::contracts::agent_state::AgentStateErrorKind::Io,
+                    "graph snapshot write failed",
+                )
+            };
+            if selected && graph && self.faults.fail_before.swap(false, Ordering::SeqCst) {
+                return Err(failure());
+            }
+            if let (true, parrot_domain::values::agent_state::AgentStateUpdate::Tasks(next)) =
+                (selected, &value)
+            {
+                let old = self.inner.load().await?.unwrap();
+                if next.entries.iter().any(|entry| {
+                    entry
+                        .runner
+                        .as_ref()
+                        .is_some_and(|runner| runner.response_reference.is_some())
+                }) && old.tasks.entries.iter().all(|entry| {
+                    entry
+                        .runner
+                        .as_ref()
+                        .is_none_or(|runner| runner.response_reference.is_none())
+                }) && self.faults.fail_response.swap(false, Ordering::SeqCst)
+                {
+                    return Err(failure());
+                }
+                if next.notifications.len() < old.tasks.notifications.len()
+                    && self.faults.fail_ack.swap(false, Ordering::SeqCst)
+                {
+                    return Err(failure());
+                }
+            }
+            let stopped = matches!(&value, parrot_domain::values::agent_state::AgentStateUpdate::Tasks(graph) if graph.entries.iter().any(|entry| entry.pending_stop.as_ref().is_some_and(|stop| stop.stopped)));
+            let saved = self.inner.update(value).await?;
+            if selected && stopped && self.faults.fail_stopped.swap(false, Ordering::SeqCst) {
+                return Err(failure());
+            }
+            if selected && graph && self.faults.fail_after.swap(false, Ordering::SeqCst) {
+                return Err(failure());
+            }
+            Ok(saved)
         })
     }
 }
