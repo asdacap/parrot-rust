@@ -58,11 +58,24 @@ const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
 #[test]
 fn m6_full_configuration_compiles_and_renders_retained_independent_source_models() {
     let (configuration, catalog) = PromptTemplateCatalog::from_content("", &environment()).unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 98);
+    assert_eq!(configuration.prompt_templates.len(), 99);
     let inventory = fixture(&(A.to_owned() + "catalog-inventory.json"));
     let migration = fixture(&(A.to_owned() + "bundled-migration-map.json"));
     let actual: Vec<_> = catalog.descriptors().collect();
-    assert_eq!(actual.len(), 98);
+    assert_eq!(actual.len(), 99);
+    let (_, legacy_warning) = actual
+        .iter()
+        .find(|(id, _)| *id == "session.legacy-resume-warning")
+        .unwrap();
+    assert_eq!(legacy_warning.engine, "scalar");
+    assert!(legacy_warning.allowed.is_empty());
+    assert!(legacy_warning.required.is_empty());
+    assert_eq!(
+        catalog
+            .render("session.legacy-resume-warning", &[], &CancelAt::never())
+            .unwrap(),
+        legacy_warning.text
+    );
     let expected = inventory["entries"]
         .as_array()
         .unwrap()
@@ -299,7 +312,7 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
             .render("agent-task.stop-succeeded", &[], &CancelAt::never())
             .unwrap()
     );
-    assert_eq!(config.prompt_templates.len(), 98);
+    assert_eq!(config.prompt_templates.len(), 99);
 }
 
 #[test]

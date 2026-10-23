@@ -83,10 +83,13 @@ fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
         )?;
         expected.insert(id.to_owned(), spec.clone());
     }
-    for id in AGENT_COMMUNICATION_IDS {
-        let spec = actual.get(id).ok_or_else(|| {
-            ConfigError::invalid_data(format!("agent communication template {id} is missing"))
-        })?;
+    for id in AGENT_COMMUNICATION_IDS
+        .into_iter()
+        .chain(["session.legacy-resume-warning"])
+    {
+        let spec = actual
+            .get(id)
+            .ok_or_else(|| ConfigError::invalid_data(format!("scalar template {id} is missing")))?;
         parrot_foundation::template_scalar::ScalarPromptTemplateEngine::compile(
             &spec.path,
             &spec.text,
