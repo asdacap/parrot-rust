@@ -27,9 +27,9 @@ use parrot_runtime::{
         services::{SelectionSource, TurnSkills},
     },
     children::{
-        AgentIdentity, AgentRegistry, ChildDiagnostic, ChildDiagnostics, ChildResult,
-        CompletionDelivery, HistoryPreparer, IdGenerator, PolicyLineage, PreparedScope,
-        RegistryConfig, Scope, ScopeConfig, ScopeFactory, SelectionCell,
+        AgentIdentity, AgentRegistry, AgentStateFiles, ChildDiagnostic, ChildDiagnostics,
+        ChildResult, CompletionDelivery, HistoryPreparer, IdGenerator, PolicyLineage,
+        PreparedScope, RegistryConfig, Scope, ScopeConfig, ScopeFactory, SelectionCell,
     },
     event_broker::EventBroker,
     interactions::{
@@ -622,6 +622,8 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 profiles: config.profiles.clone(),
                 factory: source.factory.clone(),
                 histories: histories.clone(),
+                states: Arc::new(AgentStateFiles::new(lease.selected_root().clone())),
+                router: config.router.clone(),
                 ids: config.ids.clone(),
                 diagnostics: Arc::new(SessionChildDiagnostics {
                     configured: config.diagnostics.clone(),
@@ -642,6 +644,10 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             let selection = modes
                 .capture_turn_selection(&mode_id, model.clone(), config.materializer.as_ref())
                 .map_err(invalid)?;
+            let agent_state = registry
+                .prepare_state(&identity, &selection, "", CompletionDelivery::Automatic)
+                .await
+                .map_err(internal)?;
             let cell = Arc::new(SelectionCell::new(selection, PolicyLineage::root()));
             let parent = parrot_runtime::children::ParentScope::<S>::completion(
                 identity.clone(),
@@ -652,6 +658,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             let parts = match source
                 .factory
                 .create(PreparedScope {
+                    agent_state,
                     identity: identity.clone(),
                     history: history.clone(),
                     selection: cell.clone(),
@@ -688,6 +695,13 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             cleanup_scope = Some(scope.clone());
             bind(&scope)
                 .and_then(|()| registry.register_root(scope.clone()))
+                .map_err(internal)?;
+            scope
+                .spawner()
+                .restore_children()
+                .map_err(internal)?
+                .join()
+                .await
                 .map_err(internal)?;
             let session = scope.get_service::<RuntimeSession<S>>().map_err(internal)?;
             let core = Arc::new(Self {
@@ -847,6 +861,27 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             main.model = selected.model;
             main.mode = next_mode;
         }
+        let scope = self.main.lock().expect("user main poisoned").scope.clone();
+        let selected = scope.selection().current().map_err(internal)?;
+        let mut snapshot = scope
+            .agent_state()
+            .load()
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| internal("root agent state is missing"))?;
+        snapshot.descriptor.selection = parrot_domain::values::agent_state::SelectionSnapshot {
+            profile_id: selected.profile.id,
+            model_selector: selected.model.requested_selector.value,
+        };
+        scope
+            .agent_state()
+            .update(
+                parrot_domain::values::agent_state::AgentStateUpdate::Descriptor(
+                    snapshot.descriptor,
+                ),
+            )
+            .await
+            .map_err(internal)?;
         self.publish_metadata()
     }
     fn update_model(&self, model: ResolvedModelSelection) -> ConfigurationResult<()> {

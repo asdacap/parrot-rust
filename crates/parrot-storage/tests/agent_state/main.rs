@@ -110,6 +110,7 @@ fn snapshot() -> AgentStateSnapshot {
     );
     snapshot.revision = 9;
     snapshot.children.push(RetainedChild {
+        requested_name: "child".into(),
         name: "child".into(),
         session_id: "child-session-1".into(),
     });
@@ -207,6 +208,72 @@ async fn checkpoint_variants_round_trip() {
     round_trip(CompletionDeliverySnapshot::Automatic);
     round_trip(ExecutionOutcome::Succeeded);
     round_trip(ExecutionOutcome::Canceled);
+}
+
+#[tokio::test]
+async fn retirement_removes_only_snapshot_files_and_rejects_future_writes() {
+    let fixture = Fixture::new();
+    let store = fixture.store().await;
+    store.initialize(snapshot()).await.unwrap();
+    let history = fixture.agent.join("history.sqlite");
+    let unrelated = fixture.agent.join("other");
+    fs::write(&history, b"history").unwrap();
+    fs::write(&unrelated, b"other").unwrap();
+    fs::write(fixture.agent.join(AGENT_STATE_STAGING_FILE_NAME), b"stale").unwrap();
+
+    store.retire().await.unwrap();
+    store.retire().await.unwrap();
+    assert!(!fixture.path().exists());
+    assert!(!fixture.agent.join(AGENT_STATE_STAGING_FILE_NAME).exists());
+    assert_eq!(fs::read(history).unwrap(), b"history");
+    assert_eq!(fs::read(unrelated).unwrap(), b"other");
+    assert_eq!(store.load().await.unwrap(), None);
+    assert_eq!(
+        store.initialize(snapshot()).await.unwrap_err().kind,
+        AgentStateErrorKind::Retired
+    );
+    assert_eq!(
+        store
+            .update(AgentStateUpdate::Execution(None))
+            .await
+            .unwrap_err()
+            .kind,
+        AgentStateErrorKind::Retired
+    );
+}
+
+#[tokio::test]
+async fn completed_retirement_does_not_touch_a_new_incarnations_snapshot() {
+    let fixture = Fixture::new();
+    let old = fixture.store().await;
+    old.initialize(snapshot()).await.unwrap();
+    old.retire().await.unwrap();
+    let new = FileAgentStateStore::open(&fixture.agent, "new-owner".into())
+        .await
+        .unwrap();
+    let mut replacement = snapshot();
+    replacement.owner_session_id = "new-owner".into();
+    new.initialize(replacement.clone()).await.unwrap();
+    old.retire().await.unwrap();
+    assert_eq!(new.load().await.unwrap(), Some(replacement));
+}
+
+#[tokio::test]
+async fn retirement_does_not_delete_another_owners_snapshot() {
+    let fixture = Fixture::new();
+    let old_store = fixture.store().await;
+    let mut replacement = snapshot();
+    replacement.owner_session_id = "new-owner".into();
+    fs::write(fixture.path(), serde_json::to_vec(&replacement).unwrap()).unwrap();
+
+    assert_eq!(
+        old_store.retire().await.unwrap_err().kind,
+        AgentStateErrorKind::OwnerMismatch
+    );
+    assert_eq!(
+        serde_json::from_slice::<AgentStateSnapshot>(&fs::read(fixture.path()).unwrap()).unwrap(),
+        replacement
+    );
 }
 
 #[tokio::test]
@@ -315,6 +382,7 @@ async fn concurrent_section_updates_preserve_unrelated_fields() {
     let mut descriptor = expected.descriptor.clone();
     descriptor.local_scope = "changed scope".into();
     let children = vec![RetainedChild {
+        requested_name: "child".into(),
         name: "new-child".into(),
         session_id: "new-id".into(),
     }];

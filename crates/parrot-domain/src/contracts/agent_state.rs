@@ -13,6 +13,7 @@ pub enum AgentStateErrorKind {
     AlreadyExists,
     NotFound,
     InvalidPath,
+    Retired,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,4 +60,9 @@ pub trait AgentStateStore: Send + Sync {
         &self,
         update: AgentStateUpdate,
     ) -> BoxFuture<'_, Result<AgentStateSnapshot, AgentStateError>>;
+
+    /// Removes this owner's snapshot and staging file after all writers have
+    /// been stopped and joined. The caller must ensure no operation can write
+    /// concurrently outside this shared store instance.
+    fn retire(&self) -> BoxFuture<'_, Result<(), AgentStateError>>;
 }

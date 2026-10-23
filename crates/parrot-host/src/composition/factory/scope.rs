@@ -1775,6 +1775,7 @@ where
                     }),
                 });
                 Ok(ScopeParts {
+                    agent_state: prepared.agent_state.clone(),
                     session: Arc::new(SessionAdapter::new(
                         identity.clone(),
                         prepared.selection.clone(),

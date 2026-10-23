@@ -4,11 +4,17 @@ use super::{
     *,
 };
 use crate::agent_turn::{lifecycle::Signal, services::SessionIdentity};
-use parrot_domain::contracts::{async_ops::Cancellation, security::RestrictableAccessSnapshot};
+use parrot_domain::{
+    contracts::{async_ops::Cancellation, security::RestrictableAccessSnapshot},
+    values::agent_state::{
+        AgentStateUpdate, CompletionDeliverySnapshot, RetainedChild, SelectionSnapshot,
+    },
+};
 use parrot_foundation::paths::AgentScratchDirectory;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
 use parrot_storage::conversation::{HistoryForkBoundary, HistoryForkSelection, HistoryForkSource};
 use std::{
+    collections::{HashSet, VecDeque},
     sync::{Arc, Mutex, Weak},
     time::Instant,
 };
@@ -39,6 +45,7 @@ pub struct AgentSpawner<S: RestrictableAccessSnapshot + 'static> {
     authority: Weak<AgentRegistry<S>>,
     state: Mutex<SpawnerState>,
     spawn_gate: tokio::sync::Mutex<()>,
+    admission_gate: tokio::sync::Mutex<()>,
     stop: Arc<Signal>,
     lifetime: Arc<dyn Cancellation>,
 }
@@ -63,6 +70,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
                 cleanup_failure: None,
             }),
             spawn_gate: tokio::sync::Mutex::new(()),
+            admission_gate: tokio::sync::Mutex::new(()),
             stop,
             lifetime,
         })
@@ -118,17 +126,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
         self: &Arc<Self>,
         request: LaunchRequest<S>,
     ) -> ChildResult<Operation<Arc<Scope<S>>>> {
-        self.start(move |spawner| {
-            Box::pin(async move {
-                let mut conflicts = 0;
-                loop {
-                    match spawner.spawn_candidate(&request, conflicts).await {
-                        Err(ChildError::NameConflict(_)) => conflicts += 1,
-                        result => return result,
-                    }
-                }
-            })
-        })
+        self.start(move |spawner| Box::pin(async move { spawner.spawn_available(&request).await }))
     }
     pub fn get_or_spawn(
         self: &Arc<Self>,
@@ -144,9 +142,21 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
                     return Ok(existing);
                 }
                 let request = select_launch()?;
-                match spawner.spawn_candidate(&request, 0).await {
-                    Err(ChildError::NameConflict(_)) => spawner.owner()?.children().resolve(&name),
-                    result => result,
+                let mut conflicts = 0;
+                loop {
+                    match spawner.spawn_candidate(&request, conflicts).await {
+                        Err(ChildError::NameConflict(_)) => {
+                            let candidate = select_name(&request.requested_name, "", conflicts);
+                            if let Some(existing) = spawner
+                                .find_suffix_child(&request.requested_name, &candidate)
+                                .await?
+                            {
+                                return Ok(existing);
+                            }
+                            conflicts += 1;
+                        }
+                        result => return result,
+                    }
                 }
             })
         })
@@ -165,17 +175,29 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
                 ));
             }
             if let Some(existing) = spawner.owner()?.children().find(&name) {
-                return spawner.resume(existing, &request);
+                return spawner.resume(existing, &request).await;
             }
             // Only fresh construction enters lifetime admission; retained resume
             // matches the source busy-check/selection-update branch after stop.
             spawner
                 .start(move |spawner| {
                     Box::pin(async move {
-                        match spawner.spawn_candidate(&request, 0).await {
-                            Err(ChildError::NameConflict(_)) => spawner
-                                .resume(spawner.owner()?.children().resolve(&name)?, &request),
-                            result => result,
+                        let mut conflicts = 0;
+                        loop {
+                            match spawner.spawn_candidate(&request, conflicts).await {
+                                Err(ChildError::NameConflict(_)) => {
+                                    let candidate =
+                                        select_name(&request.requested_name, "", conflicts);
+                                    if let Some(existing) = spawner
+                                        .find_suffix_child(&request.requested_name, &candidate)
+                                        .await?
+                                    {
+                                        return spawner.resume(existing, &request).await;
+                                    }
+                                    conflicts += 1;
+                                }
+                                result => return result,
+                            }
                         }
                     })
                 })?
@@ -183,7 +205,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
                 .await
         }))
     }
-    fn resume(
+    async fn resume(
         &self,
         scope: Arc<Scope<S>>,
         request: &LaunchRequest<S>,
@@ -205,8 +227,66 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
             request.model.clone(),
             authority.config.agent_limits,
         )?;
-        scope.session().update_selection(selection)?;
+        let snapshot = scope
+            .agent_state()
+            .load()
+            .await
+            .map_err(state::state_error)?
+            .ok_or_else(|| ChildError::registry("retained child state is missing"))?;
+        let previous = snapshot.descriptor;
+        let mut descriptor = previous.clone();
+        descriptor.selection = SelectionSnapshot {
+            profile_id: selection.profile.id.clone(),
+            model_selector: selection.model.requested_selector.value.clone(),
+        };
+        scope
+            .agent_state()
+            .update(AgentStateUpdate::Descriptor(descriptor))
+            .await
+            .map_err(state::state_error)?;
+        if let Err(error) = scope.session().update_selection(selection) {
+            scope
+                .agent_state()
+                .update(AgentStateUpdate::Descriptor(previous))
+                .await
+                .map_err(state::state_error)?;
+            return Err(error);
+        }
         Ok(scope)
+    }
+    async fn find_suffix_child(
+        &self,
+        requested: &str,
+        candidate: &str,
+    ) -> ChildResult<Option<Arc<Scope<S>>>> {
+        let owner = self.owner()?;
+        let Some(existing) = owner.children().find(candidate) else {
+            return Ok(None);
+        };
+        let snapshot = owner
+            .agent_state()
+            .load()
+            .await
+            .map_err(state::state_error)?
+            .ok_or_else(|| ChildError::registry("parent agent state is missing"))?;
+        let requested = sanitize(requested);
+        Ok(snapshot
+            .children
+            .iter()
+            .any(|child| {
+                child.session_id == existing.identity().session.session_id
+                    && child.requested_name == requested
+            })
+            .then_some(existing))
+    }
+    async fn spawn_available(&self, request: &LaunchRequest<S>) -> ChildResult<Arc<Scope<S>>> {
+        let mut conflicts = 0;
+        loop {
+            match self.spawn_candidate(request, conflicts).await {
+                Err(ChildError::NameConflict(_)) => conflicts += 1,
+                result => return result,
+            }
+        }
     }
     async fn spawn_candidate(
         &self,
@@ -238,6 +318,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
             .map_err(|error| ChildError::registry(error.to_string()))?;
         let mut history = None;
         let mut constructed: Option<Arc<Scope<S>>> = None;
+        let mut roster_write_attempted = false;
         let result: ChildResult<Arc<Scope<S>>> = async {
             self.ensure_accepting()?;
             let lineage = owner.selection().lineage().link(owner.selection().clone());
@@ -258,18 +339,30 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
             let prepared_history = authority.config.histories.prepare(&identity).await?;
             history = Some(prepared_history.clone());
             prepared_history.repository().initialize_forked_agent_history(source, identity.session.session_id.clone(), boundary, request.fork.clone(), fallback).await?;
+            let agent_state = {
+                let _admission = self.admission_gate.lock().await;
+                if owner.children().find(&name).is_some() { return Err(ChildError::NameConflict(format!("child agent name is already registered: {name}"))); }
+                authority.prepare_state(&identity, &selection, &request.requested_scope, request.delivery).await?
+            };
             let selection = Arc::new(SelectionCell::new(selection, lineage.clone()));
             let callback = ParentScope::completion(identity.clone(), Some(&parent), request.delivery, authority.config.ids.clone());
             let started = Instant::now();
             authority.config.diagnostics.record(ChildDiagnostic { event: "child_scope_start", session_id: identity.session.session_id.clone(), correlation_id: identity.session.parent_session_id.clone(), duration_milliseconds: None, outcome: None, error_code: None });
-            let parts = authority.config.factory.create(PreparedScope { identity: identity.clone(), history: prepared_history.clone(), selection: selection.clone(), lineage, parent_completion: callback, lifetime: self.lifetime.clone() }).await;
+            let parts = authority.config.factory.create(PreparedScope { agent_state, identity: identity.clone(), history: prepared_history.clone(), selection: selection.clone(), lineage, parent_completion: callback, lifetime: self.lifetime.clone() }).await;
             let built = async { Scope::create(ScopeConfig { authority: authority.clone(), identity: identity.clone(), history: prepared_history, selection, parent: Some(parent.clone()), delivery: request.delivery, retention: Some(reservation.clone()), parts: parts? }).join().await }.await;
             authority.config.diagnostics.record(ChildDiagnostic { event: "child_scope_completed", session_id: identity.session.session_id.clone(), correlation_id: identity.session.parent_session_id.clone(), duration_milliseconds: Some(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64), outcome: Some(match &built { Ok(_) => "succeeded", Err(ChildError::Cancelled) => "cancelled", Err(_) => "failed" }), error_code: built.as_ref().err().map(ChildError::code) });
             let scope = built?;
             constructed = Some(scope.clone());
+            let _admission = self.admission_gate.lock().await;
             self.ensure_accepting()?;
+            if !owner.children().prepare_admission(&scope)? { return Err(stopped()); }
+            let mut snapshot = owner.agent_state().load().await.map_err(state::state_error)?.ok_or_else(|| ChildError::registry("parent agent state is missing"))?;
+            if snapshot.children.iter().any(|child| child.name == scope.identity().session.name) { return Err(ChildError::NameConflict("child name is already retained on disk".into())); }
+            snapshot.children.push(RetainedChild { requested_name: sanitize(&request.requested_name), name: scope.identity().session.name.clone(), session_id: scope.identity().session.session_id.clone() });
+            roster_write_attempted = true;
+            owner.agent_state().update(AgentStateUpdate::Children(snapshot.children)).await.map_err(state::state_error)?;
             reservation.commit();
-            if !owner.children().try_add(scope.clone())? { return Err(stopped()); }
+            if !owner.children().admit_prepared(scope.clone())? { return Err(stopped()); }
             Ok(scope)
         }.await;
         if result.is_err() {
@@ -283,7 +376,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
                     .push(rejected.clone());
                 authority.track_rejected(rejected);
             }
-            if let Some(history) = history {
+            if let Some(history) = history.filter(|_| !roster_write_attempted) {
                 if let Err(error) = history
                     .repository()
                     .cleanup_forked_agent_history(history.agent_session_id().to_owned())
@@ -294,6 +387,232 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
             }
         }
         result
+    }
+    /// Removes one exact retained child durably, joins its resources, and retires its snapshot.
+    /// Errors keep the live name reserved until retirement can be reconciled or retried.
+    pub fn retire(self: &Arc<Self>, scope: Arc<Scope<S>>) -> ChildResult<Operation<Arc<Scope<S>>>> {
+        self.start(move |spawner| {
+            Box::pin(async move {
+                let _serial = spawner.spawn_gate.lock().await;
+                let _admission = spawner.admission_gate.lock().await;
+                let owner = spawner.owner()?;
+                let actual = owner.children().find(&scope.identity().session.name);
+                if !actual
+                    .as_ref()
+                    .is_some_and(|actual| Arc::ptr_eq(actual, &scope))
+                {
+                    return Err(ChildError::registry(format!(
+                        "child agent scope not found: {}",
+                        scope.identity().session.session_id
+                    )));
+                }
+                let mut snapshot = owner
+                    .agent_state()
+                    .load()
+                    .await
+                    .map_err(state::state_error)?
+                    .ok_or_else(|| ChildError::registry("parent agent state is missing"))?;
+                snapshot
+                    .children
+                    .retain(|child| child.session_id != scope.identity().session.session_id);
+                if let Err(error) = owner
+                    .agent_state()
+                    .update(AgentStateUpdate::Children(snapshot.children))
+                    .await
+                {
+                    let _ = scope.close().join().await;
+                    return Err(state::state_error(error));
+                }
+                scope.close().join().await?;
+                scope
+                    .agent_state()
+                    .retire()
+                    .await
+                    .map_err(state::state_error)?;
+                owner
+                    .children()
+                    .detach(&scope)?
+                    .ok_or_else(|| ChildError::registry("retired child is no longer registered"))
+            })
+        })
+    }
+    /// Rebuilds retained descendants without admitting prompts or recovering executions.
+    /// The caller must finish restoring the full tree before activating any work.
+    pub fn restore_children(self: &Arc<Self>) -> ChildResult<Operation<()>> {
+        let restoration = self.start(move |spawner| {
+            Box::pin(async move {
+                let owner = spawner.owner()?;
+                let mut seen = HashSet::from([owner.identity().session.session_id.clone()]);
+                let mut pending = VecDeque::from([owner.clone()]);
+                while let Some(parent) = pending.pop_front() {
+                    let parent_spawner = parent.spawner();
+                    let _serial = parent_spawner.spawn_gate.lock().await;
+                    let _admission = parent_spawner.admission_gate.lock().await;
+                    parent_spawner.ensure_accepting()?;
+                    let snapshot = parent
+                        .agent_state()
+                        .load()
+                        .await
+                        .map_err(state::state_error)?
+                        .ok_or_else(|| ChildError::registry("retained parent state is missing"))?;
+                    let mut names = HashSet::new();
+                    for reference in snapshot.children {
+                        if !names.insert(reference.name.clone())
+                            || !seen.insert(reference.session_id.clone())
+                        {
+                            return Err(ChildError::registry(
+                                "retained child roster has duplicate names or cyclic identities",
+                            ));
+                        }
+                        if parent.children().find(&reference.name).is_some() {
+                            return Err(ChildError::registry(
+                                "retained children have already been restored",
+                            ));
+                        }
+                        let child = parent_spawner.restore_child(reference).await?;
+                        pending.push_back(child);
+                    }
+                }
+                Ok(owner)
+            })
+        })?;
+        Ok(Operation::start(async move {
+            restoration.join().await.map(|_| ())
+        }))
+    }
+    async fn restore_child(&self, reference: RetainedChild) -> ChildResult<Arc<Scope<S>>> {
+        let owner = self.owner()?;
+        let authority = self.authority()?;
+        let mut name_path = owner.identity().name_path.clone();
+        name_path.push(reference.name.clone());
+        let agent_state = authority
+            .config
+            .states
+            .open(&name_path, &reference.session_id)
+            .await?;
+        let snapshot = agent_state
+            .load()
+            .await
+            .map_err(state::state_error)?
+            .ok_or_else(|| {
+                ChildError::registry(format!(
+                    "retained child snapshot is missing: {}",
+                    reference.name
+                ))
+            })?;
+        let descriptor = snapshot.descriptor;
+        if descriptor.name != reference.name
+            || descriptor.parent_session_id.as_deref()
+                != Some(owner.identity().session.session_id.as_str())
+            || reference.session_id.is_empty()
+        {
+            return Err(ChildError::registry(
+                "retained child descriptor does not match its parent roster",
+            ));
+        }
+        let depth = owner.identity().session.depth + 1;
+        if !authority.config.agent_limits.disable_recursion_limit && depth > 4 {
+            return Err(ChildError::registry(
+                "subagent depth limit reached during restoration",
+            ));
+        }
+        let lineage = owner.selection().lineage().link(owner.selection().clone());
+        let profile = authority
+            .config
+            .profiles
+            .resolve_child(&descriptor.selection.profile_id)?;
+        let model = authority
+            .config
+            .router
+            .resolve(&descriptor.selection.model_selector)
+            .map_err(|error| ChildError::registry(error.to_string()))?;
+        let selected = select_child(&lineage, profile, model, authority.config.agent_limits)?;
+        let delivery = match descriptor.completion_delivery {
+            CompletionDeliverySnapshot::Automatic => CompletionDelivery::Automatic,
+            CompletionDeliverySnapshot::RetainedOnly => CompletionDelivery::RetainedOnly,
+        };
+        let identity = Arc::new(AgentIdentity {
+            session: SessionIdentity {
+                session_id: reference.session_id,
+                name: reference.name.clone(),
+                parent_session_id: owner.identity().session.session_id.clone(),
+                depth,
+            },
+            parent_name: owner.identity().session.name.clone(),
+            name_path,
+            prompt_scope: owner.identity().prompt_scope.derive_child(
+                &reference.name,
+                depth,
+                &descriptor.local_scope,
+            ),
+            templates: owner.identity().templates.clone(),
+        });
+        let reservation = authority
+            .config
+            .retained
+            .reserve()
+            .map_err(|error| ChildError::registry(error.to_string()))?;
+        let built = async {
+            let history = authority.config.histories.prepare(&identity).await?;
+            let selection = Arc::new(SelectionCell::new(selected, lineage.clone()));
+            let callback = ParentScope::completion(
+                identity.clone(),
+                Some(&owner),
+                delivery,
+                authority.config.ids.clone(),
+            );
+            let parts = authority
+                .config
+                .factory
+                .create(PreparedScope {
+                    agent_state,
+                    identity: identity.clone(),
+                    history: history.clone(),
+                    selection: selection.clone(),
+                    lineage,
+                    parent_completion: callback,
+                    lifetime: self.lifetime.clone(),
+                })
+                .await?;
+            let scope = Scope::create(ScopeConfig {
+                authority: authority.clone(),
+                identity,
+                history,
+                selection,
+                parent: Some(owner.clone()),
+                delivery,
+                retention: Some(reservation.clone()),
+                parts,
+            })
+            .join()
+            .await?;
+            let admission = self.ensure_accepting().and_then(|()| {
+                reservation.commit();
+                owner.children().try_add(scope.clone())
+            });
+            match admission {
+                Ok(true) => Ok(scope),
+                result => {
+                    let cleanup = scope.close();
+                    self.state
+                        .lock()
+                        .expect("spawner poisoned")
+                        .rejected
+                        .push(cleanup.clone());
+                    authority.track_rejected(cleanup);
+                    match result {
+                        Err(error) => Err(error),
+                        Ok(false) => Err(stopped()),
+                        Ok(true) => unreachable!(),
+                    }
+                }
+            }
+        }
+        .await;
+        if built.is_err() {
+            reservation.rollback();
+        }
+        built
     }
     fn record_cleanup(&self, authority: &AgentRegistry<S>, error: ChildError) {
         self.state

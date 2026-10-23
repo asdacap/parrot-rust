@@ -20,6 +20,8 @@ pub struct FileAgentStateStore {
 struct State {
     directory: AgentStateDirectory,
     owner_session_id: String,
+    retired: bool,
+    retirement_complete: bool,
 }
 impl FileAgentStateStore {
     /// Opens an existing private agent directory on a blocking worker without
@@ -36,6 +38,8 @@ impl FileAgentStateStore {
                     state: Arc::new(Mutex::new(State {
                         directory,
                         owner_session_id,
+                        retired: false,
+                        retirement_complete: false,
                     })),
                 })
             })
@@ -61,6 +65,7 @@ impl AgentStateStore for FileAgentStateStore {
         Box::pin(async move {
             let state = self.state.clone().lock_owned().await;
             tokio::task::spawn_blocking(move || {
+                state.ensure_active()?;
                 if state.directory.exists().map_err(path_error)? {
                     return Err(AgentStateError::new(
                         AgentStateErrorKind::AlreadyExists,
@@ -82,6 +87,7 @@ impl AgentStateStore for FileAgentStateStore {
         Box::pin(async move {
             let state = self.state.clone().lock_owned().await;
             tokio::task::spawn_blocking(move || {
+                state.ensure_active()?;
                 let mut snapshot = state.read_snapshot()?.ok_or_else(|| {
                     AgentStateError::new(AgentStateErrorKind::NotFound, "agent snapshot is absent")
                 })?;
@@ -104,8 +110,38 @@ impl AgentStateStore for FileAgentStateStore {
             .map_err(worker_error)?
         })
     }
+
+    fn retire(&self) -> BoxFuture<'_, Result<(), AgentStateError>> {
+        Box::pin(async move {
+            let mut state = self.state.clone().lock_owned().await;
+            tokio::task::spawn_blocking(move || {
+                if state.retirement_complete {
+                    return Ok(());
+                }
+                state.retired = true;
+                if let Some(snapshot) = state.read_snapshot()? {
+                    state.validate(&snapshot)?;
+                }
+                state.directory.retire().map_err(path_error)?;
+                state.retirement_complete = true;
+                Ok(())
+            })
+            .await
+            .map_err(worker_error)?
+        })
+    }
 }
 impl State {
+    fn ensure_active(&self) -> Result<(), AgentStateError> {
+        if self.retired {
+            return Err(AgentStateError::new(
+                AgentStateErrorKind::Retired,
+                "agent snapshot store has been retired",
+            ));
+        }
+        Ok(())
+    }
+
     fn read_snapshot(&self) -> Result<Option<AgentStateSnapshot>, AgentStateError> {
         let Some(bytes) = self.directory.read().map_err(path_error)? else {
             return Ok(None);

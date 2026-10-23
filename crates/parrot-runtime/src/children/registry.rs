@@ -17,6 +17,8 @@ pub struct RegistryConfig<S: RestrictableAccessSnapshot + 'static> {
     pub profiles: Arc<dyn ProfileResolver<S>>,
     pub factory: Arc<dyn ScopeFactory<S>>,
     pub histories: Arc<dyn HistoryPreparer>,
+    pub states: Arc<dyn AgentStatePreparer>,
+    pub router: Arc<parrot_provider::routing::aliases::ModelRouter>,
     pub ids: Arc<dyn IdGenerator>,
     pub diagnostics: Arc<dyn ChildDiagnostics>,
     pub retained: RetainedAgentBudget,
@@ -270,6 +272,35 @@ impl<S: RestrictableAccessSnapshot + 'static> ChildRegistry<S> {
     }
     pub fn try_add(&self, scope: Arc<Scope<S>>) -> ChildResult<bool> {
         let mut state = self.state.lock().expect("children poisoned");
+        if !self.check_admission(&state, &scope)? {
+            return Ok(false);
+        }
+        (self.validate)(&scope)?;
+        Self::check_name(&state, &scope)?;
+        Self::insert(&mut state, scope)
+    }
+    pub(crate) fn prepare_admission(&self, scope: &Arc<Scope<S>>) -> ChildResult<bool> {
+        let state = self.state.lock().expect("children poisoned");
+        if !self.check_admission(&state, scope)? {
+            return Ok(false);
+        }
+        (self.validate)(scope)?;
+        Self::check_name(&state, scope)?;
+        Ok(true)
+    }
+    pub(crate) fn admit_prepared(&self, scope: Arc<Scope<S>>) -> ChildResult<bool> {
+        let mut state = self.state.lock().expect("children poisoned");
+        if !self.check_admission(&state, &scope)? {
+            return Ok(false);
+        }
+        Self::check_name(&state, &scope)?;
+        Self::insert(&mut state, scope)
+    }
+    fn check_admission(
+        &self,
+        state: &ChildrenState<S>,
+        scope: &Arc<Scope<S>>,
+    ) -> ChildResult<bool> {
         if state.shutdown.is_some() {
             return Ok(false);
         }
@@ -279,7 +310,9 @@ impl<S: RestrictableAccessSnapshot + 'static> ChildRegistry<S> {
                 self.owner.session.session_id
             )));
         }
-        (self.validate)(&scope)?;
+        Ok(true)
+    }
+    fn check_name(state: &ChildrenState<S>, scope: &Arc<Scope<S>>) -> ChildResult<()> {
         if state
             .children
             .iter()
@@ -290,6 +323,9 @@ impl<S: RestrictableAccessSnapshot + 'static> ChildRegistry<S> {
                 scope.identity().session.name
             )));
         }
+        Ok(())
+    }
+    fn insert(state: &mut ChildrenState<S>, scope: Arc<Scope<S>>) -> ChildResult<bool> {
         state.children.push(scope.clone());
         if let Err(error) = scope.publish_snapshots() {
             state.children.pop();
@@ -297,6 +333,7 @@ impl<S: RestrictableAccessSnapshot + 'static> ChildRegistry<S> {
         }
         Ok(true)
     }
+    /// Structural removal only. Durable retained-child removal must use the owning spawner's retire operation.
     pub fn detach(&self, scope: &Arc<Scope<S>>) -> ChildResult<Option<Arc<Scope<S>>>> {
         let mut state = self.state.lock().expect("children poisoned");
         if let Some(index) = state

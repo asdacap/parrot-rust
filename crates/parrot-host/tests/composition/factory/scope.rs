@@ -1572,6 +1572,10 @@ async fn actual_hosted_selection_updates_preserve_open_metadata_and_record_opene
     ))
     .await
     .unwrap();
+    let root = fixture.root();
+    let snapshot = root.agent_state().load().await.unwrap().unwrap();
+    assert_eq!(snapshot.descriptor.selection.model_selector, "local/model-next");
+    assert_eq!(snapshot.descriptor.selection.profile_id, root.selection().current().unwrap().profile.id);
     let updated: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     metadata["Model"] = json!("local/model-next");
     metadata["Selector"] = json!("local/model-next");

@@ -1295,6 +1295,15 @@ async fn real_root(
         profiles: Arc::new(support::Profiles),
         factory: factory.clone(),
         histories: histories.clone(),
+        states: Arc::new(parrot_runtime::children::AgentStateFiles::new(
+            histories
+                .repository
+                .events()
+                .database()
+                .selected_root()
+                .clone(),
+        )),
+        router: support::Scripted::default().router(),
         ids: Arc::new(support::Ids),
         diagnostics: Arc::new(support::Diagnostics::default()),
         retained: parrot_domain::values::accounting::RetainedAgentBudget::new(8),
@@ -1309,6 +1318,15 @@ async fn real_root(
         support::selection(&support::Scripted::default(), "first", "root", 0xff),
         PolicyLineage::root(),
     ));
+    let agent_state = registry
+        .prepare_state(
+            &identity,
+            &selection.current().unwrap(),
+            "",
+            CompletionDelivery::RetainedOnly,
+        )
+        .await
+        .unwrap();
     struct NoParent;
     impl parrot_runtime::agent_turn::services::ParentCompletion for NoParent {
     fn deliver_correlated<'a>(
@@ -1332,6 +1350,7 @@ async fn real_root(
     let parts = parrot_runtime::children::ScopeFactory::create(
         factory.as_ref(),
         PreparedScope {
+            agent_state: agent_state.clone(),
             identity: identity.clone(),
             history: history.clone(),
             selection: selection.clone(),

@@ -488,6 +488,7 @@ impl ScopeFactory<Security> for Factory {
                 .unwrap()
                 .insert(identity.session.name.clone(), built);
             Ok(ScopeParts {
+                agent_state: prepared.agent_state.clone(),
                 session: adapter,
                 services: vec![ServiceRegistration::new(queues.clone())],
                 publishers: vec![],
@@ -533,6 +534,15 @@ impl Harness {
             profiles: Arc::new(support::Profiles),
             factory: factory.clone(),
             histories: histories.clone(),
+            states: Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
+            router: Scripted::default().router(),
             ids: Arc::new(support::Ids),
             diagnostics: Arc::new(support::Diagnostics::default()),
             retained: RetainedAgentBudget::new(32),
@@ -593,9 +603,21 @@ impl Harness {
             .lock()
             .unwrap()
             .insert(name.into(), provider);
+        let local_scope = if parent.is_some() { "T52 fixture" } else { "" };
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                local_scope,
+                delivery,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .create(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),

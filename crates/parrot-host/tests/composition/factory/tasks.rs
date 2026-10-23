@@ -90,9 +90,20 @@ async fn root_with_controller(
         support::selection(&h.provider, "first", "root-mode", 0xff),
         lineage.clone(),
     ));
+    let agent_state = h
+        .registry
+        .prepare_state(
+            &identity,
+            &selection.current().unwrap(),
+            "",
+            CompletionDelivery::RetainedOnly,
+        )
+        .await
+        .unwrap();
     let mut parts = h
         .factory
         .build(PreparedScope {
+            agent_state: agent_state.clone(),
             identity: identity.clone(),
             history: history.clone(),
             selection: selection.clone(),

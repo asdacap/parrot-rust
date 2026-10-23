@@ -20,4 +20,5 @@ mod resolution;
 mod resolver_boundaries;
 mod resources;
 mod retained;
+mod restoration;
 mod support;

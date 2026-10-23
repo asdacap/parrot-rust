@@ -74,6 +74,31 @@ impl AgentStateDirectory {
         }
     }
 
+    pub(super) fn retire(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            for name in [AGENT_STATE_FILE_NAME, AGENT_STATE_STAGING_FILE_NAME] {
+                match unlinkat(&self.directory, name, AtFlags::empty()) {
+                    Ok(()) => {}
+                    Err(rustix::io::Errno::NOENT) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            self.directory.sync_all()
+        }
+        #[cfg(not(unix))]
+        {
+            for name in [AGENT_STATE_FILE_NAME, AGENT_STATE_STAGING_FILE_NAME] {
+                match std::fs::remove_file(self.path.join(name)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok(())
+        }
+    }
+
     pub(super) fn read(&self) -> io::Result<Option<Vec<u8>>> {
         #[cfg(unix)]
         let result = openat(

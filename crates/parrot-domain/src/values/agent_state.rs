@@ -59,6 +59,7 @@ pub enum CompletionDeliverySnapshot {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetainedChild {
+    pub requested_name: String,
     pub name: String,
     pub session_id: String,
 }

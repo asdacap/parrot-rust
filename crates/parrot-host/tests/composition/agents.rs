@@ -737,6 +737,7 @@ mod fixture {
                 }),
             );
             Ok(ScopeParts {
+                agent_state: prepared.agent_state.clone(),
                 session: adapter,
                 services: vec![
                     ServiceRegistration::new(bound),
@@ -806,6 +807,7 @@ mod fixture {
                     .unwrap(),
                 ),
             });
+            let model = Scripted::default();
             let registry = AgentRegistry::new(RegistryConfig {
                 agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                     disable_recursion_limit: false,
@@ -814,6 +816,15 @@ mod fixture {
                 profiles: Arc::new(super::support::Profiles),
                 factory: factory.clone(),
                 histories: histories.clone(),
+                states: Arc::new(AgentStateFiles::new(
+                    histories
+                        .repository
+                        .events()
+                        .database()
+                        .selected_root()
+                        .clone(),
+                )),
+                router: model.router(),
                 ids: Arc::new(super::support::Ids),
                 diagnostics: Arc::new(super::support::Diagnostics::default()),
                 retained: RetainedAgentBudget::new(32),
@@ -828,7 +839,6 @@ mod fixture {
             let identity = AgentIdentity::root(id(), "main".into(), templates());
             let history = histories.history(&identity);
             let lineage = PolicyLineage::root();
-            let model = Scripted::default();
             factory
                 .providers
                 .lock()
@@ -842,8 +852,18 @@ mod fixture {
                 },
                 lineage.clone(),
             ));
+            let agent_state = registry
+                .prepare_state(
+                    &identity,
+                    &selection.current().unwrap(),
+                    "",
+                    CompletionDelivery::RetainedOnly,
+                )
+                .await
+                .unwrap();
             let parts = factory
                 .build(PreparedScope {
+                    agent_state: agent_state.clone(),
                     identity: identity.clone(),
                     history: history.clone(),
                     selection: selection.clone(),

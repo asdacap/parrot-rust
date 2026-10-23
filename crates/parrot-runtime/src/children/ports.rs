@@ -10,6 +10,7 @@ use crate::{
 };
 use parrot_domain::{
     contracts::{
+        agent_state::AgentStateStore,
         async_ops::{BoxFuture, Cancellation},
         security::RestrictableAccessSnapshot,
     },
@@ -168,6 +169,7 @@ pub use parrot_domain::contracts::async_ops::{
 };
 
 pub struct ScopeParts<S: RestrictableAccessSnapshot + 'static> {
+    pub agent_state: Arc<dyn AgentStateStore>,
     pub session: Arc<dyn ScopedSession<S>>,
     pub services: Vec<ServiceRegistration>,
     pub publishers: Vec<Arc<dyn SnapshotPublisher>>,
@@ -177,6 +179,7 @@ pub struct ScopeParts<S: RestrictableAccessSnapshot + 'static> {
     pub final_resources: Vec<Arc<dyn ScopeResource<Error = super::ChildError>>>,
 }
 pub struct PreparedScope<S: RestrictableAccessSnapshot + 'static> {
+    pub agent_state: Arc<dyn AgentStateStore>,
     pub identity: Arc<AgentIdentity>,
     pub history: AgentHistoryView,
     pub selection: Arc<dyn SelectionSource<S>>,

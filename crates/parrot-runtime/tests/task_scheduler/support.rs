@@ -653,6 +653,7 @@ impl Factory {
             services.push(ServiceRegistration::new(marker));
         }
         Ok(ScopeParts {
+            agent_state: prepared.agent_state.clone(),
             session: adapter,
             services,
             publishers: plan.publishers,
@@ -685,7 +686,7 @@ pub struct Scripted {
     pub changed: Arc<tokio::sync::Notify>,
 }
 impl Scripted {
-    pub fn selection(&self, model: &str) -> ResolvedModelSelection {
+    pub fn router(&self) -> Arc<ModelRouter> {
         let mut first = Model::new("first", "scripted");
         first.context_window = 100000;
         let mut second = Model::new("second", "scripted");
@@ -698,12 +699,13 @@ impl Scripted {
             .unwrap(),
         );
         let aliases = Arc::new(ModelAliasCatalog::new(registry.clone(), vec![]).unwrap());
-        ModelRouter::new(
+        Arc::new(ModelRouter::new(
             registry,
             Arc::new(ModelRouting::new(aliases, "scripted/first")),
-        )
-        .resolve(&format!("scripted/{model}"))
-        .unwrap()
+        ))
+    }
+    pub fn selection(&self, model: &str) -> ResolvedModelSelection {
+        self.router().resolve(&format!("scripted/{model}")).unwrap()
     }
     fn call_impl(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
         let name = request

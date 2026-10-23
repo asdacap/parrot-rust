@@ -174,6 +174,15 @@ impl Harness {
             profiles: Arc::new(Profiles),
             factory: factory.clone(),
             histories: histories.clone(),
+            states: Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
+            router: Scripted::default().router(),
             ids: Arc::new(Ids),
             diagnostics: Arc::new(Diagnostics::default()),
             retained: RetainedAgentBudget::new(32),
@@ -195,9 +204,20 @@ impl Harness {
             selection(&self.provider, "first", "root", 0xff),
             lineage.clone(),
         ));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),
@@ -271,9 +291,20 @@ impl Harness {
             selection(&self.provider, "first", "child", 0xff),
             lineage.clone(),
         ));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "same-id queue replacement",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),

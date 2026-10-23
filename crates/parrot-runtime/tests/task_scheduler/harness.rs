@@ -46,6 +46,7 @@ impl Harness {
         let diagnostics = Arc::new(Diagnostics::default());
         let lifetime = Arc::new(Signal::new());
         let budget = RetainedAgentBudget::new(capacity.try_into().unwrap());
+        let provider = Scripted::default();
         let registry = AgentRegistry::new(RegistryConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
@@ -54,13 +55,21 @@ impl Harness {
             profiles: Arc::new(Profiles),
             factory: factory.clone(),
             histories: histories.clone(),
+            states: Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
+            router: provider.router(),
             ids: Arc::new(Ids),
             diagnostics: diagnostics.clone(),
             retained: budget.clone(),
             lifetime: lifetime.clone(),
             validate_child: Arc::new(|_| Ok(())),
         });
-        let provider = Scripted::default();
         *factory.registry.lock().unwrap() = Arc::downgrade(&registry);
         *factory.router.provider.lock().unwrap() = Some(provider.clone());
         Self {
@@ -86,9 +95,20 @@ impl Harness {
             selection(&self.provider, "first", "root-mode", 0xff),
             lineage.clone(),
         ));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),
@@ -145,6 +165,16 @@ impl Harness {
         let mut current = selection(&self.provider, "first", "child", 0xff);
         current.security = lineage.resolve(current.security).unwrap();
         let selection = Arc::new(SelectionCell::new(current, lineage.clone()));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "test scope",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let completion = ParentScope::completion(
             identity.clone(),
             Some(parent),
@@ -154,6 +184,7 @@ impl Harness {
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),

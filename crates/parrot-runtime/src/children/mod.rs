@@ -7,6 +7,7 @@ mod registry;
 mod resolver;
 mod scope;
 mod spawner;
+mod state;
 
 pub use completion::ParentScope;
 pub use operation::{ChildError, ChildResult, Operation};
@@ -16,3 +17,5 @@ pub use registry::{AgentRegistry, ChildAdmission, ChildRegistry, RegistryConfig}
 pub use resolver::AgentResolver;
 pub use scope::{Scope, ScopeConfig};
 pub use spawner::{AgentSpawner, HistorySource, LaunchRequest};
+
+pub use state::{AgentStateFiles, AgentStatePreparer};
