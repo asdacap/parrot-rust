@@ -548,6 +548,7 @@ struct Observations {
     selection: Option<Arc<dyn SelectionSource<Security>>>,
     bound: Option<Arc<Scope<Security>>>,
     constructors: usize,
+    construction: Option<(String, Arc<TurnBarrier>)>,
 }
 struct ObservedSource {
     actual: Arc<dyn AgentFactorySource<Security>>,
@@ -562,15 +563,31 @@ impl ScopeFactory<Security> for ObservedFactory {
         &self,
         prepared: PreparedScope<Security>,
     ) -> BoxFuture<'_, ChildResult<ScopeParts<Security>>> {
-        {
+        let construction = {
             let mut observed = self.observations.lock().unwrap();
             if prepared.identity.session.depth == 0 {
                 observed.identity = Some(prepared.identity.clone());
                 observed.selection = Some(prepared.selection.clone());
             }
             observed.constructors += 1;
-        }
-        self.actual.create(prepared)
+            if observed
+                .construction
+                .as_ref()
+                .is_some_and(|(name, _)| name == &prepared.identity.session.name)
+            {
+                observed.construction.take().map(|(_, gate)| gate)
+            } else {
+                None
+            }
+        };
+        Box::pin(async move {
+            let parts = self.actual.create(prepared).await?;
+            if let Some(construction) = construction {
+                construction.entered.notify_one();
+                construction.release.acquire().await.unwrap().forget();
+            }
+            Ok(parts)
+        })
     }
 }
 impl AgentFactorySource<Security> for ObservedSource {
@@ -2785,6 +2802,7 @@ mod integrated_rpc;
 mod original_adapters_v8;
 mod original_rpc_v8;
 mod resume_histories;
+mod session_resume;
 
 #[path = "../../e2e_scenarios/scenarios.rs"]
 mod e2e_scenarios;

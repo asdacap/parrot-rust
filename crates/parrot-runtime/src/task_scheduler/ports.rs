@@ -36,7 +36,7 @@ pub trait TaskSession: Send + Sync {
     /// Reads the worker's durable execution correlation without activating it.
     fn capture_execution(&self) -> BoxFuture<'_, ChildResult<Option<ExecutionCheckpoint>>>;
     /// Reserves the retained owned execution without admitting another prompt.
-    fn recover(&self) -> ChildResult<Operation<Execution>>;
+    fn recover(&self) -> ChildResult<TaskExecution>;
     /// Cancels only the saved matching input, without starting provider work.
     fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>>;
     /// Joins the worker while preserving unfinished durable execution intent.
@@ -132,11 +132,16 @@ impl<B: DrainBackend> TaskSession for TaskSessionAdapter<B> {
                 .execution)
         })
     }
-    fn recover(&self) -> ChildResult<Operation<Execution>> {
-        let operation = self.session.recover_owned()?;
-        Ok(Operation::start(async move {
-            operation.join().await.map_err(Into::into)
-        }))
+    fn recover(&self) -> ChildResult<TaskExecution> {
+        let handles = self.session.recover_owned_reserved()?;
+        Ok(TaskExecution {
+            execution: Operation::start(async move {
+                handles.execution.join().await.map_err(Into::into)
+            }),
+            reservation: Operation::start(async move {
+                handles.reservation.join().await.map_err(Into::into)
+            }),
+        })
     }
     fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>> {
         let operation = self.session.cancel_recovered_execution(prompt_id)?;

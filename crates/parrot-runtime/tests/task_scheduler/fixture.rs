@@ -357,7 +357,7 @@ impl TaskSession for RecordingSession {
     {
         self.actual.capture_execution()
     }
-    fn recover(&self) -> ChildResult<Operation<Execution>> {
+    fn recover(&self) -> ChildResult<parrot_runtime::task_scheduler::TaskExecution> {
         self.actual.recover()
     }
     fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>> {

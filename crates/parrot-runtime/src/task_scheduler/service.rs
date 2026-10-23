@@ -184,6 +184,7 @@ enum UpdateOrigin {
 struct Admission {
     tail: Option<Operation<()>>,
     settlement: Option<Operation<()>>,
+    freeze: Option<Operation<()>>,
     suspension: Option<Operation<()>>,
 }
 /// One graph per actual T48 scope. Composition registers this exact Arc as a service
@@ -437,7 +438,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         origin: UpdateOrigin,
     ) -> ChildResult<Operation<usize>> {
         let mut admission = self.admission.lock().expect("task admission poisoned");
-        if admission.settlement.is_some() || admission.suspension.is_some() {
+        if admission.settlement.is_some() || admission.freeze.is_some() {
             return Err(shutting_down());
         }
         let previous = admission.tail.clone();
@@ -603,7 +604,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         incoming: Vec<Task>,
     ) -> Operation<()> {
         let mut admission = self.admission.lock().expect("task admission poisoned");
-        if admission.settlement.is_some() || admission.suspension.is_some() {
+        if admission.settlement.is_some() || admission.freeze.is_some() {
             return Operation::start(async { Ok(()) });
         }
         let prior = admission.tail.clone();
@@ -641,10 +642,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         admission.tail = Some(operation.clone());
         operation
     }
-    /// Freezes the graph and joins workers without canceling durable task intent.
-    pub fn suspend(self: &Arc<Self>) -> Operation<()> {
+    /// Freezes admissions, launches and notices without closing any worker session.
+    /// User-session shutdown freezes every graph before suspending shared workers.
+    pub fn freeze_for_suspension(self: &Arc<Self>) -> Operation<()> {
         let mut admission = self.admission.lock().expect("task admission poisoned");
-        if let Some(operation) = &admission.suspension {
+        if let Some(operation) = &admission.freeze {
             return operation.clone();
         }
         let previous = admission.tail.clone();
@@ -653,11 +655,28 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             if let Some(previous) = previous {
                 let _ = previous.join().await;
             }
+            let mut state = scheduler.gate.lock().await;
+            state.suspended = true;
+            state.execution_active = false;
+            state.notifications_active = false;
+            scheduler.notifier.suspend();
+            Ok(())
+        });
+        admission.freeze = Some(operation.clone());
+        operation
+    }
+    /// Freezes the graph and joins workers without canceling durable task intent.
+    pub fn suspend(self: &Arc<Self>) -> Operation<()> {
+        let freeze = self.freeze_for_suspension();
+        let mut admission = self.admission.lock().expect("task admission poisoned");
+        if let Some(operation) = &admission.suspension {
+            return operation.clone();
+        }
+        let scheduler = self.clone();
+        let operation = Operation::start(async move {
+            freeze.join().await?;
             let (sessions, runs, executions) = {
-                let mut state = scheduler.gate.lock().await;
-                state.suspended = true;
-                state.execution_active = false;
-                state.notifications_active = false;
+                let state = scheduler.gate.lock().await;
                 let sessions = state
                     .entries
                     .iter()
@@ -939,6 +958,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         Some(scope.identity().session.session_id.clone());
                     state.entries[index].scope = Some(scope);
                     self.save_graph(state).await?;
+                }
+                Err(ChildError::Suspended) => {
+                    state.execution_active = false;
+                    state.notifications_active = false;
+                    return Ok(());
                 }
                 Err(error) => {
                     let task = state.entries[index].task.clone();
@@ -1678,6 +1702,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     }
                     let notice = {
                         let state = scheduler.gate.lock().await;
+                        if state.suspended {
+                            return Ok(());
+                        }
                         state
                             .notifications
                             .iter()
@@ -1700,8 +1727,20 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     Ok(())
                 }
                 .await;
-                ready.finish(result.clone());
                 let mut state = scheduler.gate.lock().await;
+                let result = if state.suspended
+                    && result.as_ref().is_err_and(|error| {
+                        error == &ChildError::Cancelled
+                            || error
+                                == &ChildError::from(
+                                    crate::agent_turn::lifecycle::LifecycleError::ShuttingDown,
+                                )
+                    }) {
+                    Ok(())
+                } else {
+                    result
+                };
+                ready.finish(result.clone());
                 state.stopping.remove(&stop.generation_id);
                 state.stop_readiness.remove(&stop.generation_id);
                 if let Err(error) = &result {

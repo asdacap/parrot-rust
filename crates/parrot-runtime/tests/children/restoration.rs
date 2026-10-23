@@ -335,6 +335,142 @@ async fn orphan_incarnations_are_not_overwritten_and_named_reuse_keeps_suffix_id
     .await;
 }
 
+struct SelectionPreparer {
+    files: AgentStateFiles,
+    gate: Arc<Gate>,
+    armed: Arc<AtomicBool>,
+}
+impl AgentStatePreparer for SelectionPreparer {
+    fn open<'a>(
+        &'a self,
+        names: &'a [String],
+        owner: &'a str,
+    ) -> BoxFuture<'a, ChildResult<Arc<dyn AgentStateStore>>> {
+        Box::pin(async move {
+            let inner = self.files.open(names, owner).await?;
+            Ok(Arc::new(SelectionStore {
+                inner,
+                gate: self.gate.clone(),
+                armed: self.armed.clone(),
+            }) as Arc<dyn AgentStateStore>)
+        })
+    }
+}
+struct SelectionStore {
+    inner: Arc<dyn AgentStateStore>,
+    gate: Arc<Gate>,
+    armed: Arc<AtomicBool>,
+}
+impl AgentStateStore for SelectionStore {
+    fn retire(&self) -> BoxFuture<'_, Result<(), AgentStateError>> {
+        self.inner.retire()
+    }
+    fn load(&self) -> BoxFuture<'_, Result<Option<AgentStateSnapshot>, AgentStateError>> {
+        self.inner.load()
+    }
+    fn initialize(&self, value: AgentStateSnapshot) -> BoxFuture<'_, Result<(), AgentStateError>> {
+        self.inner.initialize(value)
+    }
+    fn update(
+        &self,
+        value: AgentStateUpdate,
+    ) -> BoxFuture<'_, Result<AgentStateSnapshot, AgentStateError>> {
+        Box::pin(async move {
+            if matches!(&value, AgentStateUpdate::Descriptor(_))
+                && self.armed.swap(false, Ordering::SeqCst)
+            {
+                self.gate
+                    .wait(&parrot_storage::events::NeverCancelled)
+                    .await
+                    .map_err(|error| {
+                        AgentStateError::new(AgentStateErrorKind::Io, error.to_string())
+                    })?;
+            }
+            self.inner.update(value).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn registry_freeze_joins_accepted_retained_selection_write_before_scope_snapshot() {
+    bounded(async {
+        let histories = Histories::new();
+        let gate = Gate::new();
+        let armed = Arc::new(AtomicBool::new(false));
+        let states = Arc::new(SelectionPreparer {
+            files: AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            ),
+            gate: gate.clone(),
+            armed: armed.clone(),
+        });
+        let first = Harness::with_state_preparer(histories.clone(), states);
+        let root = first.root("root").await;
+        let child = first.spawn(&root, "retained").await;
+        let mut request = first.request(&root, "retained");
+        request.model = first.provider.selection("second");
+        armed.store(true, Ordering::SeqCst);
+        let resume = root.spawner().spawn_or_resume(request).unwrap();
+        gate.entered().await;
+        let freeze = first.registry.freeze_admissions();
+        assert!(!freeze.is_finished());
+        assert!(!first.registry.is_accepting());
+        assert!(matches!(
+            root.spawner()
+                .spawn_or_resume(first.request(&root, "later")),
+            Err(ChildError::Suspended)
+        ));
+        gate.open();
+        let resumed = resume.join().await.unwrap();
+        assert!(Arc::ptr_eq(&resumed, &child));
+        freeze.join().await.unwrap();
+        assert_eq!(
+            child
+                .agent_state()
+                .load()
+                .await
+                .unwrap()
+                .unwrap()
+                .descriptor
+                .selection
+                .model_selector,
+            "scripted/second"
+        );
+        let identity = root.identity().clone();
+        first.close().await;
+        let second = Harness::with_history_preparer(32, histories.clone(), histories);
+        let restored = second.reopen_root(identity).await;
+        restored
+            .spawner()
+            .restore_children()
+            .unwrap()
+            .join()
+            .await
+            .unwrap();
+        assert_eq!(
+            restored
+                .children()
+                .resolve("retained")
+                .unwrap()
+                .selection()
+                .current()
+                .unwrap()
+                .model
+                .requested_selector
+                .value,
+            "scripted/second"
+        );
+        assert!(second.provider.requests.lock().unwrap().is_empty());
+        second.close().await;
+    })
+    .await;
+}
+
 struct UncertainPreparer {
     files: AgentStateFiles,
     fail: Arc<AtomicBool>,

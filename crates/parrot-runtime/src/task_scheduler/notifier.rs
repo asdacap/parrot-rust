@@ -123,12 +123,23 @@ impl TaskNotifier {
                         )
                         .await
                 };
-                if delivered.is_ok() {
+                if delivered.is_ok() || self.suspended.load(Ordering::Acquire) {
                     break;
                 }
                 if attempt < 3 {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
+            }
+            if self.suspended.load(Ordering::Acquire)
+                && delivered.as_ref().is_err_and(|error| {
+                    error == &ChildError::Cancelled
+                        || error
+                            == &ChildError::from(
+                                crate::agent_turn::lifecycle::LifecycleError::ShuttingDown,
+                            )
+                })
+            {
+                break;
             }
             if let Err(error) = &delivered {
                 self.diagnostics.record(TaskDiagnostic {

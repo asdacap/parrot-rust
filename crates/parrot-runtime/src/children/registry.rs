@@ -29,6 +29,7 @@ struct RegistryState<S: RestrictableAccessSnapshot + 'static> {
     roots: Vec<Arc<Scope<S>>>,
     constructions: Vec<Operation<()>>,
     rejected: Vec<Operation<()>>,
+    freeze: Option<Operation<()>>,
     shutdown: Option<Operation<()>>,
     cleanup_failure: Option<ChildError>,
 }
@@ -51,6 +52,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRegistry<S> {
                 roots: Vec::new(),
                 constructions: Vec::new(),
                 rejected: Vec::new(),
+                freeze: None,
                 shutdown: None,
                 cleanup_failure: None,
             }),
@@ -62,11 +64,18 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRegistry<S> {
         self.lifetime.clone()
     }
     pub fn is_accepting(&self) -> bool {
-        self.state
-            .lock()
-            .expect("registry poisoned")
-            .shutdown
-            .is_none()
+        let state = self.state.lock().expect("registry poisoned");
+        state.shutdown.is_none() && state.freeze.is_none()
+    }
+    pub(crate) fn ensure_admission(&self) -> ChildResult<()> {
+        let state = self.state.lock().expect("registry poisoned");
+        if state.shutdown.is_some() {
+            Err(stopped())
+        } else if state.freeze.is_some() {
+            Err(ChildError::Suspended)
+        } else {
+            Ok(())
+        }
     }
     pub fn register_root(&self, scope: Arc<Scope<S>>) -> ChildResult<()> {
         let identity = scope.identity();
@@ -81,6 +90,9 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRegistry<S> {
         let mut state = self.state.lock().expect("registry poisoned");
         if state.shutdown.is_some() {
             return Err(stopped());
+        }
+        if state.freeze.is_some() {
+            return Err(ChildError::Suspended);
         }
         if state.roots.iter().any(|registered| {
             registered.identity().session.session_id == identity.session.session_id
@@ -163,6 +175,9 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRegistry<S> {
         if state.shutdown.is_some() {
             return Err(stopped());
         }
+        if state.freeze.is_some() {
+            return Err(ChildError::Suspended);
+        }
         let operation = launch();
         let observer = operation.clone();
         state.constructions.push(Operation::start(async move {
@@ -184,6 +199,42 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRegistry<S> {
             .expect("registry poisoned")
             .cleanup_failure
             .get_or_insert(error);
+    }
+    /// Stops new construction and joins accepted admissions without canceling session work.
+    pub fn freeze_admissions(self: &Arc<Self>) -> Operation<()> {
+        let mut state = self.state.lock().expect("registry poisoned");
+        if let Some(freeze) = &state.freeze {
+            return freeze.clone();
+        }
+        let constructions = state.constructions.clone();
+        let registry = self.clone();
+        let freeze = Operation::start(async move {
+            let mut result = Ok(());
+            for construction in constructions {
+                first(&mut result, construction.join().await);
+            }
+            let rejected = registry
+                .state
+                .lock()
+                .expect("registry poisoned")
+                .rejected
+                .clone();
+            for rejection in rejected {
+                first(&mut result, rejection.join().await);
+            }
+            if let Some(error) = registry
+                .state
+                .lock()
+                .expect("registry poisoned")
+                .cleanup_failure
+                .clone()
+            {
+                first(&mut result, Err(error));
+            }
+            result
+        });
+        state.freeze = Some(freeze.clone());
+        freeze
     }
     pub fn shutdown(self: &Arc<Self>) -> Operation<()> {
         let mut state = self.state.lock().expect("registry poisoned");

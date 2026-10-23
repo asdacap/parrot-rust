@@ -39,7 +39,7 @@ async fn direct_access_preserves_child_own_path_exact_list_and_parent_drain_item
 
 /// AgentQueueTests.cs:205-226: replacement uses the SAME child session ID and directory.
 #[tokio::test]
-async fn closed_child_replacement_with_same_id_lists_only_root_and_recreates_fresh_child_queue() {
+async fn closed_child_replacement_with_same_id_reattaches_retained_child_queue() {
     bounded(async {
         let h = Harness::new();
         let root = h.root().await;
@@ -51,9 +51,10 @@ async fn closed_child_replacement_with_same_id_lists_only_root_and_recreates_fre
             .agent_queue_directory(&child.identity().session.session_id)
             .unwrap();
         c.create("temporary-work", "").unwrap();
+        push(&c, "temporary-work", &["retained"], false);
         r.create("root-work", "").unwrap();
         bounded(child.close().join()).await.unwrap();
-        assert!(!directory.exists());
+        assert!(directory.exists());
         assert!(r.get("root-work").unwrap().path.exists());
         root.children().detach(&child).unwrap().unwrap();
         let replacement = h.replacement_child(&root, &child).await;
@@ -65,11 +66,19 @@ async fn closed_child_replacement_with_same_id_lists_only_root_and_recreates_fre
         let fresh = h.q(&replacement);
         assert!(!Arc::ptr_eq(&fresh, &c));
         assert_eq!(fresh.local().directory(), directory);
-        assert_eq!(names(&fresh), ["root-work"]);
+        assert_eq!(names(&fresh), ["root-work", "temporary-work"]);
+        assert_eq!(fresh.capture_inventory().queues.len(), 1);
         fresh.create("fresh-work", "").unwrap();
         assert!(directory.exists());
         assert!(fresh.local().get("fresh-work").unwrap().path.exists());
-        assert!(fresh.local().get("temporary-work").is_err());
+        assert_eq!(fresh.local().get("temporary-work").unwrap().size, 1);
+        assert_eq!(
+            fresh
+                .try_take("temporary-work", 1, Direction::Front)
+                .unwrap()
+                .items,
+            ["retained"]
+        );
         h.close().await;
     })
     .await;

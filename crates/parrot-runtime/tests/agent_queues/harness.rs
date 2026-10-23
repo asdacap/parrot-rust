@@ -146,8 +146,6 @@ impl Harness {
         Self::with_histories(Histories::new())
     }
     pub fn with_histories(histories: Arc<Histories>) -> Self {
-        let sessions = Arc::new(Factory::default());
-        *sessions.histories.lock().unwrap() = Some(histories.clone());
         let root = histories
             .repository
             .events()
@@ -157,6 +155,14 @@ impl Harness {
         let resource_id =
             UserSessionId::parse(histories.path.file_name().unwrap().to_str().unwrap()).unwrap();
         let resources = Arc::new(UserSessionResources::new(root, resource_id, ()).unwrap());
+        Self::with_resources(histories, resources)
+    }
+    pub fn with_resources(
+        histories: Arc<Histories>,
+        resources: Arc<UserSessionResources<()>>,
+    ) -> Self {
+        let sessions = Arc::new(Factory::default());
+        *sessions.histories.lock().unwrap() = Some(histories.clone());
         let factory = Arc::new(QueuedFactory {
             sessions,
             resources,

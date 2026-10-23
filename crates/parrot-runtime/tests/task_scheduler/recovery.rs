@@ -55,6 +55,111 @@ async fn wait_saved(
 }
 
 #[tokio::test]
+async fn suspended_stop_record_preserves_notice_without_poisoning_close_and_replays_on_reopen() {
+    let first = Harness::new();
+    let root = first.root("owner").await;
+    let provider = Gate::new();
+    first
+        .provider
+        .script("a", [Reply::held("answer", &provider)]);
+    set(&root, vec![task("a")]).await;
+    provider.entered().await;
+    let worker = first.factory.get("a");
+    let record = Gate::new();
+    *worker.task_session.record_gate.lock().unwrap() = Some(record.clone());
+    set(&root, vec![state("a", Canceled)]).await;
+    record.entered().await;
+    let scheduler = root.get_service::<Scheduler>().unwrap();
+    first.registry.freeze_admissions().join().await.unwrap();
+    scheduler.freeze_for_suspension().join().await.unwrap();
+    first
+        .factory
+        .get("owner")
+        .adapter
+        .session()
+        .suspend_handle();
+    worker.adapter.session().suspend_handle();
+    let suspension = scheduler.suspend();
+    assert!(!suspension.is_finished());
+    record.open();
+    bounded(suspension.join()).await.unwrap();
+    first.registry.shutdown().join().await.unwrap();
+    let saved = root.agent_state().load().await.unwrap().unwrap();
+    assert_eq!(saved.tasks.entries[0].task.state, Canceled);
+    let stop = saved.tasks.entries[0].pending_stop.as_ref().unwrap();
+    assert!(stop.stopped);
+    assert!(
+        saved
+            .tasks
+            .notifications
+            .iter()
+            .any(|notice| notice.message_id == stop.notice_message_id)
+    );
+    let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+    let restored = second.reopen_root(root.identity().clone()).await;
+    activate(&restored).await;
+    wait_saved(&restored, |graph| graph.entries[0].pending_stop.is_none()).await;
+    assert_eq!(snapshot(&restored).await[0].state, Canceled);
+    assert_eq!(requests(&second.provider, "a").len(), 1);
+    freeze(&second, &restored).await;
+}
+
+#[tokio::test]
+async fn registry_freeze_during_task_worker_construction_preserves_pending_attempt_for_reopen() {
+    let first = Harness::new();
+    let root = first.root("owner").await;
+    let construction = Gate::new();
+    *first.factory.construction.lock().unwrap() = Some(construction.clone());
+    let scheduler = root.get_service::<Scheduler>().unwrap();
+    let update = scheduler
+        .set_tasks(
+            vec![task("held-construction")],
+            root.selection().current().unwrap(),
+            HistoryForkBoundary::AfterCompletedHistory,
+        )
+        .unwrap();
+    construction.entered().await;
+    let frozen = first.registry.freeze_admissions();
+    assert!(!frozen.is_finished());
+    construction.open();
+    bounded(frozen.join()).await.unwrap();
+    bounded(update.join()).await.unwrap();
+    assert!(root.children().snapshot_children().is_empty());
+    let before = root.agent_state().load().await.unwrap().unwrap();
+    assert_eq!(before.tasks.entries[0].task.state, Pending);
+    assert!(before.tasks.entries[0].task.failure.is_none());
+    let attempt = before.tasks.entries[0].runner.as_ref().unwrap();
+    assert_eq!(attempt.attempt, 1);
+    let generation = attempt.generation_id.clone();
+    let identity = root.identity().clone();
+    freeze(&first, &root).await;
+    assert!(first.provider.requests.lock().unwrap().is_empty());
+    let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+    let restored = second.reopen_root(identity).await;
+    assert_eq!(
+        restored
+            .agent_state()
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .tasks
+            .entries[0]
+            .runner
+            .as_ref()
+            .unwrap()
+            .generation_id,
+        generation
+    );
+    activate(&restored).await;
+    assert_eq!(
+        complete(&restored).await[0].result.as_deref(),
+        Some("answer")
+    );
+    freeze(&second, &restored).await;
+}
+
+#[tokio::test]
 async fn graph_load_round_trips_definitions_outcomes_visibility_without_activation() {
     let first = Harness::new();
     let root = first.root("owner").await;

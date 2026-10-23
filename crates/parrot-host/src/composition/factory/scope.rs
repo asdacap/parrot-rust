@@ -1181,11 +1181,16 @@ impl<S: RestrictableAccessSnapshot + 'static> TaskSession for ScopedTaskSession<
                 .execution)
         })
     }
-    fn recover(&self) -> ChildResult<Operation<parrot_runtime::agent_turn::lifecycle::Execution>> {
-        let execution = self.link.session()?.recover_owned()?;
-        Ok(Operation::start(async move {
-            execution.join().await.map_err(Into::into)
-        }))
+    fn recover(&self) -> ChildResult<parrot_runtime::task_scheduler::TaskExecution> {
+        let handles = self.link.session()?.recover_owned_reserved()?;
+        Ok(parrot_runtime::task_scheduler::TaskExecution {
+            execution: Operation::start(async move {
+                handles.execution.join().await.map_err(Into::into)
+            }),
+            reservation: Operation::start(async move {
+                handles.reservation.join().await.map_err(Into::into)
+            }),
+        })
     }
     fn cancel_recovered(
         &self,
@@ -1734,10 +1739,11 @@ where
                 )
                 .await
                 .map_err(child)?;
-                let actual_session = Arc::new(AgentSession::with_state(
+                let actual_session = Arc::new(AgentSession::with_startup_activation(
                     backend,
                     prepared.lifetime.clone(),
                     prepared.agent_state.clone(),
+                    self.user.activation.clone(),
                 ));
                 session = Some(actual_session.clone());
                 link.session

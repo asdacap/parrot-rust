@@ -282,8 +282,9 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
                 }
                 if saved.terminal.is_none() {
                     let predecessor = session.recover()?;
+                    predecessor.reservation.wait(cancellation.as_ref()).await?;
                     progress.reserve();
-                    predecessor.wait(cancellation.as_ref()).await?;
+                    predecessor.execution.wait(cancellation.as_ref()).await?;
                     continue;
                 }
             } else if matches!(

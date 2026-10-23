@@ -84,13 +84,13 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
         self.authority.upgrade().ok_or_else(stopped)
     }
     fn ensure_accepting(&self) -> ChildResult<()> {
+        self.authority()?.ensure_admission()?;
         if self
             .state
             .lock()
             .expect("spawner poisoned")
             .shutdown
             .is_some()
-            || !self.authority()?.is_accepting()
             || !self.owner()?.children().is_accepting()
         {
             Err(stopped())
@@ -166,44 +166,46 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
         request: LaunchRequest<S>,
     ) -> ChildResult<Operation<Arc<Scope<S>>>> {
         let spawner = self.clone();
-        Ok(Operation::start(async move {
-            let _serial = spawner.spawn_gate.lock().await;
-            let name = sanitize(&request.requested_name);
-            if name.is_empty() {
-                return Err(ChildError::registry(
-                    "child agent name must contain at least one letter or digit",
-                ));
-            }
-            if let Some(existing) = spawner.owner()?.children().find(&name) {
-                return spawner.resume(existing, &request).await;
-            }
-            // Only fresh construction enters lifetime admission; retained resume
-            // matches the source busy-check/selection-update branch after stop.
-            spawner
-                .start(move |spawner| {
-                    Box::pin(async move {
-                        let mut conflicts = 0;
-                        loop {
-                            match spawner.spawn_candidate(&request, conflicts).await {
-                                Err(ChildError::NameConflict(_)) => {
-                                    let candidate =
-                                        select_name(&request.requested_name, "", conflicts);
-                                    if let Some(existing) = spawner
-                                        .find_suffix_child(&request.requested_name, &candidate)
-                                        .await?
-                                    {
-                                        return spawner.resume(existing, &request).await;
+        self.authority()?.start_construction(|| {
+            Operation::start(async move {
+                let _serial = spawner.spawn_gate.lock().await;
+                let name = sanitize(&request.requested_name);
+                if name.is_empty() {
+                    return Err(ChildError::registry(
+                        "child agent name must contain at least one letter or digit",
+                    ));
+                }
+                if let Some(existing) = spawner.owner()?.children().find(&name) {
+                    return spawner.resume(existing, &request).await;
+                }
+                // Only fresh construction enters lifetime admission; retained resume
+                // matches the source busy-check/selection-update branch after stop.
+                spawner
+                    .start(move |spawner| {
+                        Box::pin(async move {
+                            let mut conflicts = 0;
+                            loop {
+                                match spawner.spawn_candidate(&request, conflicts).await {
+                                    Err(ChildError::NameConflict(_)) => {
+                                        let candidate =
+                                            select_name(&request.requested_name, "", conflicts);
+                                        if let Some(existing) = spawner
+                                            .find_suffix_child(&request.requested_name, &candidate)
+                                            .await?
+                                        {
+                                            return spawner.resume(existing, &request).await;
+                                        }
+                                        conflicts += 1;
                                     }
-                                    conflicts += 1;
+                                    result => return result,
                                 }
-                                result => return result,
                             }
-                        }
-                    })
-                })?
-                .join()
-                .await
-        }))
+                        })
+                    })?
+                    .join()
+                    .await
+            })
+        })
     }
     async fn resume(
         &self,

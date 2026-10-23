@@ -11,7 +11,7 @@ use protobuf::Message;
 use std::sync::Arc;
 
 #[tokio::test]
-async fn root_initialization_removes_stale_child_tree_but_keeps_persisted_root_queues() {
+async fn root_initialization_preserves_child_tree_and_reattaches_persisted_root_queues() {
     bounded(async {
         let h = Harness::new();
         let paths = &h.factory.resources;
@@ -26,7 +26,10 @@ async fn root_initialization_removes_stale_child_tree_but_keeps_persisted_root_q
         std::fs::write(stale.join("orphaned.jsonl"), "orphaned").unwrap();
         let root = h.root().await;
         let queues = h.q(&root);
-        assert!(!paths.agent_queue_root_directory().exists());
+        assert_eq!(
+            std::fs::read_to_string(stale.join("orphaned.jsonl")).unwrap(),
+            "orphaned"
+        );
         assert_eq!(queues.get("root-work").unwrap().size, 1);
         assert_eq!(queues.capture_inventory().queues.len(), 1);
         h.close().await;
@@ -48,7 +51,7 @@ async fn root_queues_persist_across_distinct_actual_owner_scope_lifetimes() {
         push(&q, "persistent-work", &["item"], false);
         let path = q.get("persistent-work").unwrap().path;
         first.close().await;
-        let second = Harness::with_histories(first.histories.clone());
+        let second = Harness::with_resources(Histories::new(), first.factory.resources.clone());
         let successor = second.root().await;
         let restored = second.q(&successor).get("persistent-work").unwrap();
         assert_ne!(
@@ -64,7 +67,7 @@ async fn root_queues_persist_across_distinct_actual_owner_scope_lifetimes() {
 }
 
 #[tokio::test]
-async fn root_queue_survives_actual_foreground_turn_and_child_close_removes_only_child_owned_directory()
+async fn root_queue_survives_actual_foreground_turn_and_child_close_preserves_child_owned_directory()
  {
     bounded(async {
         let h = Harness::new();
@@ -90,7 +93,9 @@ async fn root_queue_survives_actual_foreground_turn_and_child_close_removes_only
         let close = child.close();
         drop(close);
         bounded(child.close().join()).await.unwrap();
-        assert!(!child_dir.exists());
+        let retained = QueueStore::new(child_dir).unwrap();
+        assert_eq!(retained.get("child-work").unwrap().size, 1);
+        retained.dispose().unwrap();
         assert!(sibling_file.exists());
         assert!(original.path.exists());
         assert_eq!(s.get("sibling-work").unwrap().size, 1);

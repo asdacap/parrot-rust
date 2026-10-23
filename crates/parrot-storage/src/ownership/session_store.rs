@@ -102,6 +102,7 @@ pub struct SessionInitialization {
     pub model: SessionModelSelection,
     pub mode: String,
     pub interactive_permissions: bool,
+    pub resumed: bool,
 }
 pub trait StoredUserSession: Send + Sync {
     fn model(&self) -> SessionModelSelection;
@@ -929,6 +930,7 @@ impl SessionStore {
                 }
                 .to_owned(),
                 interactive_permissions: interactive,
+                resumed: existing.is_some(),
             };
             Ok::<_, SessionStoreError>((existing, initialization))
         })();

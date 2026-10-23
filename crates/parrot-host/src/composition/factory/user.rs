@@ -23,13 +23,14 @@ use parrot_provider::routing::{
 use parrot_runtime::{
     agent_turn::{
         engine::RuntimeBackend,
-        lifecycle::{AgentSession, DrainBackend, IncomingActivity, Signal},
+        lifecycle::{AgentSession, DrainBackend, IncomingActivity, Signal, StartupActivation},
         services::{SelectionSource, TurnSkills},
     },
     children::{
-        AgentIdentity, AgentRegistry, AgentStateFiles, ChildDiagnostic, ChildDiagnostics,
-        ChildResult, CompletionDelivery, HistoryPreparer, IdGenerator, PolicyLineage,
-        PreparedScope, RegistryConfig, Scope, ScopeConfig, ScopeFactory, SelectionCell,
+        AgentIdentity, AgentRegistry, AgentStateFiles, AgentStatePreparer, ChildDiagnostic,
+        ChildDiagnostics, ChildResult, CompletionDelivery, HistoryPreparer, IdGenerator,
+        PolicyLineage, PreparedScope, RegistryConfig, Scope, ScopeConfig, ScopeFactory,
+        SelectionCell,
     },
     event_broker::EventBroker,
     interactions::{
@@ -44,6 +45,7 @@ use parrot_runtime::{
     prompt_context::{
         AgentSkills, PromptResult, SkillCatalog, SkillMetadata, SkillSnapshot, StandingInstruction,
     },
+    task_scheduler::TaskScheduler,
     tool_settlement::ToolSettlement,
 };
 use parrot_storage::{
@@ -58,7 +60,7 @@ use parrot_storage::{
 };
 use parrot_tools::session::{WriteTarget, WriteTargetKind};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex, OnceLock, Weak},
     time::Duration,
@@ -67,6 +69,8 @@ use tokio::sync::{Mutex as AsyncMutex, oneshot};
 
 pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S, ToolSettlement<S>>>;
 pub type ScopeBinder<S> = Arc<dyn Fn(&Arc<Scope<S>>) -> ChildResult<()> + Send + Sync>;
+type RuntimeTaskScheduler<S> =
+    TaskScheduler<S, parrot_tools::task_artifacts::TaskArtifactParserAdapter>;
 /// Observes saved events loaded during session initialization, keyed by user session.
 pub type SessionEventLoadProgress = Arc<dyn Fn(&str, usize) + Send + Sync>;
 
@@ -113,6 +117,7 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub permissions: Arc<PermissionBroker<WriteTarget>>,
     pub skills: Arc<dyn UserSkills<S>>,
     pub lifetime: Arc<Signal>,
+    pub activation: Arc<StartupActivation>,
     pub standing: StandingInstruction,
     pub statistics: Arc<UserSessionStatistics>,
     pub root_identity: Arc<AgentIdentity>,
@@ -459,6 +464,9 @@ impl OwnedMutations {
     fn stop(&self) {
         self.state.lock().expect("user mutations poisoned").closing = true;
     }
+    fn is_stopping(&self) -> bool {
+        self.state.lock().expect("user mutations poisoned").closing
+    }
     async fn join(&self) -> protocol::Result<()> {
         let tasks = self
             .state
@@ -602,6 +610,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             permissions,
             skills: (config.skills)(resources.workspace())?,
             lifetime: lifetime.clone(),
+            activation: Arc::new(StartupActivation::new()),
             standing: StandingInstruction::new(config.templates.clone()),
             statistics,
             root_identity: identity.clone(),
@@ -610,6 +619,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         });
         let mut cleanup_registry = None;
         let mut cleanup_scope = None;
+        let mut cleanup_core = None;
         let initialized = async {
             let source = config.source.create(services.clone())?;
             let histories = Arc::new(Histories {
@@ -617,12 +627,30 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 repository: repository.clone(),
             });
             let bind = source.bind.clone();
+            let states = Arc::new(AgentStateFiles::new(lease.selected_root().clone()));
+            let saved_root = states
+                .open(&identity.name_path, &identity.session.session_id)
+                .await
+                .map_err(internal)?
+                .load()
+                .await
+                .map_err(internal)?;
+            let legacy = initialization.resumed && saved_root.is_none();
+            if saved_root.as_ref().is_some_and(|saved| {
+                !saved.descriptor.local_scope.is_empty()
+                    || saved.descriptor.completion_delivery
+                        != parrot_domain::values::agent_state::CompletionDeliverySnapshot::Automatic
+            }) {
+                return Err(internal(
+                    "root snapshot has an invalid scope or completion delivery",
+                ));
+            }
             let registry = AgentRegistry::new(RegistryConfig {
                 agent_limits: config.agent_limits,
                 profiles: config.profiles.clone(),
                 factory: source.factory.clone(),
                 histories: histories.clone(),
-                states: Arc::new(AgentStateFiles::new(lease.selected_root().clone())),
+                states,
                 router: config.router.clone(),
                 ids: config.ids.clone(),
                 diagnostics: Arc::new(SessionChildDiagnostics {
@@ -655,7 +683,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 CompletionDelivery::Automatic,
                 config.ids.clone(),
             );
-            let parts = match source
+            let parts = source
                 .factory
                 .create(PreparedScope {
                     agent_state,
@@ -667,18 +695,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                     lifetime: lifetime.clone(),
                 })
                 .await
-            {
-                Ok(parts) => parts,
-                Err(error) => {
-                    lifetime.cancel();
-                    services.questions.close();
-                    services.asks.close();
-                    services.permissions.close().await;
-                    let _ = registry.shutdown().join().await;
-                    services.broker.complete();
-                    return Err(internal(error));
-                }
-            };
+                .map_err(internal)?;
             let scope = Scope::create(ScopeConfig {
                 authority: registry.clone(),
                 identity,
@@ -720,12 +737,46 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 mutations: OwnedMutations::new(services.lease.runtime_handle()),
                 close: AsyncMutex::new(None),
             });
-            session.recover();
+            cleanup_core = Some(core.clone());
+            if legacy {
+                let notice = services
+                    .templates
+                    .render("session.legacy-resume-warning", &[], &NeverCancelled)
+                    .map_err(internal)?;
+                let mut event = wire::Event::new();
+                event.agent_session_id = services.root_identity.session.session_id.clone();
+                event.set_agent_notice(wire::AgentNotice {
+                    kind: "legacy_root_only_resume".into(),
+                    notice,
+                    ..wire::AgentNotice::new()
+                });
+                core.publish(event).await?;
+                services.diagnostic(&DiagnosticEvent::new(
+                    "session",
+                    "legacy_root_only_resume",
+                    DiagnosticSeverity::Warning,
+                ));
+            }
+            core.activate_recovery().await?;
             Ok(core)
         }
         .await;
         if initialized.is_err() {
             let mut joined = true;
+            if let Some(core) = &cleanup_core {
+                core.mutations.stop();
+            }
+            if let Some(registry) = &cleanup_registry {
+                joined &= suspend_registry(registry).await.is_ok();
+            }
+            if let Some(scope) = &cleanup_scope {
+                if !cleanup_registry
+                    .as_ref()
+                    .is_some_and(|registry| registry.contains(scope))
+                {
+                    joined &= suspend_scopes(vec![scope.clone()]).await.is_ok();
+                }
+            }
             lifetime.cancel();
             services.questions.close();
             services.asks.close();
@@ -736,10 +787,122 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             if let Some(scope) = cleanup_scope {
                 joined &= scope.close().join().await.is_ok();
             }
+            if let Some(core) = cleanup_core {
+                joined &= core.mutations.join().await.is_ok();
+            }
             services.broker.complete();
             *settled_on_error &= joined;
         }
         initialized
+    }
+    async fn activate_recovery(self: &Arc<Self>) -> protocol::Result<()> {
+        let scopes = self.registry.snapshot_scopes();
+        let schedulers = scopes
+            .iter()
+            .map(|scope| {
+                scope
+                    .get_service::<RuntimeTaskScheduler<S>>()
+                    .map_err(internal)
+            })
+            .collect::<protocol::Result<Vec<_>>>()?;
+        for scheduler in &schedulers {
+            scheduler.resolve_workers().await.map_err(internal)?;
+        }
+        let mut claimed = HashSet::new();
+        for scheduler in &schedulers {
+            claimed.extend(scheduler.claimed_worker_ids().await);
+        }
+        let mut reserved = HashSet::new();
+        self.reserve_recovery(&scopes, &claimed, &mut reserved)
+            .await?;
+        for scheduler in &schedulers {
+            scheduler
+                .activate_executions()
+                .join()
+                .await
+                .map_err(internal)?;
+        }
+        claimed.clear();
+        for scheduler in &schedulers {
+            claimed.extend(scheduler.claimed_worker_ids().await);
+        }
+        self.reserve_recovery(&scopes, &claimed, &mut reserved)
+            .await?;
+        for scope in &scopes {
+            let id = &scope.identity().session.session_id;
+            if claimed.contains(id) || reserved.contains(id) {
+                continue;
+            }
+            let session = scope.get_service::<RuntimeSession<S>>().map_err(internal)?;
+            if session.has_recovery_work().await.map_err(internal)? {
+                session.recover();
+            }
+        }
+        for scheduler in &schedulers {
+            scheduler
+                .activate_notifications()
+                .join()
+                .await
+                .map_err(internal)?;
+        }
+        Ok(())
+    }
+    async fn reserve_recovery(
+        self: &Arc<Self>,
+        scopes: &[Arc<Scope<S>>],
+        claimed: &HashSet<String>,
+        reserved: &mut HashSet<String>,
+    ) -> protocol::Result<()> {
+        for scope in scopes {
+            let id = &scope.identity().session.session_id;
+            if claimed.contains(id) || reserved.contains(id) {
+                continue;
+            }
+            let checkpoint = scope
+                .agent_state()
+                .load()
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| internal("agent restoration snapshot is missing"))?
+                .execution;
+            let Some(checkpoint) = checkpoint else {
+                continue;
+            };
+            let session = scope.get_service::<RuntimeSession<S>>().map_err(internal)?;
+            let handles = session.recover_owned_reserved().map_err(internal)?;
+            handles.reservation.join().await.map_err(internal)?;
+            if checkpoint.terminal.is_some() {
+                handles.execution.join().await.map_err(internal)?;
+            } else {
+                reserved.insert(id.clone());
+                let weak = Arc::downgrade(self);
+                self.mutations.spawn(move || async move {
+                    let recovered = handles.execution.join().await;
+                    let Some(core) = weak.upgrade() else { return };
+                    if core.mutations.is_stopping() {
+                        return;
+                    }
+                    let outcome = async {
+                        recovered.map_err(internal)?;
+                        if session.has_recovery_work().await.map_err(internal)? {
+                            session.recover();
+                        }
+                        Ok::<_, RpcError>(())
+                    }
+                    .await;
+                    if outcome.is_err() && !core.mutations.is_stopping() {
+                        core.diagnostic_failure("execution_recovery_failed");
+                    }
+                })?;
+                continue;
+            }
+            // The public result is retained, but any newer pending input needs a raw wake.
+            if session.has_recovery_work().await.map_err(internal)? {
+                session.recover();
+            }
+            reserved.insert(id.clone());
+        }
+        Ok(())
     }
     fn owned_mutation<T, F>(
         self: &Arc<Self>,
@@ -937,11 +1100,11 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             return result.clone();
         }
         self.mutations.stop();
+        let mut failure = suspend_registry(&self.registry).await.err();
         self.services.lifetime.cancel();
         self.services.questions.close();
         self.services.asks.close();
         self.services.permissions.close().await;
-        let mut failure = None;
         let shutdown = self.registry.shutdown();
         if let Err(error) = shutdown.join().await {
             failure.get_or_insert_with(|| internal(error));
@@ -962,6 +1125,63 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         *closed = Some(result.clone());
         result
     }
+}
+
+async fn suspend_registry<S: RestrictableAccessSnapshot + 'static>(
+    registry: &Arc<AgentRegistry<S>>,
+) -> protocol::Result<()> {
+    let freeze = registry.freeze_admissions().join().await.map_err(internal);
+    let suspended = suspend_scopes(registry.snapshot_scopes()).await;
+    freeze.and(suspended)
+}
+
+async fn suspend_scopes<S: RestrictableAccessSnapshot + 'static>(
+    scopes: Vec<Arc<Scope<S>>>,
+) -> protocol::Result<()> {
+    let mut failure = None;
+    let mut schedulers = Vec::new();
+    let mut sessions = Vec::new();
+    for scope in scopes {
+        match scope.get_service::<RuntimeTaskScheduler<S>>() {
+            Ok(scheduler) => schedulers.push(scheduler),
+            Err(error) => {
+                failure.get_or_insert_with(|| internal(error));
+            }
+        }
+        match scope.get_service::<RuntimeSession<S>>() {
+            Ok(session) => sessions.push(session),
+            Err(error) => {
+                failure.get_or_insert_with(|| internal(error));
+            }
+        }
+    }
+    let freezes = schedulers
+        .iter()
+        .map(|scheduler| scheduler.freeze_for_suspension())
+        .collect::<Vec<_>>();
+    for freeze in freezes {
+        if let Err(error) = freeze.join().await {
+            failure.get_or_insert_with(|| internal(error));
+        }
+    }
+    for session in &sessions {
+        session.suspend_handle();
+    }
+    let suspensions = schedulers
+        .iter()
+        .map(|scheduler| scheduler.suspend())
+        .collect::<Vec<_>>();
+    for session in sessions {
+        if let Err(error) = session.suspend().await {
+            failure.get_or_insert_with(|| internal(error));
+        }
+    }
+    for suspension in suspensions {
+        if let Err(error) = suspension.join().await {
+            failure.get_or_insert_with(|| internal(error));
+        }
+    }
+    failure.map_or(Ok(()), Err)
 }
 
 fn internal(error: impl std::fmt::Display) -> RpcError {
@@ -1285,11 +1505,14 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSessionFactory for UserSessi
         };
         Box::pin(async move {
             match pending {
-                Some(core) => Ok(Arc::new(HostedCore {
-                    core,
-                    opened: Mutex::new(Some(opened)),
-                    closing: OnceLock::new(),
-                }) as Arc<dyn HostedSession>),
+                Some(core) => {
+                    core.services.activation.activate();
+                    Ok(Arc::new(HostedCore {
+                        core,
+                        opened: Mutex::new(Some(opened)),
+                        closing: OnceLock::new(),
+                    }) as Arc<dyn HostedSession>)
+                }
                 _ => {
                     let _ = opened.close().await;
                     Err(RpcError::new(
