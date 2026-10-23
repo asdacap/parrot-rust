@@ -439,3 +439,122 @@ async fn scheduled_work_preflight_load_error_settles_only_its_exact_request() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     runtime.close().await;
 }
+
+#[tokio::test]
+async fn canceled_matching_waiter_does_not_join_or_interrupt_an_unrelated_successor() {
+    use std::{future::Future, task::Poll};
+    let fixture = Fixture::new();
+    let store = fixture.recovery_store().await;
+    let claim = TaskResultClaim {
+        owner_session_id: "owner".into(),
+        claim_id: "task-prompt".into(),
+    };
+    let runtime = fixture
+        .recovered_runtime(
+            Scripted::new(vec![Step::complete("task answer")]),
+            store.clone(),
+            Arc::new(RecoveryParent::default()),
+        )
+        .await;
+    let task = runtime
+        .session
+        .enqueue_claimed_execution(
+            vec![ConversationPart::text("task question")],
+            claim.claim_id.clone(),
+            claim.clone(),
+            Arc::new(NeverCancelled),
+        )
+        .unwrap();
+    bounded(task.execution.join()).await.unwrap();
+    let reference = runtime
+        .session
+        .capture_claimed_result(&claim.claim_id, &claim)
+        .await
+        .unwrap();
+    runtime.close().await;
+
+    let snapshot_gate = Gate::new();
+    let paused = Arc::new(PausedState {
+        inner: store.clone(),
+        gate: snapshot_gate.clone(),
+        first: AtomicBool::new(true),
+    });
+    let provider_gate = Gate::new();
+    let mut step = Step::complete("successor answer");
+    step.gate = Some(provider_gate.clone());
+    let provider = Scripted::new(vec![step]);
+    let resumed = fixture
+        .recovered_runtime(
+            provider.clone(),
+            paused,
+            Arc::new(RecoveryParent::default()),
+        )
+        .await;
+    let caller = Arc::new(Signal::new());
+    let matching = resumed
+        .session
+        .enqueue_claimed_execution(
+            vec![ConversationPart::text("must not be resent")],
+            claim.claim_id.clone(),
+            claim.clone(),
+            caller.clone(),
+        )
+        .unwrap();
+    snapshot_gate.entered().await;
+
+    let ack_session = resumed.session.clone();
+    let mut ack = Box::pin(async move {
+        ack_session
+            .acknowledge_claimed_result(&reference, &claim)
+            .await
+    });
+    let pending = std::future::poll_fn(|context| Poll::Ready(ack.as_mut().poll(context))).await;
+    assert!(pending.is_pending());
+    let ack = tokio::spawn(ack);
+    let successor = resumed
+        .session
+        .enqueue_execution(
+            vec![ConversationPart::text("successor question")],
+            "successor-message".into(),
+            None,
+            None,
+            Arc::new(NeverCancelled),
+        )
+        .unwrap();
+    bounded(async {
+        while resumed.session.state() != parrot_runtime::agent_turn::lifecycle::DrainState::Running
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    snapshot_gate.open();
+    provider_gate.entered().await;
+    bounded(ack).await.unwrap().unwrap();
+    caller.cancel();
+    assert!(
+        bounded(matching.reservation.join())
+            .await
+            .unwrap_err()
+            .is_cancelled()
+    );
+    assert!(
+        bounded(matching.execution.join())
+            .await
+            .unwrap_err()
+            .is_cancelled()
+    );
+    assert!(!successor.is_finished());
+    assert_eq!(provider.stream_closes.load(Ordering::SeqCst), 0);
+    let saved = store.load().await.unwrap().unwrap().execution.unwrap();
+    assert_eq!(saved.initial_message_id, "successor-message");
+    assert_eq!(saved.phase, ExecutionPhase::Active);
+    assert!(saved.result_claim.is_none());
+    provider_gate.open();
+    assert_eq!(
+        bounded(successor.join()).await.unwrap(),
+        Execution::succeeded("successor answer")
+    );
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    resumed.close().await;
+}

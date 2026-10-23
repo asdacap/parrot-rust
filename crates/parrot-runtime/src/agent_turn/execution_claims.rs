@@ -152,13 +152,9 @@ impl<B: DrainBackend> AgentSession<B> {
                     }
                     if let Some((active, ready, stop)) = active {
                         let actual_claim = tokio::select! {
+                            biased;
                             result = ready.wait() => result?,
-                            _ = caller.cancelled() => {
-                                reserved.finish(Err(canceled()));
-                                if let Some(stop) = stop { stop.cancel(); return active.join().await; }
-                                let _ = active.join().await;
-                                return Err(canceled());
-                            }
+                            _ = caller.cancelled() => return Err(canceled()),
                         };
                         if actual_claim.as_ref() == Some(&claim) {
                             reserved.finish(Ok(()));
@@ -173,7 +169,11 @@ impl<B: DrainBackend> AgentSession<B> {
                                 _ = caller.cancelled() => { stop.cancel(); active.join().await }
                             };
                         }
-                        let _ = active.join().await;
+                        tokio::select! {
+                            biased;
+                            _ = caller.cancelled() => return Err(canceled()),
+                            _ = active.join() => {},
+                        }
                         continue;
                     }
                     unreachable!("matching recovery selects an active or newly reserved execution");
