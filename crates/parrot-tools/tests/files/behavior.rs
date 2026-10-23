@@ -540,15 +540,17 @@ async fn directory_listing_line_cap_is_2000() {
 
 #[tokio::test]
 async fn write_emits_exact_utf8_without_bom_replaces_bom_and_skips_identical_bytes() {
-    for (before, content) in [
-        (None, "héllo\r\n世界\n"),
+    for (before, content, before_lines, after_lines) in [
+        (None, "héllo\r\n世界\n", 0, 2),
         (
             Some(vec![
                 0xef, 0xbb, 0xbf, b'a', b'\r', b'\n', b'b', b'\r', b'\n',
             ]),
             "a\nb",
+            2,
+            2,
         ),
-        (None, ""),
+        (None, "", 0, 0),
     ] {
         let service = RecordingService::default();
         service.0.lock().unwrap().mutation_bytes = before;
@@ -561,7 +563,10 @@ async fn write_emits_exact_utf8_without_bom_replaces_bom_and_skips_identical_byt
             )
             .await
             .unwrap();
-        assert!(result.text.contains("+++ b/nested/unicode.txt"));
+        assert_eq!(
+            result.text,
+            format!("Lines before: {before_lines}\nLines after: {after_lines}")
+        );
         assert_eq!(
             service.0.lock().unwrap().mutation_bytes.as_deref(),
             Some(content.as_bytes())
@@ -586,14 +591,47 @@ async fn write_emits_exact_utf8_without_bom_replaces_bom_and_skips_identical_byt
             )
             .await
             .unwrap();
-        assert_eq!(unchanged.text, "No changes made.");
+        assert_eq!(
+            unchanged.text,
+            format!("Lines before: {after_lines}\nLines after: {after_lines}")
+        );
         assert_eq!(service.calls().len(), 3);
         assert!(matches!(service.calls()[2].action, Action::MutationRead(_)));
     }
 }
 
 #[tokio::test]
-async fn mutations_repeat_original_requested_path_and_snapshot_and_render_final_target_name() {
+async fn write_counts_logical_lines_for_empty_and_newline_edges() {
+    for (before, content, before_lines, after_lines) in [
+        (b"".as_slice(), "", 0, 0),
+        (b"one\n", "one", 1, 1),
+        (b"one\r\ntwo\r\n", "one\n\nthree\n", 2, 3),
+        (b"one\rtwo\r", "one\rtwo\r", 1, 1),
+        (b"\n\n", "\n", 2, 1),
+        (b"one", "", 1, 0),
+        (b"\xff\n\xfe", "\0\n", 2, 1),
+    ] {
+        let service = RecordingService::default();
+        service.0.lock().unwrap().mutation_bytes = Some(before.to_vec());
+        let tool = WriteTool::new(service, WorkspacePaths::default(), definition());
+        let result = tool
+            .execute(
+                &invocation(json!({"path":"lines.txt","content":content})),
+                &Snapshot(1),
+                &NoCancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            result.text,
+            format!("Lines before: {before_lines}\nLines after: {after_lines}")
+        );
+    }
+}
+
+#[tokio::test]
+async fn mutations_repeat_original_requested_path_and_snapshot_and_edit_renders_final_target_name()
+{
     for edit_mode in [false, true] {
         let service = RecordingService::default();
         {
@@ -627,9 +665,13 @@ async fn mutations_repeat_original_requested_path_and_snapshot_and_render_final_
                 .await
         }
         .unwrap();
-        assert!(result.text.contains("--- a/actual-final.txt"));
-        assert!(result.text.contains("+++ b/actual-final.txt"));
-        assert!(!result.text.contains("old-display"));
+        if edit_mode {
+            assert!(result.text.contains("--- a/actual-final.txt"));
+            assert!(result.text.contains("+++ b/actual-final.txt"));
+            assert!(!result.text.contains("old-display"));
+        } else {
+            assert_eq!(result.text, "Lines before: 1\nLines after: 1");
+        }
         let calls = service.calls();
         assert_eq!(calls.len(), 2);
         let request = MutationRequest {

@@ -67,23 +67,25 @@ impl<S: AuthorizedMutationService> WriteTool<S> {
             Ok(before) => before,
             Err(error) => return mutation_error(error, &formatter),
         };
-        let after = input.content.into_bytes();
-        if before.bytes.as_deref() == Some(after.as_slice()) {
-            return Ok(FileToolResult::text(NO_CHANGES));
+        let after = input.content.as_bytes();
+        if before.bytes.as_deref() != Some(after) {
+            match self
+                .service
+                .write_for_mutation(&request, after, snapshot, cancellation)
+                .await
+            {
+                Ok(_) => {}
+                Err(error) => return mutation_error(error, &formatter),
+            }
         }
-        let target = match self
-            .service
-            .write_for_mutation(&request, &after, snapshot, cancellation)
-            .await
-        {
-            Ok(target) => target,
-            Err(error) => return mutation_error(error, &formatter),
-        };
-        Ok(FileToolResult::text(render(&[FileChange {
-            path: &target.display_path,
-            before: before.bytes.as_deref(),
-            after: Some(&after),
-        }])))
+        let before_lines = before
+            .bytes
+            .as_deref()
+            .map_or(0, |bytes| String::from_utf8_lossy(bytes).lines().count());
+        let after_lines = input.content.lines().count();
+        Ok(FileToolResult::text(format!(
+            "Lines before: {before_lines}\nLines after: {after_lines}"
+        )))
     }
 }
 
