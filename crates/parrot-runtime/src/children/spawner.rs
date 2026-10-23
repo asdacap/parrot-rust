@@ -355,49 +355,196 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
         let result: ChildResult<Arc<Scope<S>>> = async {
             self.ensure_accepting()?;
             let lineage = owner.selection().lineage().link(owner.selection().clone());
-            let selection = select_child(&lineage, profile, request.model.clone(), authority.config.agent_limits)?;
+            let selection = select_child(
+                &lineage,
+                profile,
+                request.model.clone(),
+                authority.config.agent_limits,
+            )?;
             let session_id = authority.config.ids.agent_session()?;
             let name = select_name(&request.requested_name, &session_id, conflicts);
-            if AgentScratchDirectory::RESERVED_NAMES.contains(&name.as_str()) { return Err(ChildError::registry(format!("child agent name '{name}' is reserved"))); }
-            if owner.children().find(&name).is_some() { return Err(ChildError::NameConflict(format!("child agent name is already registered: {name}"))); }
-            let mut name_path = owner.identity().name_path.clone(); name_path.push(name.clone());
-            let identity = Arc::new(AgentIdentity { session: SessionIdentity { session_id, name: name.clone(), parent_session_id: owner.identity().session.session_id.clone(), depth }, parent_name: owner.identity().session.name.clone(), name_path, prompt_scope: owner.identity().prompt_scope.derive_child(&name, depth, &request.requested_scope), templates: owner.identity().templates.clone() });
+            if AgentScratchDirectory::RESERVED_NAMES.contains(&name.as_str()) {
+                return Err(ChildError::registry(format!(
+                    "child agent name '{name}' is reserved"
+                )));
+            }
+            if owner.children().find(&name).is_some() {
+                return Err(ChildError::NameConflict(format!(
+                    "child agent name is already registered: {name}"
+                )));
+            }
+            let mut name_path = owner.identity().name_path.clone();
+            name_path.push(name.clone());
+            let identity = Arc::new(AgentIdentity {
+                session: SessionIdentity {
+                    session_id,
+                    name: name.clone(),
+                    parent_session_id: owner.identity().session.session_id.clone(),
+                    depth,
+                },
+                parent_name: owner.identity().session.name.clone(),
+                name_path,
+                prompt_scope: owner.identity().prompt_scope.derive_child(
+                    &name,
+                    depth,
+                    &request.requested_scope,
+                ),
+                templates: owner.identity().templates.clone(),
+            });
             let (source, boundary, fallback) = match &request.history_source {
-                HistorySource::Parent => (owner.identity().session.session_id.clone(), request.boundary.clone(), None),
+                HistorySource::Parent => (
+                    owner.identity().session.session_id.clone(),
+                    request.boundary.clone(),
+                    None,
+                ),
                 HistorySource::Sibling(sibling) => {
-                    if sibling.identity().session.parent_session_id != owner.identity().session.session_id || !authority.snapshot_scopes().iter().any(|scope| Arc::ptr_eq(scope.session(), sibling)) { return Err(ChildError::registry("history source must be a registered sibling under the child's owning parent")); }
-                    (sibling.identity().session.session_id.clone(), HistoryForkBoundary::AfterSafeHistoryPrefix, Some(HistoryForkSource { agent_session_id: owner.identity().session.session_id.clone(), boundary: request.boundary.clone() }))
+                    if sibling.identity().session.parent_session_id
+                        != owner.identity().session.session_id
+                        || !authority
+                            .snapshot_scopes()
+                            .iter()
+                            .any(|scope| Arc::ptr_eq(scope.session(), sibling))
+                    {
+                        return Err(ChildError::registry(
+                            "history source must be a registered sibling under the child's owning parent",
+                        ));
+                    }
+                    (
+                        sibling.identity().session.session_id.clone(),
+                        HistoryForkBoundary::AfterSafeHistoryPrefix,
+                        Some(HistoryForkSource {
+                            agent_session_id: owner.identity().session.session_id.clone(),
+                            boundary: request.boundary.clone(),
+                        }),
+                    )
                 }
             };
             let prepared_history = authority.config.histories.prepare(&identity).await?;
             history = Some(prepared_history.clone());
-            prepared_history.repository().initialize_forked_agent_history(source, identity.session.session_id.clone(), boundary, request.fork.clone(), fallback).await?;
+            prepared_history
+                .repository()
+                .initialize_forked_agent_history(
+                    source,
+                    identity.session.session_id.clone(),
+                    boundary,
+                    request.fork.clone(),
+                    fallback,
+                )
+                .await?;
             let agent_state = {
                 let _admission = self.admission_gate.lock().await;
-                if owner.children().find(&name).is_some() { return Err(ChildError::NameConflict(format!("child agent name is already registered: {name}"))); }
-                authority.prepare_state(&identity, &selection, &request.requested_scope, request.delivery).await?
+                if owner.children().find(&name).is_some() {
+                    return Err(ChildError::NameConflict(format!(
+                        "child agent name is already registered: {name}"
+                    )));
+                }
+                authority
+                    .prepare_state(
+                        &identity,
+                        &selection,
+                        &request.requested_scope,
+                        request.delivery,
+                    )
+                    .await?
             };
             let selection = Arc::new(SelectionCell::new(selection, lineage.clone()));
-            let callback = ParentScope::completion(identity.clone(), Some(&parent), request.delivery, authority.config.ids.clone());
+            let callback = ParentScope::completion(
+                identity.clone(),
+                Some(&parent),
+                request.delivery,
+                authority.config.ids.clone(),
+            );
             let started = Instant::now();
-            authority.config.diagnostics.record(ChildDiagnostic { event: "child_scope_start", session_id: identity.session.session_id.clone(), correlation_id: identity.session.parent_session_id.clone(), duration_milliseconds: None, outcome: None, error_code: None });
-            let parts = authority.config.factory.create(PreparedScope { agent_state, identity: identity.clone(), history: prepared_history.clone(), selection: selection.clone(), lineage, parent_completion: callback, lifetime: self.lifetime.clone() }).await;
-            let built = async { Scope::create(ScopeConfig { authority: authority.clone(), identity: identity.clone(), history: prepared_history, selection, parent: Some(parent.clone()), delivery: request.delivery, retention: Some(reservation.clone()), parts: parts? }).join().await }.await;
-            authority.config.diagnostics.record(ChildDiagnostic { event: "child_scope_completed", session_id: identity.session.session_id.clone(), correlation_id: identity.session.parent_session_id.clone(), duration_milliseconds: Some(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64), outcome: Some(match &built { Ok(_) => "succeeded", Err(ChildError::Cancelled) => "cancelled", Err(_) => "failed" }), error_code: built.as_ref().err().map(ChildError::code) });
+            authority.config.diagnostics.record(ChildDiagnostic {
+                event: "child_scope_start",
+                session_id: identity.session.session_id.clone(),
+                correlation_id: identity.session.parent_session_id.clone(),
+                duration_milliseconds: None,
+                outcome: None,
+                error_code: None,
+            });
+            let parts = authority
+                .config
+                .factory
+                .create(PreparedScope {
+                    agent_state,
+                    identity: identity.clone(),
+                    history: prepared_history.clone(),
+                    selection: selection.clone(),
+                    lineage,
+                    parent_completion: callback,
+                    lifetime: self.lifetime.clone(),
+                })
+                .await;
+            let built = async {
+                Scope::create(ScopeConfig {
+                    authority: authority.clone(),
+                    identity: identity.clone(),
+                    history: prepared_history,
+                    selection,
+                    parent: Some(parent.clone()),
+                    delivery: request.delivery,
+                    retention: Some(reservation.clone()),
+                    parts: parts?,
+                })
+                .join()
+                .await
+            }
+            .await;
+            authority.config.diagnostics.record(ChildDiagnostic {
+                event: "child_scope_completed",
+                session_id: identity.session.session_id.clone(),
+                correlation_id: identity.session.parent_session_id.clone(),
+                duration_milliseconds: Some(
+                    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                ),
+                outcome: Some(match &built {
+                    Ok(_) => "succeeded",
+                    Err(ChildError::Cancelled) => "cancelled",
+                    Err(_) => "failed",
+                }),
+                error_code: built.as_ref().err().map(ChildError::code),
+            });
             let scope = built?;
             constructed = Some(scope.clone());
             let _admission = self.admission_gate.lock().await;
             self.ensure_accepting()?;
-            if !owner.children().prepare_admission(&scope)? { return Err(stopped()); }
-            let mut snapshot = owner.agent_state().load().await.map_err(state::state_error)?.ok_or_else(|| ChildError::registry("parent agent state is missing"))?;
-            if snapshot.children.iter().any(|child| child.name == scope.identity().session.name) { return Err(ChildError::NameConflict("child name is already retained on disk".into())); }
-            snapshot.children.push(RetainedChild { requested_name: sanitize(&request.requested_name), name: scope.identity().session.name.clone(), session_id: scope.identity().session.session_id.clone() });
+            if !owner.children().prepare_admission(&scope)? {
+                return Err(stopped());
+            }
+            let mut snapshot = owner
+                .agent_state()
+                .load()
+                .await
+                .map_err(state::state_error)?
+                .ok_or_else(|| ChildError::registry("parent agent state is missing"))?;
+            if snapshot
+                .children
+                .iter()
+                .any(|child| child.name == scope.identity().session.name)
+            {
+                return Err(ChildError::NameConflict(
+                    "child name is already retained on disk".into(),
+                ));
+            }
+            snapshot.children.push(RetainedChild {
+                requested_name: sanitize(&request.requested_name),
+                name: scope.identity().session.name.clone(),
+                session_id: scope.identity().session.session_id.clone(),
+            });
             roster_write_attempted = true;
-            owner.agent_state().update(AgentStateUpdate::Children(snapshot.children)).await.map_err(state::state_error)?;
+            owner
+                .agent_state()
+                .update(AgentStateUpdate::Children(snapshot.children))
+                .await
+                .map_err(state::state_error)?;
             reservation.commit();
-            if !owner.children().admit_prepared(scope.clone())? { return Err(stopped()); }
+            if !owner.children().admit_prepared(scope.clone())? {
+                return Err(stopped());
+            }
             Ok(scope)
-        }.await;
+        }
+        .await;
         if result.is_err() {
             reservation.rollback();
             if let Some(scope) = constructed {
