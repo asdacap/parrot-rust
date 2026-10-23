@@ -149,7 +149,24 @@ async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_with
     let fixture = fixture().await;
     let hosted = bounded(fixture.open()).await.unwrap();
     let root = fixture.root();
-    let child = spawn(&fixture, &root, "completed").await;
+    let child = bounded(
+        root.spawner()
+            .spawn(LaunchRequest {
+                parent: root.session().clone(),
+                requested_name: "completed".into(),
+                requested_profile: "adapter".into(),
+                model: fixture.router.resolve("local/model").unwrap(),
+                requested_scope: "retained scope completed".into(),
+                delivery: CompletionDelivery::Automatic,
+                boundary: HistoryForkBoundary::AfterCompletedHistory,
+                fork: HistoryForkSelection::parse("empty"),
+                history_source: HistorySource::Parent,
+            })
+            .unwrap()
+            .join(),
+    )
+    .await
+    .unwrap();
     finish(&child, "completed child conversation").await;
     let grandchild = spawn(&fixture, &child, "unstarted").await;
     let mut done = task("saved-result");
@@ -160,6 +177,7 @@ async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_with
     set(&child, json!([done])).await;
     idle(&root).await;
     idle(&child).await;
+    idle(&root).await;
     let expected = fixture
         .user()
         .registry()
@@ -184,95 +202,311 @@ async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_with
     }
     let root_tasks = root.get_service::<Scheduler>().unwrap().snapshot().await;
     let child_tasks = child.get_service::<Scheduler>().unwrap().snapshot().await;
+    let execution = child
+        .agent_state()
+        .load()
+        .await
+        .unwrap()
+        .unwrap()
+        .execution
+        .unwrap();
+    let completion = execution.parent_notification.as_ref().unwrap();
+    assert!(completion.admitted);
+    let history = root.history().conversation().await.unwrap();
+    let completed = fixture
+        .user()
+        .lease
+        .events
+        .replay()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|event| {
+            event.agent_session_id == child.identity().session.session_id
+                && event.has_agent_finished()
+        })
+        .collect::<Vec<_>>();
+    assert!(!completed.is_empty());
+    let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
+    let mut hosted = hosted;
+    let requests = fixture.requests.lock().unwrap().len();
+    for reopen_index in 0..2 {
+        bounded(hosted.close()).await.unwrap();
+        let resumed = reopen(&fixture, &id).await;
+        assert_eq!(fixture.requests.lock().unwrap().len(), requests);
+        let scopes = fixture.user().registry().unwrap().snapshot_scopes();
+        assert_eq!(scopes.len(), 3);
+        for scope in &scopes {
+            let original = &expected[&scope.identity().session.session_id];
+            assert!(!Arc::ptr_eq(scope, original));
+            let current = &scope.identity().session;
+            let previous = &original.identity().session;
+            assert_eq!(
+                (&current.name, &current.parent_session_id, current.depth),
+                (&previous.name, &previous.parent_session_id, previous.depth)
+            );
+            assert_eq!(
+                scope
+                    .identity()
+                    .prompt_scope
+                    .format(scope.identity().session.depth)
+                    .unwrap(),
+                original
+                    .identity()
+                    .prompt_scope
+                    .format(original.identity().session.depth)
+                    .unwrap()
+            );
+            let queues = scope.get_service::<AgentQueues<Security>>().unwrap();
+            assert_eq!(
+                queues.capture_inventory().queues.len(),
+                usize::from(reopen_index == 0)
+            );
+            let name = format!("retained-{}", scope.identity().session.name);
+            assert!(queues.get(&name).unwrap().closed);
+            let taken = queues.try_take(&name, 1, Direction::Front).unwrap();
+            assert!(taken.info.unwrap().closed);
+            if reopen_index == 0 {
+                assert_eq!(taken.items, [scope.identity().session.name.clone()]);
+            } else {
+                assert!(taken.items.is_empty());
+            }
+            assert_eq!(queues.get(&name).unwrap().size, 0);
+            assert!(!scope.session().is_active());
+        }
+        let restored_root = fixture.root();
+        let restored_child = restored_root.children().resolve("completed").unwrap();
+        assert_eq!(
+            restored_root
+                .get_service::<Scheduler>()
+                .unwrap()
+                .snapshot()
+                .await,
+            root_tasks
+        );
+        assert_eq!(
+            restored_child
+                .get_service::<Scheduler>()
+                .unwrap()
+                .snapshot()
+                .await,
+            child_tasks
+        );
+        let result = bounded(
+            restored_child
+                .get_service::<RuntimeSession<Security>>()
+                .unwrap()
+                .wait(0, &NeverCancelled),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.execution.unwrap().output, "deterministic reply");
+        assert_eq!(
+            restored_child
+                .agent_state()
+                .load()
+                .await
+                .unwrap()
+                .unwrap()
+                .execution
+                .as_ref(),
+            Some(&execution)
+        );
+        assert_eq!(
+            restored_root.history().conversation().await.unwrap(),
+            history
+        );
+        let reused = bounded(
+            restored_root
+                .spawner()
+                .get_or_spawn("completed".into(), || {
+                    panic!("completed child must be reused")
+                })
+                .unwrap()
+                .join(),
+        )
+        .await
+        .unwrap();
+        assert!(Arc::ptr_eq(&reused, &restored_child));
+        assert_eq!(
+            fixture.user().registry().unwrap().snapshot_scopes().len(),
+            3
+        );
+        let events = fixture.user().lease.events.replay().await.unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.has_input_admitted()
+                    && event.input_admitted().message_id == completion.message_id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .into_iter()
+                .filter(
+                    |event| event.agent_session_id == child.identity().session.session_id
+                        && event.has_agent_finished()
+                )
+                .collect::<Vec<_>>(),
+            completed
+        );
+        let unstarted = restored_child.children().resolve("unstarted").unwrap();
+        assert!(
+            unstarted
+                .get_service::<RuntimeSession<Security>>()
+                .unwrap()
+                .wait(1, &NeverCancelled)
+                .await
+                .is_err()
+        );
+        let constructors = fixture.observations.lock().unwrap().constructors;
+        for _ in 0..2 {
+            let cancel = Arc::new(Signal::new());
+            let mut listener = resumed.listen(None, cancel.clone()).unwrap();
+            assert!(
+                bounded(listener.next(&NeverCancelled))
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            cancel.cancel();
+        }
+        assert_eq!(
+            fixture.observations.lock().unwrap().constructors,
+            constructors
+        );
+        assert_eq!(fixture.requests.lock().unwrap().len(), requests);
+        hosted = resumed;
+    }
+    bounded(hosted.close()).await.unwrap();
+    std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[tokio::test]
+async fn actual_failed_dependency_and_canceled_task_reopen_until_explicit_reset() {
+    let fixture = fixture().await;
+    let hosted = bounded(fixture.open()).await.unwrap();
+    let root = fixture.root();
+    let mut failed = task("failed-dependency");
+    failed["state"] = "failed".into();
+    failed["failure"] = "retained failure".into();
+    let mut dependent = task("blocked-dependent");
+    dependent["dependencies"] = json!(["failed-dependency"]);
+    let mut canceled = task("explicitly-canceled");
+    canceled["state"] = "canceled".into();
+    set(&root, json!([failed, dependent, canceled])).await;
+    idle(&root).await;
+    let tasks = root.get_service::<Scheduler>().unwrap().snapshot().await;
+    assert_eq!(
+        tasks.iter().map(|task| task.state).collect::<Vec<_>>(),
+        [
+            ExecutionStatus::Failed,
+            ExecutionStatus::Pending,
+            ExecutionStatus::Canceled
+        ]
+    );
+    assert_eq!(tasks[0].failure.as_deref(), Some("retained failure"));
+    assert!(root.children().resolve("failed-dependency").is_err());
+    assert!(root.children().resolve("blocked-dependent").is_err());
+    assert!(root.children().resolve("explicitly-canceled").is_err());
+    let root_id = root.identity().session.session_id.clone();
     let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
     bounded(hosted.close()).await.unwrap();
     let requests = fixture.requests.lock().unwrap().len();
     let resumed = reopen(&fixture, &id).await;
-    assert_eq!(fixture.requests.lock().unwrap().len(), requests);
-    let scopes = fixture.user().registry().unwrap().snapshot_scopes();
-    assert_eq!(scopes.len(), 3);
-    for scope in &scopes {
-        let original = &expected[&scope.identity().session.session_id];
-        assert!(!Arc::ptr_eq(scope, original));
-        let current = &scope.identity().session;
-        let previous = &original.identity().session;
-        assert_eq!(
-            (&current.name, &current.parent_session_id, current.depth),
-            (&previous.name, &previous.parent_session_id, previous.depth)
-        );
-        assert_eq!(
-            scope
-                .identity()
-                .prompt_scope
-                .format(scope.identity().session.depth)
-                .unwrap(),
-            original
-                .identity()
-                .prompt_scope
-                .format(original.identity().session.depth)
-                .unwrap()
-        );
-        let queues = scope.get_service::<AgentQueues<Security>>().unwrap();
-        assert_eq!(queues.capture_inventory().queues.len(), 1);
-        let name = format!("retained-{}", scope.identity().session.name);
-        assert!(queues.get(&name).unwrap().closed);
-        assert_eq!(
-            queues.try_take(&name, 1, Direction::Front).unwrap().items,
-            [scope.identity().session.name.clone()]
-        );
-        assert!(!scope.session().is_active());
-    }
     let restored_root = fixture.root();
-    let restored_child = restored_root.children().resolve("completed").unwrap();
+    assert_eq!(restored_root.identity().session.session_id, root_id);
     assert_eq!(
         restored_root
             .get_service::<Scheduler>()
             .unwrap()
             .snapshot()
             .await,
-        root_tasks
+        tasks
     );
+    assert_eq!(fixture.requests.lock().unwrap().len(), requests);
     assert_eq!(
-        restored_child
+        fixture.user().registry().unwrap().snapshot_scopes().len(),
+        1
+    );
+    for (name, result) in [
+        ("failed-dependency", "recovered dependency"),
+        ("blocked-dependent", "eligible dependent"),
+    ] {
+        script(
+            &fixture,
+            &format!("Task: {name}\n"),
+            reply(&json!({"result": result, "verdict": "accept"}).to_string()),
+            None,
+        );
+    }
+    set(&restored_root, json!([task("failed-dependency")])).await;
+    wait_tasks(&restored_root, |tasks| {
+        tasks[0].state == ExecutionStatus::Succeeded && tasks[1].state == ExecutionStatus::Succeeded
+    })
+    .await;
+    idle(&restored_root).await;
+    let outcomes = restored_root
+        .get_service::<Scheduler>()
+        .unwrap()
+        .snapshot()
+        .await;
+    assert_eq!(outcomes[0].result.as_deref(), Some("recovered dependency"));
+    assert_eq!(outcomes[1].result.as_deref(), Some("eligible dependent"));
+    assert_eq!(outcomes[2].state, ExecutionStatus::Canceled);
+    assert!(outcomes.iter().all(|task| task.hidden));
+    assert!(fixture.scripts.lock().unwrap().is_empty());
+    assert!(
+        restored_root
+            .children()
+            .resolve("explicitly-canceled")
+            .is_err()
+    );
+    let workers = ["failed-dependency", "blocked-dependent"].map(|name| {
+        restored_root
+            .children()
+            .resolve(name)
+            .unwrap()
+            .identity()
+            .session
+            .session_id
+            .clone()
+    });
+    bounded(resumed.close()).await.unwrap();
+    let requests = fixture.requests.lock().unwrap().len();
+    let resumed = reopen(&fixture, &id).await;
+    let restored_root = fixture.root();
+    idle(&restored_root).await;
+    assert_eq!(restored_root.identity().session.session_id, root_id);
+    assert_eq!(
+        restored_root
             .get_service::<Scheduler>()
             .unwrap()
             .snapshot()
             .await,
-        child_tasks
+        outcomes
     );
-    let result = bounded(
-        restored_child
-            .get_service::<RuntimeSession<Security>>()
-            .unwrap()
-            .wait(0, &NeverCancelled),
-    )
-    .await
-    .unwrap();
-    assert_eq!(result.execution.unwrap().output, "deterministic reply");
-    let unstarted = restored_child.children().resolve("unstarted").unwrap();
-    assert!(
-        unstarted
-            .get_service::<RuntimeSession<Security>>()
-            .unwrap()
-            .wait(1, &NeverCancelled)
-            .await
-            .is_err()
-    );
-    let constructors = fixture.observations.lock().unwrap().constructors;
-    for _ in 0..2 {
-        let cancel = Arc::new(Signal::new());
-        let mut listener = resumed.listen(None, cancel.clone()).unwrap();
-        assert!(
-            bounded(listener.next(&NeverCancelled))
-                .await
+    for (name, worker_id) in ["failed-dependency", "blocked-dependent"]
+        .into_iter()
+        .zip(workers)
+    {
+        assert_eq!(
+            restored_root
+                .children()
+                .resolve(name)
                 .unwrap()
-                .is_some()
+                .identity()
+                .session
+                .session_id,
+            worker_id
         );
-        cancel.cancel();
     }
-    assert_eq!(
-        fixture.observations.lock().unwrap().constructors,
-        constructors
+    assert!(
+        restored_root
+            .children()
+            .resolve("explicitly-canceled")
+            .is_err()
     );
     assert_eq!(fixture.requests.lock().unwrap().len(), requests);
     bounded(resumed.close()).await.unwrap();
