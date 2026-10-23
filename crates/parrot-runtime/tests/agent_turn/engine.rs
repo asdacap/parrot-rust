@@ -297,14 +297,20 @@ impl Fixture {
             reminders,
             output: output.clone(),
             activity: activity.clone(),
-            parent_completion: Arc::new(Parent(trace)),
+            parent_completion: overrides
+                .parent_completion
+                .unwrap_or_else(|| Arc::new(Parent(trace))),
             ancestors: vec![],
             event_id: Arc::new(id),
         })
         .await
         .unwrap();
+        let session = match overrides.state {
+            Some(store) => AgentSession::with_state(backend, lifetime, store),
+            None => AgentSession::new(backend, lifetime),
+        };
         Runtime {
-            session: AgentSession::new(backend, lifetime),
+            session,
             publisher,
             output,
             activity,
@@ -320,6 +326,8 @@ impl Drop for Fixture {
 struct RuntimeOverrides {
     prompt: Option<Box<dyn SystemPrompt>>,
     status: Option<Arc<dyn TurnStatus<Security>>>,
+    state: Option<Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>>,
+    parent_completion: Option<Arc<dyn ParentCompletion>>,
 }
 type Backend = RuntimeBackend<Security, Tools>;
 struct Runtime {
@@ -705,6 +713,17 @@ mod activity_timing;
 use activity_fixture::Activity;
 struct Parent(Arc<Trace>);
 impl ParentCompletion for Parent {
+    fn deliver_correlated<'a>(
+        &'a self,
+        execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+        _: &'a str,
+    ) -> parrot_domain::contracts::async_ops::BoxFuture<
+        'a,
+        Result<(), parrot_runtime::agent_turn::services::TurnError>,
+    > {
+        self.deliver(execution)
+    }
+
     fn deliver<'a>(&'a self, execution: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
             self.0
@@ -1013,3 +1032,6 @@ async fn borrowed_tool_context_prepare_runs_inline_and_is_used_by_the_next_provi
     );
     runtime.close().await;
 }
+
+#[path = "engine/owned_recovery.rs"]
+mod owned_recovery;

@@ -127,9 +127,24 @@ pub enum TaskRunnerPhase {
 pub struct ExecutionCheckpoint {
     pub execution_id: String,
     pub initial_message_id: String,
+    pub initial_parts: Vec<ExecutionInputPart>,
+    pub history_watermark: i64,
     pub phase: ExecutionPhase,
     pub terminal: Option<ExecutionTerminal>,
     pub parent_notification: Option<NotificationCheckpoint>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExecutionInputPart {
+    Text {
+        text: String,
+    },
+    ImageArtifact {
+        artifact_id: String,
+        media_type: String,
+        display_name: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -145,7 +160,8 @@ pub enum ExecutionPhase {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionTerminal {
-    pub message_id: String,
+    pub event_id: String,
+    /// The authoritative conversation result reference, not the lifecycle event.
     pub history_sequence: i64,
     pub outcome: ExecutionOutcome,
 }
@@ -163,6 +179,7 @@ pub enum ExecutionOutcome {
 pub struct NotificationCheckpoint {
     pub message_id: String,
     pub admitted: bool,
+    pub delivery_error: Option<String>,
 }
 
 /// Replaces one owned section without overwriting concurrently saved sections.

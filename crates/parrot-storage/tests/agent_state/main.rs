@@ -94,6 +94,7 @@ fn notification() -> NotificationCheckpoint {
     NotificationCheckpoint {
         message_id: "notification-1".into(),
         admitted: true,
+        delivery_error: None,
     }
 }
 fn snapshot() -> AgentStateSnapshot {
@@ -133,9 +134,13 @@ fn snapshot() -> AgentStateSnapshot {
     snapshot.execution = Some(ExecutionCheckpoint {
         execution_id: "execution-1".into(),
         initial_message_id: "prompt-1".into(),
+        initial_parts: vec![ExecutionInputPart::Text {
+            text: "question".into(),
+        }],
+        history_watermark: 12,
         phase: ExecutionPhase::Completed,
         terminal: Some(ExecutionTerminal {
-            message_id: "response-1".into(),
+            event_id: "execution-1.finished".into(),
             history_sequence: 93,
             outcome: ExecutionOutcome::Failed("failure".into()),
         }),

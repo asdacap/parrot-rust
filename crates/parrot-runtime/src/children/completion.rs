@@ -13,6 +13,11 @@ use parrot_domain::{
 use parrot_storage::events::ConversationPart;
 use std::sync::{Arc, Weak};
 
+enum CompletionIdentity<'a> {
+    Legacy,
+    Correlated(&'a str),
+}
+
 pub struct ParentScope<S: RestrictableAccessSnapshot + 'static> {
     identity: Arc<AgentIdentity>,
     authority: Weak<AgentRegistry<S>>,
@@ -140,15 +145,26 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentScope<S> {
             )))
         }
     }
-    async fn deliver_inner(&self, execution: &Execution) -> ChildResult<()> {
+    async fn deliver_inner(
+        &self,
+        execution: &Execution,
+        message_id: CompletionIdentity<'_>,
+    ) -> ChildResult<()> {
         if self.delivery != CompletionDelivery::Automatic {
             return Ok(());
         }
         let Some(parent) = self.parent() else {
+            if matches!(message_id, CompletionIdentity::Correlated(_)) && self.has_parent() {
+                return Err(ChildError::registry("completion parent is not available"));
+            }
             return Ok(());
         };
         if !parent.children().is_accepting() {
-            return Ok(());
+            return if matches!(message_id, CompletionIdentity::Correlated(_)) {
+                Err(stopped())
+            } else {
+                Ok(())
+            };
         }
         let identity = &self.identity.session;
         let status = match execution.status {
@@ -186,7 +202,10 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentScope<S> {
         append_bounded(&mut text, &rendered);
         let sent = parent.session().send(
             vec![ConversationPart::text(text)],
-            self.ids.message()?,
+            match message_id {
+                CompletionIdentity::Correlated(id) => id.to_owned(),
+                CompletionIdentity::Legacy => self.ids.message()?,
+            },
             Delivery::DELIVERY_STEER,
             IncomingActivity {
                 name: identity.name.clone(),
@@ -200,9 +219,22 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentScope<S> {
     }
 }
 impl<S: RestrictableAccessSnapshot + 'static> ParentCompletion for ParentScope<S> {
+    fn deliver_correlated<'a>(
+        &'a self,
+        execution: &'a Execution,
+        message_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            self.deliver_inner(execution, CompletionIdentity::Correlated(message_id))
+                .await
+                .map_err(|error| TurnError::Service(error.to_string()))
+        })
+    }
     fn deliver<'a>(&'a self, execution: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
-            let _ = self.deliver_inner(execution).await;
+            let _ = self
+                .deliver_inner(execution, CompletionIdentity::Legacy)
+                .await;
             Ok(())
         })
     }

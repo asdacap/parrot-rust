@@ -187,10 +187,17 @@ pub trait SessionActivity: ProviderActivity {
     fn assistant_message(&self, message: &str);
 }
 
+/// Delivers an execution outcome to the owning parent, when configured.
 pub trait ParentCompletion: Send + Sync {
     fn deliver<'a>(
         &'a self,
         execution: &'a super::lifecycle::Execution,
+    ) -> BoxFuture<'a, Result<(), TurnError>>;
+    /// Uses a stable message identity so recovery can retry durable admission.
+    fn deliver_correlated<'a>(
+        &'a self,
+        execution: &'a super::lifecycle::Execution,
+        message_id: &'a str,
     ) -> BoxFuture<'a, Result<(), TurnError>>;
 }
 

@@ -1,9 +1,21 @@
 //! Session-owned single-drain orchestration. Persistence and the actual turn live in the backend.
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+#[path = "execution_recovery.rs"]
+mod recovery;
+
 use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
 pub use parrot_domain::values::activity::{
     AgentExecution as Execution, AgentExecutionStatus as ExecutionStatus, DrainState,
+};
+use parrot_domain::{
+    contracts::{
+        agent_state::AgentStateStore,
+        async_ops::{BoxFuture, Cancellation},
+    },
+    values::agent_state::{
+        AgentStateUpdate, ExecutionCheckpoint, ExecutionInputPart, ExecutionPhase,
+        ExecutionTerminal, NotificationCheckpoint,
+    },
 };
 use parrot_storage::events::{Admission, ConversationPart};
 use std::collections::VecDeque;
@@ -60,6 +72,17 @@ fn bound(value: &mut String) {
     }
 }
 
+/// One pass outcome and its result captured before the backend releases its state.
+pub struct DrainPass {
+    pub execution: Execution,
+    pub result_reference: ExecutionResultReference,
+}
+#[derive(Clone, Copy)]
+pub enum ExecutionResultReference {
+    Missing,
+    Captured(i64),
+}
+
 /// Turn code checks scheduled work at source's pass boundary and joins accepted
 /// reminder mutations before deciding that a terminal result is ready.
 pub trait DrainWork: Send + Sync {
@@ -93,7 +116,7 @@ pub trait DrainBackend: Send + Sync + 'static {
         &'a self,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
-    ) -> BoxFuture<'a, Result<Execution, LifecycleError>>;
+    ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>>;
     fn prepare_scheduled<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
@@ -103,6 +126,36 @@ pub trait DrainBackend: Send + Sync + 'static {
         &'a self,
         execution: &'a Execution,
     ) -> BoxFuture<'a, Result<(), LifecycleError>>;
+    /// Reconciles execution start under a stable durable identity.
+    fn execution_started_correlated(
+        &self,
+        correlation: &str,
+    ) -> BoxFuture<'_, Result<(), LifecycleError>>;
+    /// Retries terminal publication and parent admission with stable identities.
+    fn execution_finished_correlated<'a>(
+        &'a self,
+        execution: &'a Execution,
+        correlation: &'a str,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>>;
+    /// Cancels only the exact initial input named by a durable cancellation intent.
+    fn cancel_execution_input(&self, message_id: &str)
+    -> BoxFuture<'_, Result<(), LifecycleError>>;
+    /// Captures the durable conversation boundary before a new prompt is admitted.
+    fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>>;
+    /// Resolves a committed terminal reference without invoking the provider.
+    fn restore_execution<'a>(
+        &'a self,
+        terminal: &'a ExecutionTerminal,
+    ) -> BoxFuture<'a, Result<Execution, LifecycleError>>;
+    /// Captures the outcome only after normal drain readiness has settled.
+    fn capture_execution<'a>(
+        &'a self,
+        checkpoint: &'a ExecutionCheckpoint,
+        execution: &'a mut Execution,
+        reference: ExecutionResultReference,
+    ) -> BoxFuture<'a, Result<ExecutionTerminal, LifecycleError>>;
+    /// Resource cancellation following suspension must not close the durable turn.
+    fn suspend_execution(&self);
     fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>>;
 }
 
@@ -292,7 +345,16 @@ struct WorkRequest<B: DrainBackend> {
 struct OwnedReservation {
     admission: Mutex<Option<Admission>>,
     cancellation: Arc<dyn Cancellation>,
-    startup: Arc<Completion<bool>>,
+    startup: Arc<Completion<Result<bool, LifecycleError>>>,
+    result_reference: Mutex<ExecutionResultReference>,
+}
+impl OwnedReservation {
+    fn capture_result_reference(&self) -> ExecutionResultReference {
+        *self
+            .result_reference
+            .lock()
+            .expect("execution result reference poisoned")
+    }
 }
 struct DrainSlot {
     id: u64,
@@ -327,6 +389,10 @@ struct Inner<B: DrainBackend> {
     closing: Arc<Signal>,
     state: Mutex<State<B>>,
     close_join: tokio::sync::Mutex<Option<JoinHandle<()>>>,
+    recovery: Option<Arc<dyn AgentStateStore>>,
+    checkpoint_gate: tokio::sync::Mutex<()>,
+    suspending: AtomicBool,
+    interrupting: AtomicBool,
 }
 pub struct AgentSession<B: DrainBackend> {
     inner: Arc<Inner<B>>,
@@ -422,6 +488,21 @@ fn check_message(parts: &[ConversationPart]) -> Result<(), LifecycleError> {
 
 impl<B: DrainBackend> AgentSession<B> {
     pub fn new(backend: Arc<B>, lifetime: Arc<dyn Cancellation>) -> Self {
+        Self::construct(backend, lifetime, None)
+    }
+    /// Binds the same agent-local store shared by the scope's other services.
+    pub fn with_state(
+        backend: Arc<B>,
+        lifetime: Arc<dyn Cancellation>,
+        store: Arc<dyn AgentStateStore>,
+    ) -> Self {
+        Self::construct(backend, lifetime, Some(store))
+    }
+    fn construct(
+        backend: Arc<B>,
+        lifetime: Arc<dyn Cancellation>,
+        recovery: Option<Arc<dyn AgentStateStore>>,
+    ) -> Self {
         let initial = OperationHandle {
             completion: Completion::ready(Ok(Execution::succeeded(""))),
         };
@@ -448,6 +529,10 @@ impl<B: DrainBackend> AgentSession<B> {
                     closed: None,
                 }),
                 close_join: tokio::sync::Mutex::new(None),
+                recovery,
+                checkpoint_gate: tokio::sync::Mutex::new(()),
+                suspending: AtomicBool::new(false),
+                interrupting: AtomicBool::new(false),
             }),
         }
     }
@@ -498,6 +583,36 @@ impl<B: DrainBackend> AgentSession<B> {
             state.wake = true;
             return (false, drain.execution.clone());
         }
+        let owned = if owned.is_none() && self.inner.recovery.is_some() && state.started {
+            let predecessor = state.execution.clone();
+            let reservation = Arc::new(OwnedReservation {
+                admission: Mutex::new(None),
+                cancellation: Arc::new(Signal::new()),
+                startup: Completion::new(),
+                result_reference: Mutex::new(ExecutionResultReference::Missing),
+            });
+            let ready = reservation.clone();
+            let closing = self.inner.closing.clone();
+            let lifetime = self.inner.lifetime.clone();
+            let session = self.clone();
+            spawn_tracked(state, async move {
+                let start = tokio::select! {
+                    _ = predecessor.join() => {
+                        match session.execution_checkpoint().await {
+                            Ok(Some(checkpoint)) if checkpoint.terminal.is_some() => Ok(true),
+                            Ok(_) => Err(LifecycleError::Failed("previous execution has no durable terminal; recover it before starting more work".into())),
+                            Err(error) => Err(error),
+                        }
+                    },
+                    _ = closing.cancelled() => Ok(false),
+                    _ = lifetime.cancelled() => Ok(false),
+                };
+                ready.startup.finish(start);
+            });
+            Some(reservation)
+        } else {
+            owned
+        };
         state.next_id += 1;
         let id = state.next_id;
         let cancellation = Arc::new(Signal::new());
@@ -677,6 +792,7 @@ impl<B: DrainBackend> AgentSession<B> {
         self.accepting(&state)?;
         if state.tail.is_finished() && (!state.started || state.execution.is_finished()) {
             let follow_up = state.started;
+            self.inner.interrupting.store(false, Ordering::Release);
             state.started = true;
             let result = Completion::new();
             let handle = OperationHandle {
@@ -686,13 +802,29 @@ impl<B: DrainBackend> AgentSession<B> {
             state.execution = OperationHandle {
                 completion: completed.clone(),
             };
+            let reservation = self.inner.recovery.as_ref().map(|_| {
+                let owned = Arc::new(OwnedReservation {
+                    admission: Mutex::new(None),
+                    cancellation: Arc::new(Signal::new()),
+                    startup: Completion::new(),
+                    result_reference: Mutex::new(ExecutionResultReference::Missing),
+                });
+                let selected = self.wake_locked(&mut state, None, Some(owned.clone())).1;
+                (owned, selected)
+            });
             let session = self.clone();
             spawn_tracked(&mut state, async move {
                 tokio::task::yield_now().await;
+                let mut owns_intent = false;
                 let execution = async {
-                    session.inner.backend.execution_started().await?;
+                    session.begin_execution(&parts, &message_id).await?;
+                    owns_intent = true;
+                    let checkpoint = session.execution_checkpoint().await?;
+                    if checkpoint.is_none() {
+                        session.inner.backend.execution_started().await?;
+                    }
                     let uncanceled = Signal::new();
-                    let publication: &dyn Cancellation = if follow_up {
+                    let publication: &dyn Cancellation = if follow_up && reservation.is_none() {
                         caller.as_ref()
                     } else {
                         &uncanceled
@@ -706,6 +838,12 @@ impl<B: DrainBackend> AgentSession<B> {
                             publication,
                         )
                         .await?;
+                    if let (Some(checkpoint), Some((owned, _))) = (&checkpoint, &reservation) {
+                        let active = session
+                            .activate_execution(checkpoint, owned, &sent.admission)
+                            .await?;
+                        owned.startup.finish(Ok(active));
+                    }
                     sent.follow_up = follow_up;
                     let drain = sent.execution.clone();
                     // Fresh sends expose the public execution, whose completion
@@ -717,7 +855,23 @@ impl<B: DrainBackend> AgentSession<B> {
                     drain.join().await
                 }
                 .await;
-                let execution = session.finish_execution(execution).await;
+                if let Some((owned, selected)) = &reservation {
+                    owned.startup.finish(Ok(false));
+                    let _ = selected.join().await;
+                }
+                let execution = if owns_intent {
+                    let reference = reservation
+                        .as_ref()
+                        .map_or(ExecutionResultReference::Missing, |(owned, _)| {
+                            owned.capture_result_reference()
+                        });
+                    session.finish_execution(execution, reference).await
+                } else {
+                    bounded(match execution {
+                        Ok(execution) => execution,
+                        Err(error) => Execution::failed(error.to_string()),
+                    })
+                };
                 if !result.is_finished() {
                     result.finish(Err(if execution.status == ExecutionStatus::Canceled {
                         canceled()
@@ -867,6 +1021,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     if let Some(selection) = selection.clone() {
                         self.inner.backend.update_selection(selection)?;
                     }
+                    self.inner.interrupting.store(false, Ordering::Release);
                     state.started = true;
                     state.execution = OperationHandle {
                         completion: completion.clone(),
@@ -878,6 +1033,7 @@ impl<B: DrainBackend> AgentSession<B> {
                         admission: Mutex::new(None),
                         cancellation: caller.clone(),
                         startup: Completion::new(),
+                        result_reference: Mutex::new(ExecutionResultReference::Missing),
                     });
                     let selected = self
                         .wake_locked(
@@ -929,6 +1085,11 @@ impl<B: DrainBackend> AgentSession<B> {
         owned: Arc<OwnedReservation>,
         selected: ExecutionHandle,
     ) -> Result<Execution, LifecycleError> {
+        if let Err(error) = self.begin_execution(&parts, &message_id).await {
+            owned.startup.finish(Ok(false));
+            let _ = selected.join().await;
+            return Err(error);
+        }
         let admission = match self
             .inner
             .backend
@@ -942,7 +1103,7 @@ impl<B: DrainBackend> AgentSession<B> {
         {
             Ok(admission) => admission,
             Err(error) => {
-                owned.startup.finish(false);
+                owned.startup.finish(Ok(false));
                 let _ = selected.join().await;
                 return Err(error);
             }
@@ -952,27 +1113,56 @@ impl<B: DrainBackend> AgentSession<B> {
             admitted(&admission);
         };
         let result = async {
-            self.inner.backend.execution_started().await?;
+            let checkpoint = self.execution_checkpoint().await?;
+            let active = match &checkpoint {
+                Some(checkpoint) => {
+                    self.activate_execution(checkpoint, &owned, &admission)
+                        .await?
+                }
+                None => {
+                    self.inner.backend.execution_started().await?;
+                    true
+                }
+            };
             self.inner
                 .backend
                 .publish_admission(&admission, &Signal::new())
                 .await?;
-            owned.startup.finish(true);
+            owned.startup.finish(Ok(active));
             selected.join().await
         }
         .await;
-        owned.startup.finish(false);
+        owned.startup.finish(Ok(false));
         // Startup failure must still release and join the reserved drain before
         // terminal callbacks and before a successor can run.
         let _ = selected.join().await;
-        Ok(self.finish_execution(result).await)
+        Ok(self
+            .finish_execution(result, owned.capture_result_reference())
+            .await)
     }
-    async fn finish_execution(&self, result: Result<Execution, LifecycleError>) -> Execution {
+    async fn finish_execution(
+        &self,
+        result: Result<Execution, LifecycleError>,
+        reference: ExecutionResultReference,
+    ) -> Execution {
         let mut execution = bounded(match result {
             Ok(execution) => execution,
             Err(error) if error.is_cancelled() => Execution::canceled(),
             Err(error) => Execution::failed(error.to_string()),
         });
+        if self.inner.suspending.load(Ordering::Acquire)
+            && execution.status == ExecutionStatus::Canceled
+        {
+            return execution;
+        }
+        match self
+            .finish_durable_execution(&mut execution, reference)
+            .await
+        {
+            Ok(true) => return execution,
+            Ok(false) => {}
+            Err(error) => return bounded(Execution::failed(error.to_string())),
+        }
         if let Err(error) = self.inner.backend.execution_finished(&execution).await {
             execution = bounded(Execution::failed(error.to_string()));
         }
@@ -1158,6 +1348,7 @@ impl<B: DrainBackend> AgentSession<B> {
             completion.finish(Ok(()));
             return Ok(handle);
         };
+        self.inner.interrupting.store(true, Ordering::Release);
         let stop = drain.cancellation.clone();
         let execution = drain.execution.clone();
         let join = drain.join.clone();
@@ -1170,6 +1361,7 @@ impl<B: DrainBackend> AgentSession<B> {
         }
         let session = self.clone();
         spawn_tracked(&mut state, async move {
+            let recorded = session.persist_cancellation().await;
             stop.cancel();
             let result = execution.join().await.map(|_| ());
             let joined = join_task(&join).await;
@@ -1180,12 +1372,26 @@ impl<B: DrainBackend> AgentSession<B> {
                     session.wake_locked(&mut state, Some(IncomingActivity::default()), None);
                 }
             }
-            completion.finish(result.and(joined).and(pending.map(|_| ())));
+            completion.finish(recorded.and(result).and(joined).and(pending.map(|_| ())));
         });
         Ok(handle)
     }
     pub async fn interrupt(&self, caller: &dyn Cancellation) -> Result<(), LifecycleError> {
         self.interrupt_handle()?.wait(caller).await
+    }
+
+    /// Suspends unfinished durable work before cancellation joins resources.
+    /// Integration must call this before canceling the user-session lifetime.
+    pub fn suspend_handle(&self) -> OperationHandle<()> {
+        if self.inner.recovery.is_some() && !self.inner.interrupting.load(Ordering::Acquire) {
+            self.inner.suspending.store(true, Ordering::Release);
+            self.inner.backend.suspend_execution();
+        }
+        self.close_handle()
+    }
+    pub async fn suspend(&self) -> Result<(), LifecycleError> {
+        self.suspend_handle().join().await?;
+        self.close().await
     }
 
     pub fn close_handle(&self) -> OperationHandle<()> {
@@ -1217,8 +1423,14 @@ impl<B: DrainBackend> AgentSession<B> {
         let tasks = state.tasks.clone();
         let task_failure = state.task_failure.take();
         let backend = self.inner.backend.clone();
+        let session = self.clone();
         let task = tokio::spawn(async move {
             let mut result = task_failure.map_or(Ok(()), Err);
+            if session.inner.suspending.load(Ordering::Acquire) {
+                if let Err(error) = session.persist_suspension().await {
+                    result = Err(error);
+                }
+            }
             for task in tasks {
                 if let Err(error) = join_task(&task).await {
                     if result.is_ok() {
@@ -1324,33 +1536,54 @@ impl<B: DrainBackend> AgentSession<B> {
         cancellation: Arc<dyn Cancellation>,
     ) -> Result<Execution, LifecycleError> {
         let started = match &owned {
-            Some(owned) => owned.startup.wait().await,
+            Some(owned) => owned.startup.wait().await?,
             None => true,
         };
         let mut completed = Execution::succeeded("");
         loop {
             let pass = async {
-                if !started {
-                    return Ok(Execution::canceled());
+                if !started || cancellation.is_cancelled() {
+                    return Ok(DrainPass {
+                        execution: Execution::canceled(),
+                        result_reference: ExecutionResultReference::Missing,
+                    });
                 }
                 if owned
                     .as_ref()
                     .is_some_and(|owned| owned.cancellation.is_cancelled())
                 {
-                    return Ok(Execution::canceled());
+                    return Ok(DrainPass {
+                        execution: Execution::canceled(),
+                        result_reference: ExecutionResultReference::Missing,
+                    });
                 }
                 self.run_scheduled(cancellation.clone()).await;
                 self.inner.backend.pass(cancellation.as_ref(), self).await
             }
             .await;
             let mut pass = match (pass, &owned) {
-                (Ok(pass), _) => pass,
+                (Ok(pass), _) => {
+                    if let Some(owned) = &owned {
+                        if let ExecutionResultReference::Captured(_) = pass.result_reference {
+                            *owned
+                                .result_reference
+                                .lock()
+                                .expect("execution result reference poisoned") =
+                                pass.result_reference;
+                        }
+                    }
+                    pass.execution
+                }
                 (Err(error), Some(_)) if error.is_cancelled() => Execution::canceled(),
                 (Err(error), Some(_)) => Execution::failed(error.to_string()),
                 (Err(error), None) => return Err(error),
             };
             if let Some(owned) = &owned {
-                if !started || owned.cancellation.is_cancelled() {
+                if (!started
+                    || owned.cancellation.is_cancelled()
+                    || self.inner.interrupting.load(Ordering::Acquire))
+                    && !self.inner.suspending.load(Ordering::Acquire)
+                {
                     let input_id = owned
                         .admission
                         .lock()
@@ -1506,7 +1739,7 @@ mod task_reaper_tests {
             &'a self,
             _: &'a dyn Cancellation,
             _: &'a dyn DrainWork,
-        ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+        ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
             unreachable!()
         }
         fn prepare_scheduled<'a>(
@@ -1523,6 +1756,45 @@ mod task_reaper_tests {
             _: &'a Execution,
         ) -> BoxFuture<'a, Result<(), LifecycleError>> {
             unreachable!()
+        }
+        fn execution_started_correlated(
+            &self,
+            _: &str,
+        ) -> BoxFuture<'_, Result<(), LifecycleError>> {
+            Box::pin(async { panic!("not a persistent backend") })
+        }
+        fn execution_finished_correlated<'a>(
+            &'a self,
+            _: &'a Execution,
+            _: &'a str,
+        ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+            Box::pin(async { panic!("not a persistent backend") })
+        }
+        fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
+            Box::pin(async { panic!("not a persistent backend") })
+        }
+        fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
+            Box::pin(async { panic!("not a persistent backend") })
+        }
+        fn restore_execution<'a>(
+            &'a self,
+            _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
+        ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+            Box::pin(async { panic!("not a persistent backend") })
+        }
+        fn capture_execution<'a>(
+            &'a self,
+            _: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
+            _: &'a mut Execution,
+            _: ExecutionResultReference,
+        ) -> BoxFuture<
+            'a,
+            Result<parrot_domain::values::agent_state::ExecutionTerminal, LifecycleError>,
+        > {
+            Box::pin(async { panic!("not a persistent backend") })
+        }
+        fn suspend_execution(&self) {
+            panic!("not a persistent backend")
         }
         fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {
             self.closed.store(true, Ordering::SeqCst);

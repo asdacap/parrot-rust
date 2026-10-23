@@ -1,7 +1,10 @@
 //! Actual durable turn loop behind the session-owned lifecycle.
 use super::{
     budget::TurnBudget,
-    lifecycle::{DrainBackend, DrainWork, Execution, ExecutionStatus, LifecycleError},
+    lifecycle::{
+        DrainBackend, DrainPass, DrainWork, Execution, ExecutionResultReference, ExecutionStatus,
+        LifecycleError,
+    },
     provider_call::{self, OutputWriter, ProviderActivity, ProviderCall, ProviderUsage},
     services::*,
     usage::SessionUsageRecorder,
@@ -23,7 +26,10 @@ use parrot_domain::{
         storage::Committed,
     },
     protocol::messages::parrot::{self as protocol, Event},
-    values::accounting::AgentSessionStatistics,
+    values::{
+        accounting::AgentSessionStatistics,
+        agent_state::{ExecutionCheckpoint, ExecutionOutcome, ExecutionTerminal},
+    },
 };
 use parrot_foundation::{
     config::runtime::AgentLimitsConfig, template_catalog::PromptTemplateCatalog,
@@ -96,6 +102,7 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     usage: SessionUsageRecorder,
     reminders: Arc<ExitReminders<Publisher>>,
     interruption: AtomicBool,
+    suspending: AtomicBool,
     state: Mutex<State>,
     prompt: SessionPrompt,
     conversation: ConversationReadView,
@@ -176,6 +183,7 @@ where
             usage,
             reminders,
             interruption: AtomicBool::new(false),
+            suspending: AtomicBool::new(false),
             prompt: SessionPrompt::new(config.prompt),
             conversation: conversation.read_view(),
             materialized_tools: std::sync::Mutex::new(None),
@@ -1181,6 +1189,128 @@ where
     }
 }
 
+impl<S, T> RuntimeBackend<S, T>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    async fn emit_execution(
+        &self,
+        mut event: Event,
+        correlation: &ExecutionCorrelation,
+        suffix: &str,
+    ) -> Result<(), LifecycleError> {
+        if let ExecutionCorrelation::Correlated(correlation) = correlation {
+            event.id = format!("{correlation}.{suffix}");
+            if let Some(event) = self
+                .history
+                .repository()
+                .events()
+                .append_execution_event(event)
+                .await
+                .map_err(|error| LifecycleError::Failed(error.to_string()))?
+            {
+                self.publish(event, &NeverCancelled)
+                    .await
+                    .map_err(|error| error.lifecycle_error())?;
+            }
+            Ok(())
+        } else {
+            self.emit(event, &NeverCancelled)
+                .await
+                .map_err(|error| error.lifecycle_error())
+        }
+    }
+}
+
+enum ExecutionCorrelation {
+    Legacy,
+    Correlated(String),
+}
+impl<S, T> RuntimeBackend<S, T>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    fn start_execution(
+        &self,
+        correlation: ExecutionCorrelation,
+    ) -> BoxFuture<'_, Result<(), LifecycleError>> {
+        Box::pin(async move {
+            *self
+                .execution_activity
+                .lock()
+                .expect("execution activity poisoned") = Some(self.activity.begin_execution());
+            let mut event = self.event();
+            event.set_agent_started(protocol::AgentStarted {
+                parent_agent_session_id: self.identity.parent_session_id.clone(),
+                name: self.identity.name.clone(),
+                ..Default::default()
+            });
+            self.emit_execution(event, &correlation, "started").await
+        })
+    }
+    fn finish_execution<'a>(
+        &'a self,
+        execution: &'a Execution,
+        correlation: ExecutionCorrelation,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        Box::pin(async move {
+            let mut event = self.event();
+            let elapsed = self
+                .activity
+                .execution_duration()
+                .as_millis()
+                .min(i64::MAX as u128) as i64;
+            if execution.status == ExecutionStatus::Succeeded {
+                event.set_agent_finished(protocol::AgentFinished {
+                    parent_agent_session_id: self.identity.parent_session_id.clone(),
+                    name: self.identity.name.clone(),
+                    elapsed_ms: Some(elapsed),
+                    ..Default::default()
+                });
+            } else {
+                event.set_agent_failed(protocol::AgentFailed {
+                    parent_agent_session_id: self.identity.parent_session_id.clone(),
+                    name: self.identity.name.clone(),
+                    message: execution.error.clone(),
+                    ..Default::default()
+                });
+            }
+            let publication = self.emit_execution(event, &correlation, "finished").await;
+            if matches!(correlation, ExecutionCorrelation::Correlated(_)) && publication.is_err() {
+                return publication;
+            }
+            let completed = publication.as_ref().map_or_else(
+                |error| Execution::failed(error.to_string()),
+                |_| execution.clone(),
+            );
+            if let Some(activity) = self
+                .execution_activity
+                .lock()
+                .expect("execution activity poisoned")
+                .take()
+            {
+                self.activity.finish_execution(activity, &completed);
+            }
+            if let ExecutionCorrelation::Correlated(correlation) = correlation {
+                self.parent_completion
+                    .deliver_correlated(&completed, &format!("{correlation}.parent"))
+                    .await
+                    .map_err(|error| error.lifecycle_error())?;
+            } else {
+                self.parent_completion
+                    .deliver(&completed)
+                    .await
+                    .map_err(|error| error.lifecycle_error())?;
+            }
+            publication
+        })
+    }
+}
+
 impl<S, T> DrainBackend for RuntimeBackend<S, T>
 where
     S: AccessSnapshot + 'static,
@@ -1308,7 +1438,7 @@ where
         &'a self,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
-    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+    ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
             let mut state = self.state.lock().await;
             let result = self.run_pass(&mut state, cancellation, work).await;
@@ -1328,7 +1458,7 @@ where
                         if let Some(turn) = state.diagnostic_turn.take() {
                             self.activity.turn_finished(&turn, "cancelled", None);
                         }
-                        if state.turn.is_some() {
+                        if state.turn.is_some() && !self.suspending.load(Ordering::Acquire) {
                             let completed = sessions::Completion {
                                 assistant_text: self.notices.interrupted.clone(),
                                 finish_reason: "interrupted".into(),
@@ -1362,71 +1492,161 @@ where
             self.skills.end_turn().await;
             state.turn = None;
             state.diagnostic_turn = None;
-            outcome
+            let execution = outcome?;
+            let result_reference = if execution.status == ExecutionStatus::Succeeded {
+                self.history
+                    .repository()
+                    .latest_execution_result_sequence(self.identity.session_id.clone())
+                    .await
+                    .map_err(|error| LifecycleError::Failed(error.to_string()))?
+                    .map_or(
+                        ExecutionResultReference::Missing,
+                        ExecutionResultReference::Captured,
+                    )
+            } else {
+                ExecutionResultReference::Missing
+            };
+            Ok(DrainPass {
+                execution,
+                result_reference,
+            })
         })
     }
     fn execution_started(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {
-        Box::pin(async move {
-            *self
-                .execution_activity
-                .lock()
-                .expect("execution activity poisoned") = Some(self.activity.begin_execution());
-            let mut event = self.event();
-            event.set_agent_started(protocol::AgentStarted {
-                parent_agent_session_id: self.identity.parent_session_id.clone(),
-                name: self.identity.name.clone(),
-                ..Default::default()
-            });
-            self.emit(event, &NeverCancelled)
-                .await
-                .map_err(|e| e.lifecycle_error())
-        })
+        self.start_execution(ExecutionCorrelation::Legacy)
+    }
+    fn execution_started_correlated(
+        &self,
+        correlation: &str,
+    ) -> BoxFuture<'_, Result<(), LifecycleError>> {
+        self.start_execution(ExecutionCorrelation::Correlated(correlation.to_owned()))
     }
     fn execution_finished<'a>(
         &'a self,
         execution: &'a Execution,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        self.finish_execution(execution, ExecutionCorrelation::Legacy)
+    }
+    fn execution_finished_correlated<'a>(
+        &'a self,
+        execution: &'a Execution,
+        correlation: &'a str,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        self.finish_execution(
+            execution,
+            ExecutionCorrelation::Correlated(correlation.to_owned()),
+        )
+    }
+    fn cancel_execution_input(
+        &self,
+        message_id: &str,
+    ) -> BoxFuture<'_, Result<(), LifecycleError>> {
+        let message_id = message_id.to_owned();
         Box::pin(async move {
-            let mut event = self.event();
-            let elapsed = self
-                .activity
-                .execution_duration()
-                .as_millis()
-                .min(i64::MAX as u128) as i64;
-            if execution.status == ExecutionStatus::Succeeded {
-                event.set_agent_finished(protocol::AgentFinished {
-                    parent_agent_session_id: self.identity.parent_session_id.clone(),
-                    name: self.identity.name.clone(),
-                    elapsed_ms: Some(elapsed),
-                    ..Default::default()
-                });
-            } else {
-                event.set_agent_failed(protocol::AgentFailed {
-                    parent_agent_session_id: self.identity.parent_session_id.clone(),
-                    name: self.identity.name.clone(),
-                    message: execution.error.clone(),
-                    ..Default::default()
-                });
-            }
-            let publication = self.emit(event, &NeverCancelled).await;
-            let completed = publication.as_ref().map_or_else(
-                |error| Execution::failed(error.to_string()),
-                |_| execution.clone(),
-            );
-            if let Some(activity) = self
-                .execution_activity
-                .lock()
-                .expect("execution activity poisoned")
-                .take()
-            {
-                self.activity.finish_execution(activity, &completed);
-            }
-            self.parent_completion
-                .deliver(&completed)
+            if let Some(input) = self
+                .history
+                .repository()
+                .events()
+                .find_input(self.identity.session_id.clone(), message_id)
                 .await
-                .map_err(|e| e.lifecycle_error())?;
-            publication.map_err(|e| e.lifecycle_error())
+                .map_err(|error| LifecycleError::Failed(error.to_string()))?
+            {
+                self.cancel_pending_input(input.id).await?;
+            }
+            Ok(())
         })
+    }
+    fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
+        Box::pin(async move {
+            self.history
+                .repository()
+                .execution_watermark(self.identity.session_id.clone())
+                .await
+                .map_err(|error| LifecycleError::Failed(error.to_string()))
+        })
+    }
+    fn restore_execution<'a>(
+        &'a self,
+        terminal: &'a ExecutionTerminal,
+    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+        Box::pin(async move {
+            match &terminal.outcome {
+                ExecutionOutcome::Failed(error) => Ok(Execution::failed(error)),
+                ExecutionOutcome::Canceled => Ok(Execution::canceled()),
+                ExecutionOutcome::Succeeded => {
+                    let item = self
+                        .history
+                        .repository()
+                        .execution_message(
+                            self.identity.session_id.clone(),
+                            terminal.history_sequence,
+                        )
+                        .await
+                        .map_err(|error| LifecycleError::Failed(error.to_string()))?;
+                    let item = item.ok_or_else(|| {
+                        LifecycleError::Failed(
+                            "saved execution result is missing from conversation history".into(),
+                        )
+                    })?;
+                    if item.message.role != MessageRole::Assistant
+                        || !item.message.tool_calls.is_empty()
+                    {
+                        return Err(LifecycleError::Failed(
+                            "saved execution result is not a terminal assistant message".into(),
+                        ));
+                    }
+                    Ok(Execution::succeeded(parrot_storage::events::content(
+                        &item.message.parts,
+                    )))
+                }
+            }
+        })
+    }
+    fn capture_execution<'a>(
+        &'a self,
+        checkpoint: &'a ExecutionCheckpoint,
+        execution: &'a mut Execution,
+        reference: ExecutionResultReference,
+    ) -> BoxFuture<'a, Result<ExecutionTerminal, LifecycleError>> {
+        Box::pin(async move {
+            let candidate = match reference {
+                ExecutionResultReference::Captured(sequence)
+                    if sequence > checkpoint.history_watermark =>
+                {
+                    self.history
+                        .repository()
+                        .execution_message(self.identity.session_id.clone(), sequence)
+                        .await
+                        .map_err(|error| LifecycleError::Failed(error.to_string()))?
+                }
+                _ => None,
+            }
+            .filter(|item| {
+                item.message.role == MessageRole::Assistant && item.message.tool_calls.is_empty()
+            });
+            if execution.status == ExecutionStatus::Succeeded && candidate.is_none() {
+                return Err(LifecycleError::Failed(
+                    "successful execution has no captured terminal assistant reference".into(),
+                ));
+            }
+            if execution.status == ExecutionStatus::Succeeded && execution.output.is_empty() {
+                if let Some(item) = &candidate {
+                    execution.output = parrot_storage::events::content(&item.message.parts);
+                }
+            }
+            Ok(ExecutionTerminal {
+                event_id: format!("{}.finished", checkpoint.execution_id),
+                history_sequence: candidate.as_ref().map_or(0, |item| item.sequence),
+                outcome: match execution.status {
+                    ExecutionStatus::Succeeded => ExecutionOutcome::Succeeded,
+                    ExecutionStatus::Failed => ExecutionOutcome::Failed(execution.error.clone()),
+                    ExecutionStatus::Canceled => ExecutionOutcome::Canceled,
+                },
+            })
+        })
+    }
+    fn suspend_execution(&self) {
+        self.suspending.store(true, Ordering::Release);
     }
     fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {
         Box::pin(async move {
