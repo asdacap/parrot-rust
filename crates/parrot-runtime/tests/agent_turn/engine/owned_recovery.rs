@@ -777,6 +777,11 @@ impl AgentStateStore for PausedState {
     > {
         self.inner.update(update)
     }
+    fn retire(
+        &self,
+    ) -> BoxFuture<'_, Result<(), parrot_domain::contracts::agent_state::AgentStateError>> {
+        self.inner.retire()
+    }
 }
 
 #[tokio::test]
@@ -1244,6 +1249,11 @@ impl AgentStateStore for CompletionPauseState {
             }
             self.inner.update(update).await
         })
+    }
+    fn retire(
+        &self,
+    ) -> BoxFuture<'_, Result<(), parrot_domain::contracts::agent_state::AgentStateError>> {
+        self.inner.retire()
     }
 }
 

@@ -65,16 +65,16 @@ async fn root_with_controller(
     use parrot_runtime::children::*;
     struct NoParent;
     impl parrot_runtime::agent_turn::services::ParentCompletion for NoParent {
-    fn deliver_correlated<'a>(
-        &'a self,
-        execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
-        _: &'a str,
-    ) -> parrot_domain::contracts::async_ops::BoxFuture<
-        'a,
-        Result<(), parrot_runtime::agent_turn::services::TurnError>,
-    > {
-        self.deliver(execution)
-    }
+        fn deliver_correlated<'a>(
+            &'a self,
+            execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+            _: &'a str,
+        ) -> parrot_domain::contracts::async_ops::BoxFuture<
+            'a,
+            Result<(), parrot_runtime::agent_turn::services::TurnError>,
+        > {
+            self.deliver(execution)
+        }
 
         fn deliver<'a>(
             &'a self,
