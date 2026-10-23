@@ -12,4 +12,47 @@ Writes use `agent-state.json.tmp` in the same directory, sync its contents, and 
 
 The file and staging basename are reserved against child-agent names. Existing data is never replaced merely because decoding failed. There is no cross-process writer coordination; the selected-session owner and the single scoped store remain responsible for exclusive lifecycle ownership.
 
-This file is an internal recovery format. Its task payload serialization is not the `set_agent_tasks` input artifact format. Runtime consumers must record stable intent before execution admission and reconcile snapshots with SQLite history at restart. Atomic file replacement is not a transaction with conversation storage and does not promise exactly-once external tool effects.
+## Location and authority
+
+Composition opens the store through `AgentStateFiles` using the selected session
+root and the owning agent's validated name path:
+`<selected-session>/root-agents/<root-name>/<child-name>/.../agent-state.json`.
+The expected agent-session ID is checked on load, so a name-based directory from
+another incarnation cannot silently supply its state. Child roster references
+contain direct names/IDs; a referenced child's descriptor must match that parent.
+Unreferenced directories are not a recovery inventory. The staging file remains
+beside its owner's final file; there is no session-wide snapshot registry or
+shared descendant snapshot.
+
+SQLite conversation/event history remains authoritative for admitted inputs,
+responses and tool settlements. `history.jsonl` remains a projection; it is not
+loaded to rebuild a graph. Existing queue files remain in
+`<selected-session>/queues/agents/<agent-session-id>`, not in the snapshot.
+Descriptors retain profile/model selectors, local scope and completion mode,
+not credentials or security grants. Runtime resolves selectors and rebuilds
+parent-linked restrictions from current configuration.
+
+## Cross-store recovery
+
+This file is an internal recovery format. Its task payload serialization is not
+the `set_agent_tasks` input artifact format. Runtime consumers save stable intent
+before prompt admission and reconcile it against SQLite using input IDs and
+response references, rather than replaying all history. Terminal execution state
+also retains a recovery watermark distinct from its exact assistant response
+sequence, so later genuine input is not swallowed by an older terminal result.
+Inherited fork context alone is not destination-owned pending input.
+
+Child construction writes the child's descriptor before adding its reference to
+the parent roster. Scheduler outcome/checkpoint and notification outbox writes
+are ordered around durable conversation admission/consumption, but atomic file
+replacement is **not** a transaction with SQLite. Reopening must handle either
+side having committed. In particular, unresolved tool recovery can repeat an
+external effect if death occurs after that effect and before the terminal
+settlement commits; exactly-once external effects are not promised.
+
+For an existing user session with no root snapshot, host composition warns and
+uses root-only legacy recovery, then starts writing new state. It does not infer
+old child selectors or task graphs from events. Missing **referenced child**
+snapshots, corrupt/incompatible files and owner mismatches instead fail opening;
+operators should preserve them for diagnosis, not delete them to force an empty
+recovery. See the [operator guidance](../../../../docs/operator/state-and-rollback.md#retained-agents-and-task-recovery).

@@ -27,7 +27,7 @@ History preparation uses the owning actual parent by default. Sibling history re
 - Public operations synchronously start owned Tokio work and return cloneable retained `Operation` observers. Dropping/wait-canceling an observer does not cancel the work. Registry/spawner construction tracking retains **unit lifetime barriers**, not scope-valued results; detached children are not retained merely by old spawn results.
 - Rejected composed scopes start owned cleanup without delaying the original spawn failure. Both spawner and registry shutdown join all admitted constructions, then all rejected cleanup, even after failures. Pending reservations roll back; committed retention releases only at the scope's final resource stage. Foreground parent-turn cancellation is not a child lifetime.
 - Root admission rejects duplicate IDs or the exact same session reference, requires depth zero/no parent, and rolls admission back if publication startup fails. Child admission checks the owning parent ID then the injected validator. Successful publication startup occurs once; a failed startup leaves retry possible while retaining already-started operations for cleanup.
-- Fresh construction preserves the source `EnsureAccepting` recheck followed by retention commit and `ChildRegistry::try_add`; it does not add an atomic registry/spawner/child admission transaction. Get-or-spawn retains its accepting check before an existing-child early return. Spawn-or-resume instead preserves the source exception: an existing discoverable idle child receives only the busy check and selection update, even after registry/spawner stop; an absent child enters separately tracked fresh construction and its usual lifetime admission checks.
+- Fresh construction preserves the accepting recheck before retention and child admission; the descriptor/roster persistence ordering is described below. Get-or-spawn retains its accepting check before an existing-child early return. Spawn-or-resume allows an existing discoverable idle child to receive the busy check and persisted selection update after only the local spawner has closed; an absent child enters separately tracked fresh construction and its usual lifetime admission checks. Registry freeze/shutdown rejects both branches and joins accepted selection writes before hosted suspension.
 - Exact-TypeId local service registrations store the original `Arc<T>` in an `Any` holder. Both concrete and `?Sized` interface types work without concrete/interface fallback, preserving the exact service Arc and availability after shutdown.
 
 Scope close preserves concrete source order: ordered work owners (first error retained inside that list), real session close, spawner close, reversed children, ordered composition resources, ordered final resources (queue disposal/question close), retention release, then join all started publications. Later nested-finally stages override earlier stage errors, unlike registry/child/work list loops, which preserve the first error. Ordered composition-resource closures must be registered in the concrete composition's disposal order.
@@ -39,6 +39,63 @@ Names use source ASCII sanitation and `-2`, `-3`, … conflict suffixes; empty s
 Resolver status bare names are direct children only; recipient bare `parent`/actual parent name may select the parent. Explicit relative paths support `..`/`parent`, and absolute paths require one uniquely named root. Empty and `.` path segments are rejected. Explicit resource prefixes never fall back to another owner. Resolution requires a registered owner and accepting authority; ancestor-reference checking does not add that requirement, matching source.
 
 Parent completion uses the source `AgentExecution` result text and exact `agent-session.child-completion` template, rune-safe 1 MiB field/final bounds, actual parent `Send` with Steer and `IncomingActivity`, awaits send admission, and swallows delivery failures. `RetainedOnly` does not deliver. Child retention is unaffected by foreground execution completion. Diagnostics contain only bounded operational event names, IDs/correlation, elapsed time, outcome, and source-allowlisted error codes; no exception text, prompts, profiles, or security data are logged.
+
+## Retained-tree recovery
+
+Each scope shares one `AgentStateStore` with its execution and task owners. Its
+versioned `agent-state.json` lives in that agent's private directory:
+`<selected-session>/root-agents/<root-name>/<child-name>/.../agent-state.json`.
+The root snapshot is in the root agent's directory, not at the user-session
+root. A snapshot contains its owner's descriptor and state plus **direct-child
+name/ID references**, never embedded child snapshots or copied conversation
+history. `agent-state.json` and its same-directory staging basename are reserved
+against child names. See the [storage contract](../../../parrot-storage/src/agent_state/README.md).
+
+Fresh spawn saves the child's descriptor before committing its reference to the
+parent roster and before reporting successful admission. Restoration follows
+only those roster references parent-first: it does not discover children from
+old lineage events or leftover directories. Existing identities, histories,
+local prompt scopes and completion-delivery modes are reused without another
+history fork. Idle, completed and never-started children are retained too;
+restoring them alone does not request a provider response. Ordinary named reuse
+finds the restored scope.
+
+Saved profile/model selectors are resolved against **current** configuration.
+Restoration builds a new parent-linked `PolicyLineage` and applies the normal
+child admission and profile/depth limits. Each turn capture again intersects the
+selected security with current ancestor selections. No credentials, live grants
+or serialized security snapshots are restored. A missing selector is an error,
+not permission to choose a substitute profile/model.
+
+Host composition reconstructs the complete tree and reconnects all task-worker
+references before opening one shared startup activation latch. Schedulers reserve
+their workers; generic recovery reserves only unclaimed executions. This prevents
+a restored task worker from independently receiving both a generic recovery turn
+and a scheduler submission. Existing terminal results restore their wait/parent
+completion contract instead of rerunning the execution. New pending input can
+still wake an otherwise completed scope.
+
+Normal hosted close freezes construction and task admissions, suspends the
+sessions/graphs, joins owned work, and only then cancels shared resources.
+Suspension preserves unfinished execution intent; explicit interrupt, task
+cancellation and task reset retain their separate cancellation/replacement
+semantics. Child queues keep their existing files under
+`<selected-session>/queues/agents/<agent-session-id>` and reattach to the restored
+owner. Leftover files do not make an obsolete ID a retained child.
+
+An existing user session without a root snapshot uses root-only compatibility
+recovery and publishes the configurable `legacy_root_only_resume` warning;
+historical child/task runtime state cannot be reconstructed from old events.
+Fresh sessions do not warn. Once a roster references a child, an absent snapshot
+is damaged state, not a legacy fallback. Corrupt/incompatible snapshots, wrong
+owners, descriptor/parent mismatches, duplicate names or cyclic IDs stop opening
+before provider activation. State is preserved for diagnosis, not replaced with
+an empty registry.
+
+The file and SQLite stores do not form one transaction. Stable execution/input
+and completion identities reconcile durable boundaries; they do not guarantee
+exactly-once external effects. An unresolved tool call can repeat an effect if
+the process dies after the effect but before its terminal record commits.
 
 ## Verification scope
 

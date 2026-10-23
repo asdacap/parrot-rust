@@ -113,6 +113,65 @@ read fallback must still authorize the actual resolved target, including symlink
 Root selection/fallback itself grants **no access permission** and does not repair
 the unresolved production filesystem/security capability.
 
+## Retained agents and task recovery
+
+The composed session runtime now persists retained agents and task orchestration.
+This describes recovery **after a session owner is opened**; it does not remove
+the local production-creation limitations noted above.
+
+- Each agent owns one versioned `agent-state.json` beneath
+  `root-agents/<root-name>/<child-name>/.../` in the selected session directory.
+  The root has its own file under `root-agents/<root-name>/`. A parent stores
+  direct-child name/ID references, not copies of the child's graph or snapshot.
+  Do not move these files between agents or sessions, or edit their internal
+  schema as if they were `set_agent_tasks` input artifacts.
+- Opening follows the retained roster, preserving original IDs, parent links,
+  histories and local prompt scopes, including idle/completed/never-started
+  children. Old lineage events and leftover directories do not recreate obsolete
+  incarnations. Idle or completed agents do not run solely because they reopen.
+- Saved profile/model selectors use current configuration and normal
+  parent-linked restrictions. No credentials or old live grants are restored.
+  Removing a required selector causes an error rather than a silent substitute;
+  changing policy can change what resumed work is allowed to do.
+- Each owner recovers its saved graph, including results, failed/canceled states,
+  hidden flags and worker associations. An unfinished attempt continues with its
+  existing prompt identity, retry count and response-repair budget. Dependents
+  remain held by failed dependencies. Reopening does not automatically reset a
+  terminal task; an explicit task reset is a new transition with its normal
+  dependent invalidation and old-generation cancellation behavior.
+- Normal hosted close suspends unfinished work before resource cancellation.
+  Explicit task cancellation or user interruption is still terminal, not a
+  request to suspend. A crash can resume unfinished work too, but does not imply
+  that the last uncommitted write survived.
+- Existing child queue files under `queues/agents/<agent-session-id>` survive
+  close/reopen and reattach to restored owners. Leftover queue files alone do not
+  authorize or restore an obsolete agent.
+
+An existing session **without a root snapshot** uses root-only legacy recovery
+and emits a visible `legacy_root_only_resume` notice (text configured by
+`session.legacy-resume-warning`). It begins writing new snapshots, but cannot
+reconstruct historical child/task runtime state that was never saved. Fresh
+sessions do not emit this warning. This snapshot compatibility case is distinct
+from the old-path fallback setting: it can also apply to an older Rust session in
+the current root.
+
+Once a parent references a child, that child's missing snapshot is damaged
+new-format state, **not** a root-only fallback. Corrupt/unsupported snapshots,
+wrong owner IDs, invalid parent references, duplicate retained names/cyclic IDs,
+and unavailable selectors fail opening before provider activation. Preserve the
+session and error for diagnosis; deleting snapshots to bypass the error loses
+recoverable state. No repair/migration command is provided.
+
+SQLite `session.db` remains authoritative for conversation/event history and
+settlements; agent `history.jsonl` files remain projections. Back up the whole
+selected session after closing its owner, including snapshots, DB and queues,
+not just a graph file. Snapshot replacement is atomic within its agent directory,
+**not a transaction with SQLite**. Stable input/result/notification identities
+reconcile the file/DB handoffs and avoid resubmitting an already admitted initial
+assignment. They do not promise exactly-once external tool effects: if a process
+dies after an effect but before its terminal settlement commits, unresolved-tool
+recovery may invoke it again. Do not treat resume as a rollback of external work.
+
 ## Ownership, takeover and concurrency
 
 **Never use .NET and Rust concurrently on the same workspace**, even if their
