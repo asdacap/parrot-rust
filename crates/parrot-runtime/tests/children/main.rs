@@ -19,5 +19,6 @@ mod publication_failures;
 mod resolution;
 mod resolver_boundaries;
 mod resources;
+mod restoration;
 mod retained;
 mod support;

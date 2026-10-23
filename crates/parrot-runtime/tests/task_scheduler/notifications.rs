@@ -263,3 +263,67 @@ async fn progress_revisions_are_durable_replayable_and_diagnostics_contain_only_
     }
     h.close().await;
 }
+
+#[tokio::test]
+async fn exhausted_notice_send_retains_intent_without_blocking_later_delivery() {
+    let h = Harness::new();
+    let root = h.root("owner").await;
+    let first = Gate::new();
+    let second = Gate::new();
+    h.provider.script("a", [Reply::held("answer", &first)]);
+    h.provider.script("b", [Reply::held("answer", &second)]);
+    let owner = h.factory.get("owner");
+    owner.task_session.send_failures.store(3, Ordering::SeqCst);
+    set(&root, vec![task("a"), dependent("b", "a")]).await;
+    first.entered().await;
+    first.open();
+    second.entered().await;
+    owner
+        .task_session
+        .wait_calls(|calls| {
+            calls
+                .iter()
+                .filter(|call| call.kind == "send" && call.text.contains("AgentTask succeeded: a"))
+                .count()
+                == 3
+        })
+        .await;
+    bounded(async {
+        loop {
+            if h.factory
+                .task_diagnostics
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|entry| entry.operation == "delivery")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(
+        root.agent_state()
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .tasks
+            .notifications
+            .iter()
+            .any(|notice| notice.text.contains("AgentTask succeeded: a"))
+    );
+    second.open();
+    complete(&root).await;
+    owner
+        .task_session
+        .wait_calls(|calls| {
+            calls
+                .iter()
+                .any(|call| call.kind == "send" && call.text.contains("AgentTask succeeded: b"))
+        })
+        .await;
+    h.close().await;
+}

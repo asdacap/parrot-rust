@@ -35,11 +35,11 @@ where
     S: RestrictableAccessSnapshot + 'static,
     T: Send + 'static,
 {
-    pub fn new(
+    pub async fn new(
         config: SchedulerConfig<S, TaskArtifactParserAdapter>,
         capture: fn(&T) -> TurnSelection<S>,
     ) -> ChildResult<Arc<Self>> {
-        let scheduler = TaskScheduler::new(config)?;
+        let scheduler = TaskScheduler::new(config).await?;
         Ok(Arc::new(Self { scheduler, capture }))
     }
 
@@ -78,6 +78,18 @@ where
     type Snapshot = TaskSnapshot;
     type Error = ToolFailure;
 
+    fn lookup_accepted<'a>(
+        &'a self,
+        identity: &'a parrot_domain::values::agent_tasks::TaskCallIdentity,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<usize>, OperationError<ToolFailure>>> {
+        Box::pin(async move {
+            if cancellation.is_cancelled() {
+                return Err(OperationError::Cancelled);
+            }
+            tokio::select! { biased; _ = cancellation.cancelled() => Err(OperationError::Cancelled), receipt = self.scheduler.lookup_accepted(identity) => receipt.map_err(operation_error) }
+        })
+    }
     fn update<'a>(
         &'a self,
         update: Self::Update,
@@ -90,12 +102,16 @@ where
             let selection = (self.capture)(&update.selection);
             let operation = self
                 .scheduler
-                .set_tasks(
+                .set_tool_tasks(
                     update.tasks,
                     selection,
                     HistoryForkBoundary::BeforeToolBatch {
                         assistant_sequence: update.history_boundary.assistant_sequence,
-                        tool_call_id: update.history_boundary.call_id,
+                        tool_call_id: update.history_boundary.call_id.clone(),
+                    },
+                    parrot_domain::values::agent_tasks::TaskCallIdentity {
+                        assistant_sequence: update.history_boundary.assistant_sequence,
+                        call_id: update.history_boundary.call_id,
                     },
                 )
                 .map_err(operation_error)?;

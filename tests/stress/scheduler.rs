@@ -5,12 +5,13 @@ use std::time::Duration;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::events::{EventSubscription, SubscriptionLimits};
 use parrot_domain::protocol::messages::parrot::{Delivery, Event, InputSource};
+use parrot_domain::values::agent_state::{ExecutionCheckpoint, ExecutionTerminal};
 use parrot_runtime::agent_turn::lifecycle::{
-    AgentSession, DrainBackend, DrainState, DrainWork, Execution, ExecutionStatus, LifecycleError,
-    Signal,
+    AgentSession, DrainBackend, DrainPass, DrainState, DrainWork, Execution,
+    ExecutionResultReference, ExecutionStatus, LifecycleError, Signal,
 };
 use parrot_runtime::event_broker::EventBroker;
-use parrot_storage::events::{Admission, ConversationPart, NeverCancelled};
+use parrot_storage::events::{Admission, AdmittedInput, ConversationPart, NeverCancelled};
 use tokio::sync::Semaphore;
 
 use crate::support::{Case, Generator, cases, seeds};
@@ -71,12 +72,23 @@ impl DrainBackend for Backend {
         })
     }
 
+    fn find_execution_input(
+        &self,
+        _: String,
+    ) -> BoxFuture<'_, Result<Option<AdmittedInput>, LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress has no durable execution inputs") })
+    }
+
     fn publish_admission<'a>(
         &'a self,
         _: &'a Admission,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async { panic!("wake/mutation stress must not fabricate publication") })
+    }
+
+    fn has_recovery_work_after(&self, _: i64) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress has no persistent recovery work") })
     }
 
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
@@ -97,7 +109,7 @@ impl DrainBackend for Backend {
         &'a self,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
-    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+    ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.maximum_active.fetch_max(active, Ordering::SeqCst);
@@ -108,13 +120,21 @@ impl DrainBackend for Backend {
                     permit = self.release.acquire() => permit.unwrap().forget(),
                     _ = cancellation.cancelled() => {
                         self.active.fetch_sub(1, Ordering::SeqCst);
-                        return Ok(Execution::canceled());
+                        return Ok(DrainPass {
+                            execution: Execution::canceled(),
+                            result_reference: ExecutionResultReference::Missing,
+                            recovery_watermark: 0,
+                        });
                     }
                 }
             }
             work.join_mutations().await?;
             self.active.fetch_sub(1, Ordering::SeqCst);
-            Ok(Execution::succeeded("t77-controlled-pass"))
+            Ok(DrainPass {
+                execution: Execution::succeeded("t77-controlled-pass"),
+                result_reference: ExecutionResultReference::Missing,
+                recovery_watermark: 0,
+            })
         })
     }
 
@@ -140,6 +160,47 @@ impl DrainBackend for Backend {
             self.finishes.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
+    }
+
+    fn execution_started_correlated(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress has no durable execution starts") })
+    }
+
+    fn execution_finished_correlated<'a>(
+        &'a self,
+        _: &'a Execution,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress has no durable execution finishes") })
+    }
+
+    fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<i64, LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress has no durable execution inputs") })
+    }
+
+    fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress has no durable conversation") })
+    }
+
+    fn restore_execution<'a>(
+        &'a self,
+        _: &'a ExecutionTerminal,
+    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress has no saved execution") })
+    }
+
+    fn capture_execution<'a>(
+        &'a self,
+        _: &'a ExecutionCheckpoint,
+        _: &'a mut Execution,
+        _: ExecutionResultReference,
+        _: i64,
+    ) -> BoxFuture<'a, Result<ExecutionTerminal, LifecycleError>> {
+        Box::pin(async { panic!("wake/mutation stress does not persist executions") })
+    }
+
+    fn suspend_execution(&self) {
+        panic!("wake/mutation stress does not suspend durable executions")
     }
 
     fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {

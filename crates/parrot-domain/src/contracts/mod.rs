@@ -6,6 +6,7 @@
 //! await. Scope settlement joins owned work and attempts remaining cleanup after
 //! earlier failures before releasing session resources.
 
+pub mod agent_state;
 pub mod agent_tasks;
 pub mod async_ops;
 pub mod events;

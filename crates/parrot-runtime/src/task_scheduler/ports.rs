@@ -1,19 +1,20 @@
 use crate::{
-    agent_turn::{
-        lifecycle::{AgentSession, DrainBackend, Execution, IncomingActivity},
-        services::TurnSelection,
-    },
+    agent_turn::lifecycle::{AgentSession, DrainBackend, Execution, IncomingActivity},
     children::{AgentIdentity, AgentRegistry, ChildError, ChildResult, Operation},
     event_broker::BrokerError,
 };
 use parrot_domain::{
     contracts::{
+        agent_state::AgentStateStore,
         agent_tasks::TaskArtifactParser,
         async_ops::{BoxFuture, Cancellation},
         events::EventPublisher,
         security::RestrictableAccessSnapshot,
     },
     protocol::messages::parrot::{Delivery, Event},
+    values::agent_state::{
+        ExecutionCheckpoint, TaskResponseReference, TaskResultClaim, TaskRunnerCheckpoint,
+    },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::routing::aliases::{ModelRouter, ResolvedModelSelection};
@@ -23,10 +24,48 @@ use parrot_storage::{
 };
 use std::sync::{Arc, Weak};
 
+pub struct TaskExecution {
+    pub execution: Operation<Execution>,
+    pub reservation: Operation<()>,
+}
+
 /// Additional T50 operations on the same actual session used by T48's adapter.
 /// Register the exact `Arc<dyn TaskSession>` in `ScopeParts.services`.
 pub trait TaskSession: Send + Sync {
     fn identity(&self) -> &Arc<AgentIdentity>;
+    /// Reads the worker's durable execution correlation without activating it.
+    fn capture_execution(&self) -> BoxFuture<'_, ChildResult<Option<ExecutionCheckpoint>>>;
+    /// Reserves the retained owned execution without admitting another prompt.
+    fn recover(&self) -> ChildResult<TaskExecution>;
+    /// Cancels only the saved matching input, without starting provider work.
+    fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>>;
+    /// Joins the worker while preserving unfinished durable execution intent.
+    fn suspend(&self) -> BoxFuture<'_, ChildResult<()>>;
+    /// Admits a task prompt with a protected result claim and actual reservation readiness.
+    fn enqueue_claimed(
+        &self,
+        parts: Vec<ConversationPart>,
+        message_id: String,
+        claim: TaskResultClaim,
+        cancellation: Arc<dyn Cancellation>,
+    ) -> ChildResult<TaskExecution>;
+    /// Captures the exact held terminal before the parent records its response reference.
+    fn capture_result<'a>(
+        &'a self,
+        prompt_id: &'a str,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<TaskResponseReference>>;
+    /// Releases only the matching claim after the parent durably saved its reference.
+    fn acknowledge_result<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>>;
+    /// Restores a saved exact result independently of the worker's latest execution.
+    fn restore_response<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+    ) -> BoxFuture<'a, ChildResult<Execution>>;
     fn enqueue(
         &self,
         parts: Vec<ConversationPart>,
@@ -60,10 +99,19 @@ pub trait TaskSession: Send + Sync {
 pub struct TaskSessionAdapter<B: DrainBackend> {
     identity: Arc<AgentIdentity>,
     session: AgentSession<B>,
+    state: Arc<dyn AgentStateStore>,
 }
 impl<B: DrainBackend> TaskSessionAdapter<B> {
-    pub fn new(identity: Arc<AgentIdentity>, session: AgentSession<B>) -> Self {
-        Self { identity, session }
+    pub fn new(
+        identity: Arc<AgentIdentity>,
+        session: AgentSession<B>,
+        state: Arc<dyn AgentStateStore>,
+    ) -> Self {
+        Self {
+            identity,
+            session,
+            state,
+        }
     }
     pub fn session(&self) -> &AgentSession<B> {
         &self.session
@@ -72,6 +120,91 @@ impl<B: DrainBackend> TaskSessionAdapter<B> {
 impl<B: DrainBackend> TaskSession for TaskSessionAdapter<B> {
     fn identity(&self) -> &Arc<AgentIdentity> {
         &self.identity
+    }
+    fn capture_execution(&self) -> BoxFuture<'_, ChildResult<Option<ExecutionCheckpoint>>> {
+        Box::pin(async move {
+            Ok(self
+                .state
+                .load()
+                .await
+                .map_err(state_error)?
+                .ok_or_else(|| ChildError::registry("worker state is missing"))?
+                .execution)
+        })
+    }
+    fn recover(&self) -> ChildResult<TaskExecution> {
+        let handles = self.session.recover_owned_reserved()?;
+        Ok(TaskExecution {
+            execution: Operation::start(async move {
+                handles.execution.join().await.map_err(Into::into)
+            }),
+            reservation: Operation::start(async move {
+                handles.reservation.join().await.map_err(Into::into)
+            }),
+        })
+    }
+    fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>> {
+        let operation = self.session.cancel_recovered_execution(prompt_id)?;
+        Ok(Operation::start(async move {
+            operation.join().await.map_err(Into::into)
+        }))
+    }
+    fn suspend(&self) -> BoxFuture<'_, ChildResult<()>> {
+        Box::pin(async move { self.session.suspend().await.map_err(Into::into) })
+    }
+    fn enqueue_claimed(
+        &self,
+        parts: Vec<ConversationPart>,
+        message_id: String,
+        claim: TaskResultClaim,
+        cancellation: Arc<dyn Cancellation>,
+    ) -> ChildResult<TaskExecution> {
+        let handles =
+            self.session
+                .enqueue_claimed_execution(parts, message_id, claim, cancellation)?;
+        Ok(TaskExecution {
+            execution: Operation::start(async move {
+                handles.execution.join().await.map_err(Into::into)
+            }),
+            reservation: Operation::start(async move {
+                handles.reservation.join().await.map_err(Into::into)
+            }),
+        })
+    }
+    fn capture_result<'a>(
+        &'a self,
+        prompt_id: &'a str,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<TaskResponseReference>> {
+        Box::pin(async move {
+            self.session
+                .capture_claimed_result(prompt_id, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn acknowledge_result<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .acknowledge_claimed_result(reference, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn restore_response<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+    ) -> BoxFuture<'a, ChildResult<Execution>> {
+        Box::pin(async move {
+            self.session
+                .restore_saved_response(reference)
+                .await
+                .map_err(Into::into)
+        })
     }
     fn enqueue(
         &self,
@@ -183,6 +316,7 @@ pub type TaskPublisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 pub struct SchedulerConfig<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static>
 {
     pub owner_identity: Arc<AgentIdentity>,
+    pub state: Arc<dyn AgentStateStore>,
     /// Weak authority avoids a registry -> scope -> scheduler -> registry cycle.
     pub registry: Weak<AgentRegistry<S>>,
     pub owner_session: Arc<dyn TaskSession>,
@@ -231,5 +365,41 @@ pub(crate) fn render(
         .map_err(|error| ChildError::failure("argument", error.to_string()))
 }
 
-// Keep the full captured selection at initial entry admission, not only its model.
-pub(crate) type CapturedSelection<S> = TurnSelection<S>;
+#[derive(Clone)]
+pub(crate) struct CapturedSelection {
+    pub profile_id: String,
+    pub model: ResolvedModelSelection,
+}
+
+/// Exclusive prompt/result handoff for one retained worker.
+pub struct TaskWorkerLease {
+    pub(crate) _guard: tokio::sync::OwnedMutexGuard<()>,
+    pub(crate) changed: Arc<tokio::sync::Notify>,
+}
+impl Drop for TaskWorkerLease {
+    fn drop(&mut self) {
+        self.changed.notify_waiters();
+    }
+}
+
+/// Persists a runner generation and announces its first owned reservation.
+pub trait TaskRunProgress: Send + Sync {
+    /// Identifies this graph as the owner of a stable prompt result.
+    fn claim(&self, prompt_id: &str) -> TaskResultClaim;
+    /// Waits outside worker lifecycle slots until this prompt may claim its worker.
+    fn acquire<'a>(
+        &'a self,
+        checkpoint: &'a TaskRunnerCheckpoint,
+        session: &'a dyn TaskSession,
+    ) -> BoxFuture<'a, ChildResult<TaskWorkerLease>>;
+    /// Rejects stale generations and commits progress before new prompt admission.
+    fn save(&self, checkpoint: TaskRunnerCheckpoint) -> BoxFuture<'_, ChildResult<()>>;
+    /// Releases the startup barrier once an owned worker operation is reserved.
+    fn reserve(&self);
+}
+
+pub(crate) fn state_error(
+    error: parrot_domain::contracts::agent_state::AgentStateError,
+) -> ChildError {
+    ChildError::failure("io", error.to_string())
+}

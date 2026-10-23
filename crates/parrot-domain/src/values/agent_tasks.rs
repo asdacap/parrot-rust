@@ -1,5 +1,7 @@
 //! Pure values shared by agent-task parsing and runtime scheduling.
 
+use serde::{Deserialize, Serialize};
+
 pub const ARTIFACT_VERSION: u64 = 1;
 pub const MAX_DESCRIPTION_LENGTH: usize = 300;
 
@@ -17,7 +19,8 @@ impl TaskArtifact {
         }
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Task {
     pub name: String,
     pub dependencies: Vec<String>,
@@ -30,12 +33,14 @@ pub struct Task {
     pub result: Option<String>,
     pub failure: Option<String>,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum TaskPayload {
     Instruction(String),
     Tasks(Vec<Task>),
 }
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ExecutionStatus {
     #[default]
     Pending,
@@ -60,4 +65,11 @@ pub enum AcceptanceVerdict {
         payload: Option<String>,
         replacement_result: Option<String>,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskCallIdentity {
+    pub assistant_sequence: i64,
+    pub call_id: String,
 }

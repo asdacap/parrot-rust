@@ -11,6 +11,17 @@ use std::sync::Arc;
 
 struct NoParent;
 impl ParentCompletion for NoParent {
+    fn deliver_correlated<'a>(
+        &'a self,
+        execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+        _: &'a str,
+    ) -> parrot_domain::contracts::async_ops::BoxFuture<
+        'a,
+        Result<(), parrot_runtime::agent_turn::services::TurnError>,
+    > {
+        self.deliver(execution)
+    }
+
     fn deliver<'a>(&'a self, _: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async { Ok(()) })
     }
@@ -29,7 +40,9 @@ impl Harness {
         Self::with_capacity(32)
     }
     pub fn with_capacity(capacity: usize) -> Self {
-        let histories = Histories::new();
+        Self::with_history(capacity, Histories::new(), Scripted::default())
+    }
+    pub fn with_history(capacity: usize, histories: Arc<Histories>, provider: Scripted) -> Self {
         let factory = Arc::new(Factory::default());
         *factory.histories.lock().unwrap() = Some(histories.clone());
         let diagnostics = Arc::new(Diagnostics::default());
@@ -43,13 +56,21 @@ impl Harness {
             profiles: Arc::new(Profiles),
             factory: factory.clone(),
             histories: histories.clone(),
+            states: Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
+            router: provider.router(),
             ids: Arc::new(Ids),
             diagnostics: diagnostics.clone(),
             retained: budget.clone(),
             lifetime: lifetime.clone(),
             validate_child: Arc::new(|_| Ok(())),
         });
-        let provider = Scripted::default();
         *factory.registry.lock().unwrap() = Arc::downgrade(&registry);
         *factory.router.provider.lock().unwrap() = Some(provider.clone());
         Self {
@@ -69,15 +90,41 @@ impl Harness {
     }
     pub async fn unregistered_root(&self, name: &str) -> Arc<Scope<Security>> {
         let identity = AgentIdentity::root(id(), name.into(), templates());
+        self.build_root(identity).await
+    }
+    pub async fn reopen_root(&self, identity: Arc<AgentIdentity>) -> Arc<Scope<Security>> {
+        let scope = self.build_root(identity).await;
+        self.registry.register_root(scope.clone()).unwrap();
+        scope
+            .spawner()
+            .restore_children()
+            .unwrap()
+            .join()
+            .await
+            .unwrap();
+        scope
+    }
+    async fn build_root(&self, identity: Arc<AgentIdentity>) -> Arc<Scope<Security>> {
         let history = self.histories.history(&identity);
         let lineage = PolicyLineage::root();
         let selection = Arc::new(SelectionCell::new(
             selection(&self.provider, "first", "root-mode", 0xff),
             lineage.clone(),
         ));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),
@@ -134,6 +181,16 @@ impl Harness {
         let mut current = selection(&self.provider, "first", "child", 0xff);
         current.security = lineage.resolve(current.security).unwrap();
         let selection = Arc::new(SelectionCell::new(current, lineage.clone()));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "test scope",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let completion = ParentScope::completion(
             identity.clone(),
             Some(parent),
@@ -143,6 +200,7 @@ impl Harness {
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),

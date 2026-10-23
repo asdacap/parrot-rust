@@ -1,5 +1,6 @@
 //! Session persistence, projections, ownership records, and file stores.
 
+pub mod agent_state;
 pub mod artifacts;
 pub mod conversation;
 pub mod database;

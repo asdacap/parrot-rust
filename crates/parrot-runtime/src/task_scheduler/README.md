@@ -88,15 +88,54 @@ order, then notifier. Each later error remains observable through bounded typed
 allowlist. No prompt, exception body, task/model name or policy data is copied
 into these diagnostics. Successful cleanup emits no failure diagnostic.
 
-The graph is in memory, as in the source: protobuf progress snapshots are durable
-history events (append **before** committed publication), not a new graph
-repository or invented rehydration algorithm. Failed tasks hold dependents;
-cancellation is an effective transitive state rather than a permanent rewrite of
-pending declarations. Successful resets invalidate transitive running/succeeded/
-failed dependents. Auto-hide occurs only on a nonempty false-to-resolved edge
-(all effective states succeeded/canceled), permitting explicit unhide until the
-next edge. Nested payloads are prompt data; parent updates never register or
-synchronize a child's independent graph.
+The graph is persisted in its owning scope's `agent-state.json`, independently
+of protobuf progress events in conversation history. Task declarations, captured
+selectors/fork boundaries, results, failures, visibility, worker IDs, runner
+checkpoints and notification outbox state survive restart. Loading validates the
+graph and its correlations rather than replaying `set_tasks` or reading mutable
+task artifact files. Failed tasks hold dependents; cancellation is an effective
+transitive state rather than a permanent rewrite of pending declarations.
+Successful resets invalidate transitive running/succeeded/failed dependents.
+Auto-hide occurs only on a nonempty false-to-resolved edge (all effective states
+succeeded/canceled), permitting explicit unhide until the next edge. These saved
+states are not automatically reset on reopening. Nested payloads remain prompt
+data; a child registers and owns its independent graph, and the parent's
+snapshot does not contain that graph.
+
+## Restart and suspension
+
+Composition first rebuilds retained scopes, then `resolve_workers` reconnects
+saved worker IDs to actual retained direct children. Saved model selectors use
+current routing configuration; no live model/security object is deserialized.
+Execution activation and notification activation are separate phases, under the
+host's shared startup latch. Each worker execution has one recovery owner.
+
+Runner checkpoints save the original/current declaration, attempt and repair
+counters and limits, feedback, carried result, stable prompt identity and phase.
+An unfinished attempt continues with those values and its existing worker rather
+than spending a new attempt or admitting the initial assignment again. Prompt
+intent is saved before admission. A completed response is captured by a durable
+history reference before the worker claim is acknowledged; recovery can consume
+that result without requesting it again. The accepted outcome is saved before
+dependents are launched. Admission identities also let a recovered tool call
+recognize an already accepted task update rather than reset its running graph.
+
+Normal hosted shutdown uses `freeze_for_suspension`/`suspend`, **not** explicit
+settlement: no new graph updates, worker launches or notification wakes are
+admitted, unfinished worker executions are suspended, and pending outbox entries
+remain recoverable. `settle` is the cancellation-oriented scope cleanup path;
+when suspension has already completed it joins that suspension instead. Explicit
+task cancellation and superseding/reset updates still stop the old generation.
+Succeeded, failed and explicitly canceled outcomes remain terminal on reopen.
+
+Notifications are persisted before delivery with stable message IDs. Successful
+send/record admission is followed by saved consumption bookkeeping; recovery
+reuses the same ID if the process dies between these steps. This uses SQLite's
+durable input deduplication, not a file/SQLite transaction or an exactly-once
+external-effect guarantee. Existing terminal responses, pending stop records and
+outbox entries reconcile before new generations replace their work. A snapshot
+write failure is reported and blocks further graph transitions rather than
+starting unrecorded work.
 
 ## Runner and notifications
 

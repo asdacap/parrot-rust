@@ -195,6 +195,11 @@ system_prompts:
 # Stable named prompt templates. User mappings recursively override individual
 # fields. Placeholders use {name}; double braces emit literal braces.
 prompt_templates:
+  session.legacy-resume-warning:
+    template: >-
+      This legacy session has no agent restoration snapshot. Only the root agent was reopened; historical child agents and task runtime state cannot be recovered.
+    allowed_arguments: []
+    required_arguments: []
   system.agent-identity:
     template: |-
       Child agent session: {session_id}

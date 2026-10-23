@@ -126,6 +126,9 @@ impl<S: RestrictableAccessSnapshot + 'static> Scope<S> {
     pub fn selection(&self) -> &Arc<SelectionCell<S>> {
         &self.selection
     }
+    pub fn agent_state(&self) -> &Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore> {
+        &self.parts.agent_state
+    }
     pub fn session(&self) -> &Arc<dyn ScopedSession<S>> {
         &self.parts.session
     }

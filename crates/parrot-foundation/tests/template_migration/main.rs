@@ -82,7 +82,7 @@ impl parrot_domain::contracts::async_ops::Cancellation for NoCancellation {
 }
 
 #[test]
-fn new_resource_changes_only_the_ten_explicit_engine_template_values() {
+fn new_resource_changes_only_the_ten_engine_values_and_adds_legacy_resume_warning() {
     let old = yaml::parse_root(include_str!(
         "../../../../assets/config/predefined_config.system_prompts.yaml"
     ))
@@ -116,9 +116,23 @@ fn new_resource_changes_only_the_ten_explicit_engine_template_values() {
     .collect();
     assert_eq!(approved, expected);
     assert_eq!(mapping(old_templates).len(), 73);
-    assert_eq!(mapping(old_templates).len(), mapping(new_templates).len());
+    assert_eq!(mapping(new_templates).len(), 74);
+    let legacy_warning = field(new_templates, "session.legacy-resume-warning");
+    assert_eq!(mapping(legacy_warning).len(), 3);
+    assert!(sequence(field(legacy_warning, "allowed_arguments")).is_empty());
+    assert!(sequence(field(legacy_warning, "required_arguments")).is_empty());
+    assert!(
+        !scalar(field(legacy_warning, "template"))
+            .unwrap()
+            .is_empty()
+    );
+    let retained_templates = mapping(new_templates)
+        .iter()
+        .filter(|(id, _)| scalar(id) != Some("session.legacy-resume-warning"))
+        .collect::<Vec<_>>();
+    assert_eq!(mapping(old_templates).len(), retained_templates.len());
     for ((old_id, old_fields), (new_id, new_fields)) in
-        mapping(old_templates).iter().zip(mapping(new_templates))
+        mapping(old_templates).iter().zip(retained_templates)
     {
         assert_eq!(old_id, new_id);
         let id = scalar(old_id).unwrap();
@@ -169,7 +183,7 @@ fn new_resource_changes_only_the_ten_explicit_engine_template_values() {
                 .unwrap_or("scalar")
                 == "scalar")
             .count(),
-        61
+        62
     );
 }
 
@@ -294,12 +308,13 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let old_templates = mapping(field(&old, "prompt_templates"));
     let new_templates = mapping(field(&new, "prompt_templates"));
     assert_eq!(old_templates.len(), 98);
-    assert_eq!(new_templates.len(), 98);
+    assert_eq!(new_templates.len(), 99);
     let expected_ids = expected
         .iter()
         .map(|row| row["id"].as_str().unwrap())
         .chain(CONSOLIDATED_IDS)
         .chain(AGENT_COMMUNICATION_IDS)
+        .chain(["session.legacy-resume-warning"])
         .collect::<BTreeSet<_>>();
     assert_eq!(
         new_templates
@@ -320,6 +335,7 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
         .filter(|(id, _)| {
             !CONSOLIDATED_IDS.contains(&scalar(id).unwrap())
                 && !AGENT_COMMUNICATION_IDS.contains(&scalar(id).unwrap())
+                && scalar(id) != Some("session.legacy-resume-warning")
         })
         .collect::<Vec<_>>();
     let mut scalar_count = 0;

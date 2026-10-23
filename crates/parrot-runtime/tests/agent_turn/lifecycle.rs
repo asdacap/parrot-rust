@@ -1,6 +1,7 @@
 //! Deterministic scheduler tests. Persistence and provider execution are tested
 //! by the real backend's integration suite, not simulated here.
 
+use parrot_runtime::agent_turn::lifecycle::{DrainPass, ExecutionResultReference};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -184,6 +185,12 @@ impl DrainBackend for FakeBackend {
         })
     }
 
+    fn find_execution_input(
+        &self,
+        _: String,
+    ) -> BoxFuture<'_, Result<Option<AdmittedInput>, LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
     fn publish_admission<'a>(
         &'a self,
         _admission: &'a Admission,
@@ -199,6 +206,9 @@ impl DrainBackend for FakeBackend {
         })
     }
 
+    fn has_recovery_work_after(&self, _: i64) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+        self.has_pending_inputs()
+    }
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
         Box::pin(async move {
             let control = self.pending_control.lock().unwrap().take();
@@ -238,7 +248,7 @@ impl DrainBackend for FakeBackend {
         &'a self,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
-    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+    ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active.fetch_max(active, Ordering::SeqCst);
@@ -261,7 +271,7 @@ impl DrainBackend for FakeBackend {
                         plan.cancellation_join.wait().await;
                         self.active.fetch_sub(1, Ordering::SeqCst);
                         plan.exited.release();
-                        return Ok(Execution::canceled());
+                        return Ok(DrainPass { execution: Execution::canceled(), recovery_watermark: 0, result_reference: ExecutionResultReference::Missing });
                     }
                 }
             } else {
@@ -274,10 +284,14 @@ impl DrainBackend for FakeBackend {
                     return Err(error.clone());
                 }
             }
-            Ok(plan.map_or_else(
-                || Execution::succeeded("answer"),
-                |plan| plan.result.clone(),
-            ))
+            Ok(DrainPass {
+                execution: plan.map_or_else(
+                    || Execution::succeeded("answer"),
+                    |plan| plan.result.clone(),
+                ),
+                recovery_watermark: 0,
+                result_reference: ExecutionResultReference::Missing,
+            })
         })
     }
 
@@ -317,6 +331,41 @@ impl DrainBackend for FakeBackend {
         })
     }
 
+    fn execution_started_correlated(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
+        Box::pin(async { panic!("not a persistent backend") })
+    }
+    fn execution_finished_correlated<'a>(
+        &'a self,
+        _: &'a Execution,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        Box::pin(async { panic!("not a persistent backend") })
+    }
+    fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<i64, LifecycleError>> {
+        Box::pin(async { panic!("not a persistent backend") })
+    }
+    fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
+        Box::pin(async { panic!("not a persistent backend") })
+    }
+    fn restore_execution<'a>(
+        &'a self,
+        _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
+    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+        Box::pin(async { panic!("not a persistent backend") })
+    }
+    fn capture_execution<'a>(
+        &'a self,
+        _: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
+        _: &'a mut Execution,
+        _: ExecutionResultReference,
+        _: i64,
+    ) -> BoxFuture<'a, Result<parrot_domain::values::agent_state::ExecutionTerminal, LifecycleError>>
+    {
+        Box::pin(async { panic!("not a persistent backend") })
+    }
+    fn suspend_execution(&self) {
+        panic!("not a persistent backend")
+    }
     fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {
         Box::pin(async move {
             assert_eq!(self.active.load(Ordering::SeqCst), 0);

@@ -697,6 +697,23 @@ impl TaskController for Services {
     type Query = TaskQuery;
     type Snapshot = TaskSnapshot;
     type Error = ToolFailure;
+    fn lookup_accepted<'a>(
+        &'a self,
+        identity: &'a parrot_domain::values::agent_tasks::TaskCallIdentity,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<Option<usize>, ToolFailure>> {
+        Box::pin(async move {
+            cancelled(cancellation)?;
+            let state = self.state.lock().unwrap();
+            Ok(state
+                .task_boundary
+                .as_ref()
+                .filter(|(sequence, call_id)| {
+                    *sequence == identity.assistant_sequence && *call_id == identity.call_id
+                })
+                .map(|_| state.tasks.len()))
+        })
+    }
     fn update<'a>(
         &'a self,
         update: TaskUpdate<Selection>,

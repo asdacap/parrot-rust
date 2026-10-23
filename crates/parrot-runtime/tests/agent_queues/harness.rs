@@ -20,6 +20,17 @@ use std::{
 
 struct NoParent;
 impl ParentCompletion for NoParent {
+    fn deliver_correlated<'a>(
+        &'a self,
+        execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+        _: &'a str,
+    ) -> parrot_domain::contracts::async_ops::BoxFuture<
+        'a,
+        Result<(), parrot_runtime::agent_turn::services::TurnError>,
+    > {
+        self.deliver(execution)
+    }
+
     fn deliver<'a>(&'a self, _: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async { Ok(()) })
     }
@@ -135,8 +146,6 @@ impl Harness {
         Self::with_histories(Histories::new())
     }
     pub fn with_histories(histories: Arc<Histories>) -> Self {
-        let sessions = Arc::new(Factory::default());
-        *sessions.histories.lock().unwrap() = Some(histories.clone());
         let root = histories
             .repository
             .events()
@@ -146,6 +155,14 @@ impl Harness {
         let resource_id =
             UserSessionId::parse(histories.path.file_name().unwrap().to_str().unwrap()).unwrap();
         let resources = Arc::new(UserSessionResources::new(root, resource_id, ()).unwrap());
+        Self::with_resources(histories, resources)
+    }
+    pub fn with_resources(
+        histories: Arc<Histories>,
+        resources: Arc<UserSessionResources<()>>,
+    ) -> Self {
+        let sessions = Arc::new(Factory::default());
+        *sessions.histories.lock().unwrap() = Some(histories.clone());
         let factory = Arc::new(QueuedFactory {
             sessions,
             resources,
@@ -163,6 +180,15 @@ impl Harness {
             profiles: Arc::new(Profiles),
             factory: factory.clone(),
             histories: histories.clone(),
+            states: Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
+            router: Scripted::default().router(),
             ids: Arc::new(Ids),
             diagnostics: Arc::new(Diagnostics::default()),
             retained: RetainedAgentBudget::new(32),
@@ -184,9 +210,20 @@ impl Harness {
             selection(&self.provider, "first", "root", 0xff),
             lineage.clone(),
         ));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),
@@ -260,9 +297,20 @@ impl Harness {
             selection(&self.provider, "first", "child", 0xff),
             lineage.clone(),
         ));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "same-id queue replacement",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),

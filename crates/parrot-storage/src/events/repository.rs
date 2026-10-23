@@ -80,6 +80,15 @@ impl EventRepository {
         })
         .await
     }
+    /// Looks up one exact sender message without admitting a new input.
+    pub async fn find_input(
+        &self,
+        agent: String,
+        message: String,
+    ) -> Result<Option<AdmittedInput>, EventError> {
+        self.transaction(move |tx| inputs::existing(tx, &agent, &message))
+            .await
+    }
     pub async fn has_pending_inputs(&self, agent: String) -> Result<bool, EventError> {
         self.transaction(move |tx| inputs::has_pending(tx, &agent))
             .await
@@ -90,6 +99,52 @@ impl EventRepository {
     ) -> Result<Vec<AdmittedInput>, EventError> {
         self.transaction(move |tx| inputs::inputs_for_next_promotion(tx, &agent))
             .await
+    }
+
+    /// Reconciles only a correlated execution lifecycle event. Ordinary append
+    /// retains its duplicate-ID error behavior.
+    pub async fn append_execution_event(&self, event: Event) -> Result<Option<Event>, EventError> {
+        use rusqlite::OptionalExtension;
+        if !(event.has_agent_started() || event.has_agent_finished() || event.has_agent_failed()) {
+            return Err(EventError::Invalid(
+                "correlated event must describe an execution lifecycle boundary".into(),
+            ));
+        }
+        let context = self.context().clone();
+        self.transaction(move |tx| {
+            let bytes: Option<Vec<u8>> = tx
+                .query_row(
+                    "SELECT payload FROM event WHERE id = ?1;",
+                    [&event.id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(bytes) = bytes {
+                let existing = Event::parse_from_bytes(&bytes)?;
+                let same = existing.agent_session_id == event.agent_session_id
+                    && if event.has_agent_started() {
+                        existing.has_agent_started()
+                            && existing.agent_started() == event.agent_started()
+                    } else if event.has_agent_finished() {
+                        existing.has_agent_finished()
+                            && existing.agent_finished().parent_agent_session_id
+                                == event.agent_finished().parent_agent_session_id
+                            && existing.agent_finished().name == event.agent_finished().name
+                    } else {
+                        existing.has_agent_failed()
+                            && existing.agent_failed() == event.agent_failed()
+                    };
+                if !same {
+                    return Err(EventError::Invalid(
+                        "execution event identity conflicts with its durable record".into(),
+                    ));
+                }
+                return Ok(None);
+            }
+            record(tx, &event, None, &(context.timestamp)())?;
+            Ok(Some(event))
+        })
+        .await
     }
 
     /// Source ordinary append: duplicate event IDs remain errors, not upserts.

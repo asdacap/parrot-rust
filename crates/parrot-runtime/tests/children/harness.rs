@@ -3,14 +3,25 @@ use parrot_domain::{contracts::async_ops::BoxFuture, values::accounting::Retaine
 use parrot_runtime::{
     agent_turn::{
         lifecycle::{Execution, Signal},
-        services::{ParentCompletion, TurnError},
+        services::{ParentCompletion, TurnError, TurnSelection},
     },
     children::*,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 struct NoParent;
 impl ParentCompletion for NoParent {
+    fn deliver_correlated<'a>(
+        &'a self,
+        execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+        _: &'a str,
+    ) -> parrot_domain::contracts::async_ops::BoxFuture<
+        'a,
+        Result<(), parrot_runtime::agent_turn::services::TurnError>,
+    > {
+        self.deliver(execution)
+    }
+
     fn deliver<'a>(&'a self, _: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async { Ok(()) })
     }
@@ -23,6 +34,7 @@ pub struct Harness {
     pub registry: Arc<AgentRegistry<Security>>,
     pub lifetime: Arc<Signal>,
     pub budget: RetainedAgentBudget,
+    pub admission_error: Arc<Mutex<Option<ChildError>>>,
 }
 impl Harness {
     pub fn new() -> Self {
@@ -39,8 +51,16 @@ impl Harness {
     ) -> Self {
         Self::with_settings(
             capacity,
-            histories,
+            histories.clone(),
             preparer,
+            Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
             parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
                 ..Default::default()
@@ -52,12 +72,26 @@ impl Harness {
         limits: parrot_foundation::config::runtime::AgentLimitsConfig,
     ) -> Self {
         let histories = Histories::new();
-        Self::with_settings(capacity, histories.clone(), histories, limits)
+        Self::with_settings(
+            capacity,
+            histories.clone(),
+            histories.clone(),
+            Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
+            limits,
+        )
     }
     fn with_settings(
         capacity: usize,
         histories: Arc<Histories>,
         preparer: Arc<dyn HistoryPreparer>,
+        states: Arc<dyn AgentStatePreparer>,
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
     ) -> Self {
         let factory = Arc::new(Factory::default());
@@ -65,26 +99,52 @@ impl Harness {
         let diagnostics = Arc::new(Diagnostics::default());
         let lifetime = Arc::new(Signal::new());
         let budget = RetainedAgentBudget::new(capacity.try_into().unwrap());
+        let provider = Scripted::default();
+        let admission_error = Arc::new(Mutex::new(None));
+        let reject = admission_error.clone();
         let registry = AgentRegistry::new(RegistryConfig {
             agent_limits,
             profiles: Arc::new(Profiles),
             factory: factory.clone(),
             histories: preparer,
+            states,
+            router: provider.router(),
             ids: Arc::new(Ids),
             diagnostics: diagnostics.clone(),
             retained: budget.clone(),
             lifetime: lifetime.clone(),
-            validate_child: Arc::new(|_| Ok(())),
+            validate_child: Arc::new(move |_| reject.lock().unwrap().take().map_or(Ok(()), Err)),
         });
         Self {
             histories,
             factory,
-            provider: Scripted::default(),
+            provider,
             diagnostics,
             registry,
             lifetime,
             budget,
+            admission_error,
         }
+    }
+    pub fn with_state_preparer(
+        histories: Arc<Histories>,
+        states: Arc<dyn AgentStatePreparer>,
+    ) -> Self {
+        Self::with_settings(
+            32,
+            histories.clone(),
+            histories,
+            states,
+            parrot_foundation::config::runtime::AgentLimitsConfig {
+                disable_recursion_limit: false,
+                ..Default::default()
+            },
+        )
+    }
+    pub async fn reopen_root(&self, identity: Arc<AgentIdentity>) -> Arc<Scope<Security>> {
+        let scope = self.unregistered_root_identity(identity).await;
+        self.registry.register_root(scope.clone()).unwrap();
+        scope
     }
     pub async fn root(&self, name: &str) -> Arc<Scope<Security>> {
         let scope = self.unregistered_root(name).await;
@@ -93,6 +153,12 @@ impl Harness {
     }
     pub async fn unregistered_root(&self, name: &str) -> Arc<Scope<Security>> {
         let identity = AgentIdentity::root(id(), name.into(), templates());
+        self.unregistered_root_identity(identity).await
+    }
+    async fn unregistered_root_identity(
+        &self,
+        identity: Arc<AgentIdentity>,
+    ) -> Arc<Scope<Security>> {
         let history = self.histories.history(&identity);
         let lineage = PolicyLineage::root();
         let selection = Arc::new(SelectionCell::new(
@@ -102,6 +168,16 @@ impl Harness {
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: self
+                    .registry
+                    .prepare_state(
+                        &identity,
+                        &selection.current().unwrap(),
+                        "",
+                        CompletionDelivery::RetainedOnly,
+                    )
+                    .await
+                    .unwrap(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),
@@ -126,6 +202,45 @@ impl Harness {
         )
         .await
         .unwrap()
+    }
+    async fn prepare_unregistered_state(
+        &self,
+        identity: &AgentIdentity,
+        selection: &TurnSelection<Security>,
+    ) -> Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore> {
+        use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
+        use parrot_domain::values::agent_state::{
+            AgentDescriptor, AgentStateSnapshot, CompletionDeliverySnapshot, SelectionSnapshot,
+        };
+        let root = SelectedSessionRoot::new(
+            self.histories
+                .path
+                .join("unregistered")
+                .join(&identity.session.session_id),
+            RootOrigin::Current,
+        )
+        .unwrap();
+        let store = AgentStateFiles::new(root)
+            .open(&identity.name_path, &identity.session.session_id)
+            .await
+            .unwrap();
+        store
+            .initialize(AgentStateSnapshot::new(
+                identity.session.session_id.clone(),
+                AgentDescriptor {
+                    parent_session_id: Some(identity.session.parent_session_id.clone()),
+                    name: identity.session.name.clone(),
+                    selection: SelectionSnapshot {
+                        profile_id: selection.profile.id.clone(),
+                        model_selector: selection.model.requested_selector.value.clone(),
+                    },
+                    local_scope: "test scope".into(),
+                    completion_delivery: CompletionDeliverySnapshot::RetainedOnly,
+                },
+            ))
+            .await
+            .unwrap();
+        store
     }
     pub async fn unregistered_child(
         &self,
@@ -167,6 +282,9 @@ impl Harness {
         let parts = self
             .factory
             .build(PreparedScope {
+                agent_state: self
+                    .prepare_unregistered_state(&identity, &selection.current().unwrap())
+                    .await,
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),

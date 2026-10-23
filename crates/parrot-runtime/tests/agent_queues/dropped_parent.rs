@@ -57,7 +57,7 @@ async fn detached_child_scope_close_after_parent_scope_and_registry_drop_cleans_
             }
         }
         bounded(child.close().join()).await.unwrap();
-        assert!(!directory.exists());
+        assert!(directory.exists());
         assert!(root_file.exists());
         let removed = bounded(inventory.next()).await.unwrap();
         assert!(removed.removed);
@@ -137,7 +137,7 @@ async fn retained_actual_parent_registry_gate_still_serializes_dispose_after_par
         .await;
         holder.join().unwrap();
         disposer.join().unwrap().unwrap();
-        assert!(!directory.exists());
+        assert!(directory.exists());
         bounded(child.close().join()).await.unwrap();
         h.close().await;
     })

@@ -266,6 +266,17 @@ impl TurnDiagnostics for Diagnostics {
 }
 struct NoParent;
 impl ParentCompletion for NoParent {
+    fn deliver_correlated<'a>(
+        &'a self,
+        execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+        _: &'a str,
+    ) -> parrot_domain::contracts::async_ops::BoxFuture<
+        'a,
+        Result<(), parrot_runtime::agent_turn::services::TurnError>,
+    > {
+        self.deliver(execution)
+    }
+
     fn deliver<'a>(&'a self, _: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async { Ok(()) })
     }
@@ -376,6 +387,7 @@ impl ScopeFactory<Security> for Factory {
                 executions: Mutex::new(vec![]),
             });
             Ok(ScopeParts {
+                agent_state: prepared.agent_state.clone(),
                 session: adapter,
                 services: vec![ServiceRegistration::new(services)],
                 publishers: vec![],
@@ -435,6 +447,15 @@ impl Default for Harness {
             profiles: Arc::new(Profiles),
             factory: factory.clone(),
             histories: histories.clone(),
+            states: Arc::new(AgentStateFiles::new(
+                histories
+                    .repository
+                    .events()
+                    .database()
+                    .selected_root()
+                    .clone(),
+            )),
+            router: models.0.clone(),
             ids: Arc::new(support::Ids),
             diagnostics: Arc::new(support::Diagnostics::default()),
             retained: RetainedAgentBudget::new(32),
@@ -463,9 +484,20 @@ impl Harness {
             },
             lineage.clone(),
         ));
+        let agent_state = self
+            .registry
+            .prepare_state(
+                &identity,
+                &selection.current().unwrap(),
+                "",
+                CompletionDelivery::RetainedOnly,
+            )
+            .await
+            .unwrap();
         let parts = self
             .factory
             .create(PreparedScope {
+                agent_state: agent_state.clone(),
                 identity: identity.clone(),
                 history: history.clone(),
                 selection: selection.clone(),

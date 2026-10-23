@@ -135,6 +135,8 @@ impl AgentScratchDirectory {
         "blobs",
         "plan",
         "last_request.json",
+        parrot_domain::values::agent_state::AGENT_STATE_FILE_NAME,
+        parrot_domain::values::agent_state::AGENT_STATE_STAGING_FILE_NAME,
     ];
 
     pub fn new(root: &Path, current_directory: &Path) -> io::Result<Self> {
@@ -237,6 +239,13 @@ mod tests {
                 .join("main")
                 .join("blobs")
         );
+
+        for name in [
+            parrot_domain::values::agent_state::AGENT_STATE_FILE_NAME,
+            parrot_domain::values::agent_state::AGENT_STATE_STAGING_FILE_NAME,
+        ] {
+            assert!(resources.agent_scratch(&["main", name]).is_err());
+        }
 
         fs::remove_dir_all(fixture).unwrap();
     }

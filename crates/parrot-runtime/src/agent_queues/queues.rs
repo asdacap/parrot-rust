@@ -12,7 +12,6 @@ use parrot_storage::queue_files::{
 };
 use std::{
     fmt,
-    path::PathBuf,
     sync::{
         Arc, OnceLock, Weak,
         atomic::{AtomicBool, Ordering},
@@ -101,7 +100,6 @@ struct Binding<S: RestrictableAccessSnapshot + 'static> {
 }
 pub struct AgentQueues<S: RestrictableAccessSnapshot + 'static> {
     identity: Arc<AgentIdentity>,
-    agent_queue_root_directory: PathBuf,
     local: QueueStore,
     inventory: Arc<QueueInventory>,
     diagnostics: Arc<dyn QueueDiagnostics>,
@@ -135,7 +133,6 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentQueues<S> {
         };
         Ok(Arc::new(Self {
             identity,
-            agent_queue_root_directory: resources.agent_queue_root_directory(),
             local: QueueStore::new(directory)?,
             inventory,
             diagnostics,
@@ -153,9 +150,6 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentQueues<S> {
         self.disposed.load(Ordering::Acquire)
     }
     pub fn initialize(&self) -> QueueResult<()> {
-        if self.identity.session.depth == 0 && self.agent_queue_root_directory.exists() {
-            std::fs::remove_dir_all(&self.agent_queue_root_directory).map_err(io)?;
-        }
         self.local
             .attach_inventory(self.inventory.owner().clone(), self.inventory.clone())?;
         Ok(())
@@ -416,9 +410,6 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentQueues<S> {
             }
         } else {
             dispose()?;
-        }
-        if self.identity.session.depth > 0 && self.local.directory().exists() {
-            std::fs::remove_dir_all(self.local.directory()).map_err(io)?;
         }
         Ok(())
     }

@@ -135,6 +135,58 @@ pub fn read_compaction_tail(
 }
 
 impl ConversationRepository {
+    /// Captures the current conversation boundary for a new public execution.
+    pub async fn execution_watermark(&self, agent: String) -> Result<i64, EventError> {
+        self.events.transaction(move |tx| {
+            Ok(tx.query_row(
+                "SELECT COALESCE(MAX(sequence), 0) FROM conversation_item WHERE agent_session = ?1;",
+                [agent], |row| row.get(0),
+            )?)
+        }).await
+    }
+
+    /// Checks pending input or owned promoted input beyond the sealed conversation boundary.
+    pub async fn has_recovery_work_after(
+        &self,
+        agent: String,
+        watermark: i64,
+    ) -> Result<bool, EventError> {
+        self.events.transaction(move |tx| {
+            Ok(tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'pending') OR (EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'promoted') AND COALESCE((SELECT item.sequence > ?2 AND item.role IN ('user', 'tool') FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.role != 'system' AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence DESC LIMIT 1), 0));",
+                params![agent, watermark], |row| row.get(0),
+            )?)
+        }).await
+    }
+
+    /// Reads one exact execution result reference without scanning its history.
+    pub async fn execution_message(
+        &self,
+        agent: String,
+        sequence: i64,
+    ) -> Result<Option<ConversationItem>, EventError> {
+        self.events.transaction(move |tx| {
+            let owned: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM conversation_item WHERE agent_session = ?1 AND sequence = ?2);",
+                params![agent, sequence], |row| row.get(0),
+            )?;
+            if owned { read_conversation_item(tx, sequence).map(Some) } else { Ok(None) }
+        }).await
+    }
+
+    /// Captures the most recent terminal assistant while its backend pass owns state.
+    pub async fn latest_execution_result_sequence(
+        &self,
+        agent: String,
+    ) -> Result<Option<i64>, EventError> {
+        self.events.transaction(move |tx| {
+            Ok(tx.query_row(
+                "SELECT item.sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.role = 'assistant' AND NOT EXISTS (SELECT 1 FROM conversation_tool_call AS call WHERE call.item_sequence = item.sequence) ORDER BY item.sequence DESC LIMIT 1;",
+                [agent], |row| row.get(0),
+            ).optional()?)
+        }).await
+    }
+
     pub async fn resolve_image_artifact(
         &self,
         artifact_id: String,

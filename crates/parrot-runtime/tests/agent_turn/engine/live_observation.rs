@@ -252,6 +252,7 @@ async fn live_context_waits_only_for_initial_sampling_and_waiter_cancel_does_not
                     sampled: sampled.clone(),
                 })),
                 status: None,
+                ..RuntimeOverrides::default()
             },
         )
         .await;
@@ -296,6 +297,7 @@ async fn live_context_cancelled_initial_sampler_does_not_mark_epoch_sampled() {
                     sampled: sampled.clone(),
                 })),
                 status: None,
+                ..RuntimeOverrides::default()
             },
         )
         .await;
@@ -391,6 +393,7 @@ async fn live_context_resample_wait_then_summary_and_reentrant_status_are_unlock
                     sampled: sampled.clone(),
                 })),
                 status: Some(Arc::new(ReentrantBinding(status.clone()))),
+                ..RuntimeOverrides::default()
             },
         )
         .await;

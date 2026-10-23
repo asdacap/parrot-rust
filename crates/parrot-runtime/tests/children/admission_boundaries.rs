@@ -212,10 +212,16 @@ async fn detaching_and_closing_the_exact_scope_releases_name_and_single_retained
         let root = h.root("root").await;
         let original = h.spawn(&root, "worker").await;
         let original_built = h.factory.get("worker");
-        let detached = root.children().detach(&original).unwrap().unwrap();
+        assert!(h.budget.reserve().is_err());
+        let detached = root
+            .spawner()
+            .retire(original.clone())
+            .unwrap()
+            .join()
+            .await
+            .unwrap();
         assert!(Arc::ptr_eq(&detached, &original));
         assert!(root.children().snapshot_descendants().is_empty());
-        assert!(h.budget.reserve().is_err());
         detached.close().join().await.unwrap();
         assert_eq!(original_built.output.closes.load(Ordering::SeqCst), 1);
         let replacement = h.spawn(&root, "worker").await;

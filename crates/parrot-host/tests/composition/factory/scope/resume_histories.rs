@@ -13,7 +13,7 @@ async fn finish_turn(scope: &Arc<Scope<Security>>, text: &str) {
 }
 
 #[tokio::test]
-async fn actual_resume_repairs_all_completed_child_histories_without_reopening_children() {
+async fn actual_resume_repairs_histories_and_reopens_retained_children_without_execution() {
     let fixture = Fixture::with_profiles(
         false,
         false,
@@ -96,10 +96,20 @@ async fn actual_resume_repairs_all_completed_child_histories_without_reopening_c
     assert_eq!(resumed_root.identity().session.session_id, expected[0].0);
     assert_eq!(
         fixture.observations.lock().unwrap().constructors,
-        constructions + 1
+        constructions + scopes.len()
     );
     assert_eq!(fixture.requests.lock().unwrap().len(), requests);
     assert_eq!(fixture.user().registry().unwrap().snapshot_roots().len(), 1);
+    let restored_scopes = fixture.user().registry().unwrap().snapshot_scopes();
+    assert_eq!(restored_scopes.len(), scopes.len());
+    for original in &scopes {
+        assert!(
+            restored_scopes
+                .iter()
+                .any(|scope| scope.identity().session.session_id
+                    == original.identity().session.session_id)
+        );
+    }
     for (agent, path, bytes, history) in expected {
         assert_eq!(std::fs::read(&path).unwrap(), bytes, "projection {agent}");
         assert_eq!(

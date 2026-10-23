@@ -1,8 +1,10 @@
 use super::{
     ForkHistoryMode, SchedulerConfig, TaskDiagnostic, TaskRunner, TaskSession,
     apply_visibility_changes, has_same_definition, has_same_visibility,
-    notifier::TaskNotifier,
-    ports::{CapturedSelection, RunCancellation, render},
+    notifier::{Notification, TaskNotifier},
+    ports::{
+        CapturedSelection, RunCancellation, TaskRunProgress, TaskWorkerLease, render, state_error,
+    },
     status_name,
 };
 use crate::{
@@ -23,23 +25,28 @@ use parrot_domain::{
         ToolSnapshot,
     },
     values::{
-        agent_tasks::{ExecutionStatus, Task},
+        agent_state::{
+            AcceptedTaskCall, AgentStateUpdate, ForkBoundarySnapshot, NotificationCheckpoint,
+            SelectionSnapshot, TaskEntrySnapshot, TaskForkModeSnapshot, TaskGraphSnapshot,
+            TaskNotificationSnapshot, TaskResultClaim, TaskRunnerCheckpoint, TaskStopCheckpoint,
+        },
+        agent_tasks::{ExecutionStatus, Task, TaskCallIdentity},
         identifiers::Identifier,
     },
 };
 use parrot_storage::{
+    artifacts::output_blobs::is_tool_output_oversized,
     conversation::{HistoryForkBoundary, HistoryForkSelection},
     events::{ConversationPart, NeverCancelled},
 };
 use protobuf::Message;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::Instant,
 };
 
 pub const PROGRESS_KIND: &str = "agent_task_progress";
-const NOTIFICATION_CAUSE: &str = "AgentTask update";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskDetail {
     pub task: Task,
@@ -48,16 +55,23 @@ pub struct TaskDetail {
 struct Entry<S: RestrictableAccessSnapshot + 'static> {
     task: Task,
     diagnostic_id: String,
-    selection: CapturedSelection<S>,
+    selection: CapturedSelection,
     boundary: HistoryForkBoundary,
+    fork_mode: ForkHistoryMode,
+    worker_session_id: Option<String>,
+    runner: Option<TaskRunnerCheckpoint>,
+    pending_stop: Option<TaskStopCheckpoint>,
+    terminal_notification: Option<NotificationCheckpoint>,
     scope: Option<Arc<Scope<S>>>,
     run: Option<Arc<Run>>,
     last_execution: Option<Operation<()>>,
+    stopping_run: Option<Arc<Run>>,
 }
 struct Run {
     cancellation: Arc<RunCancellation>,
     started: Instant,
-    stop_reason: Mutex<Option<String>>,
+    generation_id: String,
+    ready: Arc<Readiness>,
 }
 struct State<S: RestrictableAccessSnapshot + 'static> {
     entries: Vec<Entry<S>>,
@@ -67,11 +81,111 @@ struct State<S: RestrictableAccessSnapshot + 'static> {
     complete: bool,
     all_resolved: bool,
     settling: bool,
+    suspended: bool,
+    execution_active: bool,
+    notifications_active: bool,
+    persistence_failure: Option<ChildError>,
+    notifications: Vec<TaskNotificationSnapshot>,
+    in_flight: HashSet<String>,
+    stopping: HashSet<String>,
+    completion_notification: Option<NotificationCheckpoint>,
+    stop_readiness: HashMap<String, Arc<Readiness>>,
+    reservations: Vec<Arc<Readiness>>,
+    accepted_calls: Vec<AcceptedTaskCall>,
+}
+#[derive(Default)]
+struct Readiness {
+    signal: Signal,
+    result: Mutex<Option<ChildResult<()>>>,
+}
+impl Readiness {
+    fn finish(&self, result: ChildResult<()>) {
+        let mut saved = self.result.lock().expect("task readiness poisoned");
+        if saved.is_none() {
+            *saved = Some(result);
+            self.signal.cancel();
+        }
+    }
+    fn is_ready(&self) -> bool {
+        self.result
+            .lock()
+            .expect("task readiness poisoned")
+            .is_some()
+    }
+    async fn wait(&self) -> ChildResult<()> {
+        self.signal.cancelled().await;
+        self.result
+            .lock()
+            .expect("task readiness poisoned")
+            .clone()
+            .expect("ready result")
+    }
+}
+#[derive(Default)]
+struct WorkerGate {
+    gate: Arc<tokio::sync::Mutex<()>>,
+    changed: Arc<tokio::sync::Notify>,
+}
+struct RunProgress<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> {
+    scheduler: Weak<TaskScheduler<S, P>>,
+    index: usize,
+    run: Arc<Run>,
+    owner_session_id: String,
+}
+impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> TaskRunProgress
+    for RunProgress<S, P>
+{
+    fn claim(&self, prompt_id: &str) -> TaskResultClaim {
+        TaskResultClaim {
+            owner_session_id: self.owner_session_id.clone(),
+            claim_id: prompt_id.to_owned(),
+        }
+    }
+    fn acquire<'a>(
+        &'a self,
+        checkpoint: &'a TaskRunnerCheckpoint,
+        session: &'a dyn TaskSession,
+    ) -> BoxFuture<'a, ChildResult<TaskWorkerLease>> {
+        Box::pin(async move {
+            let scheduler = self.scheduler.upgrade().ok_or(ChildError::Cancelled)?;
+            let slot = scheduler.worker_gate(&session.identity().session.session_id);
+            scheduler
+                .reserve_worker(slot, checkpoint, session, &self.run)
+                .await
+        })
+    }
+    fn save(&self, checkpoint: TaskRunnerCheckpoint) -> BoxFuture<'_, ChildResult<()>> {
+        Box::pin(async move {
+            let scheduler = self.scheduler.upgrade().ok_or(ChildError::Cancelled)?;
+            let mut state = scheduler.gate.lock().await;
+            scheduler.ensure_healthy(&state)?;
+            if state.suspended
+                || !state.entries[self.index]
+                    .run
+                    .as_ref()
+                    .is_some_and(|run| Arc::ptr_eq(run, &self.run))
+                || checkpoint.generation_id != self.run.generation_id
+            {
+                return Err(ChildError::Cancelled);
+            }
+            state.entries[self.index].runner = Some(checkpoint);
+            scheduler.save_graph(&mut state).await
+        })
+    }
+    fn reserve(&self) {
+        self.run.ready.finish(Ok(()));
+    }
+}
+enum UpdateOrigin {
+    Direct,
+    Tool(TaskCallIdentity),
 }
 #[derive(Default)]
 struct Admission {
     tail: Option<Operation<()>>,
     settlement: Option<Operation<()>>,
+    freeze: Option<Operation<()>>,
+    suspension: Option<Operation<()>>,
 }
 /// One graph per actual T48 scope. Composition registers this exact Arc as a service
 /// and work owner; it never stores a strong reference back to its owning scope.
@@ -83,12 +197,13 @@ pub struct TaskScheduler<S: RestrictableAccessSnapshot + 'static, P: TaskArtifac
     lifetime: Arc<dyn Cancellation>,
     gate: tokio::sync::Mutex<State<S>>,
     admission: Mutex<Admission>,
+    worker_gates: Mutex<HashMap<String, Arc<WorkerGate>>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> TaskScheduler<S, P> {
     pub fn work_owner(self: &Arc<Self>) -> Arc<dyn OwnedWork<Error = ChildError>> {
         Arc::new(SchedulerWork(self.clone()))
     }
-    pub fn new(config: SchedulerConfig<S, P>) -> ChildResult<Arc<Self>> {
+    pub async fn new(config: SchedulerConfig<S, P>) -> ChildResult<Arc<Self>> {
         if !Arc::ptr_eq(&config.owner_identity, config.owner_session.identity())
             || config.history.agent_session_id() != config.owner_identity.session.session_id
         {
@@ -96,6 +211,143 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 "task scheduler session/history does not match owner identity",
             ));
         }
+        let saved = config
+            .state
+            .load()
+            .await
+            .map_err(state_error)?
+            .ok_or_else(|| ChildError::registry("task scheduler state is not initialized"))?;
+        if saved.owner_session_id != config.owner_identity.session.session_id {
+            return Err(ChildError::registry(
+                "task scheduler snapshot does not match owner identity",
+            ));
+        }
+        if !saved.tasks.entries.is_empty() {
+            config
+                .parser
+                .validate_merged_graph(
+                    &saved
+                        .tasks
+                        .entries
+                        .iter()
+                        .map(|entry| entry.task.clone())
+                        .collect::<Vec<_>>(),
+                    "tasks",
+                )
+                .map_err(|error| ChildError::failure("argument", error.to_string()))?;
+        }
+        let mut notice_ids = HashSet::new();
+        for notice in &saved.tasks.notifications {
+            if notice.message_id.is_empty() || !notice_ids.insert(&notice.message_id) {
+                return Err(ChildError::registry(
+                    "task notification identities are invalid",
+                ));
+            }
+        }
+        let mut accepted_ids = HashSet::new();
+        let accepted_batch = saved
+            .tasks
+            .accepted_calls
+            .first()
+            .map(|receipt| receipt.identity.assistant_sequence);
+        for receipt in &saved.tasks.accepted_calls {
+            if Some(receipt.identity.assistant_sequence) != accepted_batch
+                || !accepted_ids.insert(&receipt.identity.call_id)
+            {
+                return Err(ChildError::registry(
+                    "accepted task call receipts do not belong to one unique batch",
+                ));
+            }
+        }
+        let mut entries = Vec::new();
+        for entry in saved.tasks.entries {
+            if entry.task.state == ExecutionStatus::Running && entry.runner.is_none() {
+                return Err(ChildError::registry(
+                    "running task has no saved runner checkpoint",
+                ));
+            }
+            if let Some(runner) = &entry.runner {
+                if runner.original_task.name != entry.task.name
+                    || runner.current_task.name != entry.task.name
+                    || runner.generation_id.is_empty()
+                    || runner.prompt_message_id.is_empty()
+                    || runner.attempt == 0
+                    || runner
+                        .outcome
+                        .as_ref()
+                        .is_some_and(|outcome| outcome.name != entry.task.name)
+                {
+                    return Err(ChildError::registry(
+                        "task runner checkpoint does not match its task",
+                    ));
+                }
+            }
+            if let Some(reference) = entry
+                .runner
+                .as_ref()
+                .and_then(|runner| runner.response_reference.as_ref())
+            {
+                if entry.worker_session_id.as_deref() != Some(reference.worker_session_id.as_str())
+                    || entry.runner.as_ref().is_some_and(|runner| {
+                        runner.prompt_message_id != reference.initial_message_id
+                    })
+                {
+                    return Err(ChildError::registry(
+                        "task response reference does not match its worker prompt",
+                    ));
+                }
+            }
+            if let Some(stop) = &entry.pending_stop {
+                if entry.worker_session_id.as_deref() != Some(stop.worker_session_id.as_str())
+                    || !saved.tasks.notifications.iter().any(|notice| {
+                        notice.message_id == stop.notice_message_id
+                            && notice.target_session_id == stop.worker_session_id
+                            && !notice.wake
+                    })
+                {
+                    return Err(ChildError::registry(
+                        "task stop intent has no matching worker notification",
+                    ));
+                }
+            }
+            entries.push(Entry {
+                task: entry.task,
+                diagnostic_id: entry.diagnostic_id,
+                selection: CapturedSelection {
+                    profile_id: entry.selection.profile_id,
+                    model: config.router.resolve(&entry.selection.model_selector)?,
+                },
+                boundary: match entry.fork_boundary {
+                    ForkBoundarySnapshot::BeforeToolBatch {
+                        assistant_sequence,
+                        tool_call_id,
+                    } => HistoryForkBoundary::BeforeToolBatch {
+                        assistant_sequence,
+                        tool_call_id,
+                    },
+                    ForkBoundarySnapshot::AfterCompletedHistory => {
+                        HistoryForkBoundary::AfterCompletedHistory
+                    }
+                    ForkBoundarySnapshot::AfterSafeHistoryPrefix => {
+                        HistoryForkBoundary::AfterSafeHistoryPrefix
+                    }
+                },
+                fork_mode: match entry.fork_mode {
+                    TaskForkModeSnapshot::Dependency => ForkHistoryMode::Dependency,
+                    TaskForkModeSnapshot::Parent => ForkHistoryMode::Parent,
+                    TaskForkModeSnapshot::Empty => ForkHistoryMode::Empty,
+                },
+                worker_session_id: entry.worker_session_id,
+                runner: entry.runner,
+                pending_stop: entry.pending_stop,
+                terminal_notification: entry.terminal_notification,
+                scope: None,
+                run: None,
+                last_execution: None,
+                stopping_run: None,
+            });
+        }
+        let fresh = entries.is_empty() && saved.tasks.notifications.is_empty();
         let stop = Arc::new(Signal::new());
         let lifetime = Arc::new(RunCancellation {
             lifetime: config.lifetime.clone(),
@@ -103,24 +355,32 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         });
         Ok(Arc::new(Self {
             runner: TaskRunner::new(config.configuration.clone(), config.parser.clone()),
-            notifier: TaskNotifier::new(
-                config.owner_session.clone(),
-                config.output_blobs.clone(),
-                config.diagnostics.clone(),
-            ),
+            notifier: TaskNotifier::new(config.diagnostics.clone(), config.lifetime.clone()),
             config,
             stop,
             lifetime,
             gate: tokio::sync::Mutex::new(State {
-                entries: Vec::new(),
+                entries,
                 executions: Vec::new(),
                 execution_failure: None,
-                revision: 0,
-                complete: false,
-                all_resolved: false,
+                revision: saved.tasks.revision,
+                complete: saved.tasks.complete,
+                all_resolved: saved.tasks.all_resolved,
                 settling: false,
+                suspended: false,
+                execution_active: fresh,
+                notifications_active: fresh,
+                persistence_failure: None,
+                notifications: saved.tasks.notifications,
+                in_flight: HashSet::new(),
+                stopping: HashSet::new(),
+                completion_notification: saved.tasks.completion_notification,
+                stop_readiness: HashMap::new(),
+                reservations: Vec::new(),
+                accepted_calls: saved.tasks.accepted_calls,
             }),
             admission: Mutex::new(Admission::default()),
+            worker_gates: Mutex::new(HashMap::new()),
         }))
     }
     /// Admission and FIFO reservation are synchronous. Dropping the returned
@@ -131,8 +391,54 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         selection: TurnSelection<S>,
         boundary: HistoryForkBoundary,
     ) -> ChildResult<Operation<()>> {
+        let update = self.set_tasks_origin(tasks, selection, boundary, UpdateOrigin::Direct)?;
+        Ok(Operation::start(
+            async move { update.join().await.map(|_| ()) },
+        ))
+    }
+    /// Deduplicates one tool call only within the current durable assistant batch.
+    pub fn set_tool_tasks(
+        self: &Arc<Self>,
+        tasks: Vec<Task>,
+        selection: TurnSelection<S>,
+        boundary: HistoryForkBoundary,
+        identity: TaskCallIdentity,
+    ) -> ChildResult<Operation<usize>> {
+        self.set_tasks_origin(tasks, selection, boundary, UpdateOrigin::Tool(identity))
+    }
+    pub async fn lookup_accepted(&self, identity: &TaskCallIdentity) -> ChildResult<Option<usize>> {
+        self.admitted().await;
+        let state = self.gate.lock().await;
+        self.ensure_healthy(&state)?;
+        Self::find_receipt(&state, identity)
+    }
+    fn find_receipt(state: &State<S>, identity: &TaskCallIdentity) -> ChildResult<Option<usize>> {
+        if state.accepted_calls.first().is_some_and(|receipt| {
+            identity.assistant_sequence < receipt.identity.assistant_sequence
+        }) {
+            return Err(ChildError::registry(
+                "task update call belongs to an older settled assistant batch",
+            ));
+        }
+        state
+            .accepted_calls
+            .iter()
+            .find(|receipt| receipt.identity == *identity)
+            .map(|receipt| {
+                usize::try_from(receipt.accepted_count)
+                    .map_err(|_| ChildError::registry("accepted task count exceeds this platform"))
+            })
+            .transpose()
+    }
+    fn set_tasks_origin(
+        self: &Arc<Self>,
+        tasks: Vec<Task>,
+        selection: TurnSelection<S>,
+        boundary: HistoryForkBoundary,
+        origin: UpdateOrigin,
+    ) -> ChildResult<Operation<usize>> {
         let mut admission = self.admission.lock().expect("task admission poisoned");
-        if admission.settlement.is_some() {
+        if admission.settlement.is_some() || admission.freeze.is_some() {
             return Err(shutting_down());
         }
         let previous = admission.tail.clone();
@@ -141,7 +447,15 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             if let Some(previous) = previous {
                 let _ = previous.join().await;
             }
+            scheduler.owner()?;
             let mut state = scheduler.gate.lock().await;
+            scheduler.ensure_healthy(&state)?;
+            if let UpdateOrigin::Tool(identity) = &origin {
+                if let Some(count) = Self::find_receipt(&state, identity)? {
+                    return Ok(count);
+                }
+            }
+            let count = tasks.len();
             let names: HashSet<_> = tasks.iter().map(|task| task.name.as_str()).collect();
             let mut merged: Vec<_> = state
                 .entries
@@ -179,14 +493,33 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     state.entries.push(Entry {
                         task,
                         diagnostic_id: format!("task-{id}"),
-                        selection: selection.clone(),
+                        selection: CapturedSelection {
+                            profile_id: selection.profile.id.clone(),
+                            model: selection.model.clone(),
+                        },
                         boundary,
+                        fork_mode: scheduler.config.configuration.fork_history_mode,
+                        worker_session_id: None,
+                        runner: None,
+                        pending_stop: None,
+                        terminal_notification: None,
                         scope: None,
                         run: None,
                         last_execution: None,
+                        stopping_run: None,
                     });
                 }
             }
+            if let UpdateOrigin::Tool(identity) = origin {
+                state.accepted_calls.retain(|receipt| {
+                    receipt.identity.assistant_sequence == identity.assistant_sequence
+                });
+                state.accepted_calls.push(AcceptedTaskCall {
+                    identity,
+                    accepted_count: count as u64,
+                });
+            }
+            scheduler.save_graph(&mut state).await?;
             scheduler.reconcile(&mut state).await?;
             let changed: Vec<_> = state
                 .entries
@@ -198,16 +531,30 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 })
                 .collect();
             if !changed.is_empty() {
+                let items = scheduler.items(&state, &changed)?;
                 scheduler.enqueue(
+                    &mut state,
                     "agent-task.notification-updated",
-                    &[("items", &scheduler.items(&state, &changed)?)],
+                    &[("items", &items)],
                     false,
                 )?;
             }
             scheduler.notify_completion(&mut state)?;
-            scheduler.publish(&mut state).await
+            let mut result = scheduler.publish(&mut state).await;
+            first(&mut result, scheduler.kick_stops(&mut state), |error| {
+                scheduler.failure_diagnostic("stop", error)
+            });
+            first(
+                &mut result,
+                scheduler.kick_notifications(&mut state),
+                |error| scheduler.failure_diagnostic("delivery", error),
+            );
+            result.map(|()| count)
         });
-        admission.tail = Some(operation.clone());
+        let tail = operation.clone();
+        admission.tail = Some(Operation::start(
+            async move { tail.join().await.map(|_| ()) },
+        ));
         Ok(operation)
     }
     async fn admitted(&self) {
@@ -257,7 +604,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         incoming: Vec<Task>,
     ) -> Operation<()> {
         let mut admission = self.admission.lock().expect("task admission poisoned");
-        if admission.settlement.is_some() {
+        if admission.settlement.is_some() || admission.freeze.is_some() {
             return Operation::start(async { Ok(()) });
         }
         let prior = admission.tail.clone();
@@ -266,7 +613,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             if let Some(prior) = prior {
                 let _ = prior.join().await;
             }
+            scheduler.owner()?;
             let mut state = scheduler.gate.lock().await;
+            scheduler.ensure_healthy(&state)?;
             let mut changed = false;
             for before in previous {
                 let Some(after) = incoming.iter().find(|task| task.name == before.name) else {
@@ -293,10 +642,12 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         admission.tail = Some(operation.clone());
         operation
     }
-    pub fn settle(self: &Arc<Self>) -> Operation<()> {
+    /// Freezes admissions, launches and notices without closing any worker session.
+    /// User-session shutdown freezes every graph before suspending shared workers.
+    pub fn freeze_for_suspension(self: &Arc<Self>) -> Operation<()> {
         let mut admission = self.admission.lock().expect("task admission poisoned");
-        if let Some(settlement) = &admission.settlement {
-            return settlement.clone();
+        if let Some(operation) = &admission.freeze {
+            return operation.clone();
         }
         let previous = admission.tail.clone();
         let scheduler = self.clone();
@@ -304,58 +655,134 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             if let Some(previous) = previous {
                 let _ = previous.join().await;
             }
-            let mut result = Ok(());
-            let executions = {
-                let mut state = scheduler.gate.lock().await;
-                state.settling = true;
-                let reason = render(
-                    &scheduler.config.configuration,
-                    "agent-task.stop-shutdown",
-                    &[],
-                );
-                match reason {
-                    Ok(reason) => {
-                        for index in 0..state.entries.len() {
-                            if let Some(run) = state.entries[index].run.take() {
-                                *run.stop_reason.lock().expect("task run poisoned") =
-                                    Some(reason.clone());
-                            }
-                            if matches!(
-                                effective(&state, index),
-                                ExecutionStatus::Pending
-                                    | ExecutionStatus::Running
-                                    | ExecutionStatus::Failed
-                            ) {
-                                state.entries[index].task.state = ExecutionStatus::Canceled;
-                            }
-                        }
-                    }
-                    Err(error) => result = Err(error),
-                }
-                if !state.entries.is_empty() {
-                    first(&mut result, scheduler.publish(&mut state).await, |error| {
-                        scheduler.failure_diagnostic("settlement_publish", error);
-                    });
-                }
-                if let Some(error) = state.execution_failure.take() {
-                    first(&mut result, Err(error), |error| {
-                        scheduler.failure_diagnostic("execution", error);
-                    });
-                }
-                std::mem::take(&mut state.executions)
+            let mut state = scheduler.gate.lock().await;
+            state.suspended = true;
+            state.execution_active = false;
+            state.notifications_active = false;
+            scheduler.notifier.suspend();
+            Ok(())
+        });
+        admission.freeze = Some(operation.clone());
+        operation
+    }
+    /// Freezes the graph and joins workers without canceling durable task intent.
+    pub fn suspend(self: &Arc<Self>) -> Operation<()> {
+        let freeze = self.freeze_for_suspension();
+        let mut admission = self.admission.lock().expect("task admission poisoned");
+        if let Some(operation) = &admission.suspension {
+            return operation.clone();
+        }
+        let scheduler = self.clone();
+        let operation = Operation::start(async move {
+            freeze.join().await?;
+            let (sessions, runs, executions) = {
+                let state = scheduler.gate.lock().await;
+                let sessions = state
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.run.is_some() || entry.stopping_run.is_some())
+                    .filter_map(|entry| entry.scope.as_ref())
+                    .map(|scope| scope.get_service::<dyn TaskSession>())
+                    .collect::<ChildResult<Vec<_>>>()?;
+                let runs = state
+                    .entries
+                    .iter()
+                    .filter_map(|entry| entry.run.clone())
+                    .collect::<Vec<_>>();
+                (sessions, runs, state.executions.clone())
             };
-            scheduler.stop.cancel();
+            let mut result = Ok(());
+            for session in sessions {
+                first(&mut result, session.suspend().await, |error| {
+                    scheduler.failure_diagnostic("suspension", error)
+                });
+            }
+            for run in runs {
+                run.cancellation.stop.cancel();
+                run.ready.finish(Err(ChildError::Cancelled));
+            }
             for execution in executions {
                 first(&mut result, execution.join().await, |error| {
-                    scheduler.failure_diagnostic("execution", error);
+                    scheduler.failure_diagnostic("execution", error)
                 });
             }
             first(
                 &mut result,
+                scheduler.notifier.suspend().join().await,
+                |error| scheduler.failure_diagnostic("suspension_notifier", error),
+            );
+            result
+        });
+        admission.suspension = Some(operation.clone());
+        operation
+    }
+    pub fn settle(self: &Arc<Self>) -> Operation<()> {
+        self.notifier.begin_settlement();
+        let mut admission = self.admission.lock().expect("task admission poisoned");
+        if let Some(settlement) = &admission.settlement {
+            return settlement.clone();
+        }
+        let previous = admission.tail.clone();
+        let suspended = admission.suspension.clone();
+        let scheduler = self.clone();
+        let operation = Operation::start(async move {
+            if let Some(suspended) = suspended {
+                return suspended.join().await;
+            }
+            if let Some(previous) = previous {
+                let _ = previous.join().await;
+            }
+            let mut result = Ok(());
+            let executions = {
+                let mut state = scheduler.gate.lock().await;
+                state.settling = true;
+                for index in 0..state.entries.len() {
+                    if state.entries[index].owns_attempt() {
+                        first(
+                            &mut result,
+                            scheduler.stop_run(&mut state, index, "agent-task.stop-shutdown"),
+                            |error| scheduler.failure_diagnostic("settlement_stop", error),
+                        );
+                    }
+                    if matches!(
+                        effective(&state, index),
+                        ExecutionStatus::Pending
+                            | ExecutionStatus::Running
+                            | ExecutionStatus::Failed
+                    ) {
+                        state.entries[index].task.state = ExecutionStatus::Canceled;
+                    }
+                }
+                if !state.entries.is_empty() {
+                    first(&mut result, scheduler.publish(&mut state).await, |error| {
+                        scheduler.failure_diagnostic("settlement_publish", error)
+                    });
+                }
+                first(&mut result, scheduler.kick_stops(&mut state), |error| {
+                    scheduler.failure_diagnostic("settlement_stop", error)
+                });
+                first(
+                    &mut result,
+                    scheduler.kick_notifications(&mut state),
+                    |error| scheduler.failure_diagnostic("settlement_notifier", error),
+                );
+                if let Some(error) = state.execution_failure.take() {
+                    first(&mut result, Err(error), |error| {
+                        scheduler.failure_diagnostic("execution", error)
+                    });
+                }
+                state.executions.clone()
+            };
+            for execution in executions {
+                first(&mut result, execution.join().await, |error| {
+                    scheduler.failure_diagnostic("execution", error)
+                });
+            }
+            scheduler.stop.cancel();
+            first(
+                &mut result,
                 scheduler.notifier.settle().join().await,
-                |error| {
-                    scheduler.failure_diagnostic("settlement_notifier", error);
-                },
+                |error| scheduler.failure_diagnostic("settlement_notifier", error),
             );
             result
         });
@@ -364,7 +791,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     }
     fn apply(&self, state: &mut State<S>, index: usize, mut incoming: Task) -> ChildResult<()> {
         let stored = state.entries[index].task.clone();
-        if state.entries[index].run.is_some()
+        if state.entries[index].owns_attempt()
             && incoming.state == ExecutionStatus::Running
             && has_same_definition(&stored, &incoming)
         {
@@ -375,7 +802,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         if incoming.state == ExecutionStatus::Running {
             incoming.state = ExecutionStatus::Pending;
         }
-        if state.entries[index].run.is_some() {
+        if state.entries[index].owns_attempt() {
             self.stop_run(
                 state,
                 index,
@@ -391,6 +818,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         {
             self.reset_dependents(state, &stored.name)?;
         }
+        state.entries[index].runner = None;
         state.entries[index].task = incoming;
         Ok(())
     }
@@ -405,15 +833,20 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     continue;
                 }
                 pending.push_back(state.entries[index].task.name.clone());
-                if !matches!(
-                    state.entries[index].task.state,
-                    ExecutionStatus::Running | ExecutionStatus::Succeeded | ExecutionStatus::Failed
-                ) {
+                if !state.entries[index].owns_attempt()
+                    && !matches!(
+                        state.entries[index].task.state,
+                        ExecutionStatus::Running
+                            | ExecutionStatus::Succeeded
+                            | ExecutionStatus::Failed
+                    )
+                {
                     continue;
                 }
-                if state.entries[index].run.is_some() {
+                if state.entries[index].owns_attempt() {
                     self.stop_run(state, index, "agent-task.stop-dependency-reset")?;
                 }
+                state.entries[index].runner = None;
                 let task = &mut state.entries[index].task;
                 task.state = ExecutionStatus::Pending;
                 task.result = None;
@@ -424,21 +857,60 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     }
     async fn reconcile(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<()> {
         for index in 0..state.entries.len() {
-            if state.entries[index].run.is_some()
+            if state.entries[index].owns_attempt()
                 && effective(state, index) == ExecutionStatus::Canceled
             {
                 self.stop_run(state, index, "agent-task.stop-dependency-canceled")?;
                 state.entries[index].task.state = ExecutionStatus::Pending;
             }
         }
-        if state.settling {
+        self.ensure_healthy(state)?;
+        if state.settling || state.suspended || !state.execution_active {
             return Ok(());
         }
         for index in 0..state.entries.len() {
+            if state.entries[index].pending_stop.is_some()
+                && state.entries[index].task.state == ExecutionStatus::Pending
+                && effective(state, index) == ExecutionStatus::Pending
+                && state.entries[index].task.dependencies.iter().all(|name| {
+                    find(state, name).is_some_and(|dependency| {
+                        state.entries[dependency].task.state == ExecutionStatus::Succeeded
+                    })
+                })
+            {
+                if state.entries[index].runner.is_none() {
+                    let task = state.entries[index].task.clone();
+                    let siblings = state
+                        .entries
+                        .iter()
+                        .enumerate()
+                        .filter(|(other, _)| *other != index)
+                        .map(|(_, entry)| entry.task.clone())
+                        .collect();
+                    let dependencies = task
+                        .dependencies
+                        .iter()
+                        .map(|name| {
+                            state.entries[find(state, name).expect("validated dependency")]
+                                .task
+                                .clone()
+                        })
+                        .collect();
+                    state.entries[index].runner =
+                        Some(self.runner.begin(task, siblings, dependencies)?);
+                }
+                state.entries[index].task.state = ExecutionStatus::Running;
+                self.save_graph(state).await?;
+            }
             let entry = &state.entries[index];
             if entry.run.is_none()
-                && entry.task.state == ExecutionStatus::Pending
-                && effective(state, index) == ExecutionStatus::Pending
+                && entry.pending_stop.is_none()
+                && (entry.task.state == ExecutionStatus::Running && entry.runner.is_some()
+                    || entry.task.state == ExecutionStatus::Pending)
+                && matches!(
+                    effective(state, index),
+                    ExecutionStatus::Pending | ExecutionStatus::Running
+                )
                 && entry.task.dependencies.iter().all(|name| {
                     find(state, name).is_some_and(|dependency| {
                         state.entries[dependency].task.state == ExecutionStatus::Succeeded
@@ -451,42 +923,55 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         Ok(())
     }
     async fn start(self: &Arc<Self>, state: &mut State<S>, index: usize) -> ChildResult<()> {
+        self.ensure_healthy(state)?;
         prune_executions(
             &mut state.executions,
             &mut state.execution_failure,
-            |error| {
-                self.failure_diagnostic("execution", error);
-            },
+            |error| self.failure_diagnostic("execution", error),
         )
         .await;
-        let task = state.entries[index].task.clone();
-        let siblings: Vec<_> = state
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(other, _)| *other != index)
-            .map(|(_, entry)| entry.task.clone())
-            .collect();
-        let dependencies: Vec<_> = task
-            .dependencies
-            .iter()
-            .map(|name| {
-                state.entries[find(state, name).expect("validated dependency")]
-                    .task
-                    .clone()
-            })
-            .collect();
-        let started = Instant::now();
+        if state.entries[index].runner.is_none() {
+            let task = state.entries[index].task.clone();
+            let siblings = state
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, entry)| entry.task.clone())
+                .collect();
+            let dependencies = task
+                .dependencies
+                .iter()
+                .map(|name| {
+                    state.entries[find(state, name).expect("validated dependency")]
+                        .task
+                        .clone()
+                })
+                .collect();
+            state.entries[index].runner = Some(self.runner.begin(task, siblings, dependencies)?);
+            self.save_graph(state).await?;
+        }
         if state.entries[index].scope.is_none() {
             match self.spawn(state, index).await {
-                Ok(scope) => state.entries[index].scope = Some(scope),
+                Ok(scope) => {
+                    state.entries[index].worker_session_id =
+                        Some(scope.identity().session.session_id.clone());
+                    state.entries[index].scope = Some(scope);
+                    self.save_graph(state).await?;
+                }
+                Err(ChildError::Suspended) => {
+                    state.execution_active = false;
+                    state.notifications_active = false;
+                    return Ok(());
+                }
                 Err(error) => {
-                    let entry = &mut state.entries[index];
-                    entry.task.state = ExecutionStatus::Failed;
-                    entry.task.result = None;
-                    entry.task.failure = Some(error.to_string());
-                    self.diagnostic(entry, "terminal", started);
+                    let task = state.entries[index].task.clone();
+                    state.entries[index].task.state = ExecutionStatus::Failed;
+                    state.entries[index].task.result = None;
+                    state.entries[index].task.failure = Some(error.to_string());
+                    state.entries[index].runner = None;
                     self.enqueue(
+                        state,
                         "agent-task.notification-failed",
                         &[
                             ("name", &task.name),
@@ -495,34 +980,35 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         ],
                         true,
                     )?;
+                    self.save_graph(state).await?;
                     return Ok(());
                 }
             }
         }
+        state.entries[index].task.state = ExecutionStatus::Running;
+        state.entries[index].task.result = None;
+        state.entries[index].task.failure = None;
+        self.save_graph(state).await?;
+        let checkpoint = state.entries[index]
+            .runner
+            .as_ref()
+            .expect("runner checkpoint");
         let run = Arc::new(Run {
             cancellation: Arc::new(RunCancellation {
                 lifetime: self.lifetime.clone(),
                 stop: Arc::new(Signal::new()),
             }),
             started: Instant::now(),
-            stop_reason: Mutex::new(None),
+            generation_id: checkpoint.generation_id.clone(),
+            ready: Arc::new(Readiness::default()),
         });
         let entry = &mut state.entries[index];
-        entry.task.state = ExecutionStatus::Running;
-        entry.task.result = None;
-        entry.task.failure = None;
         entry.run = Some(run.clone());
-        let scheduler = self.clone();
         let previous = entry.last_execution.clone();
-        let original = entry.task.clone();
-        let execution = Operation::start(scheduler.execute(
-            index,
-            run.clone(),
-            original,
-            siblings,
-            dependencies,
-            previous,
-        ));
+        let execution = Operation::start(self.clone().execute(index, run.clone(), previous));
+        state.reservations.retain(|ready| !ready.is_ready());
+        state.reservations.push(run.ready.clone());
+        let entry = &mut state.entries[index];
         entry.last_execution = Some(execution.clone());
         self.diagnostic(entry, "running", run.started);
         state.executions.push(execution);
@@ -557,7 +1043,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let task = entry.task.clone();
         let selection = entry.selection.clone();
         let boundary = entry.boundary.clone();
-        let source = if self.config.configuration.fork_history_mode == ForkHistoryMode::Dependency {
+        let source = if entry.fork_mode == ForkHistoryMode::Dependency {
             task.dependencies
                 .first()
                 .and_then(|name| find(state, name))
@@ -568,6 +1054,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             HistorySource::Parent
         };
         let scheduler = self.clone();
+        let fork_mode = entry.fork_mode;
         let parent = owner.session().clone();
         owner
             .spawner()
@@ -588,15 +1075,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     )?,
                     delivery: CompletionDelivery::RetainedOnly,
                     boundary,
-                    fork: HistoryForkSelection::parse(
-                        if scheduler.config.configuration.fork_history_mode
-                            == ForkHistoryMode::Empty
-                        {
-                            ""
-                        } else {
-                            "full"
-                        },
-                    ),
+                    fork: HistoryForkSelection::parse(if fork_mode == ForkHistoryMode::Empty {
+                        ""
+                    } else {
+                        "full"
+                    }),
                     history_source: source,
                 })
             })?
@@ -607,105 +1090,73 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         self: Arc<Self>,
         index: usize,
         run: Arc<Run>,
-        original: Task,
-        siblings: Vec<Task>,
-        dependencies: Vec<Task>,
         previous: Option<Operation<()>>,
     ) -> BoxFuture<'static, ChildResult<()>> {
         Box::pin(async move {
-            tokio::task::yield_now().await;
             if let Some(previous) = previous {
                 let _ = previous.join().await;
             }
             let result = async {
-                let state = self.gate.lock().await;
-                if run.cancellation.is_cancelled() {
-                    return Err(ChildError::Cancelled);
-                }
-                let entry = &state.entries[index];
-                let task = entry.task.clone();
-                let session = entry
-                    .scope
-                    .as_ref()
-                    .ok_or_else(|| {
-                        ChildError::registry("A running AgentTask requires an agent scope.")
-                    })?
-                    .get_service::<dyn TaskSession>()?;
-                let mut execution = Box::pin(self.runner.run(
-                    task,
-                    &siblings,
-                    &dependencies,
-                    session.as_ref(),
-                    run.cancellation.clone(),
-                ));
-                // C# invokes the runner's synchronous prefix under this gate.
-                // Poll once to admit the actual session enqueue atomically with
-                // the task capture, but never hold the gate across the turn.
-                let initial = std::future::poll_fn(|context| {
-                    std::task::Poll::Ready(std::future::Future::poll(execution.as_mut(), context))
-                })
-                .await;
-                drop(state);
-                match initial {
-                    std::task::Poll::Ready(result) => result,
-                    std::task::Poll::Pending => execution.await,
-                }
+                let (checkpoint, session) = {
+                    let state = self.gate.lock().await;
+                    self.ensure_healthy(&state)?;
+                    if run.cancellation.is_cancelled() {
+                        return Err(ChildError::Cancelled);
+                    }
+                    let entry = &state.entries[index];
+                    let checkpoint = entry.runner.clone().ok_or(ChildError::Cancelled)?;
+                    let session = entry
+                        .scope
+                        .as_ref()
+                        .ok_or_else(|| {
+                            ChildError::registry("A running AgentTask requires an agent scope.")
+                        })?
+                        .get_service::<dyn TaskSession>()?;
+                    (checkpoint, session)
+                };
+                let progress = RunProgress {
+                    scheduler: Arc::downgrade(&self),
+                    index,
+                    run: run.clone(),
+                    owner_session_id: self.config.owner_identity.session.session_id.clone(),
+                };
+                self.runner
+                    .run(
+                        checkpoint,
+                        session.as_ref(),
+                        &progress,
+                        run.cancellation.clone(),
+                    )
+                    .await
             }
             .await;
-            let outcome = match result {
-                Ok(task) => Some(task),
-                Err(ChildError::Cancelled) if run.cancellation.is_cancelled() => None,
-                Err(error) => {
-                    let mut task = original;
-                    task.state = ExecutionStatus::Failed;
-                    task.failure = Some(error.to_string());
-                    Some(task)
-                }
-            };
-            let (stop_reason, mut completion) = {
-                let mut state = self.gate.lock().await;
-                let current = state.entries[index]
+            let mut state = self.gate.lock().await;
+            if state.suspended
+                || !state.entries[index]
                     .run
                     .as_ref()
-                    .is_some_and(|current| Arc::ptr_eq(current, &run));
-                let completed = current && outcome.is_some();
-                let completion = if let (true, Some(outcome)) = (current, outcome) {
-                    self.complete(&mut state, index, outcome, &run).await
-                } else if current {
-                    state.entries[index].run = None;
-                    state.entries[index].task.state = ExecutionStatus::Canceled;
-                    self.publish(&mut state).await
-                } else {
-                    Ok(())
-                };
-                let reason = if completed {
-                    None
-                } else {
-                    run.stop_reason.lock().expect("task run poisoned").clone()
-                };
-                (
-                    if completed {
-                        Ok(None)
-                    } else {
-                        match reason {
-                            Some(reason) => Ok(Some(reason)),
-                            None => {
-                                render(&self.config.configuration, "agent-task.stop-shutdown", &[])
-                                    .map(Some)
-                            }
-                        }
-                    },
-                    completion,
-                )
-            };
-            match stop_reason {
-                Ok(Some(reason)) => self.record_stop(index, reason).await,
-                Ok(None) => {}
-                Err(error) => first(&mut completion, Err(error), |error| {
-                    self.failure_diagnostic("execution", error);
-                }),
+                    .is_some_and(|current| Arc::ptr_eq(current, &run))
+            {
+                run.ready.finish(Err(ChildError::Cancelled));
+                return Ok(());
             }
-            completion
+            if let Err(error) = self.ensure_healthy(&state) {
+                run.ready.finish(Err(error.clone()));
+                return Err(error);
+            }
+            let completed = match result {
+                Ok(outcome) => self.complete(&mut state, index, outcome, &run).await,
+                Err(ChildError::Cancelled) if run.cancellation.is_cancelled() => {
+                    state.entries[index].run = None;
+                    Ok(())
+                }
+                Err(error) => {
+                    state.persistence_failure = Some(error.clone());
+                    Err(error)
+                }
+            };
+            run.ready.finish(completed.clone());
+            completed
         })
     }
     async fn complete(
@@ -723,6 +1174,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         self.diagnostic(entry, "terminal", run.started);
         if outcome.state == ExecutionStatus::Succeeded {
             self.enqueue(
+                state,
                 "agent-task.notification-succeeded",
                 &[
                     ("name", &outcome.name),
@@ -733,6 +1185,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             )?;
         } else {
             self.enqueue(
+                state,
                 "agent-task.notification-failed",
                 &[
                     ("name", &outcome.name),
@@ -742,68 +1195,82 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 true,
             )?;
         }
+        self.save_graph(state).await?;
         self.reconcile(state).await?;
         self.notify_completion(state)?;
-        self.publish(state).await
-    }
-    async fn record_stop(&self, index: usize, reason: String) {
-        let (session, correlation_id) = {
-            let state = self.gate.lock().await;
-            let entry = &state.entries[index];
-            let Some(scope) = &entry.scope else {
-                return;
-            };
-            (
-                scope.get_service::<dyn TaskSession>(),
-                entry.diagnostic_id.clone(),
-            )
-        };
-        let result = async {
-            let text = render(
-                &self.config.configuration,
-                "agent-task.force-stopped",
-                &[("reason", &reason)],
-            )?;
-            let id = Identifier::message_id()
-                .map_err(|error| ChildError::failure("unexpected", error.to_string()))?;
-            session?
-                .record(
-                    vec![ConversationPart::text(text)],
-                    id,
-                    Delivery::DELIVERY_STEER,
-                )
-                .await
-        }
-        .await;
-        if let Err(error) = result {
-            self.config.diagnostics.record(TaskDiagnostic {
-                operation: "stop_record",
-                session_id: self.config.owner_identity.session.session_id.clone(),
-                correlation_id,
-                outcome: "failed",
-                duration_milliseconds: None,
-                error_code: Some(error.code()),
-            });
-        }
+        let mut result = self.publish(state).await;
+        first(&mut result, self.kick_stops(state), |error| {
+            self.failure_diagnostic("stop", error)
+        });
+        first(&mut result, self.kick_notifications(state), |error| {
+            self.failure_diagnostic("delivery", error)
+        });
+        result
     }
     fn stop_run(&self, state: &mut State<S>, index: usize, template: &str) -> ChildResult<()> {
+        if state.entries[index].pending_stop.is_some() {
+            return Ok(());
+        }
         let reason = render(&self.config.configuration, template, &[])?;
+        let text = render(
+            &self.config.configuration,
+            "agent-task.force-stopped",
+            &[("reason", &reason)],
+        )?;
         let entry = &mut state.entries[index];
-        let run = entry
-            .run
-            .take()
-            .expect("only a running task can be stopped");
-        *run.stop_reason.lock().expect("task run poisoned") = Some(reason);
-        run.cancellation.stop.cancel();
-        self.diagnostic(entry, "stopped", run.started);
+        let run = entry.run.take();
+        let checkpoint = entry.runner.take().expect("owned runner checkpoint");
+        let Some(worker) = entry.worker_session_id.clone() else {
+            return Ok(());
+        };
+        let message_id = Identifier::message_id()
+            .map_err(|error| ChildError::failure("unexpected", error.to_string()))?;
+        entry.stopping_run = run.clone();
+        entry.pending_stop = Some(TaskStopCheckpoint {
+            generation_id: checkpoint.generation_id,
+            prompt_message_id: checkpoint.prompt_message_id,
+            worker_session_id: worker.clone(),
+            notice_message_id: message_id.clone(),
+            stopped: false,
+        });
+        state.notifications.push(TaskNotificationSnapshot {
+            message_id,
+            target_session_id: worker,
+            text,
+            wake: false,
+            ready: false,
+        });
+        // Cancellation is performed by the owned stop operation only after the graph is saved.
+        if let Some(run) = run {
+            self.diagnostic(entry, "stopped", run.started);
+        }
         Ok(())
     }
-    fn enqueue(&self, template: &str, values: &[(&str, &str)], wake: bool) -> ChildResult<()> {
-        self.notifier.enqueue(
-            render(&self.config.configuration, template, values)?,
-            NOTIFICATION_CAUSE,
+    fn enqueue(
+        &self,
+        state: &mut State<S>,
+        template: &str,
+        values: &[(&str, &str)],
+        wake: bool,
+    ) -> ChildResult<()> {
+        let text = render(&self.config.configuration, template, values)?;
+        let text = if is_tool_output_oversized(&text) {
+            self.config
+                .output_blobs
+                .persist(&text, &NeverCancelled)
+                .map_err(|error| ChildError::failure("io", error.to_string()))?
+        } else {
+            text
+        };
+        let message_id = Identifier::message_id()
+            .map_err(|error| ChildError::failure("unexpected", error.to_string()))?;
+        state.notifications.push(TaskNotificationSnapshot {
+            message_id,
+            target_session_id: self.config.owner_identity.session.session_id.clone(),
+            text,
             wake,
-        );
+            ready: true,
+        });
         Ok(())
     }
     fn items(&self, state: &State<S>, indices: &[usize]) -> ChildResult<String> {
@@ -823,12 +1290,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     fn notify_completion(&self, state: &mut State<S>) -> ChildResult<()> {
         let complete = resolved(state);
         if complete && !state.complete {
+            let items = self.items(state, &(0..state.entries.len()).collect::<Vec<_>>())?;
             self.enqueue(
+                state,
                 "agent-task.notification-all-complete",
-                &[(
-                    "items",
-                    &self.items(state, &(0..state.entries.len()).collect::<Vec<_>>())?,
-                )],
+                &[("items", &items)],
                 true,
             )?;
         }
@@ -847,6 +1313,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             .revision
             .checked_add(1)
             .ok_or_else(|| ChildError::failure("unexpected", "task progress revision overflow"))?;
+        self.save_graph(state).await?;
         let snapshot = AgentTaskProgressSnapshot {
             revision: state.revision,
             root_nodes: state
@@ -909,6 +1376,475 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             .await
             .map_err(|error| ChildError::failure("unexpected", error.to_string()))
     }
+    fn worker_gate(&self, worker: &str) -> Arc<WorkerGate> {
+        self.worker_gates
+            .lock()
+            .expect("task worker gates poisoned")
+            .entry(worker.to_owned())
+            .or_default()
+            .clone()
+    }
+    async fn reserve_worker(
+        &self,
+        slot: Arc<WorkerGate>,
+        checkpoint: &TaskRunnerCheckpoint,
+        session: &dyn TaskSession,
+        run: &Run,
+    ) -> ChildResult<TaskWorkerLease> {
+        loop {
+            let changed = slot.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if run.cancellation.is_cancelled() {
+                return Err(ChildError::Cancelled);
+            }
+            let saved = session.capture_execution().await?;
+            if let Some(claim) = saved
+                .as_ref()
+                .and_then(|saved| saved.result_claim.as_ref())
+                .filter(|claim| claim.claim_id != checkpoint.prompt_message_id)
+            {
+                let owner_ready =
+                    {
+                        let state = self.gate.lock().await;
+                        self.ensure_healthy(&state)?;
+                        if claim.owner_session_id != self.config.owner_identity.session.session_id {
+                            return Err(ChildError::registry(
+                                "task worker is claimed by a different graph",
+                            ));
+                        }
+                        state
+                            .entries
+                            .iter()
+                            .find_map(|entry| {
+                                if entry.runner.as_ref().is_some_and(|runner| {
+                                    runner.prompt_message_id == claim.claim_id
+                                }) {
+                                    entry.run.as_ref().map(|run| run.ready.clone())
+                                } else {
+                                    entry
+                                        .pending_stop
+                                        .as_ref()
+                                        .filter(|stop| stop.prompt_message_id == claim.claim_id)
+                                        .and_then(|stop| {
+                                            state.stop_readiness.get(&stop.generation_id).cloned()
+                                        })
+                                }
+                            })
+                            .ok_or_else(|| {
+                                ChildError::registry(
+                                    "task worker claim has no matching runner or stop owner",
+                                )
+                            })?
+                    };
+                owner_ready.wait().await?;
+                run.ready.finish(Ok(()));
+                tokio::select! { _ = changed => {}, _ = run.cancellation.cancelled() => return Err(ChildError::Cancelled) }
+                continue;
+            }
+            let lease = tokio::select! { lease = slot.gate.clone().lock_owned() => lease, _ = run.cancellation.cancelled() => return Err(ChildError::Cancelled) };
+            let saved = session.capture_execution().await?;
+            if saved
+                .as_ref()
+                .and_then(|saved| saved.result_claim.as_ref())
+                .is_some_and(|claim| claim.claim_id != checkpoint.prompt_message_id)
+            {
+                drop(lease);
+                continue;
+            }
+            return Ok(TaskWorkerLease {
+                _guard: lease,
+                changed: slot.changed.clone(),
+            });
+        }
+    }
+    fn ensure_healthy(&self, state: &State<S>) -> ChildResult<()> {
+        state.persistence_failure.clone().map_or(Ok(()), Err)
+    }
+    async fn save_graph(&self, state: &mut State<S>) -> ChildResult<()> {
+        self.ensure_healthy(state)?;
+        let snapshot = TaskGraphSnapshot {
+            entries: state.entries.iter().map(Entry::snapshot).collect(),
+            revision: state.revision,
+            complete: state.complete,
+            all_resolved: state.all_resolved,
+            completion_notification: state.completion_notification.clone(),
+            notifications: state.notifications.clone(),
+            accepted_calls: state.accepted_calls.clone(),
+        };
+        if let Err(error) = self
+            .config
+            .state
+            .update(AgentStateUpdate::Tasks(snapshot))
+            .await
+        {
+            let error = state_error(error);
+            state.persistence_failure = Some(error.clone());
+            for entry in &state.entries {
+                if let Some(run) = &entry.run {
+                    run.ready.finish(Err(error.clone()));
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+    /// Reconnects graph references only. It neither admits prompts nor delivers notifications.
+    pub async fn resolve_workers(self: &Arc<Self>) -> ChildResult<()> {
+        self.admitted().await;
+        let owner = self.owner()?;
+        let children: HashMap<_, _> = owner
+            .children()
+            .snapshot_children()
+            .into_iter()
+            .map(|scope| (scope.identity().session.session_id.clone(), scope))
+            .collect();
+        let mut state = self.gate.lock().await;
+        self.ensure_healthy(&state)?;
+        for entry in &mut state.entries {
+            if entry.scope.is_some() {
+                continue;
+            }
+            let scope = if let Some(id) = &entry.worker_session_id {
+                Some(children.get(id).cloned().ok_or_else(|| {
+                    ChildError::registry(format!(
+                        "task worker is not a retained direct child: {id}"
+                    ))
+                })?)
+            } else if matches!(
+                entry.task.state,
+                ExecutionStatus::Pending | ExecutionStatus::Running
+            ) {
+                owner.spawner().find_retained(&entry.task.name).await?
+            } else {
+                None
+            };
+            if let Some(scope) = scope {
+                entry.worker_session_id = Some(scope.identity().session.session_id.clone());
+                entry.scope = Some(scope);
+            }
+        }
+        self.save_graph(&mut state).await
+    }
+    /// Returns worker identities whose execution recovery belongs to this graph.
+    pub async fn claimed_worker_ids(&self) -> Vec<String> {
+        let state = self.gate.lock().await;
+        state
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(index, entry)| {
+                entry.task.state == ExecutionStatus::Running
+                    || entry.pending_stop.is_some()
+                    || (entry.task.state == ExecutionStatus::Pending
+                        && (entry.runner.is_some()
+                            || (effective(&state, *index) == ExecutionStatus::Pending
+                                && entry.task.dependencies.iter().all(|name| {
+                                    find(&state, name).is_some_and(|dependency| {
+                                        state.entries[dependency].task.state
+                                            == ExecutionStatus::Succeeded
+                                    })
+                                }))))
+            })
+            .filter_map(|(_, entry)| entry.worker_session_id.clone())
+            .collect()
+    }
+    /// Reserves graph-owned executions and waits only for their startup reservations.
+    /// Notification wakes remain gated until activate_notifications is called.
+    pub fn activate_executions(self: &Arc<Self>) -> Operation<()> {
+        let scheduler = self.clone();
+        Operation::start(async move {
+            scheduler.resolve_workers().await?;
+            {
+                let mut state = scheduler.gate.lock().await;
+                scheduler.ensure_healthy(&state)?;
+                if state.suspended || state.settling {
+                    return Err(shutting_down());
+                }
+                state.execution_active = true;
+                scheduler.reconcile(&mut state).await?;
+                scheduler.notify_completion(&mut state)?;
+                scheduler.save_graph(&mut state).await?;
+                scheduler.kick_stops(&mut state)?;
+            }
+            loop {
+                let ready = {
+                    let mut state = scheduler.gate.lock().await;
+                    scheduler.ensure_healthy(&state)?;
+                    std::mem::take(&mut state.reservations)
+                };
+                if ready.is_empty() {
+                    return Ok(());
+                }
+                for ready in ready {
+                    ready.wait().await?;
+                }
+            }
+        })
+    }
+    /// Enables committed notification delivery only after all session owners are reserved.
+    pub fn activate_notifications(self: &Arc<Self>) -> Operation<()> {
+        let scheduler = self.clone();
+        Operation::start(async move {
+            scheduler.owner()?;
+            let mut state = scheduler.gate.lock().await;
+            scheduler.ensure_healthy(&state)?;
+            if state.suspended {
+                return Err(shutting_down());
+            }
+            state.notifications_active = true;
+            scheduler.kick_notifications(&mut state)
+        })
+    }
+    fn kick_stops(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<()> {
+        self.ensure_healthy(state)?;
+        if state.suspended {
+            return Ok(());
+        }
+        for index in 0..state.entries.len() {
+            let Some(stop) = state.entries[index].pending_stop.clone() else {
+                continue;
+            };
+            if !state.stopping.insert(stop.generation_id.clone()) {
+                continue;
+            }
+            let worker = state.entries[index]
+                .scope
+                .as_ref()
+                .ok_or_else(|| ChildError::registry("stopped task worker is unresolved"))?
+                .get_service::<dyn TaskSession>()?;
+            let live = state.entries[index].stopping_run.clone();
+            let previous = state.entries[index].last_execution.clone();
+            let scheduler = self.clone();
+            let ready = Arc::new(Readiness::default());
+            state.reservations.retain(|ready| !ready.is_ready());
+            state.reservations.push(ready.clone());
+            state
+                .stop_readiness
+                .insert(stop.generation_id.clone(), ready.clone());
+            let operation = Operation::start(async move {
+                let result = async {
+                    let slot = scheduler.worker_gate(&stop.worker_session_id);
+                    if let Some(live) = live {
+                        live.cancellation.stop.cancel();
+                    }
+                    if let Some(previous) = previous {
+                        let _ = previous.join().await;
+                    }
+                    let lease = slot.gate.clone().lock_owned().await;
+                    let claim = TaskResultClaim {
+                        owner_session_id: scheduler
+                            .config
+                            .owner_identity
+                            .session
+                            .session_id
+                            .clone(),
+                        claim_id: stop.prompt_message_id.clone(),
+                    };
+                    let saved = worker.capture_execution().await?;
+                    let matching = saved
+                        .as_ref()
+                        .is_some_and(|saved| saved.initial_message_id == stop.prompt_message_id);
+                    if let Some(saved) = &saved {
+                        if matching
+                            && saved
+                                .result_claim
+                                .as_ref()
+                                .is_some_and(|held| held != &claim)
+                        {
+                            return Err(ChildError::registry(
+                                "task stop conflicts with the worker result claimant",
+                            ));
+                        }
+                        if matching && saved.terminal.is_none() {
+                            if saved.result_claim.as_ref() != Some(&claim) {
+                                return Err(ChildError::registry(
+                                    "task stop lost its protected execution identity",
+                                ));
+                            }
+                            let canceled = worker.cancel_recovered(&stop.prompt_message_id)?;
+                            ready.finish(Ok(()));
+                            canceled.join().await?;
+                        }
+                    }
+                    {
+                        let mut state = scheduler.gate.lock().await;
+                        scheduler.ensure_healthy(&state)?;
+                        if let Some(current) = &mut state.entries[index].pending_stop {
+                            if current.generation_id != stop.generation_id {
+                                return Err(ChildError::Cancelled);
+                            }
+                            current.stopped = true;
+                        }
+                        scheduler.save_graph(&mut state).await?;
+                    }
+                    if matching
+                        && saved
+                            .as_ref()
+                            .is_some_and(|saved| saved.result_claim.as_ref() == Some(&claim))
+                    {
+                        let reference = worker
+                            .capture_result(&stop.prompt_message_id, &claim)
+                            .await?;
+                        worker.acknowledge_result(&reference, &claim).await?;
+                    }
+                    ready.finish(Ok(()));
+                    if !matching {
+                        scheduler
+                            .acknowledge_notification(&stop.notice_message_id, Ok(()))
+                            .await?;
+                        drop(lease);
+                        slot.changed.notify_waiters();
+                        return Ok(());
+                    }
+                    if scheduler.config.lifetime.is_cancelled() {
+                        return Ok(());
+                    }
+                    let notice = {
+                        let state = scheduler.gate.lock().await;
+                        if state.suspended {
+                            return Ok(());
+                        }
+                        state
+                            .notifications
+                            .iter()
+                            .find(|notice| notice.message_id == stop.notice_message_id)
+                            .cloned()
+                            .ok_or_else(|| ChildError::registry("task stop notice is missing"))?
+                    };
+                    worker
+                        .record(
+                            vec![ConversationPart::text(notice.text)],
+                            notice.message_id.clone(),
+                            Delivery::DELIVERY_STEER,
+                        )
+                        .await?;
+                    scheduler
+                        .acknowledge_notification(&notice.message_id, Ok(()))
+                        .await?;
+                    drop(lease);
+                    slot.changed.notify_waiters();
+                    Ok(())
+                }
+                .await;
+                let mut state = scheduler.gate.lock().await;
+                let result = if state.suspended
+                    && result.as_ref().is_err_and(|error| {
+                        error == &ChildError::Cancelled
+                            || error
+                                == &ChildError::from(
+                                    crate::agent_turn::lifecycle::LifecycleError::ShuttingDown,
+                                )
+                    }) {
+                    Ok(())
+                } else {
+                    result
+                };
+                ready.finish(result.clone());
+                state.stopping.remove(&stop.generation_id);
+                state.stop_readiness.remove(&stop.generation_id);
+                if let Err(error) = &result {
+                    state.persistence_failure.get_or_insert(error.clone());
+                }
+                result
+            });
+            state.executions.push(operation);
+        }
+        Ok(())
+    }
+    fn kick_notifications(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<()> {
+        self.ensure_healthy(state)?;
+        if state.suspended {
+            return Ok(());
+        }
+        for value in state.notifications.clone() {
+            let stop_notice = state.entries.iter().any(|entry| {
+                entry
+                    .pending_stop
+                    .as_ref()
+                    .is_some_and(|stop| stop.notice_message_id == value.message_id)
+            });
+            if stop_notice
+                || !value.ready
+                || !state.notifications_active
+                || !state.in_flight.insert(value.message_id.clone())
+            {
+                continue;
+            }
+            let session = if value.target_session_id
+                == self.config.owner_identity.session.session_id
+            {
+                self.config.owner_session.clone()
+            } else {
+                state
+                    .entries
+                    .iter()
+                    .filter_map(|entry| entry.scope.as_ref())
+                    .find(|scope| scope.identity().session.session_id == value.target_session_id)
+                    .ok_or_else(|| {
+                        ChildError::registry("notification target is not a retained task worker")
+                    })?
+                    .get_service::<dyn TaskSession>()?
+            };
+            let scheduler = Arc::downgrade(self);
+            let id = value.message_id.clone();
+            let acknowledge_id = id.clone();
+            let queued = self.notifier.enqueue(Notification {
+                value,
+                session,
+                finish: Box::new(move |result| {
+                    Box::pin(async move {
+                        let scheduler = scheduler.upgrade().ok_or(ChildError::Cancelled)?;
+                        scheduler
+                            .acknowledge_notification(&acknowledge_id, result)
+                            .await
+                    })
+                }),
+            });
+            if !queued {
+                state.in_flight.remove(&id);
+            }
+        }
+        Ok(())
+    }
+    async fn acknowledge_notification(
+        self: &Arc<Self>,
+        id: &str,
+        delivered: ChildResult<()>,
+    ) -> ChildResult<()> {
+        let mut state = self.gate.lock().await;
+        state.in_flight.remove(id);
+        if delivered.is_err() {
+            return Ok(());
+        }
+        self.ensure_healthy(&state)?;
+        state.notifications.retain(|notice| notice.message_id != id);
+        for entry in &mut state.entries {
+            if entry
+                .pending_stop
+                .as_ref()
+                .is_some_and(|stop| stop.notice_message_id == id)
+            {
+                entry.pending_stop = None;
+                entry.stopping_run = None;
+            }
+            if let Some(notice) = &mut entry.terminal_notification {
+                if notice.message_id == id {
+                    notice.admitted = true;
+                }
+            }
+        }
+        if let Some(notice) = &mut state.completion_notification {
+            if notice.message_id == id {
+                notice.admitted = true;
+            }
+        }
+        self.save_graph(&mut state).await?;
+        self.reconcile(&mut state).await?;
+        self.save_graph(&mut state).await?;
+        self.kick_stops(&mut state)?;
+        Ok(())
+    }
     fn failure_diagnostic(&self, operation: &'static str, error: &ChildError) {
         self.config.diagnostics.record(TaskDiagnostic {
             operation,
@@ -930,6 +1866,49 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             ),
             error_code: None,
         });
+    }
+}
+impl<S: RestrictableAccessSnapshot + 'static> Entry<S> {
+    fn owns_attempt(&self) -> bool {
+        self.run.is_some()
+            || (matches!(
+                self.task.state,
+                ExecutionStatus::Pending | ExecutionStatus::Running
+            ) && self.runner.is_some())
+    }
+    fn snapshot(&self) -> TaskEntrySnapshot {
+        TaskEntrySnapshot {
+            task: self.task.clone(),
+            diagnostic_id: self.diagnostic_id.clone(),
+            selection: SelectionSnapshot {
+                profile_id: self.selection.profile_id.clone(),
+                model_selector: self.selection.model.requested_selector.value.clone(),
+            },
+            fork_boundary: match &self.boundary {
+                HistoryForkBoundary::BeforeToolBatch {
+                    assistant_sequence,
+                    tool_call_id,
+                } => ForkBoundarySnapshot::BeforeToolBatch {
+                    assistant_sequence: *assistant_sequence,
+                    tool_call_id: tool_call_id.clone(),
+                },
+                HistoryForkBoundary::AfterCompletedHistory => {
+                    ForkBoundarySnapshot::AfterCompletedHistory
+                }
+                HistoryForkBoundary::AfterSafeHistoryPrefix => {
+                    ForkBoundarySnapshot::AfterSafeHistoryPrefix
+                }
+            },
+            fork_mode: match self.fork_mode {
+                ForkHistoryMode::Dependency => TaskForkModeSnapshot::Dependency,
+                ForkHistoryMode::Parent => TaskForkModeSnapshot::Parent,
+                ForkHistoryMode::Empty => TaskForkModeSnapshot::Empty,
+            },
+            worker_session_id: self.worker_session_id.clone(),
+            runner: self.runner.clone(),
+            pending_stop: self.pending_stop.clone(),
+            terminal_notification: self.terminal_notification.clone(),
+        }
     }
 }
 struct SchedulerWork<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static>(

@@ -109,10 +109,13 @@ async fn explicit_paths_cross_branches_but_bare_names_ids_and_status_parent_alia
         for invalid in ["inbox", "/inbox", "left/"] {
             assert!(resolver.resolve_resource(invalid).is_err());
         }
-        let duplicate = h.root("root").await;
+        let other = Harness::new();
+        let duplicate = other.root("root").await;
+        h.registry.register_root(duplicate.clone()).unwrap();
         assert!(!Arc::ptr_eq(&root, &duplicate));
         assert!(resolver.resolve_recipient("/root/right").is_err());
         h.close().await;
+        other.close().await;
     })
     .await;
 }
@@ -132,6 +135,7 @@ async fn registry_and_resolver_require_exact_registered_scope_not_matching_ident
                 delivery: CompletionDelivery::RetainedOnly,
                 retention: None,
                 parts: ScopeParts {
+                    agent_state: root.agent_state().clone(),
                     session: root.session().clone(),
                     services: vec![],
                     publishers: vec![],

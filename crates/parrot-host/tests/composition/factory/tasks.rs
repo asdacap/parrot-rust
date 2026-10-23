@@ -65,6 +65,17 @@ async fn root_with_controller(
     use parrot_runtime::children::*;
     struct NoParent;
     impl parrot_runtime::agent_turn::services::ParentCompletion for NoParent {
+        fn deliver_correlated<'a>(
+            &'a self,
+            execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+            _: &'a str,
+        ) -> parrot_domain::contracts::async_ops::BoxFuture<
+            'a,
+            Result<(), parrot_runtime::agent_turn::services::TurnError>,
+        > {
+            self.deliver(execution)
+        }
+
         fn deliver<'a>(
             &'a self,
             _: &'a parrot_runtime::agent_turn::lifecycle::Execution,
@@ -79,9 +90,20 @@ async fn root_with_controller(
         support::selection(&h.provider, "first", "root-mode", 0xff),
         lineage.clone(),
     ));
+    let agent_state = h
+        .registry
+        .prepare_state(
+            &identity,
+            &selection.current().unwrap(),
+            "",
+            CompletionDelivery::RetainedOnly,
+        )
+        .await
+        .unwrap();
     let mut parts = h
         .factory
         .build(PreparedScope {
+            agent_state: agent_state.clone(),
             identity: identity.clone(),
             history: history.clone(),
             selection: selection.clone(),
@@ -92,13 +114,17 @@ async fn root_with_controller(
         .await
         .unwrap();
     let built = h.factory.get(owner);
-    let task_session: Arc<dyn parrot_runtime::task_scheduler::TaskSession> = Arc::new(
-        TaskSessionAdapter::new(identity.clone(), built.adapter.session().clone()),
-    );
+    let task_session: Arc<dyn parrot_runtime::task_scheduler::TaskSession> =
+        Arc::new(TaskSessionAdapter::new(
+            identity.clone(),
+            built.adapter.session().clone(),
+            agent_state.clone(),
+        ));
     let mut configuration = TaskConfiguration::defaults(support::templates());
     configuration.fork_history_mode = mode;
     let controller = Controller::new(SchedulerConfig {
         owner_identity: identity.clone(),
+        state: agent_state.clone(),
         registry: Arc::downgrade(&h.registry),
         owner_session: task_session.clone(),
         history: built.history.clone(),
@@ -112,7 +138,7 @@ async fn root_with_controller(
         publisher: built.publisher.clone(),
         diagnostics: h.factory.task_diagnostics.clone(),
         lifetime: h.registry.lifetime(),
-    }, Clone::clone).unwrap();
+    }, Clone::clone).await.unwrap();
     parts.services = vec![
         ServiceRegistration::new(controller.scheduler().clone()),
         ServiceRegistration::new(task_session),
@@ -241,7 +267,7 @@ fn tool(kind: TaskToolKind, controller: &Arc<Controller>, reader: Arc<Reader>) -
 }
 fn invocation(arguments: &str) -> ToolInvocation {
     ToolInvocation {
-        call_id: "set-call".into(),
+        call_id: support::id(),
         arguments_json: arguments.into(),
         assistant_sequence: 17,
     }

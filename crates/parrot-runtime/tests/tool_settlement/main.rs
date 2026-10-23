@@ -6,6 +6,7 @@ use harness::*;
 mod admission;
 mod focused;
 mod images;
+mod owned_recovery;
 mod parallel_images;
 mod runtime;
 mod runtime_ordinary;

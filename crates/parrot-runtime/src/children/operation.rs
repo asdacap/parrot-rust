@@ -12,6 +12,7 @@ pub enum ChildError {
     Registry(String),
     NameConflict(String),
     Cancelled,
+    Suspended,
     Failure { code: &'static str, message: String },
 }
 pub type ChildResult<T> = Result<T, ChildError>;
@@ -28,7 +29,7 @@ impl ChildError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Registry(_) | Self::NameConflict(_) => "invalid_operation",
-            Self::Cancelled => "cancelled",
+            Self::Cancelled | Self::Suspended => "cancelled",
             Self::Failure { code, .. } => match *code {
                 "cancelled" | "access_denied" | "io" | "timeout" | "http" | "argument"
                 | "invalid_operation" => code,
@@ -44,6 +45,7 @@ impl fmt::Display for ChildError {
             | Self::NameConflict(message)
             | Self::Failure { message, .. } => f.write_str(message),
             Self::Cancelled => f.write_str("operation cancelled"),
+            Self::Suspended => f.write_str("agent admission is suspended"),
         }
     }
 }

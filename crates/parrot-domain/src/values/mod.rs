@@ -1,5 +1,6 @@
 pub mod accounting;
 pub mod activity;
+pub mod agent_state;
 pub mod agent_tasks;
 pub mod config;
 pub mod context;

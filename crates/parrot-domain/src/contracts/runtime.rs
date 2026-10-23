@@ -55,6 +55,14 @@ pub trait TaskController: Send + Sync {
     type Snapshot: Send + 'static;
     type Error: Send + Sync + 'static;
 
+    /// Returns the accepted count for this call before mutable arguments or files are read.
+    /// Implementations reject stale batches and never expose uncommitted receipts.
+    fn lookup_accepted<'a>(
+        &'a self,
+        identity: &'a crate::values::agent_tasks::TaskCallIdentity,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<usize>, OperationError<Self::Error>>>;
+
     /// Updates the scoped task graph and returns its resulting snapshot.
     fn update<'a>(
         &'a self,

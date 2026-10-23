@@ -20,6 +20,10 @@ base64 = "=0.22.1"
 parrot-foundation = { path = "../parrot-foundation" }
 
 [[test]]
+name = "agent_state"
+path = "tests/agent_state/main.rs"
+
+[[test]]
 name = "database"
 path = "tests/database/main.rs"
 

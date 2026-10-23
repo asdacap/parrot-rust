@@ -257,6 +257,16 @@ async fn scope_settlement_cancels_nested_graphs_before_session_resources_and_is_
     h.close().await;
     assert_eq!(snapshot(&second_owner).await[0].state, Canceled);
     assert_eq!(snapshot(&nested).await[0].state, Canceled);
+    let saved = second_owner.agent_state().load().await.unwrap().unwrap();
+    let stopped = saved.tasks.entries[0].pending_stop.as_ref().unwrap();
+    assert!(stopped.stopped);
+    assert!(
+        saved
+            .tasks
+            .notifications
+            .iter()
+            .any(|notice| notice.message_id == stopped.notice_message_id)
+    );
     assert_eq!(nested_output.closes.load(Ordering::SeqCst), 1);
     let trace = h.factory.trace.values();
     let nested_end = trace

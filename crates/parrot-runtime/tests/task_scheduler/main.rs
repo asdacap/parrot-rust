@@ -10,6 +10,8 @@ mod limits;
 mod notifications;
 mod owner_validation;
 mod prompts;
+mod receipts;
+mod recovery;
 mod retained;
 mod retries;
 mod settlement;
