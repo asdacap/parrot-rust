@@ -1364,6 +1364,19 @@ where
                 .map_err(|error| LifecycleError::Failed(error.to_string()))
         })
     }
+    fn find_execution_input(
+        &self,
+        message_id: String,
+    ) -> BoxFuture<'_, Result<Option<parrot_storage::events::AdmittedInput>, LifecycleError>> {
+        Box::pin(async move {
+            self.history
+                .repository()
+                .events()
+                .find_input(self.identity.session_id.clone(), message_id)
+                .await
+                .map_err(|error| LifecycleError::Failed(error.to_string()))
+        })
+    }
     fn publish_admission<'a>(
         &'a self,
         admission: &'a Admission,
@@ -1376,6 +1389,14 @@ where
                     .map_err(|e| e.lifecycle_error())?;
             }
             Ok(())
+        })
+    }
+    fn has_recovery_work(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+        Box::pin(async move {
+            if self.state.lock().await.conversation.is_answerable() {
+                return Ok(true);
+            }
+            self.has_pending_inputs().await
         })
     }
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {

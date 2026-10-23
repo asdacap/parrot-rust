@@ -9,6 +9,8 @@ mod cancellation;
 mod claim_regressions;
 #[path = "owned_claims.rs"]
 mod claims;
+#[path = "startup_activation.rs"]
+mod startup;
 
 impl Fixture {
     async fn recovery_store(&self) -> Arc<dyn AgentStateStore> {

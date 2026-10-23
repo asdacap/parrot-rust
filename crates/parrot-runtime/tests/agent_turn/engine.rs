@@ -306,7 +306,12 @@ impl Fixture {
         .await
         .unwrap();
         let session = match overrides.state {
-            Some(store) => AgentSession::with_state(backend, lifetime, store),
+            Some(store) => match overrides.activation {
+                Some(activation) => {
+                    AgentSession::with_startup_activation(backend, lifetime, store, activation)
+                }
+                None => AgentSession::with_state(backend, lifetime, store),
+            },
             None => AgentSession::new(backend, lifetime),
         };
         Runtime {
@@ -324,6 +329,7 @@ impl Drop for Fixture {
 }
 #[derive(Default)]
 struct RuntimeOverrides {
+    activation: Option<Arc<parrot_runtime::agent_turn::lifecycle::StartupActivation>>,
     prompt: Option<Box<dyn SystemPrompt>>,
     status: Option<Arc<dyn TurnStatus<Security>>>,
     state: Option<Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>>,

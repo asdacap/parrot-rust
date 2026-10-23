@@ -24,14 +24,90 @@ impl<B: DrainBackend> AgentSession<B> {
         }
     }
 
-    pub(super) async fn begin_execution(
+    pub(super) async fn prepare_execution(
         &self,
         parts: &[ConversationPart],
         message_id: &str,
-    ) -> Result<(), LifecycleError> {
+    ) -> Result<ExecutionPreparation, LifecycleError> {
         let _gate = self.inner.checkpoint_gate.lock().await;
+        if self.inner.recovery.is_some() {
+            let checkpoint = self.execution_checkpoint().await?;
+            if checkpoint
+                .as_ref()
+                .is_some_and(|saved| saved.result_claim.is_some())
+            {
+                return Err(LifecycleError::Failed(
+                    "previous task result is still claimed".into(),
+                ));
+            }
+            let existing = self
+                .inner
+                .backend
+                .find_execution_input(message_id.to_owned())
+                .await?;
+            if let Some(input) = &existing {
+                if input.parts != parts || input.delivery != Delivery::DELIVERY_STEER {
+                    return Err(LifecycleError::Failed(format!(
+                        "message {message_id} was already admitted with different content"
+                    )));
+                }
+            }
+            if let Some(saved) = &checkpoint {
+                if saved.initial_message_id == message_id {
+                    let original_parts: Vec<_> = saved
+                        .initial_parts
+                        .iter()
+                        .map(|part| match part {
+                            ExecutionInputPart::Text { text } => ConversationPart::text(text),
+                            ExecutionInputPart::ImageArtifact {
+                                artifact_id,
+                                media_type,
+                                display_name,
+                            } => ConversationPart::ImageArtifact {
+                                artifact_id: artifact_id.clone(),
+                                media_type: media_type.clone(),
+                                display_name: display_name.clone(),
+                            },
+                        })
+                        .collect();
+                    if original_parts != parts {
+                        return Err(LifecycleError::Failed(format!(
+                            "message {message_id} was already admitted with different content"
+                        )));
+                    }
+                    if let Some(terminal) = &saved.terminal {
+                        if let Some(input) = existing {
+                            let outcome =
+                                bounded(self.inner.backend.restore_execution(terminal).await?);
+                            return Ok(ExecutionPreparation::Duplicate(
+                                Box::new(Admission {
+                                    input,
+                                    published: None,
+                                }),
+                                Some(outcome),
+                            ));
+                        }
+                    } else {
+                        return Ok(ExecutionPreparation::Resume);
+                    }
+                }
+                if saved.terminal.is_none() {
+                    return Err(LifecycleError::Failed("previous execution is unfinished; recover it before admitting another execution".into()));
+                }
+            }
+            if let Some(input) = existing {
+                return Ok(ExecutionPreparation::Duplicate(
+                    Box::new(Admission {
+                        input,
+                        published: None,
+                    }),
+                    None,
+                ));
+            }
+        }
         self.begin_execution_locked(parts, message_id, ExecutionOwnership::Unclaimed)
-            .await
+            .await?;
+        Ok(ExecutionPreparation::New)
     }
 
     pub(super) async fn begin_execution_locked(
@@ -256,6 +332,13 @@ impl<B: DrainBackend> AgentSession<B> {
     /// Reconstructs the retained public execution without submitting a new turn
     /// prompt. All scopes must be registered before composition activates it.
     pub fn recover_owned(&self) -> Result<ExecutionHandle, LifecycleError> {
+        Ok(self.recover_owned_reserved()?.execution)
+    }
+
+    /// Reserves recovery and exposes readiness independently of provider completion.
+    /// For saved terminals readiness follows exact result restoration; execution still
+    /// joins parent delivery. Composition joins terminal/absent executions before activation.
+    pub fn recover_owned_reserved(&self) -> Result<ClaimedExecutionHandle, LifecycleError> {
         self.start_owned_recovery(RecoveryRequest::Resume)
     }
 
@@ -266,15 +349,17 @@ impl<B: DrainBackend> AgentSession<B> {
         &self,
         expected_initial_message_id: &str,
     ) -> Result<ExecutionHandle, LifecycleError> {
-        self.start_owned_recovery(RecoveryRequest::Cancel(
-            expected_initial_message_id.to_owned(),
-        ))
+        Ok(self
+            .start_owned_recovery(RecoveryRequest::Cancel(
+                expected_initial_message_id.to_owned(),
+            ))?
+            .execution)
     }
 
     fn start_owned_recovery(
         &self,
         request: RecoveryRequest,
-    ) -> Result<ExecutionHandle, LifecycleError> {
+    ) -> Result<ClaimedExecutionHandle, LifecycleError> {
         if self.inner.recovery.is_none() {
             return Err(LifecycleError::Failed(
                 "owned recovery requires an agent state store".into(),
@@ -288,7 +373,7 @@ impl<B: DrainBackend> AgentSession<B> {
         &self,
         state: &mut State<B>,
         caller: Arc<dyn Cancellation>,
-    ) -> Result<ExecutionHandle, LifecycleError> {
+    ) -> Result<ClaimedExecutionHandle, LifecycleError> {
         self.start_owned_recovery_locked(state, RecoveryRequest::ResumeClaimed(caller))
     }
 
@@ -296,7 +381,7 @@ impl<B: DrainBackend> AgentSession<B> {
         &self,
         state: &mut State<B>,
         request: RecoveryRequest,
-    ) -> Result<ExecutionHandle, LifecycleError> {
+    ) -> Result<ClaimedExecutionHandle, LifecycleError> {
         self.accepting(state)?;
         if matches!(&request, RecoveryRequest::Cancel(_))
             && ((state.started && !state.execution.is_finished()) || !state.tail.is_finished())
@@ -306,7 +391,10 @@ impl<B: DrainBackend> AgentSession<B> {
             ));
         }
         if state.started && !state.execution.is_finished() {
-            return Ok(state.execution.clone());
+            return Ok(ClaimedExecutionHandle {
+                execution: state.execution.clone(),
+                reservation: state.execution_reservation.clone(),
+            });
         }
         if state.drain.is_some() {
             return Err(LifecycleError::Failed(
@@ -319,6 +407,11 @@ impl<B: DrainBackend> AgentSession<B> {
             completion: completion.clone(),
         };
         state.execution = handle.clone();
+        let reserved = Completion::new();
+        let reservation = OperationHandle {
+            completion: reserved.clone(),
+        };
+        state.execution_reservation = reservation.clone();
         let claim_ready = Completion::new();
         state.execution_claim = claim_ready.clone();
         let stop = Arc::new(Signal::new());
@@ -345,18 +438,22 @@ impl<B: DrainBackend> AgentSession<B> {
                     session.cancel_checkpoint_input(&expected).await?;
                 }
                 session
-                    .resume_checkpoint(owned.clone(), selected.clone())
+                    .resume_checkpoint(owned.clone(), selected.clone(), reserved.clone())
                     .await
             }
             .await;
             if let Err(error) = &result {
                 claim_ready.finish(Err(error.clone()));
+                reserved.finish(Err(error.clone()));
             }
             owned.startup.finish(Ok(false));
             let _ = selected.join().await;
             completion.finish(result);
         });
-        Ok(handle)
+        Ok(ClaimedExecutionHandle {
+            execution: handle,
+            reservation,
+        })
     }
 
     async fn cancel_checkpoint_input(
@@ -387,10 +484,11 @@ impl<B: DrainBackend> AgentSession<B> {
         Ok(())
     }
 
-    async fn resume_checkpoint(
+    pub(super) async fn resume_checkpoint(
         &self,
         owned: Arc<OwnedReservation>,
         selected: ExecutionHandle,
+        reserved: Arc<Completion<Result<(), LifecycleError>>>,
     ) -> Result<Execution, LifecycleError> {
         let saved = self.execution_checkpoint().await?;
         self.inner
@@ -403,10 +501,12 @@ impl<B: DrainBackend> AgentSession<B> {
                 .and_then(|checkpoint| checkpoint.result_claim.clone())));
         let Some(checkpoint) = saved else {
             self.inner.state.lock().expect("session poisoned").started = false;
+            reserved.finish(Ok(()));
             return Ok(Execution::succeeded(""));
         };
         if let Some(terminal) = &checkpoint.terminal {
             let execution = bounded(self.inner.backend.restore_execution(terminal).await?);
+            reserved.finish(Ok(()));
             if checkpoint
                 .parent_notification
                 .as_ref()
@@ -460,9 +560,11 @@ impl<B: DrainBackend> AgentSession<B> {
             let mut execution = Execution::canceled();
             self.finish_durable_execution(&mut execution, ExecutionResultReference::Missing)
                 .await?;
+            reserved.finish(Ok(()));
             return Ok(execution);
         }
         if self.inner.suspending.load(Ordering::Acquire) {
+            reserved.finish(Err(shutting_down()));
             return Ok(Execution::canceled());
         }
         let parts = checkpoint
@@ -501,6 +603,11 @@ impl<B: DrainBackend> AgentSession<B> {
             .publish_admission(&admission, &Signal::new())
             .await?;
         owned.startup.finish(Ok(active));
+        reserved.finish(if self.inner.suspending.load(Ordering::Acquire) {
+            Err(shutting_down())
+        } else {
+            Ok(())
+        });
         let execution = self
             .finish_execution(selected.join().await, owned.capture_result_reference())
             .await;

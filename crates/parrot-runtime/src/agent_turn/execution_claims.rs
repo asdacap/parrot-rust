@@ -19,16 +19,21 @@ impl<B: DrainBackend> AgentSession<B> {
         activity: Option<IncomingActivity>,
     ) -> (bool, ExecutionHandle) {
         let mut state = self.inner.state.lock().expect("session poisoned");
-        if self.inner.recovery.is_none() || state.drain.is_some() {
+        if self.inner.activation.is_active()
+            && (self.inner.recovery.is_none() || state.drain.is_some())
+        {
             return self.wake_locked(&mut state, activity, None);
         }
         let completion = Completion::new();
         let handle = OperationHandle {
             completion: completion.clone(),
         };
+        state.pending_wakes.retain(|wake| !wake.is_finished());
+        state.pending_wakes.push(handle.clone());
         let session = self.clone();
         spawn_tracked(&mut state, async move {
             let prepared = async {
+                session.inner.activation.wait().await;
                 let gate = session.inner.checkpoint_gate.lock().await;
                 session.check_unclaimed_admission().await?;
                 let selected = {
@@ -147,8 +152,8 @@ impl<B: DrainBackend> AgentSession<B> {
                     };
                     drop(gate);
                     if let Some(restored) = restored {
-                        reserved.finish(Ok(()));
-                        return restored.join().await;
+                        reserved.finish(restored.reservation.join().await);
+                        return restored.execution.join().await;
                     }
                     if let Some((active, ready, stop)) = active {
                         let actual_claim = tokio::select! {
@@ -205,6 +210,9 @@ impl<B: DrainBackend> AgentSession<B> {
                     completion: completion.clone(),
                 };
                 state.execution_claim = Completion::ready(Ok(Some(claim.clone())));
+                state.execution_reservation = OperationHandle {
+                    completion: reserved.clone(),
+                };
                 let stop = Arc::new(Signal::new());
                 state.execution_stop = Some(stop.clone());
                 let owned = Arc::new(OwnedReservation {
@@ -331,6 +339,16 @@ impl<B: DrainBackend> AgentSession<B> {
                     .update(AgentStateUpdate::Execution(Some(current)))
                     .await
                     .map_err(recovery::storage_error)?;
+            }
+            drop(_gate);
+            if self.inner.backend.has_pending_inputs().await? {
+                let accepting = {
+                    let state = self.inner.state.lock().expect("session poisoned");
+                    !self.inner.suspending.load(Ordering::Acquire) && self.accepting(&state).is_ok()
+                };
+                if accepting {
+                    self.wake(None);
+                }
             }
             Ok(())
         })

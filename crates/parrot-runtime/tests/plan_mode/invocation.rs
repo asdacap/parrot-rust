@@ -52,12 +52,21 @@ impl DrainBackend for Consumer {
             })
         })
     }
+    fn find_execution_input(
+        &self,
+        _: String,
+    ) -> BoxFuture<'_, Result<Option<AdmittedInput>, LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
     fn publish_admission<'a>(
         &'a self,
         _: &'a Admission,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async { Ok(()) })
+    }
+    fn has_recovery_work(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+        self.has_pending_inputs()
     }
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
         Box::pin(async { Ok(*self.pending.lock().unwrap()) })
@@ -93,7 +102,7 @@ impl DrainBackend for Consumer {
         &'a self,
         _: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
-    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+    ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
             *self.pending.lock().unwrap() = false;
             let selected = self.selected.lock().unwrap().clone().unwrap();
@@ -105,7 +114,10 @@ impl DrainBackend for Consumer {
             // A selected fixture snapshot authorizes the actual target before
             // the fixture's mutation callback. No raw policy is substituted.
             if let Err(error) = selected.security.check_write(&self.target) {
-                return Ok(Execution::failed(error));
+                return Ok(DrainPass {
+                    execution: Execution::failed(error),
+                    result_reference: ExecutionResultReference::Missing,
+                });
             }
             self.expected.trace.lock().unwrap().push("mutate".into());
             std::fs::create_dir_all(self.target.parent().unwrap()).unwrap();
@@ -113,7 +125,10 @@ impl DrainBackend for Consumer {
             self.pass_entered.notify_one();
             work.join_mutations().await?;
             self.expected.trace.lock().unwrap().push("joined".into());
-            Ok(Execution::succeeded("done"))
+            Ok(DrainPass {
+                execution: Execution::succeeded("done"),
+                result_reference: ExecutionResultReference::Missing,
+            })
         })
     }
     fn prepare_scheduled<'a>(
@@ -130,6 +145,40 @@ impl DrainBackend for Consumer {
         _: &'a Execution,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async { Ok(()) })
+    }
+    fn execution_started_correlated(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
+    fn execution_finished_correlated<'a>(
+        &'a self,
+        _: &'a Execution,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
+    fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
+    fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
+    fn restore_execution<'a>(
+        &'a self,
+        _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
+    ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
+    fn capture_execution<'a>(
+        &'a self,
+        _: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
+        _: &'a mut Execution,
+        _: ExecutionResultReference,
+    ) -> BoxFuture<'a, Result<parrot_domain::values::agent_state::ExecutionTerminal, LifecycleError>>
+    {
+        panic!("fixture does not use durable owned execution")
+    }
+    fn suspend_execution(&self) {
+        panic!("fixture does not use durable owned execution")
     }
     fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {
         Box::pin(async { Ok(()) })

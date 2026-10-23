@@ -185,6 +185,12 @@ impl DrainBackend for FakeBackend {
         })
     }
 
+    fn find_execution_input(
+        &self,
+        _: String,
+    ) -> BoxFuture<'_, Result<Option<AdmittedInput>, LifecycleError>> {
+        panic!("fixture does not use durable owned execution")
+    }
     fn publish_admission<'a>(
         &'a self,
         _admission: &'a Admission,
@@ -200,6 +206,9 @@ impl DrainBackend for FakeBackend {
         })
     }
 
+    fn has_recovery_work(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
+        self.has_pending_inputs()
+    }
     fn has_pending_inputs(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
         Box::pin(async move {
             let control = self.pending_control.lock().unwrap().take();
