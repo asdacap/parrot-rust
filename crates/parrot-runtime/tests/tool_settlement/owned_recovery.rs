@@ -87,6 +87,7 @@ async fn owned_recovery_restores_settled_tool_and_invokes_only_unresolved_call()
         },
     );
     snapshot.execution = Some(ExecutionCheckpoint {
+        result_claim: None,
         execution_id: "owned-tool-execution".into(),
         initial_message_id: "original-input".into(),
         initial_parts: vec![ExecutionInputPart::Text {

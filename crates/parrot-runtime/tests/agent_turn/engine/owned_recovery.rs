@@ -3,6 +3,11 @@ use parrot_domain::{contracts::agent_state::AgentStateStore, values::agent_state
 use parrot_foundation::paths::AgentScratchDirectory;
 use parrot_storage::agent_state::FileAgentStateStore;
 
+#[path = "owned_cancellation.rs"]
+mod cancellation;
+#[path = "owned_claims.rs"]
+mod claims;
+
 impl Fixture {
     async fn recovery_store(&self) -> Arc<dyn AgentStateStore> {
         let directory = self.path.join("agent-state");
@@ -335,6 +340,7 @@ async fn intent_before_admission_recovers_once_and_existing_admission_is_not_dup
         let store = fixture.recovery_store().await;
         store
             .update(AgentStateUpdate::Execution(Some(ExecutionCheckpoint {
+                result_claim: None,
                 execution_id: "intent-execution".into(),
                 initial_message_id: "intent-message".into(),
                 initial_parts: vec![ExecutionInputPart::Text {
@@ -791,6 +797,7 @@ async fn recovery_reservation_preserves_interrupt_or_suspension_during_snapshot_
         let store = fixture.recovery_store().await;
         store
             .update(AgentStateUpdate::Execution(Some(ExecutionCheckpoint {
+                result_claim: None,
                 execution_id: "reserved-execution".into(),
                 initial_message_id: "reserved-message".into(),
                 initial_parts: vec![ExecutionInputPart::Text {
@@ -1018,6 +1025,7 @@ async fn canceled_intent_clears_only_its_exact_admitted_input() {
     let store = fixture.recovery_store().await;
     store
         .update(AgentStateUpdate::Execution(Some(ExecutionCheckpoint {
+            result_claim: None,
             execution_id: "cancel-intent".into(),
             initial_message_id: "cancel-original".into(),
             initial_parts: vec![ExecutionInputPart::Text {
@@ -1392,6 +1400,7 @@ async fn success_without_a_captured_assistant_reference_fails_before_snapshot_co
         )
         .await;
     let checkpoint = ExecutionCheckpoint {
+        result_claim: None,
         execution_id: "missing-result".into(),
         initial_message_id: "missing-result-input".into(),
         initial_parts: vec![ExecutionInputPart::Text {

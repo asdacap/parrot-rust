@@ -1,6 +1,11 @@
 use super::*;
 use parrot_domain::values::identifiers::Identifier;
 
+enum RecoveryRequest {
+    Resume,
+    Cancel(String),
+}
+
 impl<B: DrainBackend> AgentSession<B> {
     pub(super) async fn execution_checkpoint(
         &self,
@@ -23,11 +28,26 @@ impl<B: DrainBackend> AgentSession<B> {
         parts: &[ConversationPart],
         message_id: &str,
     ) -> Result<(), LifecycleError> {
+        let _gate = self.inner.checkpoint_gate.lock().await;
+        self.begin_execution_locked(parts, message_id, ExecutionOwnership::Unclaimed)
+            .await
+    }
+
+    pub(super) async fn begin_execution_locked(
+        &self,
+        parts: &[ConversationPart],
+        message_id: &str,
+        ownership: ExecutionOwnership,
+    ) -> Result<(), LifecycleError> {
         let Some(store) = &self.inner.recovery else {
             return Ok(());
         };
-        let _gate = self.inner.checkpoint_gate.lock().await;
         if let Some(mut previous) = self.execution_checkpoint().await? {
+            if previous.result_claim.is_some() {
+                return Err(LifecycleError::Failed(
+                    "previous task result is still claimed".into(),
+                ));
+            }
             if previous.terminal.is_none() {
                 return Err(LifecycleError::Failed("previous execution is unfinished; recover it before admitting another execution".into()));
             }
@@ -56,6 +76,10 @@ impl<B: DrainBackend> AgentSession<B> {
         let execution_id =
             Identifier::event_id().map_err(|error| LifecycleError::Failed(error.to_string()))?;
         let checkpoint = ExecutionCheckpoint {
+            result_claim: match ownership {
+                ExecutionOwnership::Unclaimed => None,
+                ExecutionOwnership::Claimed(claim) => Some(claim),
+            },
             parent_notification: Some(NotificationCheckpoint {
                 message_id: format!("{execution_id}.parent"),
                 admitted: false,
@@ -231,13 +255,54 @@ impl<B: DrainBackend> AgentSession<B> {
     /// Reconstructs the retained public execution without submitting a new turn
     /// prompt. All scopes must be registered before composition activates it.
     pub fn recover_owned(&self) -> Result<ExecutionHandle, LifecycleError> {
+        self.start_owned_recovery(RecoveryRequest::Resume)
+    }
+
+    /// Cancels only the saved unfinished execution with this input identity.
+    /// Startup is reserved before snapshot I/O; this agent's provider is never activated.
+    /// Terminal results and parent completion delivery retain ordinary recovery behavior.
+    pub fn cancel_recovered_execution(
+        &self,
+        expected_initial_message_id: &str,
+    ) -> Result<ExecutionHandle, LifecycleError> {
+        self.start_owned_recovery(RecoveryRequest::Cancel(
+            expected_initial_message_id.to_owned(),
+        ))
+    }
+
+    fn start_owned_recovery(
+        &self,
+        request: RecoveryRequest,
+    ) -> Result<ExecutionHandle, LifecycleError> {
         if self.inner.recovery.is_none() {
             return Err(LifecycleError::Failed(
                 "owned recovery requires an agent state store".into(),
             ));
         }
         let mut state = self.inner.state.lock().expect("session poisoned");
-        self.accepting(&state)?;
+        self.start_owned_recovery_locked(&mut state, request)
+    }
+
+    pub(super) fn recover_owned_locked(
+        &self,
+        state: &mut State<B>,
+    ) -> Result<ExecutionHandle, LifecycleError> {
+        self.start_owned_recovery_locked(state, RecoveryRequest::Resume)
+    }
+
+    fn start_owned_recovery_locked(
+        &self,
+        state: &mut State<B>,
+        request: RecoveryRequest,
+    ) -> Result<ExecutionHandle, LifecycleError> {
+        self.accepting(state)?;
+        if matches!(&request, RecoveryRequest::Cancel(_))
+            && ((state.started && !state.execution.is_finished()) || !state.tail.is_finished())
+        {
+            return Err(LifecycleError::Failed(
+                "cannot cancel recovered execution while an execution is active".into(),
+            ));
+        }
         if state.started && !state.execution.is_finished() {
             return Ok(state.execution.clone());
         }
@@ -252,18 +317,29 @@ impl<B: DrainBackend> AgentSession<B> {
             completion: completion.clone(),
         };
         state.execution = handle.clone();
+        let claim_ready = Completion::new();
+        state.execution_claim = claim_ready.clone();
         let owned = Arc::new(OwnedReservation {
             admission: Mutex::new(None),
             cancellation: Arc::new(Signal::new()),
             startup: Completion::new(),
             result_reference: Mutex::new(ExecutionResultReference::Missing),
         });
-        let selected = self.wake_locked(&mut state, None, Some(owned.clone())).1;
+        let selected = self.wake_locked(state, None, Some(owned.clone())).1;
         let session = self.clone();
-        spawn_tracked(&mut state, async move {
-            let result = session
-                .resume_checkpoint(owned.clone(), selected.clone())
-                .await;
+        spawn_tracked(state, async move {
+            let result = async {
+                if let RecoveryRequest::Cancel(expected) = request {
+                    session.cancel_checkpoint_input(&expected).await?;
+                }
+                session
+                    .resume_checkpoint(owned.clone(), selected.clone())
+                    .await
+            }
+            .await;
+            if let Err(error) = &result {
+                claim_ready.finish(Err(error.clone()));
+            }
             owned.startup.finish(Ok(false));
             let _ = selected.join().await;
             completion.finish(result);
@@ -271,12 +347,49 @@ impl<B: DrainBackend> AgentSession<B> {
         Ok(handle)
     }
 
+    async fn cancel_checkpoint_input(
+        &self,
+        expected_initial_message_id: &str,
+    ) -> Result<(), LifecycleError> {
+        let _gate = self.inner.checkpoint_gate.lock().await;
+        let Some(mut checkpoint) = self.execution_checkpoint().await? else {
+            return Ok(());
+        };
+        if checkpoint.terminal.is_some() {
+            return Ok(());
+        }
+        if checkpoint.initial_message_id != expected_initial_message_id {
+            return Err(LifecycleError::Failed(
+                "saved unfinished execution does not match the input requested for cancellation"
+                    .into(),
+            ));
+        }
+        checkpoint.phase = ExecutionPhase::Canceled;
+        self.inner
+            .recovery
+            .as_ref()
+            .expect("recovery store")
+            .update(AgentStateUpdate::Execution(Some(checkpoint)))
+            .await
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
     async fn resume_checkpoint(
         &self,
         owned: Arc<OwnedReservation>,
         selected: ExecutionHandle,
     ) -> Result<Execution, LifecycleError> {
-        let Some(mut checkpoint) = self.execution_checkpoint().await? else {
+        let saved = self.execution_checkpoint().await?;
+        self.inner
+            .state
+            .lock()
+            .expect("session poisoned")
+            .execution_claim
+            .finish(Ok(saved
+                .as_ref()
+                .and_then(|checkpoint| checkpoint.result_claim.clone())));
+        let Some(mut checkpoint) = saved else {
             self.inner.state.lock().expect("session poisoned").started = false;
             return Ok(Execution::succeeded(""));
         };
@@ -364,6 +477,8 @@ impl<B: DrainBackend> AgentSession<B> {
     }
 }
 
-fn storage_error(error: parrot_domain::contracts::agent_state::AgentStateError) -> LifecycleError {
+pub(super) fn storage_error(
+    error: parrot_domain::contracts::agent_state::AgentStateError,
+) -> LifecycleError {
     LifecycleError::Failed(error.to_string())
 }

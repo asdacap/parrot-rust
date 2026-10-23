@@ -133,6 +133,7 @@ fn snapshot() -> AgentStateSnapshot {
     snapshot.tasks.entries[0].task.payload =
         TaskPayload::Tasks(vec![task(ExecutionStatus::Succeeded)]);
     snapshot.execution = Some(ExecutionCheckpoint {
+        result_claim: None,
         execution_id: "execution-1".into(),
         initial_message_id: "prompt-1".into(),
         initial_parts: vec![ExecutionInputPart::Text {

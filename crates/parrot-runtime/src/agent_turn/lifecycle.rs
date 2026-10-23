@@ -1,5 +1,7 @@
 //! Session-owned single-drain orchestration. Persistence and the actual turn live in the backend.
 
+#[path = "execution_claims.rs"]
+mod claims;
 #[path = "execution_recovery.rs"]
 mod recovery;
 
@@ -14,7 +16,7 @@ use parrot_domain::{
     },
     values::agent_state::{
         AgentStateUpdate, ExecutionCheckpoint, ExecutionInputPart, ExecutionPhase,
-        ExecutionTerminal, NotificationCheckpoint,
+        ExecutionTerminal, NotificationCheckpoint, TaskResponseReference, TaskResultClaim,
     },
 };
 use parrot_storage::events::{Admission, ConversationPart};
@@ -285,6 +287,18 @@ impl<T: Clone> OperationHandle<T> {
     }
 }
 pub type ExecutionHandle = OperationHandle<Execution>;
+
+/// A task execution and the separate proof that its actual drain is reserved.
+pub struct ClaimedExecutionHandle {
+    pub execution: ExecutionHandle,
+    pub reservation: OperationHandle<()>,
+}
+impl ClaimedExecutionHandle {
+    pub async fn join(&self) -> Result<Execution, LifecycleError> {
+        self.execution.join().await
+    }
+}
+
 pub type AdmissionCallback = Arc<dyn Fn(&Admission) + Send + Sync>;
 
 struct MutationCompletion<T: Clone> {
@@ -342,6 +356,11 @@ struct WorkRequest<B: DrainBackend> {
     cancellation: Arc<dyn Cancellation>,
     completion: Arc<Completion<Result<(), LifecycleError>>>,
 }
+enum ExecutionOwnership {
+    Unclaimed,
+    Claimed(TaskResultClaim),
+}
+
 struct OwnedReservation {
     admission: Mutex<Option<Admission>>,
     cancellation: Arc<dyn Cancellation>,
@@ -375,6 +394,7 @@ struct State<B: DrainBackend> {
     last_drain: ExecutionHandle,
     started: bool,
     execution: ExecutionHandle,
+    execution_claim: Arc<Completion<Result<Option<TaskResultClaim>, LifecycleError>>>,
     tail: Arc<Completion<()>>,
     incoming: Option<IncomingWait>,
     scheduled: VecDeque<WorkRequest<B>>,
@@ -520,6 +540,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     last_drain: initial.clone(),
                     started: false,
                     execution: initial,
+                    execution_claim: Completion::ready(Ok(None)),
                     tail: Completion::ready(()),
                     incoming: None,
                     scheduled: VecDeque::new(),
@@ -599,7 +620,7 @@ impl<B: DrainBackend> AgentSession<B> {
                 let start = tokio::select! {
                     _ = predecessor.join() => {
                         match session.execution_checkpoint().await {
-                            Ok(Some(checkpoint)) if checkpoint.terminal.is_some() => Ok(true),
+                            Ok(Some(checkpoint)) if checkpoint.terminal.is_some() && checkpoint.result_claim.is_none() => Ok(true),
                             Ok(_) => Err(LifecycleError::Failed("previous execution has no durable terminal; recover it before starting more work".into())),
                             Err(error) => Err(error),
                         }
@@ -645,8 +666,7 @@ impl<B: DrainBackend> AgentSession<B> {
         (true, execution)
     }
     pub fn wake(&self, activity: Option<IncomingActivity>) -> (bool, ExecutionHandle) {
-        let mut state = self.inner.state.lock().expect("session poisoned");
-        self.wake_locked(&mut state, activity, None)
+        self.wake_unclaimed(activity)
     }
     pub fn recover(&self) -> ExecutionHandle {
         self.wake(None).1
@@ -679,10 +699,7 @@ impl<B: DrainBackend> AgentSession<B> {
         };
         let incoming =
             (admission.created() || pending.as_ref().copied().unwrap_or(false)).then_some(activity);
-        let (follow_up, execution) = {
-            let mut state = self.inner.state.lock().expect("session poisoned");
-            self.wake_locked(&mut state, incoming, None)
-        };
+        let (follow_up, execution) = self.wake(incoming);
         published?;
         pending?;
         Ok(SendResult {
@@ -802,6 +819,7 @@ impl<B: DrainBackend> AgentSession<B> {
             state.execution = OperationHandle {
                 completion: completed.clone(),
             };
+            state.execution_claim = Completion::ready(Ok(None));
             let reservation = self.inner.recovery.as_ref().map(|_| {
                 let owned = Arc::new(OwnedReservation {
                     admission: Mutex::new(None),
@@ -1026,6 +1044,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     state.execution = OperationHandle {
                         completion: completion.clone(),
                     };
+                    state.execution_claim = Completion::ready(Ok(None));
                     // Reserve the slot before the first asynchronous durable
                     // admission. Raw wakes must reuse this startup-gated drain,
                     // not create an unowned drain while the actor commits.
@@ -1090,6 +1109,17 @@ impl<B: DrainBackend> AgentSession<B> {
             let _ = selected.join().await;
             return Err(error);
         }
+        self.execute_prepared_owned(parts, message_id, admitted, owned, selected)
+            .await
+    }
+    async fn execute_prepared_owned(
+        &self,
+        parts: Vec<ConversationPart>,
+        message_id: String,
+        admitted: Option<AdmissionCallback>,
+        owned: Arc<OwnedReservation>,
+        selected: ExecutionHandle,
+    ) -> Result<Execution, LifecycleError> {
         let admission = match self
             .inner
             .backend
@@ -1288,7 +1318,8 @@ impl<B: DrainBackend> AgentSession<B> {
             cancellation: caller,
             completion,
         });
-        self.wake_locked(&mut state, None, None);
+        drop(state);
+        self.wake(None);
         Ok(handle)
     }
 
@@ -1367,9 +1398,14 @@ impl<B: DrainBackend> AgentSession<B> {
             let joined = join_task(&join).await;
             let pending = session.inner.backend.has_pending_inputs().await;
             if pending.as_ref().copied().unwrap_or(false) {
-                let mut state = session.inner.state.lock().expect("session poisoned");
-                if !state.disposing {
-                    session.wake_locked(&mut state, Some(IncomingActivity::default()), None);
+                let accepting = !session
+                    .inner
+                    .state
+                    .lock()
+                    .expect("session poisoned")
+                    .disposing;
+                if accepting {
+                    session.wake(Some(IncomingActivity::default()));
                 }
             }
             completion.finish(recorded.and(result).and(joined).and(pending.map(|_| ())));

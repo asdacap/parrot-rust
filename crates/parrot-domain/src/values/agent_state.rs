@@ -133,6 +133,23 @@ pub struct ExecutionCheckpoint {
     pub phase: ExecutionPhase,
     pub terminal: Option<ExecutionTerminal>,
     pub parent_notification: Option<NotificationCheckpoint>,
+    pub result_claim: Option<TaskResultClaim>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskResultClaim {
+    pub owner_session_id: String,
+    pub claim_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskResponseReference {
+    pub worker_session_id: String,
+    pub initial_message_id: String,
+    pub execution_id: String,
+    pub terminal: ExecutionTerminal,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
