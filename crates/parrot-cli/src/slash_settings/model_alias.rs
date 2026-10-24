@@ -111,12 +111,12 @@ impl ModelAliasCommand {
                 &alias.name,
                 format!(
                     "{}; {}",
-                    alias.usage,
                     if alias.model_string.is_empty() {
                         "not configured"
                     } else {
                         &alias.model_string
-                    }
+                    },
+                    alias.usage
                 ),
             )
         }));

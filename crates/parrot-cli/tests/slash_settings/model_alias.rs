@@ -77,7 +77,7 @@ async fn wizard_configures_only_alias_with_explicit_effort() {
     assert_eq!(first[0].id, "/provider-defaults");
     assert_eq!(first[0].label, "Use provider defaults");
     assert_eq!(first[0].description, "Configure all four model aliases");
-    assert_eq!(first[1].description, "General purpose; not configured");
+    assert_eq!(first[1].description, "not configured; General purpose");
     assert_eq!(
         dialog
             .pickers
@@ -121,7 +121,7 @@ async fn wizard_uses_current_target_detail_and_ordinal_alias_order() {
     assert_eq!(dialog.pickers[0].1[1].id, "low_llm");
     assert_eq!(
         dialog.pickers[0].1[1].description,
-        "Routine work; provider/old/low"
+        "provider/old/low; Routine work"
     );
 }
 
