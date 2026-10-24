@@ -17,8 +17,16 @@ pub fn legacy(root: &Path) -> Connection {
         )
         .unwrap();
     let events: &[(&str, &str, &[u8])] = &[
-        ("agent-start", "agent", include_bytes!("fixtures/agent-start.pb")),
-        ("child-start", "child", include_bytes!("fixtures/child-start.pb")),
+        (
+            "agent-start",
+            "agent",
+            include_bytes!("fixtures/agent-start.pb"),
+        ),
+        (
+            "child-start",
+            "child",
+            include_bytes!("fixtures/child-start.pb"),
+        ),
         (
             "child-restart",
             "child",

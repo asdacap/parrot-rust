@@ -8,9 +8,13 @@ use std::error::Error;
 
 #[tokio::test]
 async fn all_twelve_list_origins_follow_the_exact_root_finite_diagnostic_contract() {
-    let inputs: Value = serde_json::from_str(include_str!("../routing/fixtures/catalog-origin-v1/inputs.json"))
+    let inputs: Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/catalog-origin-v1/inputs.json"
+    ))
     .unwrap();
-    let source: Value = serde_json::from_str(include_str!("../routing/fixtures/catalog-origin-v1/catalog.expected.json"))
+    let source: Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/catalog-origin-v1/catalog.expected.json"
+    ))
     .unwrap();
     let original: Value = serde_json::from_str(include_str!("fixtures/inputs.json")).unwrap();
     let template = &original["cases"]

@@ -1201,6 +1201,7 @@ mod tests {
 
     #[tokio::test]
     async fn browser_login_pkce_callback_and_listener_cleanup_on_cancel_timeout_drop() {
+        let _guard = super::super::BROWSER_CALLBACK_TEST_LOCK.lock().await;
         let (url, server) = issuer(vec![(200, token_response())]).await;
         let browser = Arc::new(FakeBrowser::new());
         let client = Arc::new(OpenAiOAuthClient::new(

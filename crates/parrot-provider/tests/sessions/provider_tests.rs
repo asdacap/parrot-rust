@@ -1331,7 +1331,9 @@ async fn already_cancelled_aware_key_observes_cancellation_for_direct_and_statel
 }
 
 fn compatible_catalog_input(case_id: &str) -> serde_json::Value {
-    let inputs: serde_json::Value = serde_json::from_str(include_str!("../routing/fixtures/compatible-catalog-origin-v1/inputs.json"))
+    let inputs: serde_json::Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/compatible-catalog-origin-v1/inputs.json"
+    ))
     .unwrap();
     inputs["cases"]
         .as_array()

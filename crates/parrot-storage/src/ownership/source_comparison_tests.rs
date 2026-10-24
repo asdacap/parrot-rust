@@ -59,7 +59,10 @@ fn assert_admission(
     assert_eq!(actual.session_id.as_ref().unwrap().value(), id);
     assert_eq!(actual.activation_lease.is_some(), generation.is_some());
     assert_eq!(
-        actual.activation_lease.as_ref().map(|lease| lease.generation),
+        actual
+            .activation_lease
+            .as_ref()
+            .map(|lease| lease.generation),
         generation
     );
     let intent = actual.intent.as_ref().unwrap();
@@ -138,7 +141,10 @@ fn nullable_legacy_and_schema2_serialization_preserve_wire_format() {
         super::claim::serialize_owner(&active).unwrap(),
         schema2.as_bytes()
     );
-    assert_eq!(serde_json::from_str::<OwnerRecord>(schema2).unwrap(), active);
+    assert_eq!(
+        serde_json::from_str::<OwnerRecord>(schema2).unwrap(),
+        active
+    );
 }
 
 #[test]
@@ -161,7 +167,13 @@ fn legacy_recovery_requires_process_evidence_even_when_boot_identity_differs() {
         for (recorded_start, status, observed_start, disposition, generation) in [
             (Some("old-start"), Missing, None, Resumed, Some(1)),
             (Some("old-start"), Found, Some("old-start"), Live, None),
-            (Some("old-start"), Found, Some("new-start"), Resumed, Some(1)),
+            (
+                Some("old-start"),
+                Found,
+                Some("new-start"),
+                Resumed,
+                Some(1),
+            ),
             (Some("old-start"), Unreadable, None, Live, None),
             (Some("old-start"), Found, None, Live, None),
             (Some("old-start"), Found, Some(""), Live, None),
@@ -235,7 +247,9 @@ fn fresh_release_is_idempotent_and_inactive_resume_advances_generation() {
         OpenOperation::CreateFresh,
     );
     let activation = state.0.join("owners/activations").join(id.value());
-    let active = WorkingDirectoryClaim::current(&activation).unwrap().unwrap();
+    let active = WorkingDirectoryClaim::current(&activation)
+        .unwrap()
+        .unwrap();
     let lease = fresh.activation_lease.as_ref().unwrap();
     let expected_active = OwnerRecord {
         schema_version: Some(2),
@@ -260,7 +274,8 @@ fn fresh_release_is_idempotent_and_inactive_resume_advances_generation() {
         .join("owners/workspaces")
         .join(WorkingDirectoryClaim::fingerprint(WORKSPACE))
         .join(format!("{}.json", id.value()));
-    let association: OwnerRecord = serde_json::from_slice(&fs::read(associations).unwrap()).unwrap();
+    let association: OwnerRecord =
+        serde_json::from_slice(&fs::read(associations).unwrap()).unwrap();
     assert_eq!(
         association,
         OwnerRecord {
@@ -275,7 +290,10 @@ fn fresh_release_is_idempotent_and_inactive_resume_advances_generation() {
     lease.release().unwrap();
     let inactive_bytes = fs::read(activation.join("v2.json")).unwrap();
     lease.release().unwrap();
-    assert_eq!(fs::read(activation.join("v2.json")).unwrap(), inactive_bytes);
+    assert_eq!(
+        fs::read(activation.join("v2.json")).unwrap(),
+        inactive_bytes
+    );
     assert!(!activation.join("v3.json").exists());
     let mut inactive = expected_active;
     inactive.version = Some(2);
@@ -292,7 +310,9 @@ fn fresh_release_is_idempotent_and_inactive_resume_advances_generation() {
         Some(2),
         OpenOperation::Resume,
     );
-    let head = WorkingDirectoryClaim::current(&activation).unwrap().unwrap();
+    let head = WorkingDirectoryClaim::current(&activation)
+        .unwrap()
+        .unwrap();
     assert_eq!(head.version, Some(3));
     assert_eq!(head.generation, Some(2));
     assert_eq!(head.state.as_deref(), Some("Active"));
@@ -322,7 +342,10 @@ fn active_owner_blocks_default_open_and_explicit_takeover() {
     }
     let activation = state.0.join("owners/activations").join(id.value());
     assert_eq!(
-        WorkingDirectoryClaim::current(&activation).unwrap().unwrap().version,
+        WorkingDirectoryClaim::current(&activation)
+            .unwrap()
+            .unwrap()
+            .version,
         Some(1)
     );
     assert!(!activation.join("v2.json").exists());
@@ -356,15 +379,31 @@ fn pid_reuse_recovers_ownership_and_stale_release_cannot_fence_the_successor() {
     owner.activation_lease.as_ref().unwrap().release().unwrap();
     assert_eq!(fs::read(activation.join("v2.json")).unwrap(), before);
     assert!(!activation.join("v3.json").exists());
-    let head = WorkingDirectoryClaim::current(&activation).unwrap().unwrap();
+    let head = WorkingDirectoryClaim::current(&activation)
+        .unwrap()
+        .unwrap();
     assert_eq!(head.generation, Some(2));
     assert_eq!(head.state.as_deref(), Some("Active"));
     assert_eq!(
         head.lease_id.as_deref(),
-        Some(successor.activation_lease.as_ref().unwrap().lease_id.as_str())
+        Some(
+            successor
+                .activation_lease
+                .as_ref()
+                .unwrap()
+                .lease_id
+                .as_str()
+        )
     );
-    successor.activation_lease.as_ref().unwrap().release().unwrap();
-    let head = WorkingDirectoryClaim::current(&activation).unwrap().unwrap();
+    successor
+        .activation_lease
+        .as_ref()
+        .unwrap()
+        .release()
+        .unwrap();
+    let head = WorkingDirectoryClaim::current(&activation)
+        .unwrap()
+        .unwrap();
     assert_eq!(head.version, Some(3));
     assert_eq!(head.generation, Some(2));
     assert_eq!(head.state.as_deref(), Some("Inactive"));

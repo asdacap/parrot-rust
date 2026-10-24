@@ -13,8 +13,6 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-
-
 struct Fixture {
     _temp: TempRoot,
     paths: StatePaths,

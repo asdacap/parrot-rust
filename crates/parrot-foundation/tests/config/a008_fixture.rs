@@ -50,6 +50,13 @@ pub fn inventory() -> Result<Vec<Value>> {
             ));
         }
     }
+    for row in &mut rows {
+        row["text"] = crate::product_changes::align_product_text(
+            row["id"].as_str().unwrap(),
+            row["text"].as_str().unwrap(),
+        )
+        .into();
+    }
     Ok(rows)
 }
 

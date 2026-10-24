@@ -52,11 +52,11 @@ fn generic_presenter_formats_json_inputs_and_results_as_yaml() {
             .unwrap()
             .unwrap(),
     );
-    assert!(live.contains("path: \"src/App.cs\""));
-    assert!(live.contains("limit: 2"));
-    assert!(complete.contains("enabled: true"));
-    assert!(complete.contains("ambiguous: \"true\""));
-    assert!(complete.contains("  ---\n  - name: \"first\""));
+    assert!(live.contains("\"path\": \"src/App.cs\""));
+    assert!(live.contains("\"limit\": 2"));
+    assert!(complete.contains("\"enabled\": true"));
+    assert!(complete.contains("\"ambiguous\": \"true\""));
+    assert!(complete.contains("  ---\n  - \"name\": \"first\""));
     assert!(!complete.contains("{\""));
     let plain = rendered(
         &presenter

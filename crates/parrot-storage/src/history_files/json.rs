@@ -164,6 +164,20 @@ impl<F: Formatter> Formatter for DotNetJsonFormatter<F> {
     delegate_layout!(begin_object_value);
     delegate_layout!(end_object_value);
 
+    fn write_number_str<W>(&mut self, writer: &mut W, value: &str) -> io::Result<()>
+    where
+        W: ?Sized + io::Write,
+    {
+        if value.contains(['.', 'e', 'E']) {
+            let value = value
+                .parse::<f64>()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            self.write_f64(writer, value)
+        } else {
+            self.0.write_number_str(writer, value)
+        }
+    }
+
     fn write_f64<W>(&mut self, writer: &mut W, value: f64) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -268,8 +282,7 @@ mod tests {
     use super::*;
     use crate::conversation::{AgentHistoryEntry, ConversationPart, ToolCall};
 
-    const BOUNDARY_BYTES: &str =
-        include_str!("../../tests/history_files/fixtures/escaping.txt");
+    const BOUNDARY_BYTES: &str = include_str!("../../tests/history_files/fixtures/escaping.txt");
 
     #[test]
     fn metadata_and_history_escape_boundaries_match_system_text_json_bytes() {
@@ -326,6 +339,15 @@ mod tests {
                 .write_f64(&mut actual, value)
                 .unwrap();
             assert_eq!(actual, expected.as_bytes(), "value {value}");
+            let mut serialized = Vec::new();
+            Number::from_f64(value)
+                .unwrap()
+                .serialize(&mut serde_json::Serializer::with_formatter(
+                    &mut serialized,
+                    DotNetJsonFormatter(CompactFormatter),
+                ))
+                .unwrap();
+            assert_eq!(serialized, expected.as_bytes(), "number {value}");
         }
         let entry = AgentHistoryEntry::Request {
             sequence: 3,
@@ -383,7 +405,9 @@ mod tests {
                 tool_calls: 2,
             },
         ];
-        let evidence: Value = serde_json::from_str(include_str!("../../tests/history_files/fixtures/format-cases.json"))
+        let evidence: Value = serde_json::from_str(include_str!(
+            "../../tests/history_files/fixtures/format-cases.json"
+        ))
         .unwrap();
         let oracle = evidence;
         let expected = oracle["observations"]

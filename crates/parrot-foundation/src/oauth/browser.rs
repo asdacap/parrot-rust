@@ -190,6 +190,7 @@ mod tests {
     #[test]
     fn default_launcher_returns_before_exit_and_reaps_synthetic_child() {
         use std::os::unix::fs::PermissionsExt;
+        let _guard = super::super::BROWSER_CALLBACK_TEST_LOCK.blocking_lock();
         let directory = std::env::current_dir().unwrap().join(".tmp").join(format!(
             "oauth-browser-reap-{}-{}",
             std::process::id(),

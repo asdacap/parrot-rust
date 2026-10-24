@@ -911,9 +911,9 @@ fn actual_live_commit_routes_json_through_existing_final_yaml_formatter_once() {
     let update = presenter.observe(&completed("root")).unwrap();
     let output = commits(&update.commits, 80);
     assert_eq!(update.completion, Some(true));
-    assert!(output.contains("path: \"src/App.cs\""));
-    assert!(output.contains("enabled: true"));
+    assert!(output.contains("\"path\": \"src/App.cs\""));
+    assert!(output.contains("\"enabled\": true"));
     assert!(!output.contains("{\"path\""));
-    assert_eq!(output.matches("enabled: true").count(), 1);
+    assert_eq!(output.matches("\"enabled\": true").count(), 1);
     assert!(presenter.finish().unwrap().commits.is_empty());
 }

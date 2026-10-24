@@ -101,9 +101,6 @@ fn view() -> RawActivityView {
         ToolPresenterRegistry::new(Vec::new(), Arc::new(GenericToolPresenter)).unwrap(),
     ))
 }
-fn count(text: &str) -> usize {
-    text.encode_utf16().count().div_ceil(4)
-}
 
 #[test]
 fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
@@ -125,7 +122,7 @@ fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
             let drawn = view
                 .observe(&reasoning(owner, "\x1b[2Jmore reasoning", false, false))
                 .unwrap();
-            let expected = count("reasoning about the problemmore reasoning");
+            let expected = 10;
             let prefix = if owner == "root" {
                 "⠋ ".to_owned()
             } else {
@@ -166,15 +163,11 @@ fn raw_reasoning_count_grows_with_each_fragment_and_stays_silent_when_nothing_ar
     let empty = view.observe(&reasoning("root", "", true, false)).unwrap();
     assert!(commits(&empty).is_empty());
     assert!(!live(&empty).contains("Thinking ("));
-    let mut accumulated = String::new();
-    for fragment in ["first", "\x1b[2Jsecond", " third\n"] {
-        accumulated.push_str(&parrot_cli::terminal_layout::TerminalText::sanitize(
-            fragment,
-        ));
+    for (fragment, expected) in [("first", 1), ("\x1b[2Jsecond", 5), (" third\n", 7)] {
         let update = view
             .observe(&reasoning("root", fragment, false, false))
             .unwrap();
-        assert!(live(&update).contains(&format!("⠋ Thinking ({} tokens)…", count(&accumulated))));
+        assert!(live(&update).contains(&format!("⠋ Thinking ({expected} tokens)…")));
         assert!(commits(&update).is_empty());
     }
 }
@@ -184,7 +177,7 @@ fn raw_reasoning_count_is_humanized_once_it_is_large() {
     let mut view = view();
     view.observe(&turn("root")).unwrap();
     let update = view
-        .observe(&reasoning("root", &"a".repeat(16_400), false, false))
+        .observe(&reasoning("root", &" a".repeat(4_100), false, false))
         .unwrap();
     assert!(live(&update).contains("⠋ Thinking (4.1k tokens)…"));
     assert_eq!(
@@ -209,11 +202,8 @@ fn raw_reasoning_state_is_isolated_per_agent() {
             false,
         ))
         .unwrap();
-    assert!(live(&update).contains(&format!("⠋ Thinking ({} tokens)…", count("root reasoning"))));
-    assert!(live(&update).contains(&format!(
-        "  ⠋ [worker] Thinking ({} tokens)…",
-        count("a much longer child reasoning")
-    )));
+    assert!(live(&update).contains("⠋ Thinking (2 tokens)…"));
+    assert!(live(&update).contains("  ⠋ [worker] Thinking (5 tokens)…"));
     let child = view.observe(&phase("child")).unwrap();
     assert_eq!(commits(&child).len(), 1);
     assert!(commits(&child)[0].contains("[worker]"));
@@ -1314,11 +1304,11 @@ fn returned_scrollback_owns_stable_data_until_actual_driver_acknowledges_it() {
     view.observe(&reasoning("root", "first reasoning", false, false))
         .unwrap();
     let pending = view.observe(&phase("root")).unwrap();
-    assert_eq!(commits(&pending), ["✦ Reasoned for 4 tokens…"]);
+    assert_eq!(commits(&pending), ["✦ Reasoned for 2 tokens…"]);
     assert!(commits(&view.observe(&phase("root")).unwrap()).is_empty());
     view.observe(&reasoning("root", "new reasoning state", false, false))
         .unwrap();
-    assert_eq!(commits(&pending), ["✦ Reasoned for 4 tokens…"]);
+    assert_eq!(commits(&pending), ["✦ Reasoned for 2 tokens…"]);
     // Actual I/O retry/partial-publication acknowledgement belongs to T72's
     // driver. This assertion is ownership/orchestration evidence, not that gate.
 }

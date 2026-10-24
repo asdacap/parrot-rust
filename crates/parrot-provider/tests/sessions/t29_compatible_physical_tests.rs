@@ -2,8 +2,8 @@ use super::projection_tests::projection;
 use serde_json::{Value, json};
 
 async fn assert_physical(index: usize, response_bytes: Option<&[u64]>) {
-    let mut input: Value = serde_json::from_str(include_str!("fixtures/t29-compatible-physical-inputs.json"))
-    .unwrap();
+    let mut input: Value =
+        serde_json::from_str(include_str!("fixtures/t29-compatible-physical-inputs.json")).unwrap();
     let case = input["cases"][index].clone();
     let behavior = case["behavior"].as_str().unwrap().to_owned();
     input["cases"] = json!([case]);

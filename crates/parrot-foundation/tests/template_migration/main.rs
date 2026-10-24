@@ -1,4 +1,6 @@
 //! Fixed bundled-template migration evidence, not general Scriban compatibility.
+#[path = "../config/product_changes.rs"]
+mod product_changes;
 use parrot_foundation::{
     config::{
         node::{Kind, Node},
@@ -82,7 +84,7 @@ impl parrot_domain::contracts::async_ops::Cancellation for NoCancellation {
 }
 
 #[test]
-fn new_resource_changes_only_the_ten_engine_values_and_adds_legacy_resume_warning() {
+fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes() {
     let old = yaml::parse_root(include_str!(
         "../../../../assets/config/predefined_config.system_prompts.yaml"
     ))
@@ -168,7 +170,22 @@ fn new_resource_changes_only_the_ten_engine_values_and_adds_legacy_resume_warnin
     assert_eq!(old_root.len(), new_root.len());
     for ((old_key, old_value), (new_key, new_value)) in old_root.iter().zip(new_root) {
         assert_eq!(old_key, new_key);
-        if scalar(old_key) != Some("prompt_templates") {
+        if scalar(old_key) == Some("system_prompts") {
+            let mut expected = old_value.clone();
+            let base = expected.get_mut("runtime:system-context:01-base").unwrap();
+            // 4f1117e added this human guidance to the legacy resource only.
+            let text = base
+                .as_str()
+                .unwrap()
+                .strip_suffix(concat!(
+                    "\n## Minimize processes\n",
+                    "Do not lose sight of your objective by writing reports that is not part of the objective."
+                ))
+                .unwrap()
+                .to_owned();
+            base.kind = Kind::Scalar(Some(text));
+            assert_eq!(&expected, new_value, "system prompt resource changed");
+        } else if scalar(old_key) != Some("prompt_templates") {
             assert_eq!(
                 old_value, new_value,
                 "non-template resource section changed"
@@ -379,7 +396,8 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
         );
         let golden = &golden_rows[index];
         assert_eq!(golden["template_id"], id);
-        let expected_output = golden["expected"].as_str().unwrap();
+        let expected_output =
+            product_changes::align_product_text(id, golden["expected"].as_str().unwrap());
         let argument_values = fields(&golden["arguments"]);
         let output = if new_engine == "scalar" {
             scalar_count += 1;

@@ -259,7 +259,6 @@ async fn observe(root: PathBuf) -> Value {
     result
 }
 
-
 #[tokio::test]
 async fn malformed_request_projection_suppresses_decode_failure_and_recovers_cursors() {
     let root = std::env::temp_dir().join(format!(

@@ -171,7 +171,9 @@ mod tests {
             "provider",
             "provider/model",
         );
-        let evidence: serde_json::Value = serde_json::from_str(include_str!("../../tests/history_files/fixtures/format-cases.json"))
+        let evidence: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/history_files/fixtures/format-cases.json"
+        ))
         .unwrap();
         let oracle = evidence;
         let expected = oracle["observations"]

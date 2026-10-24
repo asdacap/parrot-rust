@@ -603,7 +603,14 @@ mod unicode_tests {
 
     #[test]
     fn ordinal_uppercase_preserves_simple_case_and_character_width() {
-        for (lower, upper) in [('é', 'É'), ('σ', 'Σ'), ('ς', 'Σ'), ('я', 'Я'), ('ᾀ', 'ᾈ'), ('𐐨', '𐐀')] {
+        for (lower, upper) in [
+            ('é', 'É'),
+            ('σ', 'Σ'),
+            ('ς', 'Σ'),
+            ('я', 'Я'),
+            ('ᾀ', 'ᾈ'),
+            ('𐐨', '𐐀'),
+        ] {
             assert_eq!(ordinal_uppercase(lower), upper);
             assert_eq!(ordinal_uppercase(upper), upper);
             assert_eq!(lower.len_utf16(), upper.len_utf16());

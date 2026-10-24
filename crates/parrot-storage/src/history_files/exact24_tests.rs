@@ -15,7 +15,7 @@ use parrot_domain::protocol::messages::parrot::{
 };
 use parrot_domain::values::identifiers::UserSessionId;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -420,7 +420,7 @@ async fn delegated24_request_round_trip_null_effort() {
 async fn delegated24_request_round_trip_high_effort() {
     request_round_trip(Some("high"), ".2.1.0").await;
 }
-async fn request_round_trip(effort: Option<&str>, parameter: &str) {
+async fn request_round_trip(effort: Option<&str>, _parameter: &str) {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     let mut main = event("main-request", "main");

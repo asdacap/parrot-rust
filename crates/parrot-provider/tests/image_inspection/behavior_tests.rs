@@ -38,7 +38,8 @@ fn source_image_format_and_truncation_cases() {
 
 #[test]
 fn source_image_token_cost_cases() {
-    let oracle: Value = serde_json::from_str(include_str!("fixtures/oracle/expected.json")).unwrap();
+    let oracle: Value =
+        serde_json::from_str(include_str!("fixtures/oracle/expected.json")).unwrap();
     let rows: Vec<_> = oracle["cases"]
         .as_array()
         .unwrap()
@@ -127,4 +128,3 @@ fn source_budget_cases_reuse_domain_implementation() {
     }
     assert!(ToolCycleImageBudget::new(10).try_accept(-1).is_err());
 }
-

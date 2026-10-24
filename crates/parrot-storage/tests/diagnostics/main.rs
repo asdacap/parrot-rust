@@ -134,7 +134,6 @@ fn session_records_are_bounded_escaped_correlated_and_appended() {
     assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
 }
 
-
 #[test]
 fn timestamps_keep_utc_offsets_seven_fraction_digits_and_gregorian_dates() {
     let directory = TempDirectory::new("timestamp");

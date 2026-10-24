@@ -344,6 +344,8 @@ async fn actual_remote_invalid_variant_remains_usage_before_session_creation() {
     assert!(matches!(actual, Ok(dispatch::EXIT_USAGE)), "{actual:?}");
     assert!(calls.lock().unwrap().created.is_empty());
     assert!(calls.lock().unwrap().messages.is_empty());
+    drop(server);
+    drop(app);
     std::fs::remove_dir_all(socket_root).unwrap();
     std::fs::remove_dir_all(base).unwrap();
 }

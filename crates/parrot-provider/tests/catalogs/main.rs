@@ -348,9 +348,13 @@ fn standard_decoder_dedupes_and_defaults_name() {
 
 #[test]
 fn standard_decoder_typed_errors_match_archived_t32_source_contrasts() {
-    let inputs: serde_json::Value = serde_json::from_str(include_str!("../routing/fixtures/catalog-origin-v1/inputs.json"))
+    let inputs: serde_json::Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/catalog-origin-v1/inputs.json"
+    ))
     .unwrap();
-    let source: serde_json::Value = serde_json::from_str(include_str!("../routing/fixtures/catalog-origin-v1/catalog.expected.json"))
+    let source: serde_json::Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/catalog-origin-v1/catalog.expected.json"
+    ))
     .unwrap();
     let source_cases = source["cases"].as_array().unwrap();
 

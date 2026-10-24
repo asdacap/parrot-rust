@@ -5,7 +5,9 @@
 //! Fuel bounds instructions, not time or memory. Without output, cancellation can
 //! only be observed after native evaluation completes or exhausts its fuel.
 use crate::config::{ConfigError, Result};
-use minijinja::{AutoEscape, Environment, UndefinedBehavior, syntax::SyntaxConfig, value::Serde};
+use minijinja::{
+    AutoEscape, Environment, UndefinedBehavior, syntax::SyntaxConfig, value::Value as NativeValue,
+};
 use parrot_domain::contracts::async_ops::{Cancellation, OperationError, OperationResult};
 use serde_json::{Map, Value};
 use std::io::{self, Write};
@@ -69,7 +71,14 @@ impl MiniJinjaPromptTemplateEngine {
         cancellation
             .check()
             .map_err(|_| OperationError::Cancelled)?;
-        let context: minijinja::value::Value = Serde(arguments).into();
+        let context = arguments
+            .iter()
+            .map(|(name, value)| {
+                self.convert_value(value)
+                    .map(|value| (name.as_str(), value))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(NativeValue::from_pairs);
         let mut writer = CancellationWriter {
             cancellation,
             output: Vec::new(),
@@ -78,6 +87,7 @@ impl MiniJinjaPromptTemplateEngine {
         cancellation
             .check()
             .map_err(|_| OperationError::Cancelled)?;
+        let context = context.map_err(OperationError::Failed)?;
         let rendered = self
             .environment
             .get_template(&self.name)
@@ -95,6 +105,46 @@ impl MiniJinjaPromptTemplateEngine {
         })?;
         String::from_utf8(writer.output).map_err(|error| {
             OperationError::Failed(ConfigError::invalid_data(format!("{}: {error}", self.name)))
+        })
+    }
+
+    fn convert_value(&self, value: &Value) -> Result<NativeValue> {
+        Ok(match value {
+            Value::Null => NativeValue::from(()),
+            Value::Bool(value) => NativeValue::from(*value),
+            Value::String(value) => NativeValue::from(value.as_str()),
+            Value::Number(value) => {
+                // Generic Serde exposes arbitrary-precision numbers as private structs.
+                if let Some(value) = value.as_u64() {
+                    NativeValue::from(value)
+                } else if let Some(value) = value.as_i64() {
+                    NativeValue::from(value)
+                } else if let Some(value) = value.as_u128() {
+                    NativeValue::from(value)
+                } else if let Some(value) = value.as_i128() {
+                    NativeValue::from(value)
+                } else {
+                    NativeValue::from(value.as_f64().ok_or_else(|| {
+                        ConfigError::invalid_data(format!(
+                            "{}: JSON number is outside the native numeric range",
+                            self.name
+                        ))
+                    })?)
+                }
+            }
+            Value::Array(values) => values
+                .iter()
+                .map(|value| self.convert_value(value))
+                .collect::<Result<NativeValue>>()?,
+            Value::Object(values) => NativeValue::from_pairs(
+                values
+                    .iter()
+                    .map(|(name, value)| {
+                        self.convert_value(value)
+                            .map(|value| (name.as_str(), value))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            ),
         })
     }
 }

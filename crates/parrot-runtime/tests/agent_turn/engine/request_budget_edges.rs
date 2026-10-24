@@ -206,25 +206,26 @@ async fn global_default_disables_profile_request_budget_but_explicit_false_resto
         let runtime = EdgeRuntime::with_limits(&fixture, &provider, 2, "settled", limits).await;
         let execution = runtime.execute().await;
         let events = fixture.events().await;
-        let requests = provider.requests.lock().unwrap();
-        if disable_max_turns {
-            assert_eq!(execution.status, ExecutionStatus::Succeeded);
-            assert_eq!(execution.output, "done beyond profile budget");
-            assert_eq!(requests.len(), 3);
-            assert!(
-                requests
-                    .iter()
-                    .all(|request| request.tools.iter().any(|tool| tool.name == "settled"))
-            );
-            assert!(!events.iter().any(|event| event.has_turn_failed()));
-            assert!(events.iter().any(|event| event.has_turn_ended()));
-        } else {
-            assert_eq!(execution.status, ExecutionStatus::Failed);
-            assert_eq!(requests.len(), 2);
-            assert!(requests[1].tools.is_empty());
-            assert_runaway(&events);
+        {
+            let requests = provider.requests.lock().unwrap();
+            if disable_max_turns {
+                assert_eq!(execution.status, ExecutionStatus::Succeeded);
+                assert_eq!(execution.output, "done beyond profile budget");
+                assert_eq!(requests.len(), 3);
+                assert!(
+                    requests
+                        .iter()
+                        .all(|request| request.tools.iter().any(|tool| tool.name == "settled"))
+                );
+                assert!(!events.iter().any(|event| event.has_turn_failed()));
+                assert!(events.iter().any(|event| event.has_turn_ended()));
+            } else {
+                assert_eq!(execution.status, ExecutionStatus::Failed);
+                assert_eq!(requests.len(), 2);
+                assert!(requests[1].tools.is_empty());
+                assert_runaway(&events);
+            }
         }
-        drop(requests);
         runtime.close().await;
     }
 }
