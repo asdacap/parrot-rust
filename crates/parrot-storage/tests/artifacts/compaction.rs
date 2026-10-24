@@ -7,8 +7,6 @@
 #[path = "../../src/artifacts/compaction.rs"]
 mod implementation;
 
-
-
 use implementation::{
     CompactionContent, CompactionErrorKind, CompactionGroup, CompactionGroupBlobStore,
     CompactionMessage, CompactionToolCall,
@@ -56,7 +54,7 @@ struct Directory {
 impl Directory {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let container = std::env::current_dir().unwrap().join(".tmp").join(format!(
+        let container = std::env::temp_dir().join(format!(
             "t20-compaction-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)

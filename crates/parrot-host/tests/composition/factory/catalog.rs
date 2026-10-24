@@ -1425,15 +1425,15 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
             .collect::<Vec<_>>(),
         parrot_tools::catalog::BUILTIN_NAMES
     );
-    assert_eq!(first.tools.len(), 30);
-    assert_eq!(first.supported.iter().filter(|value| **value).count(), 29);
+    assert_eq!(first.tools.len(), 31);
+    assert_eq!(first.supported.iter().filter(|value| **value).count(), 30);
     for (index, (left, right)) in first.tools.iter().zip(&second.tools).enumerate() {
         match (left, right) {
             (ToolHandle::Ordinary(left), ToolHandle::Ordinary(right)) => {
                 assert!(Arc::ptr_eq(left, right))
             }
             (ToolHandle::Borrowed(left), ToolHandle::Borrowed(right)) => {
-                assert!(matches!(index, 23 | 24));
+                assert!(matches!(index, 24 | 25));
                 assert!(Arc::ptr_eq(left, right));
             }
             _ => panic!("materialization changed handle kind"),
@@ -1447,8 +1447,8 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
             *adapter.catalog().factories()[index].definition()
         );
     }
-    assert!(matches!(first.tools[23], ToolHandle::Borrowed(_)));
     assert!(matches!(first.tools[24], ToolHandle::Borrowed(_)));
+    assert!(matches!(first.tools[25], ToolHandle::Borrowed(_)));
     let snapshot = ToolSnapshot::document(first).unwrap();
     assert!(snapshot.find("request_write_permission").is_none());
     assert_eq!(

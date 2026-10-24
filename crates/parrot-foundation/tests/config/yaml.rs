@@ -250,6 +250,36 @@ fn compose_recursively_merges_arbitrary_mappings_in_resource_order() {
 }
 
 #[test]
+fn compose_merges_disjoint_section_fields_and_duplicate_empty_mappings() {
+    let text = compose(&[
+        (
+            "first.yaml",
+            Some("prompt_templates: {shared: {template: first}, empty: {}}\ntools: {empty: {}}"),
+        ),
+        (
+            "second.yaml",
+            Some("prompt_templates: {shared: {allowed_arguments: []}, empty: {}}\ntools: {empty: {}}"),
+        ),
+    ])
+    .unwrap();
+    assert_eq!(
+        text,
+        "prompt_templates: {shared: {template: first, allowed_arguments: []}, empty: {}}\ntools: {empty: {}}\n...\n"
+    );
+}
+
+#[test]
+fn compose_leaves_section_schema_validation_to_configuration() {
+    for section in ["prompt_templates", "system_prompts", "tools"] {
+        let content = format!("{section}: []");
+        assert_eq!(
+            compose(&[("source.yaml", Some(&content))]).unwrap(),
+            format!("{content}\n...\n")
+        );
+    }
+}
+
+#[test]
 fn compose_invalid_sources_report_resource_and_reason() {
     for (content, reason) in [
         ("model: [", "invalid predefined configuration YAML"),
@@ -477,8 +507,30 @@ fn mutable_shared_sequences_preserve_identity_and_preceding_edits() {
     );
 }
 
+const OBSOLETE_COMPOSER_CASES: [&str; 6] = [
+    "compose-duplicate-2",
+    "compose-duplicate-3",
+    "compose-invalid-5",
+    "compose-invalid-6",
+    "compose-invalid-7",
+    "compose-shipped",
+];
+
 #[test]
 fn independent_dotnet_emitter_and_composer_fixtures_match_exact_bytes() {
+    assert_source_emitter_and_composer_fixtures(|id| !OBSOLETE_COMPOSER_CASES.contains(&id), 22);
+}
+
+#[test]
+#[ignore = "abdaf0f changed section composition; later prompt changes obsolete live assets versus source bytes"]
+fn obsolete_dotnet_composer_fixtures_match_exact_bytes() {
+    assert_source_emitter_and_composer_fixtures(|id| OBSOLETE_COMPOSER_CASES.contains(&id), 6);
+}
+
+fn assert_source_emitter_and_composer_fixtures(
+    select_case: impl Fn(&str) -> bool,
+    expected_count: usize,
+) {
     let inputs: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/inputcases.json")).unwrap();
     let oracle: serde_json::Value =
@@ -486,6 +538,9 @@ fn independent_dotnet_emitter_and_composer_fixtures_match_exact_bytes() {
     let mut failures = Vec::new();
     let mut compared = 0;
     for input in inputs.as_array().unwrap() {
+        if !select_case(input["id"].as_str().unwrap()) {
+            continue;
+        }
         let kind = input["kind"].as_str().unwrap();
         let actual = match kind {
             "emit" => {
@@ -576,6 +631,9 @@ fn independent_dotnet_emitter_and_composer_fixtures_match_exact_bytes() {
             failures.push(format!("{}: first byte mismatch {} (actual {} vs source {} bytes)\nactual: {:?}\nsource: {:?}", input["id"], first, actual.len(), expected.len(), actual_excerpt, expected_excerpt));
         }
     }
-    assert!(compared >= 25, "fixture selection unexpectedly narrowed");
+    assert_eq!(
+        compared, expected_count,
+        "fixture selection unexpectedly changed"
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

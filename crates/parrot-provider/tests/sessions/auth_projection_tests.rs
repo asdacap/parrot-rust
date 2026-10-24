@@ -1,9 +1,13 @@
 use super::projection_tests::projection;
 
 fn public_input(predicate: impl Fn(&serde_json::Value) -> bool) -> String {
-    let inputs: serde_json::Value = serde_json::from_str(include_str!("../routing/fixtures/source/auth-cases-v1/inputs.json"))
+    let inputs: serde_json::Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/source/auth-cases-v1/inputs.json"
+    ))
     .unwrap();
-    let collaborators: serde_json::Value = serde_json::from_str(include_str!("../routing/fixtures/source/auth-cases-v1/collaborators.json"))
+    let collaborators: serde_json::Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/source/auth-cases-v1/collaborators.json"
+    ))
     .unwrap();
     let cases = inputs["cases"]
         .as_array()
@@ -133,9 +137,13 @@ async fn original_constructor_details_survive_direct_and_session_wrappers() {
 
 #[tokio::test(start_paused = true)]
 async fn explicit_public_counterpart_inputs_keep_their_distinct_contract_and_messages() {
-    let inputs: serde_json::Value = serde_json::from_str(include_str!("../routing/fixtures/source/auth-counterparts-v1/inputs.json"))
+    let inputs: serde_json::Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/source/auth-counterparts-v1/inputs.json"
+    ))
     .unwrap();
-    let collaborators: serde_json::Value = serde_json::from_str(include_str!("../routing/fixtures/source/auth-cases-v1/collaborators.json"))
+    let collaborators: serde_json::Value = serde_json::from_str(include_str!(
+        "../routing/fixtures/source/auth-cases-v1/collaborators.json"
+    ))
     .unwrap();
     let input = serde_json::json!({"contract":"t32-auth-counterparts-source-v1","cases":inputs["cases"],"collaborators":collaborators}).to_string();
     let output: serde_json::Value =

@@ -41,7 +41,7 @@ fn a008_scriban_is_rejected_with_manual_guide_and_user_yaml_is_not_rewritten() {
     let error = context.load().unwrap_err();
     assert_eq!(
         error.0,
-        "prompt_templates.custom.native.engine: Scriban is no longer supported; manually migrate the template to MiniJinja native syntax and set engine: minijinja"
+        "prompt_templates.custom.native.engine: Scriban is no longer supported; manually migrate the template to MiniJinja native syntax and set engine: minijinja (see docs/template-migration-guide.md)"
     );
     assert_eq!(context.saved(), content);
 }
@@ -66,7 +66,7 @@ fn a008_active_catalog_retains_source_descriptors_except_explicit_migrations() {
     );
     assert!(!expected.iter().any(|row| row["engine"] == "scriban"));
     let configuration = fixtures::fixture_configuration("").unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 98);
+    assert_eq!(configuration.prompt_templates.len(), 99);
     for id in fixtures::CONSOLIDATED_IDS {
         assert_eq!(configuration.prompt_templates[id].engine, "minijinja");
     }

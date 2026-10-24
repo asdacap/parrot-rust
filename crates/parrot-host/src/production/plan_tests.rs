@@ -301,18 +301,19 @@ async fn production_plan_requests_use_prepared_workflow_and_follow_live_mode_swi
         "# Approved plan\nImplement the requested change."
     );
     assert_eq!(plan_completed[0].task_declarations.len(), 1);
-    let requests = capture.requests.lock().unwrap();
-    let paths: BTreeSet<_> = requests
-        .iter()
-        .filter(|request| current_status(request).contains(PLAN_LABEL))
-        .map(|request| assert_plan_contract(request, &directory))
-        .collect();
-    assert_eq!(
-        paths.len(),
-        1,
-        "switching back to plan must retain its artifact pair"
-    );
-    drop(requests);
+    {
+        let requests = capture.requests.lock().unwrap();
+        let paths: BTreeSet<_> = requests
+            .iter()
+            .filter(|request| current_status(request).contains(PLAN_LABEL))
+            .map(|request| assert_plan_contract(request, &directory))
+            .collect();
+        assert_eq!(
+            paths.len(),
+            1,
+            "switching back to plan must retain its artifact pair"
+        );
+    }
     drop(stream);
     bounded(host.close()).await.unwrap();
     std::fs::remove_dir_all(&fixture.root).unwrap();

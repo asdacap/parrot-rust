@@ -1,4 +1,6 @@
 //! Catalog/config integration: original-source bytes plus explicitly mapped A008 boundaries.
+#[path = "../config/product_changes.rs"]
+mod product_changes;
 mod support;
 use parrot_domain::contracts::async_ops::OperationError;
 use parrot_foundation::{
@@ -106,7 +108,10 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
         );
         if original["engine"] == "scalar" {
             assert_eq!(spec.engine, "scalar");
-            assert_eq!(spec.text, original["text"].as_str().unwrap());
+            assert_eq!(
+                spec.text,
+                product_changes::align_product_text(id, original["text"].as_str().unwrap())
+            );
         } else {
             let mapped = migration["entries"]
                 .as_array()
@@ -135,7 +140,10 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
             .unwrap();
         assert_eq!(
             rendered,
-            row["expected"].as_str().unwrap(),
+            product_changes::align_product_text(
+                row["template_id"].as_str().unwrap(),
+                row["expected"].as_str().unwrap(),
+            ),
             "{}",
             row["case_id"]
         );
@@ -659,7 +667,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     let new = "prompt_templates:\n  custom.structured:\n    engine: minijinja\n    template: '{{ value }}'\n    allowed_arguments: [value]\n    required_arguments: [value]\n";
     std::fs::write(&path, new).unwrap();
     let (config, catalog) = PromptTemplateCatalog::load(&path, &predefined, &env).unwrap();
-    assert_eq!(config.prompt_templates.len(), 99);
+    assert_eq!(config.prompt_templates.len(), 100);
     assert_eq!(
         catalog
             .render(
@@ -690,7 +698,10 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
                     &CancelAt::never()
                 )
                 .unwrap(),
-            row["expected"].as_str().unwrap()
+            product_changes::align_product_text(
+                row["template_id"].as_str().unwrap(),
+                row["expected"].as_str().unwrap(),
+            )
         );
     }
     let active = source_predefined_content().unwrap();

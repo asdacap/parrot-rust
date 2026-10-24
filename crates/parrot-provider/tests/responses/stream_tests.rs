@@ -1,5 +1,6 @@
 use super::projection::observe_stream_async;
 use serde_json::{Value, json};
+use std::fmt::Write;
 
 #[test]
 fn stream_regressions_preserve_event_order_content_and_error_scope() {
@@ -32,10 +33,10 @@ fn stream_regressions_preserve_event_order_content_and_error_scope() {
 }
 
 fn observe_records(records: &[Value]) -> (Vec<Value>, Option<Value>) {
-    let sse: String = records
-        .iter()
-        .map(|record| format!("data: {record}\n\n"))
-        .collect();
+    let mut sse = String::new();
+    for record in records {
+        write!(sse, "data: {record}\n\n").unwrap();
+    }
     observe_stream_async(&json!({"sse": sse}))
 }
 
@@ -92,7 +93,8 @@ fn terminal_nonobjects_preserve_following_items_and_reasoning_order() {
     assert_eq!(events[0]["AssistantText"], "");
     assert_eq!(provider_output(&events[0]), json!([message]));
 
-    let reasoning = json!({"type":"reasoning", "encrypted_content":"cipher", "summary":[], "id":"r1"});
+    let reasoning =
+        json!({"type":"reasoning", "encrypted_content":"cipher", "summary":[], "id":"r1"});
     let without_id = json!({"type":"reasoning", "encrypted_content":"cipher", "summary":[]});
     for (records, expected_output) in [
         (
@@ -138,8 +140,14 @@ fn observe_error_body(body: &str) -> Value {
     let (events, exception) = observe_stream_async(&json!({"sse":format!("data: {body}\n\n")}));
     assert!(events.is_empty());
     let exception = exception.unwrap();
-    assert_eq!(exception["type"], "Parrot.Llm.Wire.ProviderResponseException");
-    assert_eq!(exception["message"], "Try later (server_error) [overloaded]");
+    assert_eq!(
+        exception["type"],
+        "Parrot.Llm.Wire.ProviderResponseException"
+    );
+    assert_eq!(
+        exception["message"],
+        "Try later (server_error) [overloaded]"
+    );
     assert_eq!(exception["error_type"], "server_error");
     assert_eq!(exception["error_code"], "overloaded");
     assert_eq!(exception["detail"], "Try later");
@@ -165,11 +173,17 @@ fn error_and_failed_bodies_preserve_the_byte_limit_and_utf8_boundaries() {
                 assert_eq!(retained.len(), 65_536);
                 assert!(retained.starts_with(prefix.as_str()));
                 assert!(retained.ends_with("\n… [truncated]"));
-                assert!(retained[prefix.len()..65_520].bytes().all(|byte| byte == b'A'));
+                assert!(
+                    retained[prefix.len()..65_520]
+                        .bytes()
+                        .all(|byte| byte == b'A')
+                );
             }
         }
 
-        for (rune_at, retained_bytes, rune_kept) in [(65_516, 65_536, true), (65_519, 65_535, false)] {
+        for (rune_at, retained_bytes, rune_kept) in
+            [(65_516, 65_536, true), (65_519, 65_535, false)]
+        {
             let prefix = error_body_prefix(failed);
             let body = format!(
                 "{prefix}{}😀{}\"}}",
@@ -222,4 +236,3 @@ fn malformed_item_json_still_reports_its_original_position() {
     assert_eq!(exception["line_number"], 0);
     assert_eq!(exception["byte_position_in_line"], 45);
 }
-

@@ -40,7 +40,10 @@ fn assert_current(bytes: &[u8], expected: Option<OwnerRecord>) {
     let fixture = Fixture::new();
     let path = fixture.0.join("v1.json");
     fs::write(&path, bytes).unwrap();
-    assert_eq!(WorkingDirectoryClaim::current(&fixture.0).unwrap(), expected);
+    assert_eq!(
+        WorkingDirectoryClaim::current(&fixture.0).unwrap(),
+        expected
+    );
     assert_eq!(fs::read(path).unwrap(), bytes);
 }
 
@@ -66,7 +69,10 @@ const ENCODINGS: [(u32, &[u8]); 5] = [
 ];
 
 fn encoded_record(code_page: u32, preamble: &[u8]) -> Vec<u8> {
-    let text = format!(r#"{},"UnicodeMarker":"é雪𝄞"}}"#, &RECORD[..RECORD.len() - 1]);
+    let text = format!(
+        r#"{},"UnicodeMarker":"é雪𝄞"}}"#,
+        &RECORD[..RECORD.len() - 1]
+    );
     let mut bytes = preamble.to_vec();
     match code_page {
         65001 => bytes.extend(text.as_bytes()),
@@ -173,7 +179,10 @@ fn duplicate_known_properties_validate_each_occurrence_and_keep_the_last() {
         ("ProcessId", None),
     ] {
         let literal = value.map_or_else(|| "null".to_owned(), |value| value.to_string());
-        let text = format!(r#"{},"{property}":{literal}}}"#, &RECORD[..RECORD.len() - 1]);
+        let text = format!(
+            r#"{},"{property}":{literal}}}"#,
+            &RECORD[..RECORD.len() - 1]
+        );
         let mut expected = expected_record();
         match property {
             "Version" => expected.version = value,

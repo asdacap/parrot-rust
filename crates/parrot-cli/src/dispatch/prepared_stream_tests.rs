@@ -81,6 +81,7 @@ struct Fixture {
     server: GrpcServer,
     connection: GrpcTransportClient,
     requests: Arc<Mutex<Vec<wire::ListenRequest>>>,
+    directory: PathBuf,
 }
 impl Fixture {
     async fn new(events: Vec<wire::Event>, keep_open: bool) -> Self {
@@ -89,9 +90,7 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         );
-        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join(".tmp/t65-prepared-stream")
-            .join(&instance);
+        let directory = PathBuf::from("/tmp").join(format!("t65-prepared-{instance}"));
         std::fs::create_dir_all(&directory).unwrap();
         let diagnostics = Arc::new(
             FileDiagnosticLog::open_global(directory.join("logs"), "prepared", |_| {}).unwrap(),
@@ -102,8 +101,7 @@ impl Fixture {
             keep_open,
             requests: requests.clone(),
         };
-        // Literal /tmp is the check driver's private bind, keeping sockaddr_un short.
-        let socket = PathBuf::from("/tmp").join(format!("t65-prepared-{instance}.sock"));
+        let socket = directory.join("grpc.sock");
         let server = GrpcServer::start(
             endpoint,
             TransportAddress::Unix(socket),
@@ -119,6 +117,7 @@ impl Fixture {
             server,
             connection,
             requests,
+            directory,
         }
     }
     fn client(&mut self) -> WebClient {
@@ -127,6 +126,9 @@ impl Fixture {
     async fn close(mut self) {
         self.connection.close();
         self.server.close().await.unwrap();
+        drop(self.connection);
+        drop(self.server);
+        std::fs::remove_dir_all(self.directory).unwrap();
     }
 }
 fn event(id: &str, payload: Payload) -> wire::Event {

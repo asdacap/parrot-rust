@@ -19,21 +19,30 @@ fn source_assertions() {
             "prompt_templates:\n  shared:\n    template: first",
             "prompt_templates.shared",
         ),
-        (
-            "prompt_templates:\n  shared:\n    template: first",
-            "prompt_templates:\n  shared:\n    allowed_arguments: []",
-            "prompt_templates.shared",
-        ),
     ] {
-        let error = yaml::compose(&[("first.yaml", Some(first)), ("second.yaml", Some(second))])
-            .unwrap_err();
-        for expected in [
-            "duplicate predefined configuration",
-            "first.yaml",
-            "second.yaml",
-            path,
-        ] {
-            assert!(error.0.contains(expected), "{} missing {expected}", error.0);
-        }
+        assert_conflict(first, second, path);
+    }
+}
+
+#[test]
+#[ignore = "abdaf0f intentionally merges disjoint fields within the same template id"]
+fn source_rejects_disjoint_template_fields() {
+    assert_conflict(
+        "prompt_templates:\n  shared:\n    template: first",
+        "prompt_templates:\n  shared:\n    allowed_arguments: []",
+        "prompt_templates.shared",
+    );
+}
+
+fn assert_conflict(first: &str, second: &str, path: &str) {
+    let error =
+        yaml::compose(&[("first.yaml", Some(first)), ("second.yaml", Some(second))]).unwrap_err();
+    for expected in [
+        "duplicate predefined configuration",
+        "first.yaml",
+        "second.yaml",
+        path,
+    ] {
+        assert!(error.0.contains(expected), "{} missing {expected}", error.0);
     }
 }

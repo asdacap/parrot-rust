@@ -9,7 +9,9 @@ async fn run(dual: bool) -> Value {
         include_str!("../routing/fixtures/source/ws-auth-v1/inputs.json")
     })
     .unwrap();
-    input["collaborators"] = serde_json::from_str(include_str!("../routing/fixtures/source/ws-auth-v1/collaborators.json"))
+    input["collaborators"] = serde_json::from_str(include_str!(
+        "../routing/fixtures/source/ws-auth-v1/collaborators.json"
+    ))
     .unwrap();
     serde_json::from_str(&projection::project(&input.to_string()).await.unwrap()).unwrap()
 }

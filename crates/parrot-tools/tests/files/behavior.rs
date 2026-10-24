@@ -1130,7 +1130,7 @@ async fn glob_deadline_is_checked_even_when_the_service_never_yields() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn glob_propagates_cancellation_and_uses_real_tokio_timeout() {
     let service = RecordingService::default();
     service.directory(".", vec![]);

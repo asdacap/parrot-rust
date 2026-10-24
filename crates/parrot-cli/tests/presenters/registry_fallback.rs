@@ -155,7 +155,7 @@ fn actual_registry_queue_push_malformed_sources_preserve_generic_yaml() {
         assert!(
             fallback(&registry, "queue_push", args, "{}")
                 .join("\n")
-                .contains("name: \"work\"")
+                .contains("\"name\": \"work\"")
         );
     }
 }

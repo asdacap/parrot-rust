@@ -27,6 +27,25 @@ fn exact_a008_native_configuration_is_applied() {
 }
 
 #[test]
+fn owned_json_numbers_remain_native_numbers_in_nested_sequences_and_maps() {
+    let arguments = serde_json::from_str::<Map<String, Value>>(
+        r#"{"values":[-9223372036854775808,18446744073709551615,1.5],"nested":{"cost":0.125},"count":123,"nothing":null,"flag":true,"label":"text"}"#,
+    )
+    .unwrap();
+    let engine = MiniJinjaPromptTemplateEngine::compile(
+        "prompt_templates.numbers",
+        "{{ values|join(',') }}|{{ nested.cost + 0.125 }}|{{ count + 1 }}|{{ nothing is none }}|{{ flag }}|{{ label }}",
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .render(&arguments, &Flag(AtomicBool::new(false)))
+            .unwrap(),
+        "-9223372036854775808,18446744073709551615,1.5|0.25|124|True|True|text"
+    );
+}
+
+#[test]
 fn writer_keeps_prior_bytes_private_and_uses_a_nonretryable_cancel_error() {
     let flag = Flag(AtomicBool::new(false));
     let mut writer = CancellationWriter {

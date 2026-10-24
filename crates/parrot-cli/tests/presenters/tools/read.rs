@@ -45,7 +45,7 @@ fn failed_read_shows_full_request_yaml_not_raw_json() {
         assert_eq!(
             rendered(&call, &terminal, false).join("\n"),
             format!(
-                "✗ read src/App.cs\n  path: \"src/App.cs\"\n  offset: 12\n  limit: 3\n  ---\n  {expected}"
+                "✗ read src/App.cs\n  \"path\": \"src/App.cs\"\n  \"offset\": 12\n  \"limit\": 3\n  ---\n  {expected}"
             )
         );
         let live = ReadToolPresenter.present_live(&call, 0).unwrap();

@@ -7,17 +7,6 @@ use serde_json::Value;
 /// SQLite remains authoritative. Null reference carriers and part shapes that the
 /// shared Rust history model cannot preserve are rejected rather than normalized.
 pub fn deserialize_entry(bytes: &[u8]) -> Result<AgentHistoryEntry> {
-    let value: Value = serde_json::from_slice(bytes).map_err(decode_error)?;
-    if value
-        .as_object()
-        .and_then(|object| object.keys().next())
-        .map(String::as_str)
-        != Some("type")
-    {
-        return Err(Error::invalid_data(
-            "history discriminator must be the first object property",
-        ));
-    }
     let entry: HistoryEntry = serde_json::from_slice(bytes).map_err(decode_error)?;
     match entry {
         HistoryEntry::Compaction(entry) => Ok(AgentHistoryEntry::Compaction {
@@ -67,12 +56,52 @@ fn decode_error(error: serde_json::Error) -> Error {
     Error::invalid_data(format!("deserialize history entry: {error}"))
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
 enum HistoryEntry {
     Message(Message),
     Compaction(Compaction),
     Request(Request),
+}
+
+impl<'de> Deserialize<'de> for HistoryEntry {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct HistoryEntryVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for HistoryEntryVisitor {
+            type Value = HistoryEntry;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a history record with its discriminator first")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> std::result::Result<HistoryEntry, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                if map.next_key::<String>()?.as_deref() != Some("type") {
+                    return Err(serde::de::Error::custom(
+                        "history discriminator must be the first object property",
+                    ));
+                }
+                let kind = map.next_value::<String>()?;
+                // Stream typed fields rather than buffering arbitrary-precision numbers.
+                let fields = serde::de::value::MapAccessDeserializer::new(map);
+                match kind.as_str() {
+                    "message" => Message::deserialize(fields).map(HistoryEntry::Message),
+                    "compaction" => Compaction::deserialize(fields).map(HistoryEntry::Compaction),
+                    "request" => Request::deserialize(fields).map(HistoryEntry::Request),
+                    _ => Err(serde::de::Error::unknown_variant(
+                        &kind,
+                        &["message", "compaction", "request"],
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(HistoryEntryVisitor)
+    }
 }
 
 struct Compaction {
@@ -216,7 +245,9 @@ mod tests {
     use crate::history_files::json::serialize_entry;
 
     fn source_observations() -> Vec<Value> {
-        let evidence: Value = serde_json::from_str(include_str!("../../tests/history_files/fixtures/format-cases.json"))
+        let evidence: Value = serde_json::from_str(include_str!(
+            "../../tests/history_files/fixtures/format-cases.json"
+        ))
         .unwrap();
         let payload = evidence;
         payload["observations"].as_array().unwrap().clone()
@@ -286,6 +317,46 @@ mod tests {
             changed["total_cost"] = serde_json::json!({"ignored": true});
             let restored = deserialize_entry(&serde_json::to_vec(&changed).unwrap()).unwrap();
             assert_eq!(restored, history);
+        }
+    }
+
+    #[test]
+    fn request_costs_decode_directly_as_numbers_and_reject_number_shaped_objects() {
+        for (input, expected) in [
+            ("0.125", 0.125_f64),
+            ("1e-7", 1e-7),
+            ("-0.0", -0.0),
+            ("1e17", 1e17),
+        ] {
+            let json = format!(
+                r#"{{"type":"request","request_id":"request","provider":"provider","model":"model","input_cost":{input},"output_cost":{input}}}"#
+            );
+            let AgentHistoryEntry::Request {
+                input_cost,
+                output_cost,
+                ..
+            } = deserialize_entry(json.as_bytes()).unwrap()
+            else {
+                panic!("expected a request history entry");
+            };
+            assert_eq!(input_cost.to_bits(), expected.to_bits(), "{input}");
+            assert_eq!(output_cost.to_bits(), expected.to_bits(), "{input}");
+        }
+        for field in ["input_cost", "output_cost"] {
+            for input in [
+                "null",
+                "true",
+                "[]",
+                "{}",
+                r#""0.125""#,
+                r#"{"$serde_json::private::Number":"0.125"}"#,
+                "1e400",
+            ] {
+                let json = format!(
+                    r#"{{"type":"request","request_id":"request","provider":"provider","model":"model","{field}":{input}}}"#
+                );
+                assert!(deserialize_entry(json.as_bytes()).is_err(), "{json}");
+            }
         }
     }
 

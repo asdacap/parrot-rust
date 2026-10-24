@@ -13,6 +13,7 @@ parrot-domain = { path = "../../crates/parrot-domain" }
 [patch.crates-io]
 protobuf = { path = "../../vendor/rust-protobuf-a001/protobuf" }
 protobuf-codegen = { path = "../../vendor/rust-protobuf-a001/protobuf-codegen" }
+tonic = { path = "../../vendor/tonic-0.12.3" }
 
 [lints.rust]
 warnings = "deny"

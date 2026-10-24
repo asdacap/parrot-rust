@@ -53,9 +53,7 @@ async fn actual_pinned_content_type_observer_rows_match_native_fetch_processing(
     for line in [
         include_str!("fixtures/text-observer/content-type/raw/observations.jsonl"),
         include_str!("fixtures/text-observer/content-type/edges/raw/observations.jsonl"),
-        include_str!(
-            "fixtures/text-observer/content-type/quote-boundaries/raw/observations.jsonl"
-        ),
+        include_str!("fixtures/text-observer/content-type/quote-boundaries/raw/observations.jsonl"),
     ]
     .into_iter()
     .flat_map(str::lines)

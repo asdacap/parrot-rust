@@ -1,8 +1,9 @@
 mod a008_templates;
+mod fixtures;
 mod integration;
 mod model_transaction;
 mod models;
-mod fixtures;
+mod product_changes;
 mod runtime;
 mod source_assertions;
 mod support;

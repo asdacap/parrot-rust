@@ -39,4 +39,3 @@ async fn source_endpoint_boundaries() {
 async fn source_authority_boundaries() {
     compare_family("catalog.authority.boundary.", 6).await;
 }
-

@@ -26,6 +26,35 @@ on bounded agent scope, delegation, parent attention and model-tier selection,
 ported from the .NET repository. Repository contributor guidance is in
 [AGENTS.md](AGENTS.md).
 
+## Running tests
+
+Run from the repository root in `nix develop`. The native test harnesses require
+an installed browser dependency tree, the crash-probe executable and the shell
+from the Nix environment:
+
+```sh
+export CARGO_TARGET_DIR=/tmp/parrot-rust-test-target
+npm --prefix web ci --no-audit --no-fund
+npm --prefix web run build
+cargo build --locked -p parrot-storage --example t17-crash-probe
+export T17_CRASH_PROBE_BINARY="$CARGO_TARGET_DIR/debug/examples/t17-crash-probe"
+export T57_TEST_SHELL="$(command -v bash)"
+export PARROT_T64_BROWSER_MODULES="$PWD/web/node_modules"
+cargo test --workspace --locked
+cargo test --manifest-path tests/contracts/Cargo.toml --locked
+npm --prefix web test
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+nix flake check
+```
+
+Keep the target directory and feature selection consistent between runs. Atomic
+compaction-artifact fixtures use `std::env::temp_dir()`; ensure `TMPDIR` is on a
+local filesystem supporting atomic rename exchange, not an NFS mount. Production
+artifact quarantine also requires that filesystem operation; this test setup does
+not establish NFS support. Additional native-platform and package-smoke gates are
+listed in [.github/workflows/check.yml](.github/workflows/check.yml).
+
 ## Operator guide
 
 - [Installation and platform requirements](docs/operator/installation.md)

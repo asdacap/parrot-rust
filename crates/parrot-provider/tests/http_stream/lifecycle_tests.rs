@@ -14,7 +14,10 @@ async fn independent_http_idle_and_protocol_boundary_assertions() {
                 assert_eq!(detail, "é".repeat(1024));
                 assert_eq!(
                     error.remove("message").unwrap(),
-                    format!("provider request failed with HTTP 400: {}", "é".repeat(1024))
+                    format!(
+                        "provider request failed with HTTP 400: {}",
+                        "é".repeat(1024)
+                    )
                 );
                 let body = error.remove("response_body").unwrap();
                 let body = body.as_str().unwrap();

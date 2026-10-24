@@ -181,7 +181,7 @@ struct Fixture {
 impl Fixture {
     fn new(limit: i32, scripts: Vec<Vec<Result<Event, Error>>>) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::current_dir().unwrap().join(".tmp").join(format!(
+        let path = std::env::temp_dir().join(format!(
             "t45-execution-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)

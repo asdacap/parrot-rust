@@ -96,7 +96,10 @@ async fn preexisting_keys_and_lineage_are_not_recomputed_on_open_or_reopen() {
         let lineage = lineage.clone();
         database
             .admit("check preserved metadata", &active(), move |tx| {
-                assert_eq!(observe::query(tx, "SELECT * FROM event ORDER BY sequence")?, events);
+                assert_eq!(
+                    observe::query(tx, "SELECT * FROM event ORDER BY sequence")?,
+                    events
+                );
                 assert_eq!(observe::query(tx, LINEAGE)?, lineage);
                 Ok(())
             })
@@ -137,7 +140,10 @@ fn corrupt_payload_rolls_back_each_migration_and_remains_a_protobuf_error_on_ret
                 Err(DatabaseError::Protobuf(_))
             ));
             let connection = Connection::open(fixture.0.join("session.db")).unwrap();
-            assert_eq!(observe::query(&connection, "SELECT * FROM event ORDER BY sequence").unwrap(), events);
+            assert_eq!(
+                observe::query(&connection, "SELECT * FROM event ORDER BY sequence").unwrap(),
+                events
+            );
             assert_eq!(
                 observe::query(&connection, "SELECT type,name,sql FROM sqlite_master WHERE tbl_name='event' ORDER BY type,name").unwrap(),
                 event_schema
@@ -173,7 +179,10 @@ fn partial_usage_schema_preserves_sentinel_and_committed_lineage_despite_index_e
             Err(DatabaseError::Sqlite(_))
         ));
         let connection = Connection::open(fixture.0.join("session.db")).unwrap();
-        assert_eq!(observe::query(&connection, "SELECT * FROM event ORDER BY sequence").unwrap(), events);
+        assert_eq!(
+            observe::query(&connection, "SELECT * FROM event ORDER BY sequence").unwrap(),
+            events
+        );
         let tools: i64 = connection
             .query_row(
                 "SELECT count(*) FROM pragma_table_info('event') WHERE name='tool_call_id'",

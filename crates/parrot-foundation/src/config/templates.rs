@@ -97,7 +97,7 @@ where
         };
         if engine == "scriban" {
             return Err(ConfigError::invalid_data(format!(
-                "{path}.engine: Scriban is no longer supported; manually migrate the template to MiniJinja native syntax and set engine: minijinja"
+                "{path}.engine: Scriban is no longer supported; manually migrate the template to MiniJinja native syntax and set engine: minijinja (see docs/template-migration-guide.md)"
             )));
         }
         if !matches!(engine.as_str(), "scalar" | "minijinja") {

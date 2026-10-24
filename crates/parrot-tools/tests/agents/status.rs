@@ -80,14 +80,14 @@ fn recent_budget_and_alias_cursor_follow_original_sequence_rules() {
     formatter.format(&current);
     current.activity.recent = vec![
         entry(1, "line one"),
-        entry(2, &"a".repeat(2000)),
-        entry(3, &"b".repeat(2000)),
+        entry(2, &" a".repeat(600)),
+        entry(3, &" b".repeat(600)),
     ]
     .into_boxed_slice();
     let first = formatter.format(&current);
     assert!(first.contains("2 older entries omitted to stay within 1K tokens"));
-    assert!(first.contains(&"b".repeat(2000)));
-    assert!(!first.contains(&"a".repeat(2000)));
+    assert!(first.contains(&" b".repeat(600)));
+    assert!(!first.contains(&" a".repeat(600)));
     assert!(!first.contains("line one"));
     let repeat = formatter.format(&current);
     assert!(repeat.contains("2 earlier entries already reported by a previous agent_status"));
@@ -98,10 +98,10 @@ fn recent_budget_and_alias_cursor_follow_original_sequence_rules() {
     current.activity.recent = entries.into_boxed_slice();
     let alias = formatter.format(&current);
     assert!(alias.contains("2 earlier entries already reported"));
-    assert!(alias.contains(&"b".repeat(2000)));
+    assert!(alias.contains(&" b".repeat(600)));
     assert!(alias.contains("fresh one"));
     assert!(alias.contains("fresh two"));
-    assert!(!alias.contains(&"a".repeat(2000)));
+    assert!(!alias.contains(&" a".repeat(600)));
 }
 
 #[test]

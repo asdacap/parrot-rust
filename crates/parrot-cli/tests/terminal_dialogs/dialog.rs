@@ -294,7 +294,11 @@ async fn unicode_picker_matches_case_in_labels_and_descriptions() {
             keys.extend([key(TerminalKeyKind::Submit), key(TerminalKeyKind::Escape)]);
             let host = ScriptedHost::new(keys);
             let selected = dialog(&host)
-                .select("Unicode: ", std::slice::from_ref(&option), &TestCancellation::default())
+                .select(
+                    "Unicode: ",
+                    std::slice::from_ref(&option),
+                    &TestCancellation::default(),
+                )
                 .await
                 .unwrap();
             assert_eq!(selected.is_some(), expected, "{haystack:?} / {needle:?}");

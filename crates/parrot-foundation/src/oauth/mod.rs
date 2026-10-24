@@ -10,6 +10,10 @@ mod token_source;
 #[cfg(test)]
 mod flow_tests;
 
+// A forked child can retain a CLOEXEC callback listener until exec.
+#[cfg(test)]
+static BROWSER_CALLBACK_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub use api_key_source::{ApiKeyEnvironment, StoredApiKeySource};
 pub use browser::{BrowserLaunchError, BrowserLauncher, SystemBrowserOpener};
 pub use client::{
