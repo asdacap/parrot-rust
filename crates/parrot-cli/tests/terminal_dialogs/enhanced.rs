@@ -319,153 +319,157 @@ async fn countdown_updates_without_keys_and_retains_typed_answer() {
 }
 
 #[tokio::test]
-async fn transient_question_discovery_failures_keep_listen_and_timed_question_alive() {
-    for code in [Code::Unavailable, Code::DeadlineExceeded] {
-        let mut rpc = Fixture::start().await;
-        let mut terminal = TerminalFixture::new();
-        let cli = rpc.cli(terminal.take(), "", None);
-        let stop = rpc.stopping.clone();
-        let result = fixture::run_flow(cli, stop.clone(), terminal.end_input(), async {
-            terminal.output_contains("❯ ").await;
-            rpc.wait(|state| state.question_lists > 0 && state.listens.len() == 1)
-                .await;
-            let session_id = rpc.state.lock().unwrap().listens[0].user_session_id.clone();
-            let assert_running_without_reply = || {
-                let state = rpc.state.lock().unwrap();
-                assert_eq!(state.listens.len(), 1, "must retain the healthy Listen");
-                let streams = &state.streams[&session_id];
-                assert_eq!(streams.len(), 1);
-                assert!(
-                    !streams[0].is_closed(),
-                    "{code:?} question discovery failure must not close healthy Listen"
-                );
-                assert!(state.question_replies.is_empty());
-                assert!(state.question_rejections.is_empty());
-                assert!(state.permission_replies.is_empty());
-                assert!(state.sent.is_empty());
-                assert!(state.interrupted.is_empty());
-                assert!(!stop.is_cancelled());
-                assert!(!terminal.restored.load(Ordering::Acquire));
-            };
+async fn transient_question_discovery_failures_keep_listen_and_timed_question_alive_unavailable() {
+    run_transient_question_discovery_failure_scenario(Code::Unavailable).await;
+}
 
-            let before_question = {
-                let mut state = rpc.state.lock().unwrap();
-                state.question_list_failure =
-                    Some(Status::new(code, "transient question discovery"));
-                state.question_lists
-            };
-            rpc.wait(|state| {
-                state.question_lists >= before_question + 2
-                    || state.streams[&session_id][0].is_closed()
-            })
-            .await;
-            assert_running_without_reply();
-            assert!(rpc.state.lock().unwrap().question_lists >= before_question + 2);
+#[tokio::test]
+async fn transient_question_discovery_failures_keep_listen_and_timed_question_alive_deadline_exceeded()
+ {
+    run_transient_question_discovery_failure_scenario(Code::DeadlineExceeded).await;
+}
 
-            let mut pending = question("recovered-timed", "Answer after discovery recovers");
-            let request_id = pending.id.clone();
-            pending.remaining_timeout_ms = Some(61_000);
-            let recovered = {
-                let mut state = rpc.state.lock().unwrap();
-                state.question_list_failure = None;
-                state.questions.insert(session_id.clone(), vec![pending]);
-                state.question_lists
-            };
-            terminal
-                .output_contains("Answer after discovery recovers")
-                .await;
-            terminal.output_contains("Auto-return in 1:01").await;
-            assert!(rpc.state.lock().unwrap().question_lists > recovered);
-            terminal.input.type_text("retained typed answer");
-            terminal.output_contains("retained typed answer").await;
-
-            let before_failure_output = terminal.output.text().len();
-            let while_active = {
-                let mut state = rpc.state.lock().unwrap();
-                state.question_list_failure =
-                    Some(Status::new(code, "transient active question poll"));
-                state.question_lists
-            };
-            rpc.wait(|state| {
-                state.question_lists >= while_active + 3
-                    || state.streams[&session_id][0].is_closed()
-            })
+async fn run_transient_question_discovery_failure_scenario(code: Code) {
+    let mut rpc = Fixture::start().await;
+    let mut terminal = TerminalFixture::new();
+    let cli = rpc.cli(terminal.take(), "", None);
+    let stop = rpc.stopping.clone();
+    let result = fixture::run_flow(cli, stop.clone(), terminal.end_input(), async {
+        terminal.output_contains("❯ ").await;
+        rpc.wait(|state| state.question_lists > 0 && state.listens.len() == 1)
             .await;
-            assert_running_without_reply();
-            wait_until(|| {
-                terminal.output.text()[before_failure_output..].contains("Auto-return in 1:00")
-                    || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
-            })
-            .await;
-            assert_running_without_reply();
-            let before_resize = terminal.output.text().len();
-            terminal.columns.store(81, Ordering::Release);
-            wait_until(|| {
-                terminal.output.text()[before_resize..].contains("retained typed answer")
-                    || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
-            })
-            .await;
-            assert_running_without_reply();
-            let failed_poll_output = terminal.output.text()[before_failure_output..].to_owned();
+        let session_id = rpc.state.lock().unwrap().listens[0].user_session_id.clone();
+        let assert_running_without_reply = || {
+            let state = rpc.state.lock().unwrap();
+            assert_eq!(state.listens.len(), 1, "must retain the healthy Listen");
+            let streams = &state.streams[&session_id];
+            assert_eq!(streams.len(), 1);
             assert!(
-                failed_poll_output.contains("Auto-return in 1:00"),
-                "countdown must extrapolate its last successful sample during {code:?}"
+                !streams[0].is_closed(),
+                "{code:?} question discovery failure must not close healthy Listen"
             );
-            assert!(failed_poll_output.contains("retained typed answer"));
-            assert!(rpc.state.lock().unwrap().question_list_failure.is_some());
+            assert!(state.question_replies.is_empty());
+            assert!(state.question_rejections.is_empty());
+            assert!(state.permission_replies.is_empty());
+            assert!(state.sent.is_empty());
+            assert!(state.interrupted.is_empty());
+            assert!(!stop.is_cancelled());
+            assert!(!terminal.restored.load(Ordering::Acquire));
+        };
 
-            let before_recovery_output = terminal.output.text().len();
-            let recovered = {
-                let mut state = rpc.state.lock().unwrap();
-                let pending = &mut state.questions.get_mut(&session_id).unwrap()[0];
-                assert_eq!(pending.id, request_id);
-                pending.remaining_timeout_ms = Some(90_000);
-                state.question_list_failure = None;
-                state.question_lists
-            };
-            wait_until(|| {
-                terminal.output.text()[before_recovery_output..].contains("Auto-return in 1:30")
-                    || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
-            })
-            .await;
-            assert_running_without_reply();
-            let before_resize = terminal.output.text().len();
-            terminal.columns.store(82, Ordering::Release);
-            wait_until(|| {
-                terminal.output.text()[before_resize..].contains("retained typed answer")
-                    || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
-            })
-            .await;
-            assert_running_without_reply();
-            let recovered_output = terminal.output.text()[before_recovery_output..].to_owned();
-            assert!(recovered_output.contains("Auto-return in 1:30"));
-            assert!(recovered_output.contains("retained typed answer"));
-            assert!(rpc.state.lock().unwrap().question_lists > recovered);
-            terminal.input.type_text("\r");
-            rpc.wait(|state| state.question_replies.len() == 1).await;
-            {
-                let state = rpc.state.lock().unwrap();
-                let reply = &state.question_replies[0];
-                assert_eq!(reply.user_session_id, session_id);
-                assert_eq!(reply.question_request_id, request_id);
-                assert_eq!(reply.answers[0].text, "retained typed answer");
-                assert!(state.question_rejections.is_empty());
-                assert!(state.sent.is_empty());
-                assert_eq!(state.listens.len(), 1);
-                assert!(!state.streams[&session_id][0].is_closed());
-            }
-            terminal.input.end();
+        let before_question = {
+            let mut state = rpc.state.lock().unwrap();
+            state.question_list_failure = Some(Status::new(code, "transient question discovery"));
+            state.question_lists
+        };
+        rpc.wait(|state| {
+            state.question_lists >= before_question + 2 || state.streams[&session_id][0].is_closed()
         })
         .await;
-        assert_eq!(
-            result.unwrap(),
-            0,
-            "recovered {code:?} must exit normally at EOF"
+        assert_running_without_reply();
+        assert!(rpc.state.lock().unwrap().question_lists >= before_question + 2);
+
+        let mut pending = question("recovered-timed", "Answer after discovery recovers");
+        let request_id = pending.id.clone();
+        pending.remaining_timeout_ms = Some(61_000);
+        let recovered = {
+            let mut state = rpc.state.lock().unwrap();
+            state.question_list_failure = None;
+            state.questions.insert(session_id.clone(), vec![pending]);
+            state.question_lists
+        };
+        terminal
+            .output_contains("Answer after discovery recovers")
+            .await;
+        terminal.output_contains("Auto-return in 1:01").await;
+        assert!(rpc.state.lock().unwrap().question_lists > recovered);
+        terminal.input.type_text("retained typed answer");
+        terminal.output_contains("retained typed answer").await;
+
+        let before_failure_output = terminal.output.text().len();
+        let while_active = {
+            let mut state = rpc.state.lock().unwrap();
+            state.question_list_failure = Some(Status::new(code, "transient active question poll"));
+            state.question_lists
+        };
+        rpc.wait(|state| {
+            state.question_lists >= while_active + 3 || state.streams[&session_id][0].is_closed()
+        })
+        .await;
+        assert_running_without_reply();
+        wait_until(|| {
+            terminal.output.text()[before_failure_output..].contains("Auto-return in 1:00")
+                || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
+        })
+        .await;
+        assert_running_without_reply();
+        let before_resize = terminal.output.text().len();
+        terminal.columns.store(81, Ordering::Release);
+        wait_until(|| {
+            terminal.output.text()[before_resize..].contains("retained typed answer")
+                || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
+        })
+        .await;
+        assert_running_without_reply();
+        let failed_poll_output = terminal.output.text()[before_failure_output..].to_owned();
+        assert!(
+            failed_poll_output.contains("Auto-return in 1:00"),
+            "countdown must extrapolate its last successful sample during {code:?}"
         );
-        assert!(terminal.restored.load(Ordering::Acquire));
-        assert_eq!(rpc.state.lock().unwrap().question_replies.len(), 1);
-        rpc.close().await;
-    }
+        assert!(failed_poll_output.contains("retained typed answer"));
+        assert!(rpc.state.lock().unwrap().question_list_failure.is_some());
+
+        let before_recovery_output = terminal.output.text().len();
+        let recovered = {
+            let mut state = rpc.state.lock().unwrap();
+            let pending = &mut state.questions.get_mut(&session_id).unwrap()[0];
+            assert_eq!(pending.id, request_id);
+            pending.remaining_timeout_ms = Some(90_000);
+            state.question_list_failure = None;
+            state.question_lists
+        };
+        wait_until(|| {
+            terminal.output.text()[before_recovery_output..].contains("Auto-return in 1:30")
+                || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
+        })
+        .await;
+        assert_running_without_reply();
+        let before_resize = terminal.output.text().len();
+        terminal.columns.store(82, Ordering::Release);
+        wait_until(|| {
+            terminal.output.text()[before_resize..].contains("retained typed answer")
+                || rpc.state.lock().unwrap().streams[&session_id][0].is_closed()
+        })
+        .await;
+        assert_running_without_reply();
+        let recovered_output = terminal.output.text()[before_recovery_output..].to_owned();
+        assert!(recovered_output.contains("Auto-return in 1:30"));
+        assert!(recovered_output.contains("retained typed answer"));
+        assert!(rpc.state.lock().unwrap().question_lists > recovered);
+        terminal.input.type_text("\r");
+        rpc.wait(|state| state.question_replies.len() == 1).await;
+        {
+            let state = rpc.state.lock().unwrap();
+            let reply = &state.question_replies[0];
+            assert_eq!(reply.user_session_id, session_id);
+            assert_eq!(reply.question_request_id, request_id);
+            assert_eq!(reply.answers[0].text, "retained typed answer");
+            assert!(state.question_rejections.is_empty());
+            assert!(state.sent.is_empty());
+            assert_eq!(state.listens.len(), 1);
+            assert!(!state.streams[&session_id][0].is_closed());
+        }
+        terminal.input.end();
+    })
+    .await;
+    assert_eq!(
+        result.unwrap(),
+        0,
+        "recovered {code:?} must exit normally at EOF"
+    );
+    assert!(terminal.restored.load(Ordering::Acquire));
+    assert_eq!(rpc.state.lock().unwrap().question_replies.len(), 1);
+    rpc.close().await;
 }
 
 #[tokio::test]
