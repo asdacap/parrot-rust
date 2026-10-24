@@ -537,6 +537,7 @@ async fn factory_uses_actual_configured_definitions_names_aliases_and_schemas() 
                     "string"
                 );
                 assert_eq!(schema["properties"]["tty"]["default"], false);
+                assert_eq!(schema["properties"]["yield_after_ms"]["default"], 1000);
                 assert_eq!(schema["properties"]["yield_after_ms"]["minimum"], 500);
                 assert_eq!(schema["properties"]["yield_after_ms"]["maximum"], 10000);
             }

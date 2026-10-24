@@ -67,7 +67,7 @@ impl ExecInput {
             name,
             description,
             yield_after_ms: match milliseconds {
-                None => None,
+                None => Some(1000),
                 Some(value) if (0..=10_000).contains(&value) => Some(value as u64),
                 Some(_) => {
                     return Err(InputError(

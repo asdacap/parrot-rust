@@ -13,7 +13,7 @@ fn exec_defaults_and_nullable_optional_fields() {
     assert!(input.environment.is_empty());
     assert_eq!(input.name, None);
     assert_eq!(input.description, None);
-    assert_eq!(input.yield_after_ms, None);
+    assert_eq!(input.yield_after_ms, Some(1000));
     assert!(!input.tty);
     let nullable = ExecInput::parse(
         r#"{"command":"true","env":null,"name":null,"description":null,"yield_after_ms":null}"#,
@@ -228,12 +228,12 @@ fn environment_rejects_invalid_names_and_nul_values_with_exact_message() {
 }
 
 #[test]
-fn exec_yield_delay_preserves_defaults_and_accepts_inclusive_bounds() {
+fn exec_yield_delay_defaults_to_one_second_and_accepts_inclusive_bounds() {
     for json in [
         r#"{"command":"true"}"#,
         r#"{"command":"true","yield_after_ms":null}"#,
     ] {
-        assert_eq!(ExecInput::parse(json).unwrap().yield_after_ms, None);
+        assert_eq!(ExecInput::parse(json).unwrap().yield_after_ms, Some(1000));
     }
     for (lexeme, expected) in [
         ("0", 0),
