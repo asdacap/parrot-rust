@@ -110,13 +110,17 @@ fn web_port_is_strict_unsigned_ushort_and_last_occurrence_wins() {
 }
 
 #[test]
-fn serve_recognizes_only_source_flags_without_reading_tokens() {
+fn serve_recognizes_native_tls_flags_without_reading_files() {
     let actual = parse(&args(&[
         "serve",
         "--listen",
         "http://localhost:42",
         "--token-file",
         "fixture",
+        "--tls-cert-file",
+        "chain.pem",
+        "--tls-key-file",
+        "key.pem",
         "--unsafe-allow-external",
     ]))
     .unwrap();
@@ -125,12 +129,20 @@ fn serve_recognizes_only_source_flags_without_reading_tokens() {
         Command::Runtime(RuntimeCommand::Serve(ServeOptions {
             listen: Some("http://localhost:42".into()),
             token_file: "fixture".into(),
+            tls_cert_file: "chain.pem".into(),
+            tls_key_file: "key.pem".into(),
             unsafe_allow_external: true,
         }))
     );
     for values in [
         vec!["serve", "--listen"],
         vec!["serve", "--token-file"],
+        vec!["serve", "--tls-cert-file"],
+        vec!["serve", "--tls-key-file"],
+        vec!["serve", "--tls-cert-file", ""],
+        vec!["serve", "--tls-key-file", ""],
+        vec!["serve", "--tls-cert-file", "--unsafe-allow-external"],
+        vec!["serve", "--tls-key-file", "--tls-cert-file", "chain.pem"],
         vec!["serve", "unexpected"],
     ] {
         assert_eq!(parse(&args(&values)).unwrap_err().message, SERVE_USAGE);

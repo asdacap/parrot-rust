@@ -97,9 +97,12 @@ highlighting and streaming behavior.
 experimental attach interface for a separately authorized compatible server, not
 a way to start the missing local service. Addresses include `unix:/path`, HTTP
 and HTTPS. TCP uses an owner-only token file; plaintext non-loopback listening
-also requires `--unsafe-allow-external`. No example here authorizes a live
-provider, remote server/account, OAuth or S3 action. Authentication/model-list
-commands may access credentials or a network and are **not offline smoke checks**.
+also requires `--unsafe-allow-external`. HTTPS serving additionally requires
+`--tls-cert-file <PEM-chain>` and `--tls-key-file <unencrypted-PEM-key>`; see
+[HTTPS provisioning](../../README.md#https-certificates-for-serve).
+No example here authorizes a live provider, remote server/account, OAuth or S3
+action. Authentication/model-list commands may access credentials or a network and
+are **not offline smoke checks**.
 Do not infer available local operation merely because help lists a command.
 
 ## Attribution and retention

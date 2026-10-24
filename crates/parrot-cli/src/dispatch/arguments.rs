@@ -5,7 +5,7 @@ pub const DEFAULT_WEB_PORT: u16 = 7420;
 pub const AUTH_USAGE: &str =
     "usage: parrot auth login <provider> [--api-key-stdin] [--device] [--s3-stdin]";
 pub const S3_USAGE: &str = "usage: parrot auth login image_upload --s3-stdin";
-pub const SERVE_USAGE: &str = "usage: parrot serve [--listen unix:/path|http://host:port|https://host:port] [--token-file <path>] [--unsafe-allow-external]";
+pub const SERVE_USAGE: &str = "usage: parrot serve [--listen unix:/path|http://host:port|https://host:port] [--token-file <path>] [--tls-cert-file <path> --tls-key-file <path>] [--unsafe-allow-external]";
 pub const WEB_USAGE: &str = "usage: parrot web [--port <n>]";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -109,6 +109,8 @@ pub struct ServeOptions {
     /// None selects the ordinary application's control/parrot.sock.
     pub listen: Option<String>,
     pub token_file: String,
+    pub tls_cert_file: String,
+    pub tls_key_file: String,
     pub unsafe_allow_external: bool,
 }
 
@@ -232,6 +234,14 @@ fn parse_serve(arguments: &[String]) -> Result<ServeOptions, UsageError> {
             }
             ("--token-file", Some(value)) => {
                 options.token_file = value.clone();
+                index += 1;
+            }
+            ("--tls-cert-file", Some(value)) if !value.is_empty() && !value.starts_with("--") => {
+                options.tls_cert_file = value.clone();
+                index += 1;
+            }
+            ("--tls-key-file", Some(value)) if !value.is_empty() && !value.starts_with("--") => {
+                options.tls_key_file = value.clone();
                 index += 1;
             }
             ("--unsafe-allow-external", _) => options.unsafe_allow_external = true,

@@ -338,8 +338,24 @@ impl Application {
             ));
         }
         let tls = if address.tcp_url().is_some_and(|url| url.scheme() == "https") {
-            Some(https_certificate::load().map_err(command_failure)?)
+            if options.tls_cert_file.is_empty() || options.tls_key_file.is_empty() {
+                return Err(command_failure(
+                    "HTTPS requires --tls-cert-file <PEM-chain> and --tls-key-file <unencrypted-PEM-key>",
+                ));
+            }
+            Some(
+                https_certificate::load(
+                    std::path::Path::new(&options.tls_cert_file),
+                    std::path::Path::new(&options.tls_key_file),
+                )
+                .map_err(command_failure)?,
+            )
         } else {
+            if !options.tls_cert_file.is_empty() || !options.tls_key_file.is_empty() {
+                return Err(command_failure(
+                    "--tls-cert-file and --tls-key-file require an HTTPS listen address",
+                ));
+            }
             None
         };
         let (configuration, templates) = self.configuration_and_templates()?;
