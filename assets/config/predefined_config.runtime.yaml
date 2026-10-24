@@ -367,6 +367,7 @@ tools:
         yield_after_ms:
           type: integer
           minimum: 500
+          maximum: 10000
           description: Return the process name if still running after this many milliseconds. 0 mean yield immediately. undefined means block indefinitely.
         tty:
           type: boolean

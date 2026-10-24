@@ -538,6 +538,7 @@ async fn factory_uses_actual_configured_definitions_names_aliases_and_schemas() 
                 );
                 assert_eq!(schema["properties"]["tty"]["default"], false);
                 assert_eq!(schema["properties"]["yield_after_ms"]["minimum"], 500);
+                assert_eq!(schema["properties"]["yield_after_ms"]["maximum"], 10000);
             }
             ProcessToolKind::WriteStdin => {
                 assert_eq!(schema["required"], json!(["name", "input"]));
@@ -659,6 +660,11 @@ async fn invalid_wrapper_arguments_have_source_exact_errors_and_never_launch() {
             ProcessToolKind::ExecCommand,
             r#"{"command":"true","name":" "}"#,
             "error: process name must not be empty",
+        ),
+        (
+            ProcessToolKind::ExecCommand,
+            r#"{"command":"true","yield_after_ms":10001}"#,
+            "error: Tool argument 'yield_after_ms' must be a non-negative integer no greater than 10000.",
         ),
         (
             ProcessToolKind::ExecCommand,
