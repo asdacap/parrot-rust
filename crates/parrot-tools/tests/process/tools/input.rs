@@ -13,7 +13,7 @@ fn exec_defaults_and_nullable_optional_fields() {
     assert!(input.environment.is_empty());
     assert_eq!(input.name, None);
     assert_eq!(input.description, None);
-    assert_eq!(input.yield_after_ms, None);
+    assert_eq!(input.yield_after_ms, Some(1000));
     assert!(!input.tty);
     let nullable = ExecInput::parse(
         r#"{"command":"true","env":null,"name":null,"description":null,"yield_after_ms":null}"#,
@@ -228,7 +228,53 @@ fn environment_rejects_invalid_names_and_nul_values_with_exact_message() {
 }
 
 #[test]
-fn yield_delay_defaults_and_inclusive_bounds() {
+fn exec_yield_delay_defaults_to_one_second_and_accepts_inclusive_bounds() {
+    for json in [
+        r#"{"command":"true"}"#,
+        r#"{"command":"true","yield_after_ms":null}"#,
+    ] {
+        assert_eq!(ExecInput::parse(json).unwrap().yield_after_ms, Some(1000));
+    }
+    for (lexeme, expected) in [
+        ("0", 0),
+        ("-0", 0),
+        ("1", 1),
+        ("499", 499),
+        ("500", 500),
+        ("10000", 10_000),
+    ] {
+        assert_eq!(
+            ExecInput::parse(&format!(
+                r#"{{"command":"true","yield_after_ms":{lexeme}}}"#
+            ))
+            .unwrap()
+            .yield_after_ms,
+            Some(expected)
+        );
+    }
+}
+
+#[test]
+fn exec_yield_delay_rejects_out_of_bounds_with_exact_message() {
+    for lexeme in [
+        "-1",
+        "10001",
+        "4294967294",
+        "4294967295",
+        "9223372036854775807",
+        "-9223372036854775808",
+    ] {
+        assert_eq!(
+            error(ExecInput::parse(&format!(
+                r#"{{"command":"true","yield_after_ms":{lexeme}}}"#
+            ))),
+            "Tool argument 'yield_after_ms' must be a non-negative integer no greater than 10000."
+        );
+    }
+}
+
+#[test]
+fn write_stdin_yield_delay_defaults_and_inclusive_bounds() {
     assert_eq!(
         WriteStdinInput::parse(r#"{"name":"p","input":""}"#)
             .unwrap()
@@ -243,14 +289,6 @@ fn yield_delay_defaults_and_inclusive_bounds() {
     );
     for (lexeme, expected) in [("0", 0), ("-0", 0), ("4294967294", 4_294_967_294)] {
         assert_eq!(
-            ExecInput::parse(&format!(
-                r#"{{"command":"true","yield_after_ms":{lexeme}}}"#
-            ))
-            .unwrap()
-            .yield_after_ms,
-            Some(expected)
-        );
-        assert_eq!(
             WriteStdinInput::parse(&format!(
                 r#"{{"name":"p","input":"","yield_after_ms":{lexeme}}}"#
             ))
@@ -262,7 +300,7 @@ fn yield_delay_defaults_and_inclusive_bounds() {
 }
 
 #[test]
-fn yield_delay_rejects_out_of_bounds_with_exact_message() {
+fn write_stdin_yield_delay_rejects_out_of_bounds_with_exact_message() {
     for lexeme in [
         "-1",
         "4294967295",
@@ -270,12 +308,6 @@ fn yield_delay_rejects_out_of_bounds_with_exact_message() {
         "-9223372036854775808",
     ] {
         let expected = "Tool argument 'yield_after_ms' must be a non-negative integer no greater than 4294967294.";
-        assert_eq!(
-            error(ExecInput::parse(&format!(
-                r#"{{"command":"true","yield_after_ms":{lexeme}}}"#
-            ))),
-            expected
-        );
         assert_eq!(
             error(WriteStdinInput::parse(&format!(
                 r#"{{"name":"p","input":"","yield_after_ms":{lexeme}}}"#

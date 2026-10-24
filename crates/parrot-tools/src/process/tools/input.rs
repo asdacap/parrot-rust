@@ -66,7 +66,16 @@ impl ExecInput {
             environment,
             name,
             description,
-            yield_after_ms: delay(milliseconds)?,
+            yield_after_ms: match milliseconds {
+                None => Some(1000),
+                Some(value) if (0..=10_000).contains(&value) => Some(value as u64),
+                Some(_) => {
+                    return Err(InputError(
+                        "Tool argument 'yield_after_ms' must be a non-negative integer no greater than 10000."
+                            .into(),
+                    ));
+                }
+            },
             tty,
         })
     }
