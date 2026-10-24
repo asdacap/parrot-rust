@@ -352,6 +352,33 @@ fn wide_diff_pairs_removed_added_rows_and_narrow_diff_stays_inline() {
 }
 
 #[test]
+fn side_by_side_diff_pads_unicode_to_terminal_columns() {
+    let diff = format!(
+        "--- a/file\n+++ b/file\n@@ -1,5 +1,5 @@\n plain\n 界\n e\u{301}\n 😀\n {}\n",
+        "界".repeat(80)
+    );
+    let item = terminal("edit", ToolBlock::from_diff(diff));
+    let rows = ScrollbackItem::render(
+        &item,
+        ScrollbackRenderContext {
+            inline_diff: false,
+            ..context(80, false)
+        },
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 7);
+    let (first_left, _) = rows[2].split_once(" │ ").unwrap();
+    for row in &rows[2..] {
+        let (left, _) = row.split_once(" │ ").unwrap();
+        assert_eq!(TerminalText::width(left), TerminalText::width(first_left));
+        assert!(TerminalText::width(row) <= 80);
+    }
+    assert!(rows[3].contains('界'));
+    assert!(rows[4].contains("e\u{301}"));
+    assert!(rows[5].contains('😀'));
+}
+
+#[test]
 fn diff_context_rows_advance_old_new_counters_and_preserve_trailing_header_text() {
     let diff =
         "--- a/file\n+++ b/file\n@@ -10,3 +20,4 @@ heading\n context\n-old\n+new\n+extra\n tail";

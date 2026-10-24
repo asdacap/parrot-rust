@@ -415,7 +415,17 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
         if text.encode_utf16().count() <= limit {
             return Ok(text.to_owned());
         }
-        let prefix = String::from_utf16_lossy(&text.encode_utf16().take(limit).collect::<Vec<_>>());
+        let mut remaining = limit;
+        let prefix: String = text
+            .chars()
+            .take_while(|character| {
+                if character.len_utf16() > remaining {
+                    return false;
+                }
+                remaining -= character.len_utf16();
+                true
+            })
+            .collect();
         render(
             &self.configuration,
             "agent-task.truncated",

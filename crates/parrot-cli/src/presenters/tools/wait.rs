@@ -62,12 +62,6 @@ impl ToolPresenter for WaitToolPresenter {
         frame: usize,
     ) -> PresenterResult<Presentation> {
         let milliseconds = Self::duration(call)?;
-        // TimeSpan.FromMilliseconds rejects values outside its tick range.
-        if !(-922_337_203_685_477..=922_337_203_685_477).contains(&milliseconds) {
-            return Err(PresenterError(
-                "wait duration exceeds TimeSpan range.".into(),
-            ));
-        }
         let started = (self.clock)();
         let clock = self.clock.clone();
         let mut report = ToolReport::live(

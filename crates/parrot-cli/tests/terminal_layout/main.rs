@@ -5,6 +5,7 @@ mod markdown_golden;
 mod markdown_regressions;
 mod markdown_round3;
 mod markdown_round4_wrap;
+mod native_final_format;
 mod round3_final_format;
 mod termimad_adapter;
 mod termimad_live;

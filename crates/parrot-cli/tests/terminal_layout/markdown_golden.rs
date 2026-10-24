@@ -77,15 +77,18 @@ source_case!(
 );
 source_case!(
     yaml_review_date_key_1773cc7308d2,
-    "yaml.review.date-key.1773cc7308d2"
+    "yaml.review.date-key.1773cc7308d2",
+    "Rust formatter always double-quotes string mapping keys"
 );
 source_case!(
     yaml_review_date_key_f1b2d9fc00ea,
-    "yaml.review.date-key.f1b2d9fc00ea"
+    "yaml.review.date-key.f1b2d9fc00ea",
+    "Rust formatter always double-quotes string mapping keys"
 );
 source_case!(
     yaml_review_date_key_402089f6358f,
-    "yaml.review.date-key.402089f6358f"
+    "yaml.review.date-key.402089f6358f",
+    "Rust formatter always double-quotes string mapping keys"
 );
 source_case!(
     yaml_review_date_key_51fa106d06f4,

@@ -55,6 +55,34 @@ fn wait_counts_down_same_live_item_across_animated_frames() {
     }
 }
 #[test]
+fn wait_renders_integer_extremes_without_timespan_limits() {
+    let presenter = WaitToolPresenter::with_clock(Arc::new(|| Duration::ZERO));
+    let context = LiveBufferRenderContext {
+        columns: 512,
+        color: false,
+    };
+    for (milliseconds, expected) in [
+        (922_337_203_685_477, "256204778h 48m 06s"),
+        (922_337_203_685_478, "256204778h 48m 06s"),
+        (i64::MAX, "2562047788015h 12m 56s"),
+        (-922_337_203_685_478, "0s"),
+        (i64::MIN, "0s"),
+    ] {
+        let item = presenter
+            .present_live(
+                &ToolCallPresentation::new("wait", format!("{{\"duration_ms\":{milliseconds}}}")),
+                0,
+            )
+            .unwrap();
+        assert_eq!(
+            LiveBufferItem::render(&item, context).unwrap().lines[0].text(),
+            format!("⠋ Wait for incoming activity ({expected} left)"),
+            "{milliseconds}"
+        );
+    }
+}
+
+#[test]
 fn wait_is_live_only_modeline_eligible_and_omits_all_terminal_outcomes() {
     let presenter = WaitToolPresenter::new();
     assert!(presenter.metadata().live_only);

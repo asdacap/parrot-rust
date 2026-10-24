@@ -46,7 +46,9 @@ fn write_node(node: &Node, output: &mut String) -> Result<()> {
                 output.push_str(&integer.to_string());
             } else if let Some(number) = invariant_double(value) {
                 if !number.is_finite() {
-                    return Err(ConfigError::invalid_data(".NET number values such as positive and negative infinity cannot be written as valid JSON. To make it work when using 'JsonSerializer', consider specifying 'JsonNumberHandling.AllowNamedFloatingPointLiterals' (see https://learn.microsoft.com/dotnet/api/system.text.json.serialization.jsonnumberhandling).".to_owned()));
+                    return Err(ConfigError::invalid_data(
+                        "Non-finite number values cannot be written as valid JSON.".to_owned(),
+                    ));
                 }
                 output.push_str(&number_string(number));
             } else {

@@ -1407,7 +1407,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "two-face",
- "tz-rs",
  "unicode-general-category",
  "unicode-segmentation",
 ]
@@ -2671,12 +2670,6 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
-
-[[package]]
-name = "tz-rs"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1450bf2b99397e72070e7935c89facaa80092ac812502200375f1f7d33c71a1"
 
 [[package]]
 name = "unicode-general-category"

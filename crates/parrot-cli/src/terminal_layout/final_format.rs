@@ -43,7 +43,7 @@ impl ToolYamlFormatter {
         }
         let node = match convert(raw) {
             Ok(node) => node,
-            Err(ConvertError::DuplicateKey | ConvertError::DateArgument) => return Ok(None),
+            Err(ConvertError::DuplicateKey) => return Ok(None),
             Err(ConvertError::Scalar(error)) => return Err(error),
         };
         let mut text = String::new();
@@ -251,7 +251,7 @@ impl<'a> Parser<'a> {
 }
 
 enum Node {
-    Object(Vec<(String, bool, Node)>),
+    Object(Vec<(String, Node)>),
     Array(Vec<Node>),
     String(String),
     Scalar(String),
@@ -259,7 +259,6 @@ enum Node {
 
 enum ConvertError {
     DuplicateKey,
-    DateArgument,
     Scalar(FinalFormatError),
 }
 
@@ -278,14 +277,11 @@ fn convert(raw: Raw<'_>) -> Result<Node, ConvertError> {
             let mut converted = Vec::new();
             for (key, value) in members {
                 let key = decode(key)?;
-                // KeyScalar is evaluated before the property's value in the
-                // source; date-related ArgumentException belongs to its catch.
-                let quoted = requires_quotes(&key).map_err(|()| ConvertError::DateArgument)?;
                 let value = convert(value)?;
                 if !keys.insert(key.clone()) {
                     return Err(ConvertError::DuplicateKey);
                 }
-                converted.push((key, quoted, value));
+                converted.push((key, value));
             }
             Node::Object(converted)
         }
@@ -314,9 +310,9 @@ fn emit(node: &Node, indent: usize, out: &mut String) {
     }
     match node {
         Node::Object(members) => {
-            for (key, quoted, value) in members {
+            for (key, value) in members {
                 out.push_str(&" ".repeat(indent));
-                let rendered_key = key_scalar(key, *quoted, indent);
+                let rendered_key = key_scalar(key, indent);
                 let complex_key = rendered_key.starts_with("? ");
                 out.push_str(&rendered_key);
                 out.push(':');
@@ -401,221 +397,15 @@ fn double_quote(value: &str) -> String {
     out
 }
 
-fn key_scalar(value: &str, quoted: bool, indent: usize) -> String {
-    let scalar = key_scalar_style(value, quoted, indent);
-    // CheckSimpleKey counts the original .NET string, not serialized escapes.
-    if value.chars().any(yaml_break) || value.encode_utf16().count() > 1024 {
-        let end = if scalar.chars().next_back().is_some_and(yaml_break) {
-            ""
-        } else {
-            "\n"
-        };
-        format!("? {scalar}{end}{}", " ".repeat(indent))
+fn key_scalar(value: &str, indent: usize) -> String {
+    let scalar = double_quote(value);
+    if value.chars().any(yaml_break) || scalar.chars().count() > 1024 {
+        format!("? {scalar}\n{}", " ".repeat(indent))
     } else {
         scalar
     }
 }
 
-fn key_scalar_style(value: &str, quoted: bool, indent: usize) -> String {
-    if quoted {
-        return double_quote(value);
-    }
-    if value.chars().any(yaml_break) {
-        // AnalyzeScalar forbids block style for trailing spaces and a line of
-        // spaces following a break. Tabs are blank for folding, not IsSpace.
-        let mut previous_break = false;
-        let mut line_of_spaces = false;
-        for c in value.chars() {
-            if c == ' ' {
-                line_of_spaces |= previous_break;
-                previous_break = false;
-            } else if yaml_break(c) {
-                if line_of_spaces {
-                    return double_quote(value);
-                }
-                previous_break = true;
-            } else {
-                previous_break = false;
-                line_of_spaces = false;
-            }
-        }
-        return if value.ends_with(' ') {
-            double_quote(value)
-        } else {
-            folded_key(value, indent)
-        };
-    }
-    if value
-        .chars()
-        .any(|c| (c.is_control() && c != '\t') || u32::from(c) >= 0xfffe)
-    {
-        return double_quote(value);
-    }
-    if plain_key(value) {
-        return value.to_owned();
-    }
-    format!("'{}'", value.replace('\'', "''"))
-}
-
 fn yaml_break(c: char) -> bool {
     matches!(c, '\r' | '\n' | '\u{85}' | '\u{2028}' | '\u{2029}')
-}
-
-fn folded_key(value: &str, indent: usize) -> String {
-    // Hints inspect the original UTF-16 characters, before CRLF normalization.
-    let mut ending = value.chars().rev();
-    let chomp = if !ending.next().is_some_and(yaml_break) {
-        "-"
-    } else if ending.next().is_some_and(yaml_break) {
-        "+"
-    } else {
-        ""
-    };
-    let indicator = if value.starts_with(' ') || value.chars().next().is_some_and(yaml_break) {
-        "2"
-    } else {
-        ""
-    };
-    let value = value.replace("\r\n", "\n").replace(['\r', '\u{85}'], "\n");
-    let padding = " ".repeat(indent + 2);
-    let mut out = format!(">{indicator}{chomp}\n");
-    let mut previous_break = true;
-    let mut leading_spaces = true;
-    let chars: Vec<_> = value.chars().collect();
-    for (index, &c) in chars.iter().enumerate() {
-        if yaml_break(c) {
-            if !previous_break && !leading_spaces && c == '\n' {
-                let next = chars[index..].iter().find(|c| !yaml_break(**c));
-                if next.is_some_and(|c| !matches!(c, ' ' | '\t')) {
-                    out.push('\n');
-                }
-            }
-            out.push(c);
-            previous_break = true;
-        } else {
-            if previous_break {
-                out.push_str(&padding);
-                leading_spaces = matches!(c, ' ' | '\t');
-            }
-            out.push(c);
-            previous_break = false;
-        }
-    }
-    if !previous_break {
-        out.push('\n');
-    }
-    out
-}
-
-fn plain_key(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with(' ')
-        && !value.ends_with(' ')
-        && !["---", "..."]
-            .iter()
-            .any(|prefix| value.starts_with(prefix))
-        && !value.starts_with([
-            '!', '&', '*', '{', '}', '[', ']', ',', '#', '|', '>', '\'', '"', '%', '@', '`',
-        ])
-        && !matches!(value, "-" | "?" | ":")
-        && !["- ", "? ", ": "]
-            .iter()
-            .any(|prefix| value.starts_with(prefix))
-        && !value.contains(": ")
-        && !value.contains(":\t")
-        && !value.ends_with(':')
-        && !value.contains(" #")
-        && !value.chars().any(|c| {
-            (c.is_control() && c != '\t') || matches!(c, '\u{85}' | '\u{2028}' | '\u{2029}')
-        })
-}
-
-fn requires_quotes(value: &str) -> Result<bool, ()> {
-    let trimmed = value.trim();
-    if value.is_empty()
-        || ["null", "yes", "no", "on", "off"]
-            .iter()
-            .any(|word| value.eq_ignore_ascii_case(word))
-        || matches!(value, "~" | "<<")
-        || trimmed.eq_ignore_ascii_case("true")
-        || trimmed.eq_ignore_ascii_case("false")
-        || decimal_number(trimmed)
-    {
-        Ok(true)
-    } else {
-        date_key(value)
-    }
-}
-
-fn decimal_number(value: &str) -> bool {
-    // NumberStyles.Float excludes thousands separators and includes a leading
-    // sign, decimal point and exponent. Decimal's finite range excludes NaN/Inf.
-    let unsigned = value.strip_prefix(['+', '-']).unwrap_or(value);
-    let (mantissa, exponent) = unsigned.split_once(['e', 'E']).unwrap_or((unsigned, "0"));
-    let exponent = match exponent.parse::<i32>() {
-        Ok(exponent) => exponent,
-        Err(_)
-            if exponent
-                .strip_prefix('-')
-                .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())) =>
-        {
-            i32::MIN
-        }
-        Err(_)
-            if !exponent.strip_prefix('+').unwrap_or(exponent).is_empty()
-                && exponent
-                    .strip_prefix('+')
-                    .unwrap_or(exponent)
-                    .bytes()
-                    .all(|b| b.is_ascii_digit()) =>
-        {
-            i32::MAX
-        }
-        Err(_) => return false,
-    };
-    let mut digits = String::new();
-    let mut dot = None;
-    for c in mantissa.chars() {
-        if c == '.' && dot.is_none() {
-            dot = Some(digits.len());
-        } else if c.is_ascii_digit() {
-            digits.push(c);
-        } else {
-            return false;
-        }
-    }
-    if digits.is_empty() {
-        return false;
-    }
-    let significant = digits.trim_start_matches('0');
-    if significant.is_empty() {
-        return true;
-    }
-    let scale = (digits.len() - dot.unwrap_or(digits.len())) as i64 - i64::from(exponent);
-    let integer_digits = significant.len() as i64 - scale;
-    if integer_digits < 29 {
-        return true;
-    }
-    if integer_digits > 29 {
-        return false;
-    }
-    let mut integer = significant.chars().take(29).collect::<String>();
-    while integer.len() < 29 {
-        integer.push('0');
-    }
-    match integer.as_str().cmp("79228162514264337593543950335") {
-        std::cmp::Ordering::Less => true,
-        std::cmp::Ordering::Greater => false,
-        std::cmp::Ordering::Equal => significant
-            .as_bytes()
-            .get(29)
-            .is_none_or(|digit| *digit < b'5'),
-    }
-}
-
-#[path = "invariant_date.rs"]
-mod invariant_date;
-
-fn date_key(value: &str) -> Result<bool, ()> {
-    invariant_date::classify(value)
 }

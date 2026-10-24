@@ -242,6 +242,29 @@ fn progress_try_read_uses_exact_kind_and_protobuf_not_json() {
 }
 
 #[test]
+#[ignore = "Rust duration rounding no longer reproduces C# unchecked overflow"]
+fn duration_maximum_preserves_dotnet_unchecked_overflow() {
+    assert_eq!(DurationFormatter::format(i64::MAX), "0s");
+}
+
+#[test]
+fn duration_rounding_stays_monotonic_at_integer_limits() {
+    assert_eq!(DurationFormatter::format(i64::MIN), "0s");
+    assert_eq!(
+        DurationFormatter::format(i64::MAX - 1000),
+        "2562047788015h 12m 55s"
+    );
+    assert_eq!(
+        DurationFormatter::format(i64::MAX - 500),
+        "2562047788015h 12m 55s"
+    );
+    assert_eq!(
+        DurationFormatter::format(i64::MAX),
+        "2562047788015h 12m 56s"
+    );
+}
+
+#[test]
 fn duration_rounds_clamps_and_uses_fixed_minute_hour_fields() {
     for (milliseconds, expected) in [
         (-1000, "0s"),
@@ -254,7 +277,6 @@ fn duration_rounds_clamps_and_uses_fixed_minute_hour_fields() {
         (65_000, "1m 05s"),
         (3_599_500, "1h 00m 00s"),
         (3_661_000, "1h 01m 01s"),
-        (i64::MAX, "0s"),
     ] {
         assert_eq!(
             DurationFormatter::format(milliseconds),

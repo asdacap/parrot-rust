@@ -19,7 +19,6 @@ pub const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 pub const CALLBACK_URL: &str = "http://localhost:1455/auth/callback";
 const MAX_JSON_BYTES: usize = 1 << 20;
 const TOKEN_EXPIRY_RANGE: &str = "Value to add was out of range. (Parameter 'value')";
-const DEVICE_DURATION_RANGE: &str = "TimeSpan overflowed because the duration is too long.";
 
 pub struct SystemOAuthClock;
 impl Clock for SystemOAuthClock {
@@ -360,9 +359,9 @@ impl OAuthClient for OpenAiOAuthClient {
             if device_id.is_empty() || user_code.is_empty() {
                 return Err(failed("auth: invalid device authorization response"));
             }
-            let interval = auth(parse_interval(&document).and_then(timespan_seconds))?;
+            let interval = auth(parse_interval(&document))?;
             let interval = if interval < 1 { 5 } else { interval as u64 };
-            let expires = auth(read_long(&document, "expires_in").and_then(timespan_seconds))?;
+            let expires = auth(read_long(&document, "expires_in"))?;
             let expires = if expires > 0
                 && Duration::from_secs(expires as u64) <= self.options.login_timeout
             {
@@ -567,12 +566,6 @@ fn parse_interval(scope: &RawValue) -> Result<i64, AuthError> {
         }
         _ => Ok(0),
     }
-}
-fn timespan_seconds(seconds: i64) -> Result<i64, AuthError> {
-    if !(-922_337_203_685..=922_337_203_685).contains(&seconds) {
-        return Err(AuthError::ArgumentOutOfRange(DEVICE_DURATION_RANGE));
-    }
-    Ok(seconds)
 }
 fn random_url_string() -> OperationResult<String, AuthError> {
     let mut bytes = [0_u8; 32];
@@ -1486,6 +1479,88 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Rust device expiry is capped by login timeout instead of .NET TimeSpan limits"]
+    async fn device_expiry_overflow_preserves_dotnet_failure_category() {
+        let body = r#"{"device_auth_id":"d","user_code":"u","expires_in":9223372036854775807}"#;
+        let (url, server) = issuer(vec![(200, body.to_owned())]).await;
+        assert_eq!(
+            client(url, clock())
+                .start_device_authorization(&NEVER)
+                .await
+                .unwrap_err(),
+            OperationError::Failed(AuthError::ArgumentOutOfRange(
+                "TimeSpan overflowed because the duration is too long."
+            ))
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn device_duration_extremes_preserve_defaults_and_login_timeout_cap() {
+        for (interval, expires) in [(0, i64::MAX), (i64::MIN, i64::MIN), (-1, -1), (0, 0)] {
+            let body = format!(
+                "{{\"device_auth_id\":\"d\",\"user_code\":\"u\",\"interval\":{interval},\"expires_in\":{expires}}}"
+            );
+            let (url, server) = issuer(vec![(200, body)]).await;
+            let clock = clock();
+            let mut client = client(url, clock.clone());
+            client.options.login_timeout = Duration::from_secs(37);
+            let device = client.start_device_authorization(&NEVER).await.unwrap();
+            assert_eq!(device.interval, Duration::from_secs(5));
+            assert_eq!(device.expires_at, clock.utc_now() + Duration::from_secs(37));
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn device_large_intervals_use_native_checked_deadlines() {
+        for interval in [922_337_203_686, i64::MAX] {
+            let body =
+                format!("{{\"device_auth_id\":\"d\",\"user_code\":\"u\",\"interval\":{interval}}}");
+            let (url, server) = issuer(vec![(200, body), (404, String::new())]).await;
+            let clock = Arc::new(SleepClock {
+                monotonic: Instant::now(),
+                entered: tokio::sync::Notify::new(),
+                deadlines: Mutex::new(Vec::new()),
+            });
+            let client = client(url, clock.clone());
+            let device = client.start_device_authorization(&NEVER).await.unwrap();
+            assert_eq!(device.interval, Duration::from_secs(interval as u64));
+            let deadline = device
+                .interval
+                .checked_add(client.options.polling_safety_margin)
+                .and_then(|delay| clock.monotonic.checked_add(delay));
+            let cancellation = Arc::new(TestCancellation::new());
+            let operation = {
+                let cancellation = cancellation.clone();
+                tokio::spawn(async move {
+                    client
+                        .await_device_authorization(&device, cancellation.as_ref())
+                        .await
+                })
+            };
+            if let Some(deadline) = deadline {
+                clock.entered.notified().await;
+                assert_eq!(*clock.deadlines.lock().unwrap(), [deadline]);
+                cancellation.cancel();
+                assert!(matches!(
+                    operation.await.unwrap(),
+                    Err(OperationError::Cancelled)
+                ));
+            } else {
+                assert_eq!(
+                    operation.await.unwrap().unwrap_err(),
+                    OperationError::Failed(AuthError::Message(
+                        "auth: invalid device polling response"
+                    ))
+                );
+                assert!(clock.deadlines.lock().unwrap().is_empty());
+            }
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn malformed_shapes_and_numeric_ranges_preserve_source_failure_categories() {
         for payload in ["[]", "3", r#"{"organizations":[3]}"#] {
             assert!(matches!(
@@ -1507,11 +1582,6 @@ mod tests {
             (
                 r#"{"device_auth_id":"d","user_code":"u","interval":1e30}"#.to_owned(),
                 AuthError::Format,
-            ),
-            (
-                r#"{"device_auth_id":"d","user_code":"u","expires_in":9223372036854775807}"#
-                    .to_owned(),
-                AuthError::ArgumentOutOfRange(DEVICE_DURATION_RANGE),
             ),
         ] {
             let (url, server) = issuer(vec![(200, body)]).await;

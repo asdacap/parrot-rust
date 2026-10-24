@@ -783,7 +783,7 @@ fn diff_cell(line: i32, marker: char, text: &str, digits: usize, content_width: 
     let content = TerminalText::clip(&expand_tabs(text), content_width);
     format!(
         "{line:>digits$} {marker}{content}{}",
-        " ".repeat(content_width.saturating_sub(content.encode_utf16().count()))
+        " ".repeat(content_width.saturating_sub(TerminalText::width(&content)))
     )
 }
 fn side_by_side_rows(files: &[DiffFile], columns: usize) -> Vec<String> {

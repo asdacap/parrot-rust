@@ -10,8 +10,7 @@ pub struct DurationFormatter;
 
 impl DurationFormatter {
     pub fn format(elapsed_milliseconds: i64) -> String {
-        // C#'s unchecked addition wraps, including at Int64.MaxValue.
-        let seconds = elapsed_milliseconds.wrapping_add(500).max(0) / 1000;
+        let seconds = (i128::from(elapsed_milliseconds).max(0) + 500) / 1000;
         match seconds {
             0..60 => format!("{seconds}s"),
             60..3600 => format!("{}m {:02}s", seconds / 60, seconds % 60),
