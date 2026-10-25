@@ -1258,7 +1258,7 @@ async fn plan_send_terminal_before_unary_response_does_not_restore_busy() {
             assert_eq!(state.sent.len(), 1);
             assert_eq!(state.listens.len(), 1);
             assert_eq!(state.listens[0].user_session_id, initial.id);
-            assert!(!state.listens[0].replay);
+            assert!(state.listens[0].replay);
             assert_eq!(state.streams[&initial.id].len(), 1);
             assert!(!state.streams[&initial.id][0].is_closed());
             assert!(state.created.is_empty());
@@ -1428,7 +1428,7 @@ async fn plan_mode_only_choice_refreshes_retained_modeline_without_send() {
             assert_eq!(state.updated.len(), 1);
             assert_eq!(state.listens.len(), 1);
             assert_eq!(state.listens[0].user_session_id, initial.id);
-            assert!(!state.listens[0].replay);
+            assert!(state.listens[0].replay);
             assert_eq!(state.streams[&initial.id].len(), 1);
             assert!(!state.streams[&initial.id][0].is_closed());
             assert_eq!(

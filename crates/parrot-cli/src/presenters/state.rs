@@ -36,6 +36,7 @@ pub struct AgentSessionState {
     tool_live: Mutex<BTreeMap<String, super::Presentation>>,
     response: String,
     reasoning: String,
+    reasoning_tokens: i64,
     agent_task_revision: u64,
     terminal_committed: bool,
     request_attempt: u32,
@@ -144,6 +145,7 @@ impl AgentSessionState {
         self.folded_tool_order = 0;
         self.response.clear();
         self.reasoning.clear();
+        self.reasoning_tokens = 0;
         self.response_complete = false;
         self.response_line_breaks = 0;
         true
@@ -171,8 +173,10 @@ impl AgentSessionState {
     pub fn collect_reasoning(&mut self, chunk: &wire::ReasoningChunk) {
         self.is_reasoning_summary =
             chunk.kind == wire::ReasoningKind::REASONING_KIND_SUMMARY.into();
-        self.reasoning
-            .push_str(&TerminalText::sanitize(&chunk.fragment));
+        let fragment = TerminalText::sanitize(&chunk.fragment);
+        // A running estimate keeps each live frame from re-tokenizing the whole reasoning.
+        self.reasoning_tokens += TokenEstimator::estimate_tokens(&fragment);
+        self.reasoning.push_str(&fragment);
     }
 
     pub fn has_reasoning(&self) -> bool {
@@ -189,7 +193,7 @@ impl AgentSessionState {
             ActivityValue::Spinner {
                 text: format!(
                     "Thinking ({} tokens)…",
-                    format_token_count(TokenEstimator::estimate_tokens(&self.reasoning))
+                    format_token_count(self.reasoning_tokens)
                 ),
                 frame,
             }
@@ -198,6 +202,7 @@ impl AgentSessionState {
 
     pub(crate) fn drain_reasoning(&mut self) -> Option<ActivityValue> {
         let reasoning = std::mem::take(&mut self.reasoning);
+        self.reasoning_tokens = 0;
         if reasoning.trim().is_empty() {
             return None;
         }

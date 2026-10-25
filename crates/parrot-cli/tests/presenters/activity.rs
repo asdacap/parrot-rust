@@ -64,9 +64,9 @@ fn phase(owner: &str) -> wire::Event {
         ),
     )
 }
-fn live(update: &ActivityUpdate) -> String {
-    update
-        .live
+fn live(view: &RawActivityView) -> String {
+    view.snapshot()
+        .unwrap()
         .iter()
         .flat_map(|item| {
             item.render(LiveBufferRenderContext {
@@ -119,8 +119,7 @@ fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
                 false,
             ))
             .unwrap();
-            let drawn = view
-                .observe(&reasoning(owner, "\x1b[2Jmore reasoning", false, false))
+            view.observe(&reasoning(owner, "\x1b[2Jmore reasoning", false, false))
                 .unwrap();
             let expected = 10;
             let prefix = if owner == "root" {
@@ -129,9 +128,9 @@ fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
                 "  ⠋ [worker] ".to_owned()
             };
             assert!(
-                live(&drawn).contains(&format!("{prefix}Thinking ({expected} tokens)…")),
+                live(&view).contains(&format!("{prefix}Thinking ({expected} tokens)…")),
                 "{}",
-                live(&drawn)
+                live(&view)
             );
             let flushed = match trigger {
                 "prepare" => view.observe(&phase(owner)).unwrap(),
@@ -150,7 +149,7 @@ fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
                     if owner == "root" { "" } else { "[worker] " }
                 )
             );
-            assert!(!live(&flushed).contains("Thinking ("));
+            assert!(!live(&view).contains("Thinking ("));
         }
     }
 }
@@ -162,12 +161,12 @@ fn raw_reasoning_count_grows_with_each_fragment_and_stays_silent_when_nothing_ar
     assert!(commits(&view.observe(&phase("root")).unwrap()).is_empty());
     let empty = view.observe(&reasoning("root", "", true, false)).unwrap();
     assert!(commits(&empty).is_empty());
-    assert!(!live(&empty).contains("Thinking ("));
+    assert!(!live(&view).contains("Thinking ("));
     for (fragment, expected) in [("first", 1), ("\x1b[2Jsecond", 5), (" third\n", 7)] {
         let update = view
             .observe(&reasoning("root", fragment, false, false))
             .unwrap();
-        assert!(live(&update).contains(&format!("⠋ Thinking ({expected} tokens)…")));
+        assert!(live(&view).contains(&format!("⠋ Thinking ({expected} tokens)…")));
         assert!(commits(&update).is_empty());
     }
 }
@@ -176,10 +175,9 @@ fn raw_reasoning_count_grows_with_each_fragment_and_stays_silent_when_nothing_ar
 fn raw_reasoning_count_is_humanized_once_it_is_large() {
     let mut view = view();
     view.observe(&turn("root")).unwrap();
-    let update = view
-        .observe(&reasoning("root", &" a".repeat(4_100), false, false))
+    view.observe(&reasoning("root", &" a".repeat(4_100), false, false))
         .unwrap();
-    assert!(live(&update).contains("⠋ Thinking (4.1k tokens)…"));
+    assert!(live(&view).contains("⠋ Thinking (4.1k tokens)…"));
     assert_eq!(
         commits(&view.observe(&phase("root")).unwrap()),
         ["✦ Reasoned for 4.1k tokens…"]
@@ -194,25 +192,24 @@ fn raw_reasoning_state_is_isolated_per_agent() {
     view.observe(&turn("child")).unwrap();
     view.observe(&reasoning("root", "root reasoning", false, false))
         .unwrap();
-    let update = view
-        .observe(&reasoning(
-            "child",
-            "a much longer child reasoning",
-            false,
-            false,
-        ))
-        .unwrap();
-    assert!(live(&update).contains("⠋ Thinking (2 tokens)…"));
-    assert!(live(&update).contains("  ⠋ [worker] Thinking (5 tokens)…"));
+    view.observe(&reasoning(
+        "child",
+        "a much longer child reasoning",
+        false,
+        false,
+    ))
+    .unwrap();
+    assert!(live(&view).contains("⠋ Thinking (2 tokens)…"));
+    assert!(live(&view).contains("  ⠋ [worker] Thinking (5 tokens)…"));
     let child = view.observe(&phase("child")).unwrap();
     assert_eq!(commits(&child).len(), 1);
     assert!(commits(&child)[0].contains("[worker]"));
-    assert!(live(&child).contains("Thinking ("));
-    assert!(!live(&child).contains("[worker] Thinking ("));
+    assert!(live(&view).contains("Thinking ("));
+    assert!(!live(&view).contains("[worker] Thinking ("));
     let root = view.observe(&phase("root")).unwrap();
     assert_eq!(commits(&root).len(), 1);
     assert!(!commits(&root)[0].contains("[worker]"));
-    assert!(!live(&root).contains("Thinking ("));
+    assert!(!live(&view).contains("Thinking ("));
 }
 
 #[test]
@@ -241,7 +238,7 @@ fn encrypted_reasoning_commits_one_hierarchical_notice_per_event() {
                     "  ✦ [worker] Reasoning received (encrypted)"
                 }]
             );
-            assert!(!live(&update).contains("Thinking ("));
+            assert!(!live(&view).contains("Thinking ("));
         }
     }
 }
@@ -350,39 +347,28 @@ fn hidden_tasks_follow_worker_activity_without_new_progress_revisions() {
         view.observe(&turn("root")).unwrap();
         view.observe(&child("worker", "worker", "root")).unwrap();
         let original = task("hidden task", "worker", true, status);
-        let update = view
-            .observe(&progress("root", 1, vec![original.clone()]))
+        view.observe(&progress("root", 1, vec![original.clone()]))
             .unwrap();
-        assert!(!live(&update).contains("Agent tasks:"));
-        let update = view.observe(&turn("worker")).unwrap();
-        assert!(live(&update).contains("Agent tasks:"));
-        assert!(live(&update).contains("hidden task"));
-        assert_eq!(live(&update).matches("[worker]").count(), 1);
-        assert!(
-            live(
-                &view
-                    .observe(&reasoning("worker", "Still thinking", false, false))
-                    .unwrap()
-            )
-            .contains("Thinking (")
-        );
-        assert!(
-            live(
-                &view
-                    .observe(&event(
-                        "worker",
-                        wire::event::Payload::TextChunk(wire::TextChunk {
-                            fragment: "streamed response".into(),
-                            ..Default::default()
-                        })
-                    ))
-                    .unwrap()
-            )
-            .contains("streamed response")
-        );
+        assert!(!live(&view).contains("Agent tasks:"));
+        view.observe(&turn("worker")).unwrap();
+        assert!(live(&view).contains("Agent tasks:"));
+        assert!(live(&view).contains("hidden task"));
+        assert_eq!(live(&view).matches("[worker]").count(), 1);
+        view.observe(&reasoning("worker", "Still thinking", false, false))
+            .unwrap();
+        assert!(live(&view).contains("Thinking ("));
+        view.observe(&event(
+            "worker",
+            wire::event::Payload::TextChunk(wire::TextChunk {
+                fragment: "streamed response".into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+        assert!(live(&view).contains("streamed response"));
         let update = view.observe(&ended("worker")).unwrap();
-        assert!(!live(&update).contains("Agent tasks:"));
-        assert!(!live(&update).contains("hidden task"));
+        assert!(!live(&view).contains("Agent tasks:"));
+        assert!(!live(&view).contains("hidden task"));
         assert!(commits(&update).join("|").contains("streamed response"));
         assert!(original.hidden);
     }
@@ -405,35 +391,35 @@ fn nested_hidden_graphs_reveal_only_the_path_to_a_working_descendant() {
         )],
     ))
     .unwrap();
-    let update = view
-        .observe(&progress(
-            "parent",
-            1,
-            vec![
-                task(
-                    "active child task",
-                    "worker",
-                    true,
-                    wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_UNSPECIFIED,
-                ),
-                task(
-                    "idle sibling",
-                    "idle",
-                    false,
-                    wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_UNSPECIFIED,
-                ),
-            ],
-        ))
-        .unwrap();
-    assert!(!live(&update).contains("Agent tasks:"));
-    let update = view.observe(&turn("worker")).unwrap();
-    let text = live(&update);
+    view.observe(&progress(
+        "parent",
+        1,
+        vec![
+            task(
+                "active child task",
+                "worker",
+                true,
+                wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_UNSPECIFIED,
+            ),
+            task(
+                "idle sibling",
+                "idle",
+                false,
+                wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_UNSPECIFIED,
+            ),
+        ],
+    ))
+    .unwrap();
+    assert!(!live(&view).contains("Agent tasks:"));
+    view.observe(&turn("worker")).unwrap();
+    let text = live(&view);
     assert!(text.contains("hidden parent"));
     assert!(text.contains("active child task"));
     assert!(!text.contains("idle sibling"));
     assert_eq!(text.matches("Agent tasks:").count(), 1);
     assert_eq!(text.matches("[worker]").count(), 1);
-    assert!(!live(&view.observe(&ended("worker")).unwrap()).contains("Agent tasks:"));
+    view.observe(&ended("worker")).unwrap();
+    assert!(!live(&view).contains("Agent tasks:"));
 }
 
 #[test]
@@ -453,7 +439,7 @@ fn hidden_successful_graph_flush_does_not_commit_an_empty_task_block() {
     .unwrap();
     let finished = view.finish().unwrap();
     assert!(commits(&finished).is_empty());
-    assert!(live(&finished).is_empty());
+    assert!(live(&view).is_empty());
     assert!(commits(&view.finish().unwrap()).is_empty());
 }
 
@@ -486,10 +472,11 @@ fn flushed_terminal_tree_retains_hidden_descendants_for_later_activity() {
         view.observe(&progress("root", 1, vec![ancestor])).unwrap();
         let flushed = view.tick(Duration::from_secs(1)).unwrap();
         assert!(commits(&flushed).join("|").contains("visible ancestor"));
-        let update = view.observe(&turn("worker")).unwrap();
-        assert!(live(&update).contains("visible ancestor"));
-        assert!(live(&update).contains("hidden descendant"));
-        assert!(!live(&view.observe(&ended("worker")).unwrap()).contains("hidden descendant"));
+        view.observe(&turn("worker")).unwrap();
+        assert!(live(&view).contains("visible ancestor"));
+        assert!(live(&view).contains("hidden descendant"));
+        view.observe(&ended("worker")).unwrap();
+        assert!(!live(&view).contains("hidden descendant"));
     }
 }
 
@@ -512,9 +499,9 @@ fn terminal_tree_kept_for_active_worker_retires_after_activity_stops() {
     .unwrap();
     let flushed = view.tick(Duration::from_secs(1)).unwrap();
     assert!(commits(&flushed).join("|").contains("finished task"));
-    let update = view.observe(&ended("worker")).unwrap();
-    assert!(!live(&update).contains("Agent tasks:"));
-    assert!(!live(&update).contains("finished task"));
+    view.observe(&ended("worker")).unwrap();
+    assert!(!live(&view).contains("Agent tasks:"));
+    assert!(!live(&view).contains("finished task"));
 }
 
 struct Processes {
@@ -658,7 +645,7 @@ fn yielded_exec_remains_live_without_committing() {
     let mut fixture = Processes::new();
     let update = fixture.yield_process("call", "sleep 20", "process", "process-1", "inventory", 1);
     assert!(commits(&update).is_empty());
-    assert!(live(&update).contains("$ sleep 20 (process process running"));
+    assert!(live(&fixture.view).contains("$ sleep 20 (process process running"));
 }
 
 #[test]
@@ -678,7 +665,7 @@ fn owner_inventory_replacement_and_removal_preserve_sibling_yielded_process() {
         depth: 1,
         ..process("child-process", "child command", "child")
     };
-    let update = fixture.replace(
+    fixture.replace(
         "child",
         "child-inventory",
         8,
@@ -686,9 +673,9 @@ fn owner_inventory_replacement_and_removal_preserve_sibling_yielded_process() {
         vec![child.clone()],
         vec![],
     );
-    assert!(live(&update).contains("root-process running"));
-    assert!(live(&update).contains("child-process running"));
-    let update = fixture.yield_process(
+    assert!(live(&fixture.view).contains("root-process running"));
+    assert!(live(&fixture.view).contains("child-process running"));
+    fixture.yield_process(
         "second-call",
         "sleep 30",
         "root-process",
@@ -696,8 +683,8 @@ fn owner_inventory_replacement_and_removal_preserve_sibling_yielded_process() {
         "new-root-inventory",
         1,
     );
-    assert!(live(&update).contains("root-process running"));
-    assert!(live(&update).contains("child-process running"));
+    assert!(live(&fixture.view).contains("root-process running"));
+    assert!(live(&fixture.view).contains("child-process running"));
     fixture.replace(
         "child",
         "replacement",
@@ -711,8 +698,8 @@ fn owner_inventory_replacement_and_removal_preserve_sibling_yielded_process() {
         1
     );
     let ignored = fixture.replace("child", "child-inventory", 9, false, vec![child], vec![]);
-    assert!(live(&ignored).contains("root-process running"));
-    assert!(!live(&ignored).contains("child-process running"));
+    assert!(live(&fixture.view).contains("root-process running"));
+    assert!(!live(&fixture.view).contains("child-process running"));
     assert!(commits(&ignored).is_empty());
     assert_eq!(
         commits(&fixture.omit("new-root-inventory", 2)),
@@ -732,7 +719,7 @@ fn named_long_process_shows_name_and_description() {
     let yielded = fixture.finish("call", "build", "process-1", "inventory", 1, false);
     assert_eq!(commits(&yielded).len(), 1);
     assert_eq!(commits(&yielded)[0].matches('x').count(), 200);
-    assert!(live(&yielded).contains("$ build · Build it (process build running"));
+    assert!(live(&fixture.view).contains("$ build · Build it (process build running"));
     assert_eq!(
         commits(&fixture.replace(
             "main",
@@ -744,7 +731,7 @@ fn named_long_process_shows_name_and_description() {
         )),
         ["$ build · Build it (7s)"]
     );
-    let update = fixture.replace(
+    fixture.replace(
         "main",
         "inventory",
         3,
@@ -756,7 +743,7 @@ fn named_long_process_shows_name_and_description() {
         }],
         vec![],
     );
-    assert!(live(&update).contains("$ test · Test it (process test running"));
+    assert!(live(&fixture.view).contains("$ test · Test it (process test running"));
     assert_eq!(commits(&fixture.omit("inventory", 4)), ["$ test · Test it"]);
 }
 
@@ -768,8 +755,8 @@ fn origin_tool_completion_waits_for_terminal_output() {
         origin_tool_call_id: "call".into(),
         ..process("process-1", "rg AgentTask", "main")
     };
-    let update = fixture.replace("main", "inventory", 1, false, vec![active], vec![]);
-    assert!(!live(&update).contains("process process-1 running"));
+    fixture.replace("main", "inventory", 1, false, vec![active], vec![]);
+    assert!(!live(&fixture.view).contains("process process-1 running"));
     assert!(commits(&fixture.omit("inventory", 2)).is_empty());
     let finished = fixture
         .view
@@ -825,7 +812,7 @@ fn newer_omission_commits_neutral_original_command() {
     fixture.yield_process("call", "sleep 20", "build", "process-1", "inventory", 1);
     let update = fixture.omit("inventory", 2);
     assert_eq!(commits(&update), ["$ sleep 20"]);
-    assert!(!live(&update).contains("process build running"));
+    assert!(!live(&fixture.view).contains("process build running"));
 }
 
 #[test]
@@ -849,7 +836,7 @@ fn snapshot_before_yielded_completion_commits_without_showing_process() {
     fixture.omit("inventory", 2);
     let update = fixture.finish("call", "build", "process-1", "inventory", 1, false);
     assert_eq!(commits(&update), ["$ sleep 20"]);
-    assert!(!live(&update).contains("process build running"));
+    assert!(!live(&fixture.view).contains("process build running"));
     assert!(
         commits(&fixture.finish("call", "build", "process-1", "inventory", 1, false)).is_empty()
     );
@@ -959,7 +946,7 @@ fn equal_and_stale_snapshots_do_not_complete_yielded_process() {
     assert!(commits(&fixture.omit("inventory", 2)).is_empty());
     let stale = fixture.omit("inventory", 1);
     assert!(commits(&stale).is_empty());
-    assert!(live(&stale).contains("$ sleep 20 (process build running"));
+    assert!(live(&fixture.view).contains("$ sleep 20 (process build running"));
 }
 
 #[test]
@@ -1090,8 +1077,8 @@ fn preamble_end_retires_processes_without_a_live_inventory() {
         vec![],
     );
     let update = fixture.view.retire_unconfirmed_processes().unwrap();
-    assert!(!live(&update).contains("stale-process running"));
-    assert!(live(&update).contains("live-process running"));
+    assert!(!live(&fixture.view).contains("stale-process running"));
+    assert!(live(&fixture.view).contains("live-process running"));
     assert!(commits(&update).is_empty());
     assert!(
         commits(&fixture.finish(
@@ -1112,12 +1099,14 @@ fn monitor_marker_blinks_without_moving_or_restyling_content() {
         let mut fixture = Processes::new();
         fixture.start("call", "monitor command");
         fixture.finish("call", "watch", "process-1", "inventory", 1, true);
-        let update = fixture
+        fixture
             .view
             .tick(Duration::from_millis(frame * 80))
             .unwrap();
-        let process = update
-            .live
+        let process = fixture
+            .view
+            .snapshot()
+            .unwrap()
             .iter()
             .find_map(|item| {
                 let rendered = item
@@ -1151,7 +1140,7 @@ fn monitor_marker_blinks_without_moving_or_restyling_content() {
 fn non_monitor_kind_preserves_spinner() {
     for kind in [0, 99] {
         let mut fixture = Processes::new();
-        let update = fixture.replace(
+        fixture.replace(
             "main",
             "inventory",
             1,
@@ -1162,7 +1151,7 @@ fn non_monitor_kind_preserves_spinner() {
             }],
             vec![],
         );
-        assert!(live(&update).starts_with("⠋ $ command"));
+        assert!(live(&fixture.view).starts_with("⠋ $ command"));
     }
 }
 
@@ -1187,10 +1176,10 @@ fn monitor_kind_survives_either_event_order_and_completion() {
                 vec![],
             );
         }
-        let yielded = fixture.finish("call", "watch", "process-1", "inventory", 1, true);
-        assert!(live(&yielded).contains("◉ $ monitor command"));
+        fixture.finish("call", "watch", "process-1", "inventory", 1, true);
+        assert!(live(&fixture.view).contains("◉ $ monitor command"));
         if !inventory_first {
-            let update = fixture.replace(
+            fixture.replace(
                 "main",
                 "inventory",
                 2,
@@ -1198,18 +1187,18 @@ fn monitor_kind_survives_either_event_order_and_completion() {
                 vec![inventory_process],
                 vec![],
             );
-            assert!(live(&update).contains("◉ $ monitor command"));
+            assert!(live(&fixture.view).contains("◉ $ monitor command"));
         }
         let completed = fixture.omit("inventory", 3);
         assert_eq!(commits(&completed), ["$ monitor command"]);
-        assert!(!live(&completed).contains("watch running"));
+        assert!(!live(&fixture.view).contains("watch running"));
     }
 }
 
 #[test]
 fn inventory_only_monitor_and_exec_use_distinct_markers_and_remove_cleanly() {
     let mut fixture = Processes::new();
-    let update = fixture.replace(
+    fixture.replace(
         "main",
         "inventory",
         1,
@@ -1224,11 +1213,11 @@ fn inventory_only_monitor_and_exec_use_distinct_markers_and_remove_cleanly() {
         ],
         vec![],
     );
-    assert!(live(&update).contains("◉ $ watch command"));
-    assert!(live(&update).contains("⠋ $ exec command"));
+    assert!(live(&fixture.view).contains("◉ $ watch command"));
+    assert!(live(&fixture.view).contains("⠋ $ exec command"));
     let update = fixture.omit("inventory", 2);
     assert_eq!(commits(&update).len(), 2);
-    assert!(!live(&update).contains("running"));
+    assert!(!live(&fixture.view).contains("running"));
 }
 
 #[test]
@@ -1259,42 +1248,38 @@ fn queue_inventory_replacement_is_owner_scoped_and_fences_retired_instances() {
         &snapshot("root", "root-work", 2),
     )
     .unwrap();
-    let update = view
-        .replace_queues(
-            &inventory("child", "child-inventory", 1, false),
-            &snapshot("child", "child-work", 1),
-        )
-        .unwrap();
-    assert!(live(&update).contains("queue: root-work · 2 items"));
-    assert!(live(&update).contains("[child] queue: child-work · 1 item"));
+    view.replace_queues(
+        &inventory("child", "child-inventory", 1, false),
+        &snapshot("child", "child-work", 1),
+    )
+    .unwrap();
+    assert!(live(&view).contains("queue: root-work · 2 items"));
+    assert!(live(&view).contains("[child] queue: child-work · 1 item"));
     view.replace_queues(
         &inventory("child", "replacement", 1, false),
         &snapshot("child", "new-work", 3),
     )
     .unwrap();
-    let ignored = view
-        .replace_queues(
-            &inventory("child", "child-inventory", 2, false),
-            &snapshot("child", "stale-work", 9),
-        )
-        .unwrap();
-    assert!(live(&ignored).contains("new-work"));
-    assert!(!live(&ignored).contains("stale-work"));
-    let update = view
-        .replace_queues(
-            &inventory("child", "replacement", 2, true),
-            &queue::QueueSnapshot::default(),
-        )
-        .unwrap();
-    assert!(live(&update).contains("root-work"));
-    assert!(!live(&update).contains("new-work"));
-    let ignored = view
-        .replace_queues(
-            &inventory("child", "replacement", 3, false),
-            &snapshot("child", "resurrected", 4),
-        )
-        .unwrap();
-    assert!(!live(&ignored).contains("resurrected"));
+    view.replace_queues(
+        &inventory("child", "child-inventory", 2, false),
+        &snapshot("child", "stale-work", 9),
+    )
+    .unwrap();
+    assert!(live(&view).contains("new-work"));
+    assert!(!live(&view).contains("stale-work"));
+    view.replace_queues(
+        &inventory("child", "replacement", 2, true),
+        &queue::QueueSnapshot::default(),
+    )
+    .unwrap();
+    assert!(live(&view).contains("root-work"));
+    assert!(!live(&view).contains("new-work"));
+    view.replace_queues(
+        &inventory("child", "replacement", 3, false),
+        &snapshot("child", "resurrected", 4),
+    )
+    .unwrap();
+    assert!(!live(&view).contains("resurrected"));
 }
 
 #[test]

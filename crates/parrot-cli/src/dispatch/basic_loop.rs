@@ -362,7 +362,9 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             "parrot {} — /help for commands, /exit to leave",
             self.version
         )?;
-        self.run_loop(initial, application).await
+        // A supplied startup session may be resumed or attached, so its history,
+        // agent names and task graphs arrive only through replay.
+        self.run_loop(initial, application, supplied).await
     }
 
     async fn once(
@@ -409,11 +411,22 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         &mut self,
         initial: wire::UserSession,
         application: Arc<Signal>,
+        replay: bool,
     ) -> Result<i32, BasicFailure> {
         let stop = Arc::new(Signal::new());
-        let stream =
+        let stream = if replay {
+            PreparedSessionStream::open(
+                self.client.clone(),
+                &initial.id,
+                application.clone(),
+                application.as_ref(),
+            )
+            .await?
+        } else {
             PreparedSessionStream::open_live(self.client.clone(), &initial.id, application.clone())
-                .await?;
+                .await?
+        };
+        let replay_context = stream.replay_context();
         let shared = Arc::new(BasicSession {
             binding: tokio::sync::Mutex::new(Binding {
                 stream,
@@ -437,6 +450,12 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             output: self.output.clone(),
             error: self.error.clone(),
         });
+        if replay {
+            replay_context
+                .lock()
+                .expect("Basic replay poisoned")
+                .set_completion(shared.busy_observer());
+        }
         let navigation = self.request.navigation.clone().unwrap_or_else(|| {
             Arc::new(ExplicitRemoteTerminalSessionNavigation::new(
                 self.client.clone(),
@@ -1405,7 +1424,7 @@ mod tests {
         struct PlanState {
             events: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Result<wire::Event, Status>>>>,
             messages: Mutex<Vec<wire::SendMessageRequest>>,
-            listened_sessions: Mutex<Vec<String>>,
+            listened_sessions: Mutex<Vec<(String, bool)>>,
             listening: Signal,
             interrupts: Mutex<Vec<wire::InterruptRequest>>,
             interrupted: Signal,
@@ -1547,7 +1566,8 @@ mod tests {
                         let stream: Self::ListenStream = if let Some(plan) = self.1.as_ref() {
                             let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
                             *plan.events.lock().unwrap() = Some(sender);
-                            plan.listened_sessions.lock().unwrap().push(request.into_inner().user_session_id);
+                            let request = request.into_inner();
+                            plan.listened_sessions.lock().unwrap().push((request.user_session_id, request.replay));
                             plan.listening.cancel();
                             Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(receiver))
                         } else {
@@ -1823,7 +1843,7 @@ mod tests {
                 "initial-live-test".into(),
                 prepare,
             );
-            let running = basic.run_loop(initial, application.clone());
+            let running = basic.run_loop(initial, application.clone(), true);
             tokio::pin!(running);
             let mut observed_live = false;
             let mut signalled_first_interrupt = false;
@@ -1833,7 +1853,6 @@ mod tests {
             let scenario: Result<(), String> = {
                 let driving = async {
                     plan.listening.cancelled().await;
-                    input_pending.cancelled().await;
                     let publish = |payload| {
                         plan.events
                             .lock()
@@ -1847,6 +1866,10 @@ mod tests {
                             }))
                             .unwrap();
                     };
+                    publish(wire::event::Payload::SessionUsageSnapshot(
+                        Default::default(),
+                    ));
+                    input_pending.cancelled().await;
                     publish(wire::event::Payload::TurnStarted(Default::default()));
                     publish(wire::event::Payload::TextChunk(wire::TextChunk {
                         fragment: "OWN EXISTING LIVE OUTPUT".into(),
@@ -1909,7 +1932,7 @@ mod tests {
             );
             assert_eq!(
                 *plan.listened_sessions.lock().unwrap(),
-                vec![SESSION.to_owned()]
+                vec![(SESSION.to_owned(), true)]
             );
             assert!(
                 signalled_first_interrupt,
@@ -2049,7 +2072,7 @@ mod tests {
                 "plan-race-test".into(),
                 prepare,
             );
-            let running = basic.run_loop(initial, application.clone());
+            let running = basic.run_loop(initial, application.clone(), false);
             tokio::pin!(running);
             let driving = async {
                 let enter = |text: &str| {

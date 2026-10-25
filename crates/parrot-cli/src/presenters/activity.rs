@@ -29,7 +29,6 @@ const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '
 #[derive(Default)]
 pub struct ActivityUpdate {
     pub commits: Vec<Arc<dyn ScrollbackItem>>,
-    pub live: Vec<Arc<dyn LiveBufferItem>>,
     pub main_agent_activity: Option<String>,
 }
 
@@ -817,7 +816,6 @@ impl RawActivityView {
         self.retire_task_progress();
         Ok(ActivityUpdate {
             commits,
-            live: self.snapshot()?,
             main_agent_activity,
         })
     }

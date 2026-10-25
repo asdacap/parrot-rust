@@ -174,7 +174,8 @@ impl EnhancedCli {
     pub async fn run(mut self, cancellation: &dyn Cancellation) -> Result<i32, EnhancedFailure> {
         check(cancellation)?;
         let exit_on_completion = !self.request.prompt.is_empty();
-        let show_loaded_banner = self.request.initial_session.is_none();
+        let supplied = self.request.initial_session.is_some();
+        let show_loaded_banner = !supplied;
         self.request.session.interactive_permissions = !exit_on_completion;
         let initial = match self.request.initial_session.take() {
             Some(session) => session,
@@ -196,10 +197,22 @@ impl EnhancedCli {
         };
         let lifetime = Arc::new(Signal::new());
         let binding_stop = Arc::new(Signal::new());
-        let stream = tokio::select! {
-            biased;
-            () = cancellation.cancelled() => return Err(Status::cancelled("operation cancelled").into()),
-            stream = PreparedSessionStream::open_live(self.client.clone(), &initial.id, binding_stop.clone()) => stream?,
+        // A supplied startup session may be resumed or attached, so its history,
+        // agent names and task graphs arrive only through replay.
+        let stream = if supplied {
+            PreparedSessionStream::open(
+                self.client.clone(),
+                &initial.id,
+                binding_stop.clone(),
+                cancellation,
+            )
+            .await?
+        } else {
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return Err(Status::cancelled("operation cancelled").into()),
+                stream = PreparedSessionStream::open_live(self.client.clone(), &initial.id, binding_stop.clone()) => stream?,
+            }
         };
         let (live_rows, inline_diff, prefixes) = {
             let configuration = self
