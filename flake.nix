@@ -52,11 +52,10 @@
             pkg-config
             protobuf
             rust
+            sccache
           ]
           ++ lib.optionals stdenv.hostPlatform.isLinux [bubblewrap];
-        shellHook = ''
-          export CARGO_HOME="''${PARROT_CARGO_HOME:-$PWD/.tmp/cargo-home}"
-        '';
+        RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
       };
     });
 
