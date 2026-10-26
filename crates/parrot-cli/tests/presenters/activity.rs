@@ -219,6 +219,110 @@ fn turn_failures_identify_the_main_agent_once() {
 }
 
 #[test]
+fn compaction_completions_identify_root_and_child_agents_once() {
+    for (owner, name, parent, prefix, label) in [
+        ("root", "", "", "", "main"),
+        ("root", "captain", "", "", "captain"),
+        ("child", "worker", "root", "  ", "worker"),
+    ] {
+        let mut view = view();
+        view.observe(&turn("root")).unwrap();
+        if !name.is_empty() {
+            view.observe(&child(owner, name, parent)).unwrap();
+        }
+        view.observe(&event(
+            owner,
+            wire::event::Payload::CompactionStarted(wire::CompactionStarted::default()),
+        ))
+        .unwrap();
+        let completion = event(
+            owner,
+            wire::event::Payload::CompactionFinished(wire::CompactionFinished::default()),
+        );
+        assert_eq!(
+            commits(&view.observe(&completion).unwrap()),
+            [format!("{prefix}✓ [{label}] compaction finished")]
+        );
+        assert!(!live(&view).contains("Compacting"));
+        assert!(commits(&view.observe(&completion).unwrap()).is_empty());
+    }
+}
+
+#[test]
+fn agent_completions_identify_root_and_child_agents_once() {
+    for (owner, name, terminal_name, parent, prefix, label) in [
+        ("root", "", "", "", "", "main"),
+        ("root", "captain", "admiral", "", "", "admiral"),
+        ("child", "worker", "reviewer", "root", "  ", "reviewer"),
+    ] {
+        for finish_reason in ["stop", "interrupted"] {
+            let mut view = view();
+            view.observe(&turn("root")).unwrap();
+            if !name.is_empty() {
+                view.observe(&child(owner, name, parent)).unwrap();
+            }
+            if owner != "root" {
+                view.observe(&turn(owner)).unwrap();
+                let turn_ended = event(
+                    owner,
+                    wire::event::Payload::TurnEnded(wire::TurnEnded {
+                        finish_reason: finish_reason.into(),
+                        ..Default::default()
+                    }),
+                );
+                assert!(commits(&view.observe(&turn_ended).unwrap()).is_empty());
+            }
+            let completion = event(
+                owner,
+                wire::event::Payload::AgentFinished(wire::AgentFinished {
+                    name: terminal_name.into(),
+                    parent_agent_session_id: parent.into(),
+                    elapsed_ms: Some(7000),
+                    ..Default::default()
+                }),
+            );
+            let update = view.observe(&completion).unwrap();
+            assert_eq!(
+                commits(&update),
+                [format!("{prefix}♟ [{label}] agent finished after 7s")]
+            );
+            assert_eq!(
+                update.main_agent_activity.as_deref(),
+                if owner == "root" { Some("") } else { None }
+            );
+            assert!(commits(&view.observe(&completion).unwrap()).is_empty());
+        }
+    }
+}
+
+#[test]
+fn turn_completions_and_interruptions_identify_the_main_agent_once() {
+    for (name, label) in [("", "main"), ("captain", "captain")] {
+        for (finish_reason, notice) in [
+            ("stop", format!("♟ [{label}] agent finished")),
+            ("interrupted", format!("■ [{label}] agent interrupted")),
+        ] {
+            let mut view = view();
+            view.observe(&turn("root")).unwrap();
+            if !name.is_empty() {
+                view.observe(&child("root", name, "")).unwrap();
+            }
+            let completion = event(
+                "root",
+                wire::event::Payload::TurnEnded(wire::TurnEnded {
+                    finish_reason: finish_reason.into(),
+                    ..Default::default()
+                }),
+            );
+            let update = view.observe(&completion).unwrap();
+            assert_eq!(commits(&update), [notice]);
+            assert_eq!(update.main_agent_activity.as_deref(), Some(""));
+            assert!(commits(&view.observe(&completion).unwrap()).is_empty());
+        }
+    }
+}
+
+#[test]
 fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
     for owner in ["root", "child"] {
         for trigger in ["prepare", "completed", "summary"] {

@@ -795,7 +795,7 @@ impl RawActivityView {
             label: self.hierarchy.get_label(owner).map(str::to_owned),
         })
     }
-    fn wrap_failure(&self, owner: &str, value: impl Into<ActivityItem>) -> Arc<dyn ScrollbackItem> {
+    fn wrap_notice(&self, owner: &str, value: impl Into<ActivityItem>) -> Arc<dyn ScrollbackItem> {
         Arc::new(HierarchicalScrollbackValue {
             value: value.into(),
             depth: self.hierarchy.get_depth(owner),
@@ -925,13 +925,7 @@ impl RawActivityView {
                             marker: marker.to_owned(),
                             text,
                         });
-                        commits.push(
-                            if matches!(published.payload, Some(Payload::TurnFailed(_))) {
-                                self.wrap_failure(owner, notice)
-                            } else {
-                                self.wrap(owner, notice)
-                            },
-                        );
+                        commits.push(self.wrap_notice(owner, notice));
                     }
                 }
             }
@@ -954,13 +948,7 @@ impl RawActivityView {
                         marker: marker.to_owned(),
                         text,
                     });
-                    commits.push(
-                        if matches!(published.payload, Some(Payload::AgentFailed(_))) {
-                            self.wrap_failure(owner, notice)
-                        } else {
-                            self.wrap(owner, notice)
-                        },
-                    );
+                    commits.push(self.wrap_notice(owner, notice));
                     self.activities
                         .retain(|(id, activity)| id != owner || activity != AGENT_ACTIVITY_ID);
                     self.state(owner).complete_agent();
@@ -993,13 +981,7 @@ impl RawActivityView {
                         marker: marker.to_owned(),
                         text,
                     });
-                    commits.push(
-                        if matches!(published.payload, Some(Payload::CompactionFailed(_))) {
-                            self.wrap_failure(owner, notice)
-                        } else {
-                            self.wrap(owner, notice)
-                        },
-                    );
+                    commits.push(self.wrap_notice(owner, notice));
                 }
             }
             Some(Payload::ProviderRequestPhaseChanged(phase)) => {
