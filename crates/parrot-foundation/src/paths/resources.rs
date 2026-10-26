@@ -135,6 +135,7 @@ impl AgentScratchDirectory {
         "blobs",
         "plan",
         "last_request.json",
+        "requests",
         parrot_domain::values::agent_state::AGENT_STATE_FILE_NAME,
         parrot_domain::values::agent_state::AGENT_STATE_STAGING_FILE_NAME,
     ];

@@ -437,3 +437,334 @@ fn failure_classification_is_allowlisted_and_transport_wrappers_use_inner_kind()
     let clock = MonotonicDiagnosticClock::default();
     let _ = clock.now_millis();
 }
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum ArchivedBody {
+    Utf8(String),
+    Bytes(Vec<u8>),
+}
+
+#[derive(serde::Deserialize)]
+struct ArchivedRequest {
+    number: u64,
+    transport: String,
+    request: Option<ArchivedBody>,
+    response: Vec<ArchivedBody>,
+    outcome: String,
+    error_code: Option<String>,
+}
+
+fn archive_call(root: &TestRoot, sink: &Arc<RecordingSink>) -> CallTrace {
+    CallTrace::start(
+        sink.clone(),
+        Arc::new(ManualClock::default()),
+        context(),
+        Some(Arc::new(LastRequestDumper::new(
+            root.0.join("requests/last_requests.json"),
+            sink.clone(),
+        ))),
+    )
+}
+
+fn archived_request(root: &TestRoot, number: u64) -> ArchivedRequest {
+    serde_json::from_slice(
+        &fs::read(root.0.join(format!("requests/request_{number}.json"))).unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn archive_preserves_exact_request_and_response_bytes_before_parsing() {
+    let root = TestRoot::new("archive-exact");
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    let request = call.begin_request("http_sse", "one");
+    let initial = archived_request(&root, 1);
+    assert_eq!(initial.outcome, "in_progress");
+    assert_eq!(initial.request, None);
+    let body = b"{\"x\":1e999,\"x\":2}";
+    request.dump_prepared_body(body);
+    let capture = request.response_capture().unwrap();
+    let response = "data: SECRET-RESPONSE-雪\n\n".as_bytes();
+    for byte in response {
+        capture.append(&[*byte]);
+    }
+    assert!(request.finish(TraceOutcome::Completed));
+    capture.append(b"ignored");
+    let record = archived_request(&root, 1);
+    assert_eq!(record.number, 1);
+    assert_eq!(record.transport, "http_sse");
+    assert_eq!(
+        record.request,
+        Some(ArchivedBody::Utf8(
+            String::from_utf8(body.to_vec()).unwrap()
+        ))
+    );
+    assert_eq!(
+        record.response,
+        vec![ArchivedBody::Utf8(
+            String::from_utf8(response.to_vec()).unwrap()
+        )]
+    );
+    assert_eq!(record.outcome, "completed");
+    assert_eq!(record.error_code, None);
+    assert_eq!(
+        fs::read(root.0.join("requests/last_requests.json")).unwrap(),
+        body
+    );
+    assert!(!format!("{:?}", sink.entries()).contains("SECRET-RESPONSE"));
+    assert!(!root.0.join("requests/request_1.json.tmp").exists());
+}
+
+#[test]
+fn archive_preserves_websocket_boundaries_binary_bytes_and_partial_messages() {
+    let root = TestRoot::new("archive-messages");
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    let request = call.begin_request("websocket", "one");
+    request.dump_prepared_body(&[0xff, 0x01]);
+    let capture = request.response_capture().unwrap();
+    capture.append(b"first");
+    capture.finish_message();
+    capture.finish_message();
+    capture.append(&[0xff]);
+    capture.append(&[0x01]);
+    assert!(request.finish(TraceOutcome::Failed(FailureKind::WireProtocol)));
+    let record = archived_request(&root, 1);
+    assert_eq!(record.request, Some(ArchivedBody::Bytes(vec![0xff, 0x01])));
+    assert_eq!(
+        record.response,
+        vec![
+            ArchivedBody::Utf8("first".into()),
+            ArchivedBody::Utf8(String::new()),
+            ArchivedBody::Bytes(vec![0xff, 0x01]),
+        ]
+    );
+    assert_eq!(record.outcome, "failed");
+    assert_eq!(record.error_code.as_deref(), Some("wire_protocol"));
+}
+
+#[test]
+fn archive_retains_ten_numeric_records_and_continues_after_restart() {
+    let root = TestRoot::new("archive-retention");
+    let sink = Arc::new(RecordingSink::default());
+    fs::create_dir(root.0.join("requests")).unwrap();
+    fs::write(root.0.join("requests/unrelated.json"), "keep").unwrap();
+    fs::write(root.0.join("last_request.json"), "legacy").unwrap();
+    {
+        let call = archive_call(&root, &sink);
+        for number in 1..=12 {
+            let request = call.begin_request("http_sse", &number.to_string());
+            request.dump_prepared_body(number.to_string().as_bytes());
+            request.finish(TraceOutcome::Completed);
+        }
+        assert!(!root.0.join("requests/request_1.json").exists());
+        assert!(!root.0.join("requests/request_2.json").exists());
+        for number in 3..=12 {
+            assert_eq!(archived_request(&root, number).number, number);
+        }
+    }
+    let call = archive_call(&root, &sink);
+    let request = call.begin_request("http_sse", "after-restart");
+    request.dump_prepared_body(b"thirteen");
+    request.finish(TraceOutcome::Completed);
+    assert_eq!(archived_request(&root, 13).number, 13);
+    assert!(!root.0.join("requests/request_3.json").exists());
+    assert_eq!(fs::read_dir(root.0.join("requests")).unwrap().count(), 12);
+    assert_eq!(
+        fs::read(root.0.join("requests/last_requests.json")).unwrap(),
+        b"thirteen"
+    );
+    assert_eq!(
+        fs::read(root.0.join("requests/unrelated.json")).unwrap(),
+        b"keep"
+    );
+    assert_eq!(
+        fs::read(root.0.join("last_request.json")).unwrap(),
+        b"legacy"
+    );
+}
+
+#[test]
+fn archive_eviction_prevents_late_completion_or_preparation_from_recreating_records() {
+    let root = TestRoot::new("archive-late");
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    let oldest = call.begin_request("http_sse", "oldest");
+    oldest.dump_prepared_body(b"oldest");
+    let capture = oldest.response_capture().unwrap();
+    capture.append(b"discard this buffer");
+    let mut pending = Vec::new();
+    for number in 2..=12 {
+        let request = call.begin_request("http_sse", &number.to_string());
+        request.dump_prepared_body(number.to_string().as_bytes());
+        pending.push(request);
+    }
+    for request in pending.into_iter().rev() {
+        request.finish(TraceOutcome::Completed);
+    }
+    capture.append(b"not buffered");
+    capture.finish_message();
+    oldest.dump_prepared_body(b"late-old-body");
+    oldest.finish(TraceOutcome::Completed);
+    assert!(!root.0.join("requests/request_1.json").exists());
+    assert!(!root.0.join("requests/request_2.json").exists());
+    assert_eq!(fs::read_dir(root.0.join("requests")).unwrap().count(), 11);
+    assert_eq!(
+        fs::read(root.0.join("requests/last_requests.json")).unwrap(),
+        b"12"
+    );
+    assert_eq!(archived_request(&root, 12).outcome, "completed");
+}
+
+#[test]
+fn archive_cancellation_snapshots_partial_response_without_another_poll() {
+    let root = TestRoot::new("archive-cancel");
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    let request = call.begin_request("http_sse", "partial");
+    request.dump_prepared_body(b"request");
+    let capture = request.response_capture().unwrap();
+    capture.append(b"data: partial");
+    call.cancel();
+    capture.append(b"too late");
+    assert!(!request.finish(TraceOutcome::Completed));
+    let record = archived_request(&root, 1);
+    assert_eq!(
+        record.response,
+        vec![ArchivedBody::Utf8("data: partial".into())]
+    );
+    assert_eq!(record.outcome, "cancelled");
+    assert_eq!(record.error_code.as_deref(), Some("cancelled"));
+    let entries = sink.entries();
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|event| event.operation == "request_finished")
+            .count(),
+        1
+    );
+    assert_eq!(entries.last().unwrap().operation, "call_finished");
+}
+
+#[test]
+fn archive_records_null_requests_and_disposal_without_replacing_latest_body() {
+    let root = TestRoot::new("archive-null");
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    let first = call.begin_request("http_sse", "first");
+    first.dump_prepared_body(b"latest");
+    first.finish(TraceOutcome::Completed);
+    let failed = call.begin_request("websocket", "connect-failure");
+    failed.finish(TraceOutcome::Failed(FailureKind::WebSocketUpgrade));
+    drop(call.begin_request("websocket", "disposed"));
+    let record = archived_request(&root, 2);
+    assert_eq!(record.request, None);
+    assert!(record.response.is_empty());
+    assert_eq!(record.outcome, "failed");
+    assert_eq!(record.error_code.as_deref(), Some("websocket_upgrade"));
+    assert_eq!(archived_request(&root, 3).outcome, "disposed");
+    assert_eq!(
+        fs::read(root.0.join("requests/last_requests.json")).unwrap(),
+        b"latest"
+    );
+}
+
+#[test]
+fn archive_isolates_agent_counters_and_capture_disabled_paths() {
+    let first = TestRoot::new("archive-first-agent");
+    let second = TestRoot::new("archive-second-agent");
+    let sink = Arc::new(RecordingSink::default());
+    for root in [&first, &second] {
+        let call = archive_call(root, &sink);
+        call.begin_request("http_sse", "one")
+            .finish(TraceOutcome::Completed);
+        assert_eq!(archived_request(root, 1).number, 1);
+        assert!(!root.0.join("requests/request_2.json").exists());
+    }
+    let disabled = call(&sink, &Arc::new(ManualClock::default()));
+    assert!(
+        disabled
+            .begin_request("http_sse", "one")
+            .response_capture()
+            .is_none()
+    );
+}
+
+#[test]
+fn archive_serializes_concurrent_attempts_and_retention() {
+    let root = TestRoot::new("archive-concurrent");
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    thread::scope(|scope| {
+        for number in 0..32 {
+            let call = call.clone();
+            scope.spawn(move || {
+                let request = call.begin_request("http_sse", &number.to_string());
+                request.dump_prepared_body(number.to_string().as_bytes());
+                request.response_capture().unwrap().append(b"response");
+                request.finish(TraceOutcome::Completed);
+            });
+        }
+    });
+    for number in 23..=32 {
+        let record = archived_request(&root, number);
+        assert_eq!(record.number, number);
+        assert_eq!(record.outcome, "completed");
+    }
+    assert_eq!(fs::read_dir(root.0.join("requests")).unwrap().count(), 11);
+    assert!(
+        sink.entries()
+            .iter()
+            .all(|event| event.operation != "last_request_dump_failed")
+    );
+}
+
+#[test]
+fn archive_io_failures_do_not_change_trace_outcomes_or_expose_payloads() {
+    let root = TestRoot::new("archive-io-failure");
+    fs::write(root.0.join("requests"), "not a directory").unwrap();
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    let request = call.begin_request("http_sse", "one");
+    request.dump_prepared_body(b"SECRET-REQUEST");
+    assert!(request.response_capture().is_none());
+    assert!(request.finish(TraceOutcome::Completed));
+    let events = sink.entries();
+    let failures: Vec<_> = events
+        .iter()
+        .filter(|event| event.operation == "last_request_dump_failed")
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].error_code.is_some());
+    assert_eq!(events.last().unwrap().outcome.as_deref(), Some("completed"));
+    assert!(!format!("{events:?}").contains("SECRET"));
+    assert!(!format!("{events:?}").contains(root.0.to_str().unwrap()));
+}
+
+#[test]
+fn archive_failed_terminal_rename_cleans_temporary_file_and_remains_nonthrowing() {
+    let root = TestRoot::new("archive-terminal-rename");
+    let sink = Arc::new(RecordingSink::default());
+    let call = archive_call(&root, &sink);
+    let request = call.begin_request("http_sse", "one");
+    let path = root.0.join("requests/request_1.json");
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    request
+        .response_capture()
+        .unwrap()
+        .append(b"SECRET-RESPONSE");
+    assert!(request.finish(TraceOutcome::Completed));
+    assert!(path.is_dir());
+    assert!(!root.0.join("requests/request_1.json.tmp").exists());
+    let events = sink.entries();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.operation == "last_request_dump_failed")
+    );
+    assert_eq!(events.last().unwrap().outcome.as_deref(), Some("completed"));
+    assert!(!format!("{events:?}").contains("SECRET"));
+}

@@ -1699,7 +1699,7 @@ where
                     Arc::new(MonotonicDiagnosticClock::default()),
                     identity.session.session_id.clone(),
                     Some(Arc::new(LastRequestDumper::new(
-                        scratch.root().join("last_request.json"),
+                        scratch.root().join("requests/last_requests.json"),
                         log.clone(),
                     ))),
                 );

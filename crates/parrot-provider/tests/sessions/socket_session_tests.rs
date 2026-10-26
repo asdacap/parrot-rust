@@ -4,6 +4,7 @@ use parrot_provider::{responses, responses_websocket as ws, sessions::*};
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -46,6 +47,8 @@ struct Wire {
     prepares: AtomicUsize,
     connects: AtomicUsize,
     receives: AtomicUsize,
+    fragment_bytes: AtomicUsize,
+    receive_error_at: AtomicUsize,
     drops: AtomicUsize,
     aborts: AtomicUsize,
     sent: Mutex<Vec<Value>>,
@@ -62,7 +65,7 @@ impl ws::HeaderSource for Headers {
 }
 struct Socket {
     wire: Arc<Wire>,
-    script: VecDeque<String>,
+    script: VecDeque<Vec<u8>>,
     aborted: bool,
 }
 impl Drop for Socket {
@@ -97,15 +100,28 @@ impl ws::Socket for Socket {
         bytes: &'a mut [u8],
         cancel: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ws::ReceivedFrame, ws::WebSocketError>> {
-        self.wire.receives.fetch_add(1, Ordering::SeqCst);
+        let receive = self.wire.receives.fetch_add(1, Ordering::SeqCst) + 1;
         Box::pin(async move {
+            if self.wire.receive_error_at.load(Ordering::SeqCst) == receive {
+                return Err(ws::WebSocketError::Wire("receive failed".into()));
+            }
             match self.script.pop_front() {
                 Some(message) => {
-                    bytes[..message.len()].copy_from_slice(message.as_bytes());
+                    let maximum = self.wire.fragment_bytes.load(Ordering::SeqCst);
+                    let count = if maximum == 0 {
+                        message.len()
+                    } else {
+                        message.len().min(maximum)
+                    };
+                    let end_of_message = count == message.len();
+                    bytes[..count].copy_from_slice(&message[..count]);
+                    if !end_of_message {
+                        self.script.push_front(message[count..].to_vec());
+                    }
                     Ok(ws::ReceivedFrame {
-                        count: message.len(),
+                        count,
                         kind: ws::FrameKind::Text,
-                        end_of_message: true,
+                        end_of_message,
                         close_status: None,
                         close_description: None,
                     })
@@ -147,7 +163,7 @@ impl ws::Connector for Connector {
             Ok(ws::ConnectedSocket {
                 socket: Box::new(Socket {
                     wire: self.wire.clone(),
-                    script: script?.into(),
+                    script: script?.into_iter().map(String::into_bytes).collect(),
                     aborted: false,
                 }),
                 response_headers: Vec::new(),
@@ -495,14 +511,10 @@ async fn websocket_trace_dumps_actual_incremental_body_and_counts_wire_bytes() {
         ])],
         false,
     );
+    wire.fragment_bytes.store(3, Ordering::SeqCst);
     let sink = Arc::new(Sink::default());
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let path = std::env::current_dir().unwrap().join(".tmp").join(format!(
-        "t30-socket-dump-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let archive = SocketArchive::new();
+    let path = archive.0.join("last_requests.json");
     let dumper = Arc::new(diagnostics::LastRequestDumper::new(&path, sink.clone()));
     let cancel = Cancel::default();
     let first_trace = trace(sink.clone(), Some(dumper.clone()));
@@ -548,19 +560,40 @@ async fn websocket_trace_dumps_actual_incremental_body_and_counts_wire_bytes() {
     );
     assert_eq!(finished[1].outcome.as_deref(), Some("completed"));
     assert!(!format!("{events:?}").contains("secret-canary"));
-    std::fs::remove_file(path).unwrap();
+    for (number, response) in [(1, first_completion), (2, second_completion)] {
+        let record = archive.read(number);
+        assert_eq!(
+            record.request,
+            Some(ArchivedBody::Utf8(
+                String::from_utf8(bodies[number as usize - 1].clone()).unwrap()
+            ))
+        );
+        assert_eq!(record.response, vec![ArchivedBody::Utf8(response)]);
+        assert_eq!(record.outcome, "completed");
+        assert_eq!(record.error_code, None);
+    }
     session.close().await.unwrap();
 }
 #[tokio::test]
 async fn suspended_websocket_request_trace_is_cancelled_once_via_shared_call_trace() {
-    let (session, _, _) = setup(vec![Ok(vec![delta("first")])], false);
+    let response = delta("first");
+    let (session, _, _) = setup(vec![Ok(vec![response.clone()])], false);
     let sink = Arc::new(Sink::default());
-    let trace = trace(sink.clone(), None);
+    let archive = SocketArchive::new();
+    let dumper = Arc::new(diagnostics::LastRequestDumper::new(
+        archive.0.join("last_requests.json"),
+        sink.clone(),
+    ));
+    let trace = trace(sink.clone(), Some(dumper));
     let mut stream = session
         .call_with_trace(request("a"), trace.clone())
         .unwrap();
     stream.next(&Cancel::default()).await.unwrap();
     trace.cancel();
+    let record = archive.read(1);
+    assert_eq!(record.response, vec![ArchivedBody::Utf8(response)]);
+    assert_eq!(record.outcome, "cancelled");
+    assert_eq!(record.error_code.as_deref(), Some("cancelled"));
     {
         let events = sink.0.lock().unwrap();
         let finished: Vec<_> = events
@@ -591,8 +624,13 @@ async fn websocket_connect_failure_has_allowlisted_trace_and_no_encoded_request_
         false,
     );
     let sink = Arc::new(Sink::default());
+    let archive = SocketArchive::new();
+    let dumper = Arc::new(diagnostics::LastRequestDumper::new(
+        archive.0.join("last_requests.json"),
+        sink.clone(),
+    ));
     let mut stream = session
-        .call_with_trace(request("a"), trace(sink.clone(), None))
+        .call_with_trace(request("a"), trace(sink.clone(), Some(dumper)))
         .unwrap();
     assert!(matches!(
         stream.next(&Cancel::default()).await.unwrap(),
@@ -610,6 +648,13 @@ async fn websocket_connect_failure_has_allowlisted_trace_and_no_encoded_request_
     assert_eq!(finished[0].request_bytes, None);
     assert_eq!(finished[0].response_bytes, None);
     assert!(!format!("{events:?}").contains("secret-error"));
+    let record = archive.read(1);
+    assert_eq!(record.request, None);
+    assert!(record.response.is_empty());
+    assert_eq!(record.outcome, "failed");
+    assert_eq!(record.error_code.as_deref(), Some("websocket_upgrade"));
+    assert!(!archive.0.join("last_requests.json").exists());
+    assert!(!archive.0.join("request_2.json").exists());
 }
 
 struct FailedAuthHeaders {
@@ -718,4 +763,145 @@ async fn websocket_auth_trace_classifies_original_error_without_consuming_it() {
         stream.close().await.unwrap();
         session.close().await.unwrap();
     }
+}
+
+struct SocketArchive(PathBuf);
+impl SocketArchive {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::current_dir().unwrap().join(".tmp").join(format!(
+            "socket-archive-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        Self(root)
+    }
+    fn read(&self, number: u64) -> ArchivedAttempt {
+        let record: ArchivedAttempt = serde_json::from_slice(
+            &std::fs::read(self.0.join(format!("request_{number}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(record.number, number);
+        assert_eq!(record.transport, "websocket");
+        record
+    }
+}
+impl Drop for SocketArchive {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum ArchivedBody {
+    Utf8(String),
+    Bytes(Vec<u8>),
+}
+#[derive(serde::Deserialize)]
+struct ArchivedAttempt {
+    number: u64,
+    transport: String,
+    request: Option<ArchivedBody>,
+    response: Vec<ArchivedBody>,
+    outcome: String,
+    error_code: Option<String>,
+}
+
+#[tokio::test]
+async fn websocket_archive_retains_malformed_response_before_parser_failure() {
+    let (session, _, _) = setup(vec![Ok(vec!["{".into()])], false);
+    let sink = Arc::new(Sink::default());
+    let archive = SocketArchive::new();
+    let dumper = Arc::new(diagnostics::LastRequestDumper::new(
+        archive.0.join("last_requests.json"),
+        sink.clone(),
+    ));
+    let mut stream = session
+        .call_with_trace(request("a"), trace(sink, Some(dumper)))
+        .unwrap();
+    assert!(stream.next(&Cancel::default()).await.is_err());
+    let record = archive.read(1);
+    assert_eq!(record.response, vec![ArchivedBody::Utf8("{".into())]);
+    assert_eq!(record.outcome, "failed");
+    assert!(record.error_code.is_some());
+    stream.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn websocket_archive_separates_recovery_attempt_responses() {
+    let error =
+        r#"{"type":"error","code":"previous_response_not_found","message":"missing"}"#.to_owned();
+    let completion = completed("recovered");
+    let (session, wire, _) = setup(
+        vec![Ok(vec![error.clone()]), Ok(vec![completion.clone()])],
+        false,
+    );
+    let sink = Arc::new(Sink::default());
+    let archive = SocketArchive::new();
+    let dumper = Arc::new(diagnostics::LastRequestDumper::new(
+        archive.0.join("last_requests.json"),
+        sink.clone(),
+    ));
+    let mut stream = session
+        .call_with_trace(request("a"), trace(sink, Some(dumper)))
+        .unwrap();
+    let cancel = Cancel::default();
+    assert!(matches!(
+        stream.next(&cancel).await.unwrap(),
+        Some(Event::Retry { .. })
+    ));
+    assert!(matches!(
+        stream.next(&cancel).await.unwrap(),
+        Some(Event::Completed(_))
+    ));
+    assert_eq!(stream.next(&cancel).await.unwrap(), None);
+    let first = archive.read(1);
+    assert_eq!(first.response, vec![ArchivedBody::Utf8(error)]);
+    assert_eq!(first.outcome, "failed");
+    let second = archive.read(2);
+    assert_eq!(second.response, vec![ArchivedBody::Utf8(completion)]);
+    assert_eq!(second.outcome, "completed");
+    assert!(first.request.is_some());
+    assert!(second.request.is_some());
+    assert_eq!(wire.connects.load(Ordering::SeqCst), 2);
+    stream.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn websocket_archive_retains_partial_message_on_receive_failure() {
+    let response = delta("partial");
+    let (session, wire, _) = setup(vec![Ok(vec![response.clone()])], false);
+    wire.fragment_bytes.store(3, Ordering::SeqCst);
+    wire.receive_error_at.store(2, Ordering::SeqCst);
+    let sink = Arc::new(Sink::default());
+    let archive = SocketArchive::new();
+    let dumper = Arc::new(diagnostics::LastRequestDumper::new(
+        archive.0.join("last_requests.json"),
+        sink.clone(),
+    ));
+    let mut stream = session
+        .call_with_trace(request("a"), trace(sink.clone(), Some(dumper)))
+        .unwrap();
+    assert!(stream.next(&Cancel::default()).await.is_err());
+    let record = archive.read(1);
+    assert_eq!(
+        record.response,
+        vec![ArchivedBody::Utf8(response[..3].into())]
+    );
+    assert_eq!(record.outcome, "failed");
+    assert!(record.error_code.is_some());
+    let events = sink.0.lock().unwrap().clone();
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.operation == "request_finished")
+            .unwrap()
+            .response_bytes,
+        Some(3)
+    );
+    stream.close().await.unwrap();
+    session.close().await.unwrap();
 }

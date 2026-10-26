@@ -415,25 +415,31 @@ impl responses_websocket::WebSocketObserver for WebSocketTraceObserver {
         );
         Box::new(WebSocketTraceAttempt {
             request: self.trace.begin_request("websocket", &request_id),
-            call: self.trace.clone(),
             original_error: self.original_error.clone(),
         })
     }
 }
 struct WebSocketTraceAttempt {
     request: RequestTrace,
-    call: Arc<CallTrace>,
     original_error: Arc<StdMutex<Option<Error>>>,
 }
 impl responses_websocket::WebSocketAttemptObserver for WebSocketTraceAttempt {
     fn dump_request(&mut self, body: &[u8]) {
-        self.call.dump_prepared_body(body);
+        self.request.dump_prepared_body(body);
     }
     fn record_request_bytes(&mut self, bytes: u64) {
         self.request.record_request_bytes(bytes);
     }
     fn record_response_bytes(&mut self, bytes: u64) {
         self.request.record_response_bytes(bytes);
+    }
+    fn capture_response(&mut self, body: &[u8], end_of_message: bool) {
+        if let Some(capture) = self.request.response_capture() {
+            capture.append(body);
+            if end_of_message {
+                capture.finish_message();
+            }
+        }
     }
     fn record_close_status(&mut self, status: u16) {
         self.request.record_close_status(i32::from(status));

@@ -173,6 +173,10 @@ impl ResponsesWebSocket {
                 if frame.kind != FrameKind::Close {
                     if let Some(observer) = observer {
                         observer.record_response_bytes(frame.count as u64);
+                        observer.capture_response(
+                            &state.receive_buffer[written..written + frame.count],
+                            frame.end_of_message,
+                        );
                     }
                     *state.stats.response_bytes.get_or_insert(0) += frame.count as u64;
                 }

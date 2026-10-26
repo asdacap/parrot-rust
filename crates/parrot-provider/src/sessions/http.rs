@@ -1,11 +1,11 @@
 //! Owning HTTP/SSE composition over the protocol adapters and T25 transport.
-use super::diagnostics::{CallTrace, FailureKind, RequestTrace, TraceOutcome};
+use super::diagnostics::{CallTrace, FailureKind, RequestTrace, ResponseCapture, TraceOutcome};
 use super::{Error, Event, EventStream};
 use crate::{
     chat_completions::{ChatStream, ChatStreamError},
     http_stream::{
-        Endpoint, HttpError, HttpEventStream, HttpRequest, HttpResponse, HttpStreamEvent,
-        HttpTransport, ResponseByteCounter, StreamOptions,
+        ByteStream, Endpoint, HttpError, HttpEventStream, HttpRequest, HttpResponse,
+        HttpStreamEvent, HttpTransport, ResponseByteCounter, StreamOptions,
     },
     responses::{ResponsesEvent, ResponsesParser},
     responses_websocket::{HttpEvents, SessionEvent, WebSocketError},
@@ -45,6 +45,7 @@ impl From<HttpResponseEvent> for Event {
 struct ObservedTransport {
     inner: Arc<dyn HttpTransport>,
     obtained: Arc<AtomicBool>,
+    capture: Option<ResponseCapture>,
 }
 impl HttpTransport for ObservedTransport {
     fn send<'a>(
@@ -53,12 +54,36 @@ impl HttpTransport for ObservedTransport {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
-            let response = self.inner.send(request, cancellation).await?;
+            let mut response = self.inner.send(request, cancellation).await?;
             self.obtained.store(true, Ordering::Release);
+            if let Some(capture) = &self.capture {
+                response.body = Box::new(CapturedBody {
+                    inner: response.body,
+                    capture: capture.clone(),
+                });
+            }
             Ok(response)
         })
     }
 }
+struct CapturedBody {
+    inner: Box<dyn ByteStream>,
+    capture: ResponseCapture,
+}
+impl ByteStream for CapturedBody {
+    fn read<'a>(
+        &'a mut self,
+        buffer: &'a mut [u8],
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<usize, HttpError>> {
+        Box::pin(async move {
+            let count = self.inner.read(buffer, cancellation).await?;
+            self.capture.append(&buffer[..count]);
+            Ok(count)
+        })
+    }
+}
+
 struct InitialRequest {
     transport: Arc<dyn HttpTransport>,
     endpoint: Endpoint,
@@ -156,12 +181,16 @@ impl HttpDriver {
                 obtained.load(Ordering::Acquire).then(|| counter.get())
             }));
             attempt.record_request_bytes(initial.body.len() as u64);
-            trace.dump_prepared_body(&initial.body);
+            attempt.dump_prepared_body(&initial.body);
             self.attempt = Some(attempt);
         }
         let transport = Arc::new(ObservedTransport {
             inner: initial.transport,
             obtained: self.obtained.clone(),
+            capture: self
+                .attempt
+                .as_ref()
+                .and_then(RequestTrace::response_capture),
         });
         let http = HttpEventStream::new(
             transport,

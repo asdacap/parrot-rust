@@ -1,11 +1,10 @@
-//! Metadata-only provider diagnostics and atomic last-request capture.
+//! Metadata-only provider diagnostics and retained request/response capture.
 //!
 //! The caller supplies correlation/request IDs and invokes `cancel` from its
 //! cancellation watcher, so terminal records do not depend on another read or
 //! on the consumer disposing its stream.
 use std::{
-    fs, io,
-    path::{Path, PathBuf},
+    io,
     sync::{Arc, Mutex, MutexGuard, Weak},
     time::{Duration, Instant},
 };
@@ -122,46 +121,10 @@ impl FailureKind {
     }
 }
 
-/// Replaces `path` with the complete actual prepared body. Failures are reported
-/// only by category; payloads and error strings never enter diagnostics.
-pub struct LastRequestDumper {
-    path: PathBuf,
-    sink: Arc<dyn DiagnosticSink>,
-    gate: Mutex<()>,
-}
-impl LastRequestDumper {
-    pub fn new(path: impl Into<PathBuf>, sink: Arc<dyn DiagnosticSink>) -> Self {
-        Self {
-            path: path.into(),
-            sink,
-            gate: Mutex::new(()),
-        }
-    }
+mod archive;
 
-    pub fn dump(&self, body: &[u8]) {
-        let failure = {
-            let _guard = lock(&self.gate);
-            let temp = temp_path(&self.path);
-            let result = fs::write(&temp, body).and_then(|()| fs::rename(&temp, &self.path));
-            if result.is_err() {
-                let _ = fs::remove_file(&temp);
-            }
-            result.err()
-        };
-        if let Some(error) = failure {
-            let mut event =
-                DiagnosticEvent::provider("last_request_dump_failed", DiagnosticSeverity::Error);
-            event.error_code = Some(FailureKind::from_io(&error).code().into());
-            self.sink.write(event);
-        }
-    }
-}
-
-fn temp_path(path: &Path) -> PathBuf {
-    let mut temp = path.as_os_str().to_owned();
-    temp.push(".tmp");
-    PathBuf::from(temp)
-}
+use archive::AttemptCapture;
+pub use archive::{LastRequestDumper, ResponseCapture};
 
 pub trait DiagnosticClock: Send + Sync {
     fn now_millis(&self) -> u64;
@@ -216,6 +179,7 @@ impl TraceOutcome {
 #[derive(Default)]
 struct AttemptState {
     recorded: bool,
+    capture: Option<AttemptCapture>,
     request_bytes: Option<u64>,
     response_bytes: Option<u64>,
     response_bytes_snapshot: Option<Arc<dyn Fn() -> Option<u64> + Send + Sync>>,
@@ -251,7 +215,7 @@ impl TraceState {
 
     fn finish(&self, outcome: TraceOutcome) -> bool {
         let mut event = self.entry.clone();
-        {
+        let capture = {
             let mut state = lock(&self.state);
             if state.recorded {
                 return false;
@@ -265,6 +229,10 @@ impl TraceState {
                     .map_or(state.response_bytes, |snapshot| snapshot());
                 event.close_status = state.close_status;
             }
+            state.capture.take()
+        };
+        if let Some(capture) = capture {
+            capture.finish(outcome);
         }
         let (outcome, severity, failure) = outcome.fields();
         event.operation = self.terminal_operation.into();
@@ -332,6 +300,11 @@ impl CallTrace {
                 "request_finished",
             ),
         };
+        let capture = self
+            .dumper
+            .as_ref()
+            .and_then(|dumper| dumper.begin(transport));
+        lock(&request.trace.state).capture = capture;
         let cancelled = {
             let mut registrations = lock(&self.requests);
             registrations
@@ -408,6 +381,24 @@ pub struct RequestTrace {
     trace: Arc<TraceState>,
 }
 impl RequestTrace {
+    /// Associates the adapter's exact prepared bytes with this attempt and the
+    /// latest-request file. Payloads never enter operational diagnostics.
+    pub fn dump_prepared_body(&self, body: &[u8]) {
+        let capture = lock(&self.trace.state).capture.clone();
+        if let Some(capture) = capture {
+            capture.dump_prepared_body(body);
+        }
+    }
+
+    /// Returns the optional raw-response receiver. Transports should append
+    /// bytes before parsing so cancellation can retain an unfinished response.
+    pub fn response_capture(&self) -> Option<ResponseCapture> {
+        lock(&self.trace.state)
+            .capture
+            .as_ref()
+            .map(AttemptCapture::response_capture)
+    }
+
     /// Reads the owning transport's live byte counter when a terminal is recorded,
     /// including cancellation while an SSE event is only partially received.
     pub fn track_response_bytes(&self, snapshot: Arc<dyn Fn() -> Option<u64> + Send + Sync>) {
