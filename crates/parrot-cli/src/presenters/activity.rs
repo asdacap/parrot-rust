@@ -795,6 +795,13 @@ impl RawActivityView {
             label: self.hierarchy.get_label(owner).map(str::to_owned),
         })
     }
+    fn wrap_notice(&self, owner: &str, value: impl Into<ActivityItem>) -> Arc<dyn ScrollbackItem> {
+        Arc::new(HierarchicalScrollbackValue {
+            value: value.into(),
+            depth: self.hierarchy.get_depth(owner),
+            label: Some(self.hierarchy.resolve_agent_reference(owner, owner)),
+        })
+    }
     fn wrap_live(
         &self,
         owner: &str,
@@ -914,13 +921,11 @@ impl RawActivityView {
                             }
                             _ => ("♟", "agent finished".to_owned()),
                         };
-                        commits.push(self.wrap(
-                            owner,
-                            Arc::new(ActivityValue::Notice {
-                                marker: marker.to_owned(),
-                                text,
-                            }),
-                        ));
+                        let notice = Arc::new(ActivityValue::Notice {
+                            marker: marker.to_owned(),
+                            text,
+                        });
+                        commits.push(self.wrap_notice(owner, notice));
                     }
                 }
             }
@@ -939,13 +944,11 @@ impl RawActivityView {
                         ),
                         _ => unreachable!(),
                     };
-                    commits.push(self.wrap(
-                        owner,
-                        Arc::new(ActivityValue::Notice {
-                            marker: marker.to_owned(),
-                            text,
-                        }),
-                    ));
+                    let notice = Arc::new(ActivityValue::Notice {
+                        marker: marker.to_owned(),
+                        text,
+                    });
+                    commits.push(self.wrap_notice(owner, notice));
                     self.activities
                         .retain(|(id, activity)| id != owner || activity != AGENT_ACTIVITY_ID);
                     self.state(owner).complete_agent();
@@ -979,13 +982,11 @@ impl RawActivityView {
                         }
                         _ => ("✓", "compaction finished".to_owned()),
                     };
-                    commits.push(self.wrap(
-                        owner,
-                        Arc::new(ActivityValue::Notice {
-                            marker: marker.to_owned(),
-                            text,
-                        }),
-                    ));
+                    let notice = Arc::new(ActivityValue::Notice {
+                        marker: marker.to_owned(),
+                        text,
+                    });
+                    commits.push(self.wrap_notice(owner, notice));
                 }
             }
             Some(Payload::ProviderRequestPhaseChanged(phase)) => {
