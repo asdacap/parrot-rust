@@ -103,6 +103,122 @@ fn view() -> RawActivityView {
 }
 
 #[test]
+fn compaction_failures_identify_root_child_and_unknown_agents() {
+    for (owner, name, parent, prefix, label) in [
+        ("root", "", "", "", "main"),
+        ("root", "captain", "", "", "captain"),
+        ("child", "worker", "root", "  ", "worker"),
+        (
+            "nested",
+            "worker/reviewer",
+            "child",
+            "    ",
+            "worker/reviewer",
+        ),
+        ("unknown", "", "", "  ", "unknown"),
+    ] {
+        let mut view = view();
+        view.observe(&turn("root")).unwrap();
+        if parent == "child" {
+            view.observe(&child("child", "worker", "root")).unwrap();
+        }
+        if !name.is_empty() {
+            view.observe(&child(owner, name, parent)).unwrap();
+        }
+        view.observe(&event(
+            owner,
+            wire::event::Payload::CompactionStarted(wire::CompactionStarted::default()),
+        ))
+        .unwrap();
+        let failure = event(
+            owner,
+            wire::event::Payload::CompactionFailed(wire::CompactionFailed {
+                message: "The compaction provider did not complete with a summary.".into(),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            commits(&view.observe(&failure).unwrap()),
+            [format!(
+                "{prefix}✗ [{label}] compaction failed: The compaction provider did not complete with a summary."
+            )]
+        );
+        assert!(!live(&view).contains("Compacting"));
+        assert!(commits(&view.observe(&failure).unwrap()).is_empty());
+    }
+}
+
+#[test]
+fn agent_failures_identify_root_child_and_unknown_agents_once() {
+    for (owner, name, terminal_name, parent, prefix, label) in [
+        ("root", "", "", "", "", "main"),
+        ("root", "captain", "captain", "", "", "captain"),
+        ("root", "captain", "admiral", "", "", "admiral"),
+        ("child", "worker", "worker", "root", "  ", "worker"),
+        ("child", "worker", "reviewer", "root", "  ", "reviewer"),
+        ("unknown", "", "", "", "  ", "unknown"),
+    ] {
+        let mut view = view();
+        view.observe(&turn("root")).unwrap();
+        if !name.is_empty() {
+            view.observe(&child(owner, name, parent)).unwrap();
+        }
+        if owner != "root" {
+            view.observe(&turn(owner)).unwrap();
+            let turn_failure = view
+                .observe(&event(
+                    owner,
+                    wire::event::Payload::TurnFailed(wire::TurnFailed {
+                        message: "request failed".into(),
+                        ..Default::default()
+                    }),
+                ))
+                .unwrap();
+            assert!(commits(&turn_failure).is_empty());
+        }
+        let failure = event(
+            owner,
+            wire::event::Payload::AgentFailed(wire::AgentFailed {
+                name: terminal_name.into(),
+                parent_agent_session_id: parent.into(),
+                message: "request failed".into(),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            commits(&view.observe(&failure).unwrap()),
+            [format!("{prefix}✗ [{label}] agent: request failed")]
+        );
+        assert!(commits(&view.observe(&failure).unwrap()).is_empty());
+    }
+}
+
+#[test]
+fn turn_failures_identify_the_main_agent_once() {
+    for (name, label) in [("", "main"), ("captain", "captain")] {
+        let mut view = view();
+        view.observe(&turn("root")).unwrap();
+        if !name.is_empty() {
+            view.observe(&child("root", name, "")).unwrap();
+        }
+        let failure = event(
+            "root",
+            wire::event::Payload::TurnFailed(wire::TurnFailed {
+                message: "request failed".into(),
+                ..Default::default()
+            }),
+        );
+        let update = view.observe(&failure).unwrap();
+        assert_eq!(
+            commits(&update),
+            [format!("✗ [{label}] agent: request failed")]
+        );
+        assert_eq!(update.main_agent_activity.as_deref(), Some(""));
+        assert!(commits(&view.observe(&failure).unwrap()).is_empty());
+    }
+}
+
+#[test]
 fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
     for owner in ["root", "child"] {
         for trigger in ["prepare", "completed", "summary"] {
