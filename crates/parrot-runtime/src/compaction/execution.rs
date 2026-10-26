@@ -311,6 +311,11 @@ impl Compactor {
     }
 }
 
+enum SummaryOutcome {
+    Summary(String),
+    NoSummary(String),
+}
+
 struct SummaryRunner<'a> {
     compactor: &'a Compactor,
     selected: &'a ProviderModel,
@@ -349,15 +354,16 @@ impl SummaryRunner<'_> {
     ) -> BoxFuture<'a, Result<String, CompactionError>> {
         Box::pin(async move {
             let messages: Vec<_> = pending.iter().flatten().cloned().collect();
-            if let Some(summary) = self.summarise(preceding_summary, &messages).await? {
-                *completed_groups += pending.len();
-                self.report_progress(*completed_groups).await?;
-                return Ok(summary);
-            }
-            if pending.len() == 1 {
-                return Err(CompactionError::InvalidOperation(
-                    "The compaction provider did not complete with a summary.".into(),
-                ));
+            match self.summarise(preceding_summary, &messages).await? {
+                SummaryOutcome::Summary(summary) => {
+                    *completed_groups += pending.len();
+                    self.report_progress(*completed_groups).await?;
+                    return Ok(summary);
+                }
+                SummaryOutcome::NoSummary(reason) if pending.len() == 1 => {
+                    return Err(CompactionError::InvalidOperation(reason));
+                }
+                SummaryOutcome::NoSummary(_) => {}
             }
             let half = pending.len().div_ceil(2);
             let first = self
@@ -372,7 +378,7 @@ impl SummaryRunner<'_> {
         &self,
         preceding_summary: &str,
         chunk: &[Message],
-    ) -> Result<Option<String>, CompactionError> {
+    ) -> Result<SummaryOutcome, CompactionError> {
         self.cancellation
             .check()
             .map_err(|_| CompactionError::Cancelled)?;
@@ -387,6 +393,8 @@ impl SummaryRunner<'_> {
         let mut stream = session.call(request)?;
         let result = async {
             let mut summary = None;
+            let mut completion_details = None;
+            let mut reasoning_bytes = 0;
             while let Some(event) = stream.next(self.cancellation).await? {
                 if summary.is_some() {
                     return Err(CompactionError::InvalidOperation(
@@ -398,10 +406,28 @@ impl SummaryRunner<'_> {
                     Event::Completed(completion) if !completion.assistant_text.is_empty() => {
                         summary = Some(completion.assistant_text.clone());
                     }
+                    Event::Completed(completion) => {
+                        completion_details = Some(format!(
+                            "The compaction provider completed with empty assistant text (finish reason: {:?}; assistant text length: {} UTF-8 bytes; provider input tokens: {}; provider output tokens: {}).",
+                            completion.finish_reason,
+                            completion.assistant_text.len(),
+                            completion.input_tokens,
+                            completion.output_tokens,
+                        ));
+                    }
+                    Event::ReasoningDelta { text, .. } => reasoning_bytes += text.len(),
                     _ => {}
                 }
             }
-            Ok(summary)
+            Ok(match summary {
+                Some(summary) => SummaryOutcome::Summary(summary),
+                None => SummaryOutcome::NoSummary(format!(
+                    "{} Reasoning delta length: {reasoning_bytes} UTF-8 bytes.",
+                    completion_details.unwrap_or_else(|| {
+                        "The compaction provider stream ended without a Completed event.".into()
+                    }),
+                )),
+            })
         }
         .await;
         // Like await-foreach disposal, close even on cancellation, observer or

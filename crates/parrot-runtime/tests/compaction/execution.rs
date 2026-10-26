@@ -18,7 +18,7 @@ use parrot_provider::{
     },
     sessions::{
         Completion, Content, Error, Event, EventStream, Message, Provider, ProviderSessions,
-        Request, Role, Session, ToolCall,
+        ReasoningKind, Request, Role, Session, ToolCall,
         diagnostics::{
             DiagnosticEvent, DiagnosticSink, LastRequestDumper, MonotonicDiagnosticClock,
         },
@@ -759,10 +759,19 @@ async fn recursive_fold_keeps_assistant_and_all_tool_results_in_one_atomic_group
 
 #[tokio::test]
 async fn single_empty_or_missing_completion_fails_finitely_without_using_deltas() {
-    for events in [
-        vec![done("")],
-        vec![Ok(Event::TextDelta("not a completed summary".into()))],
-        vec![],
+    for (events, expected) in [
+        (
+            vec![done("")],
+            "The compaction provider completed with empty assistant text (finish reason: \"\"; assistant text length: 0 UTF-8 bytes; provider input tokens: 0; provider output tokens: 0). Reasoning delta length: 0 UTF-8 bytes.",
+        ),
+        (
+            vec![Ok(Event::TextDelta("not a completed summary".into()))],
+            "The compaction provider stream ended without a Completed event. Reasoning delta length: 0 UTF-8 bytes.",
+        ),
+        (
+            vec![],
+            "The compaction provider stream ended without a Completed event. Reasoning delta length: 0 UTF-8 bytes.",
+        ),
     ] {
         let mut fixture = Fixture::new(1000, vec![events]);
         let error = fixture
@@ -772,14 +781,130 @@ async fn single_empty_or_missing_completion_fails_finitely_without_using_deltas(
             )
             .await
             .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "The compaction provider did not complete with a summary."
-        );
+        assert_eq!(error.to_string(), expected);
         assert_eq!(fixture.requests().len(), 1);
         assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 1);
         fixture.close().await;
     }
+}
+
+#[tokio::test]
+async fn empty_completion_reports_metadata_and_reasoning_bytes_without_content() {
+    let mut fixture = Fixture::new(
+        1000,
+        vec![vec![
+            Ok(Event::ReasoningDelta {
+                text: "private reasoning".into(),
+                kind: ReasoningKind::Raw,
+                part_id: "raw".into(),
+                completed: false,
+            }),
+            Ok(Event::ReasoningDelta {
+                text: "🦜".into(),
+                kind: ReasoningKind::Summary,
+                part_id: "summary".into(),
+                completed: true,
+            }
+            .with_text("private event text")),
+            Ok(Event::Completed(Completion {
+                finish_reason: "length".into(),
+                input_tokens: 123,
+                output_tokens: 456,
+                provider_content: "private provider content".into(),
+                ..Completion::default()
+            })
+            .with_text("private completion text")),
+        ]],
+    );
+    let error = fixture
+        .compact(
+            &compactor(500),
+            &[Message::user("a"), Message::user("tail")],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, CompactionError::InvalidOperation(_)));
+    assert_eq!(
+        error.to_string(),
+        "The compaction provider completed with empty assistant text (finish reason: \"length\"; assistant text length: 0 UTF-8 bytes; provider input tokens: 123; provider output tokens: 456). Reasoning delta length: 21 UTF-8 bytes."
+    );
+    assert_eq!(fixture.requests().len(), 1);
+    assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 1);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn missing_completion_subdivides_successfully_without_using_deltas() {
+    let mut fixture = Fixture::new(
+        1000,
+        vec![
+            vec![Ok(Event::TextDelta("not a completed summary".into()))],
+            vec![done("A")],
+            vec![done("AB")],
+        ],
+    );
+    let result = fixture
+        .compact(
+            &compactor(500),
+            &[
+                Message::user("a"),
+                Message::user("b"),
+                Message::user("tail"),
+            ],
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.summary.content(), "S:AB");
+    assert_eq!(
+        fixture.requests().iter().map(texts).collect::<Vec<_>>(),
+        [
+            vec!["Sum.", "a", "b"],
+            vec!["Sum.", "a"],
+            vec!["Sum.", "S:A", "b"],
+        ]
+    );
+    assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 3);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn subdivision_failure_reports_the_terminal_attempt() {
+    let mut fixture = Fixture::new(
+        1000,
+        vec![
+            vec![Ok(Event::Completed(Completion {
+                finish_reason: "length".into(),
+                input_tokens: 100,
+                output_tokens: 200,
+                ..Completion::default()
+            }))],
+            vec![Ok(Event::Completed(Completion {
+                finish_reason: "stop".into(),
+                input_tokens: 10,
+                output_tokens: 20,
+                ..Completion::default()
+            }))],
+        ],
+    );
+    let error = fixture
+        .compact(
+            &compactor(500),
+            &[
+                Message::user("a"),
+                Message::user("b"),
+                Message::user("tail"),
+            ],
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "The compaction provider completed with empty assistant text (finish reason: \"stop\"; assistant text length: 0 UTF-8 bytes; provider input tokens: 10; provider output tokens: 20). Reasoning delta length: 0 UTF-8 bytes."
+    );
+    assert_eq!(fixture.requests().len(), 2);
+    assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 2);
+    fixture.close().await;
 }
 
 #[tokio::test]
@@ -1088,6 +1213,14 @@ async fn provider_response_body_stays_concrete_and_does_not_traverse_wrapped_cau
             "",
         ),
         (Error::Io("ordinary failure".into()), ""),
+        (
+            Error::HeaderTimeout("provider headers timed out".into()),
+            "",
+        ),
+        (
+            Error::Http(HttpError::Transport("provider stream idle timeout".into())),
+            "",
+        ),
     ] {
         let mut fixture = Fixture::new(1000, vec![vec![Err(provider_error.clone())]]);
         let error = fixture
