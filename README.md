@@ -26,6 +26,20 @@ on bounded agent scope, delegation, parent attention and model-tier selection,
 ported from the .NET repository. Repository contributor guidance is in
 [AGENTS.md](AGENTS.md).
 
+## Compiler cache
+
+`nix develop` provides `sccache` and sets `RUSTC_WRAPPER` to use it. The compiler
+cache uses sccache's per-user default cache directory, shared across worktrees;
+Cargo build artifacts remain worktree-local in `.tmp/cargo-target` unless
+`CARGO_TARGET_DIR` is set. Cargo's dependency cache also uses its normal per-user
+location unless `CARGO_HOME` is set externally.
+
+Rust incremental compilations are not cacheable by sccache. To favor compiler
+cache reuse across clean targets or worktrees, run `CARGO_INCREMENTAL=0 cargo build`
+(or set that variable for the desired session). This does not make every Rust
+compilation cacheable; for example, linking binaries is not cached. Use
+`sccache --show-stats` to inspect cache hits and non-cacheable compilations.
+
 ## Running tests
 
 Run from the repository root in `nix develop`. The native test harnesses require
