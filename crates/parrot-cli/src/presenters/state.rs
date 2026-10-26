@@ -30,6 +30,7 @@ pub struct AgentSessionState {
     pub agent_session_id: String,
     pub name: Option<String>,
     pub activities: BTreeSet<String>,
+    pub compaction_progress: Option<wire::CompactionProgressEvent>,
     tool_calls: BTreeMap<String, ToolCallState>,
     folded_tools: BTreeMap<String, (String, u64)>,
     terminal_tools: BTreeSet<String>,
@@ -442,7 +443,24 @@ impl AgentSessionState {
         }
         if id == COMPACTION_ACTIVITY_ID {
             return Ok(ActivityItem::Value(ActivityValue::Spinner {
-                text: "Compacting…".to_owned(),
+                text: match &self.compaction_progress {
+                    Some(progress)
+                        if progress.phase
+                            == wire::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into() =>
+                    {
+                        format!(
+                            "Compacting: summarizing ({}/{} groups)…",
+                            progress.completed_groups, progress.total_groups
+                        )
+                    }
+                    Some(progress)
+                        if progress.phase
+                            == wire::CompactionPhase::COMPACTION_PHASE_SAVING.into() =>
+                    {
+                        "Compacting: saving summary…".to_owned()
+                    }
+                    _ => "Compacting…".to_owned(),
+                },
                 frame,
             }));
         }

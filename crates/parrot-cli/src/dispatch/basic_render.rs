@@ -56,6 +56,7 @@ impl BasicRenderer {
                     | Payload::AgentFinished(_)
                     | Payload::AgentFailed(_)
                     | Payload::CompactionStarted(_)
+                    | Payload::CompactionProgress(_)
                     | Payload::CompactionFinished(_)
                     | Payload::CompactionFailed(_)
                     | Payload::SkillLoaded(_),
@@ -109,6 +110,17 @@ impl BasicRenderer {
                 writeln!(output, "  agent failed: {}: {}", agent.name, agent.message)?;
             }
             Some(Payload::CompactionStarted(_)) => writeln!(output, "  compaction started")?,
+            Some(Payload::CompactionProgress(progress)) => {
+                if progress.phase == wire::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into() {
+                    writeln!(
+                        output,
+                        "  compaction: summarizing ({}/{} groups)",
+                        progress.completed_groups, progress.total_groups
+                    )?;
+                } else if progress.phase == wire::CompactionPhase::COMPACTION_PHASE_SAVING.into() {
+                    writeln!(output, "  compaction: saving summary")?;
+                }
+            }
             Some(Payload::CompactionFinished(_)) => writeln!(output, "  compaction finished")?,
             Some(Payload::CompactionFailed(compaction)) => {
                 writeln!(output, "  compaction failed: {}", compaction.message)?

@@ -1,7 +1,7 @@
 //! Awaited context epochs over the authoritative storage history.
 use super::{
-    CompactionError, CompactionGroup, Compactor, ContextCadence, ContextSize, ContextSnapshot,
-    PlanningError, PlanningInput, ProviderTokenBudget, RetryObserver,
+    CompactionError, CompactionGroup, CompactionObserver, Compactor, ContextCadence, ContextSize,
+    ContextSnapshot, PlanningError, PlanningInput, ProviderTokenBudget,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_domain::{
@@ -10,7 +10,8 @@ use parrot_domain::{
         storage::Committed,
     },
     protocol::messages::parrot::{
-        AgentNotice, CompactionFailed, CompactionFinished, CompactionStarted, Event,
+        AgentNotice, CompactionFailed, CompactionFinished, CompactionPhase,
+        CompactionProgressEvent, CompactionStarted, Event,
     },
     values::{context::ContextCadenceError, identifiers::Identifier},
 };
@@ -107,7 +108,7 @@ pub trait ContextStatus: Send + Sync {
 /// `publish` retains projection-only notices after their history effect commits;
 /// source status/reminder projection-only operations deliberately do not record the event.
 /// The caller must await this controller (including terminal publication) before draining.
-pub trait ContextEvents: RetryObserver {
+pub trait ContextEvents: CompactionObserver {
     fn emit<'a>(
         &'a self,
         event: Event,
@@ -579,7 +580,7 @@ impl ContextController {
                 },
                 &mut self.blobs,
                 input.sessions,
-                &ContextRetry(input.events),
+                &ContextObserver(input.events),
                 cancellation,
             )
             .await?;
@@ -601,6 +602,12 @@ impl ContextController {
                     "The compacted conversation exceeds the selected model input limit.".into(),
                 ));
             }
+            let mut saving = self.event()?;
+            saving.set_compaction_progress(CompactionProgressEvent {
+                phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
+                ..CompactionProgressEvent::new()
+            });
+            input.events.emit(saving, cancellation).await?;
             let published = self.notice("status", "Status prompt injected".into())?;
             if !self
                 .history
@@ -800,14 +807,21 @@ pub fn provider_message(message: &ModelMessage) -> Message {
         .clone_from(&message.provider_content.content);
     mapped
 }
-struct ContextRetry<'a>(&'a dyn ContextEvents);
-impl RetryObserver for ContextRetry<'_> {
+struct ContextObserver<'a>(&'a dyn ContextEvents);
+impl CompactionObserver for ContextObserver<'_> {
     fn observe<'a>(
         &'a self,
         event: &'a parrot_provider::sessions::Event,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), parrot_provider::sessions::Error>> {
         self.0.observe(event, cancellation)
+    }
+    fn observe_progress<'a>(
+        &'a self,
+        progress: CompactionProgressEvent,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), parrot_provider::sessions::Error>> {
+        self.0.observe_progress(progress, cancellation)
     }
 }
 struct Uncancelled;

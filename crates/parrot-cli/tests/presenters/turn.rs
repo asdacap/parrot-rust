@@ -256,6 +256,15 @@ fn typed_turn_events_render_cumulative_text_and_sanitize_terminal_content() {
         ),
         event(
             "",
+            Payload::CompactionProgress(wire::CompactionProgressEvent {
+                phase: wire::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
+                completed_groups: 2,
+                total_groups: 5,
+                ..Default::default()
+            }),
+        ),
+        event(
+            "",
             Payload::CompactionFinished(wire::CompactionFinished::default()),
         ),
         event(

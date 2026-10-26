@@ -1,7 +1,7 @@
 //! Provider budgets, causal summary execution and awaited durable context epochs.
 mod budget;
 mod execution;
-pub use execution::{CompactionError, CompactionResult, Compactor, RetryObserver};
+pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
 mod context;
 pub use context::{
     ContextCompactionResult, ContextController, ContextError, ContextEvents, ContextResult,

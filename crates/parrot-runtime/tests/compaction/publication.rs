@@ -1,5 +1,6 @@
 //! Real storage false/error paths must never create a committed status publication.
 use super::*;
+use parrot_domain::protocol::messages::parrot::CompactionPhase;
 use parrot_storage::conversation::CompactionSnapshot;
 
 struct RacingStatus {
@@ -94,9 +95,22 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
         }
         assert_eq!(conversation.messages(), before);
         let committed = events.committed.lock().unwrap().clone();
-        assert_eq!(committed.len(), 2);
+        assert_eq!(committed.len(), 5);
         assert!(committed[0].has_compaction_started());
-        assert!(committed[1].has_compaction_failed());
+        for event in &committed[1..3] {
+            assert_eq!(
+                event.compaction_progress().phase,
+                CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into()
+            );
+            assert_eq!(event.compaction_progress().total_groups, 1);
+        }
+        assert_eq!(committed[1].compaction_progress().completed_groups, 0);
+        assert_eq!(committed[2].compaction_progress().completed_groups, 1);
+        assert_eq!(
+            committed[3].compaction_progress().phase,
+            CompactionPhase::COMPACTION_PHASE_SAVING.into()
+        );
+        assert!(committed[4].has_compaction_failed());
         assert!(!committed.iter().any(|event| event.has_agent_notice()));
         let snapshot = fixture.repository.compaction("agent".into()).await.unwrap();
         if sqlite_failure {

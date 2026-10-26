@@ -4,6 +4,7 @@ use parrot_domain::{
         filenames::FilenameGenerator,
         paths::{RootOrigin, SelectedSessionRoot},
     },
+    protocol::messages::parrot::CompactionProgressEvent,
     values::config::{ModelProfileConfig, ModelProfiles},
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -19,8 +20,8 @@ use parrot_provider::{
     },
 };
 use parrot_runtime::compaction::{
-    CompactionError, CompactionResult, CompactionSettings, Compactor, PlanningError, PlanningInput,
-    RetryObserver, group_messages,
+    CompactionError, CompactionObserver, CompactionResult, CompactionSettings, Compactor,
+    PlanningError, PlanningInput, group_messages,
 };
 use parrot_storage::artifacts::compaction::CompactionGroupBlobStore;
 use std::{
@@ -50,6 +51,7 @@ struct State {
     scripts: Mutex<VecDeque<Vec<Result<Event, Error>>>>,
     requests: Mutex<Vec<Request>>,
     audit: Mutex<Vec<&'static str>>,
+    progress: Mutex<Vec<CompactionProgressEvent>>,
     opens: AtomicUsize,
     stream_closes: AtomicUsize,
     session_closes: AtomicUsize,
@@ -145,7 +147,7 @@ struct Observer {
     cancel: Option<Arc<Token>>,
     failure: Option<Error>,
 }
-impl RetryObserver for Observer {
+impl CompactionObserver for Observer {
     fn observe<'a>(
         &'a self,
         event: &'a Event,
@@ -160,6 +162,17 @@ impl RetryObserver for Observer {
             }
             self.state.audit.lock().unwrap().push("retry-finish");
             self.failure.clone().map_or(Ok(()), Err)
+        })
+    }
+    fn observe_progress<'a>(
+        &'a self,
+        progress: CompactionProgressEvent,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            cancellation.check().map_err(|_| Error::Cancelled)?;
+            self.state.progress.lock().unwrap().push(progress);
+            Ok(())
         })
     }
 }
@@ -403,6 +416,17 @@ async fn chunk_budget_folds_in_order_carrying_only_previous_summary() {
         .unwrap()
         .unwrap();
     assert_eq!(result.summary.content(), "S:third");
+    assert_eq!(
+        fixture
+            .state
+            .progress
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|progress| (progress.completed_groups, progress.total_groups))
+            .collect::<Vec<_>>(),
+        [(0, 3), (1, 3), (2, 3), (3, 3)]
+    );
     let requests = fixture.requests();
     assert_eq!(requests.len(), 3);
     assert_eq!(texts(&requests[0]), ["Sum.", history[0].content()]);
@@ -452,6 +476,17 @@ async fn empty_summary_halves_odd_group_count_without_losing_or_reordering_any_g
         .unwrap()
         .unwrap();
     assert_eq!(result.summary.content(), "S:ABC");
+    assert_eq!(
+        fixture
+            .state
+            .progress
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|progress| (progress.completed_groups, progress.total_groups))
+            .collect::<Vec<_>>(),
+        [(0, 3), (1, 3), (2, 3), (3, 3)]
+    );
     let requests = fixture.requests();
     assert_eq!(
         requests.iter().map(texts).collect::<Vec<_>>(),

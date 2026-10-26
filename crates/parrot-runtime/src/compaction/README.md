@@ -17,7 +17,7 @@ This module implements the original compactor and context-epoch algorithm over t
 
 ## Invocation and ownership contract
 
-`Compactor::new(settings, profiles, templates)` renders execution template text; the settings' rendered-text fields remain useful to the independent planner but are overridden by the real catalog for execution. `compact` accepts actual resolved selection, target, `PlanningInput`, **mutable** real `CompactionGroupBlobStore`, shared caller-owned `ProviderSessions`, awaited `RetryObserver` and cancellation.
+`Compactor::new(settings, profiles, templates)` renders execution template text; the settings' rendered-text fields remain useful to the independent planner but are overridden by the real catalog for execution. `compact` accepts actual resolved selection, target, `PlanningInput`, **mutable** real `CompactionGroupBlobStore`, shared caller-owned `ProviderSessions`, awaited `CompactionObserver` and cancellation. The observer preserves provider retry notices and reports completed/total conversation groups at successful summary folds, including recursive fallback folds. The controller emits a saving phase before committing the snapshot; start/finish/failure events bracket progress, including no-op completion. No summary text is published as progress.
 
 `ContextController::new(compactor, history, blobs, templates)` owns context-epoch state, calibration and cadence. `EpochInput` borrows the existing `parrot_storage::conversation::AgentConversation`, selection/tools, T44 `SystemPrompt`, provider sessions and bound status/event adapters. There is no duplicate conversation model.
 

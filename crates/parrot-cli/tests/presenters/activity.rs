@@ -1382,3 +1382,83 @@ fn deferred_started_command_commits_after_grace_or_yield_and_omits_fast_start() 
     assert_eq!(commits(&yielded).len(), 1);
     assert_eq!(commits(&yielded)[0].matches('x').count(), 201);
 }
+
+#[test]
+fn compaction_progress_updates_each_agents_spinner_and_terminal_events_clear_it() {
+    for owner in ["root", "child"] {
+        for failure in [false, true] {
+            let mut view = view();
+            view.observe(&turn("root")).unwrap();
+            if owner == "child" {
+                view.observe(&child("child", "worker", "root")).unwrap();
+            }
+            view.observe(&event(
+                owner,
+                wire::event::Payload::CompactionStarted(wire::CompactionStarted::new()),
+            ))
+            .unwrap();
+            assert!(live(&view).contains("Compacting…"));
+            for completed_groups in [0, 3, 5] {
+                let update = view
+                    .observe(&event(
+                        owner,
+                        wire::event::Payload::CompactionProgress(wire::CompactionProgressEvent {
+                            phase: wire::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
+                            completed_groups,
+                            total_groups: 5,
+                            ..Default::default()
+                        }),
+                    ))
+                    .unwrap();
+                assert!(commits(&update).is_empty());
+                view.observe(&event(
+                    owner,
+                    wire::event::Payload::CompactionStarted(wire::CompactionStarted::new()),
+                ))
+                .unwrap();
+                assert!(live(&view).contains(&format!(
+                    "Compacting: summarizing ({completed_groups}/5 groups)…"
+                )));
+            }
+            let saving = event(
+                owner,
+                wire::event::Payload::CompactionProgress(wire::CompactionProgressEvent {
+                    phase: wire::CompactionPhase::COMPACTION_PHASE_SAVING.into(),
+                    ..Default::default()
+                }),
+            );
+            view.observe(&saving).unwrap();
+            assert!(live(&view).contains("Compacting: saving summary…"));
+            let terminal = event(
+                owner,
+                if failure {
+                    wire::event::Payload::CompactionFailed(wire::CompactionFailed {
+                        message: "provider failed".into(),
+                        ..Default::default()
+                    })
+                } else {
+                    wire::event::Payload::CompactionFinished(wire::CompactionFinished::new())
+                },
+            );
+            let update = view.observe(&terminal).unwrap();
+            assert!(!live(&view).contains("Compacting"));
+            assert_eq!(commits(&update).len(), 1);
+            assert!(commits(&view.observe(&terminal).unwrap()).is_empty());
+            view.observe(&saving).unwrap();
+            assert!(!live(&view).contains("Compacting"));
+            view.observe(&event(
+                owner,
+                wire::event::Payload::CompactionStarted(wire::CompactionStarted::new()),
+            ))
+            .unwrap();
+            assert!(live(&view).contains("Compacting…"));
+            assert!(!live(&view).contains("saving summary"));
+            view.observe(&event(
+                owner,
+                wire::event::Payload::CompactionFinished(wire::CompactionFinished::new()),
+            ))
+            .unwrap();
+            assert!(!live(&view).contains("Compacting"));
+        }
+    }
+}

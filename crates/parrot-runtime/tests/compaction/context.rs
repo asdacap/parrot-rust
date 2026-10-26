@@ -447,13 +447,30 @@ impl Events {
         }
     }
 }
-impl RetryObserver for Events {
+impl CompactionObserver for Events {
     fn observe<'a>(
         &'a self,
         _: &'a sessions::Event,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move { cancellation.check().map_err(|_| Error::Cancelled) })
+    }
+    fn observe_progress<'a>(
+        &'a self,
+        progress: parrot_domain::protocol::messages::parrot::CompactionProgressEvent,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let mut event = Event {
+                id: parrot_domain::values::identifiers::Identifier::event_id().unwrap(),
+                agent_session_id: self.history.agent_session_id().into(),
+                ..Event::new()
+            };
+            event.set_compaction_progress(progress);
+            self.emit(event, cancellation)
+                .await
+                .map_err(|error| Error::Provider(error.to_string()))
+        })
     }
 }
 impl ContextEvents for Events {
@@ -707,6 +724,7 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
             .unwrap()
             .reduced
     );
+    events.published.lock().unwrap().clear();
     let snapshot = fixture.repository.compaction("agent".into()).await.unwrap();
     assert!(
         !controller
@@ -730,6 +748,10 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
         fixture.repository.compaction("agent".into()).await.unwrap(),
         snapshot
     );
+    let no_op = events.published.lock().unwrap().clone();
+    assert_eq!(no_op.len(), 2);
+    assert!(no_op[0].has_compaction_started());
+    assert!(no_op[1].has_compaction_finished());
     user(&history, "new tail").await;
     conversation.reload().await.unwrap();
     assert!(

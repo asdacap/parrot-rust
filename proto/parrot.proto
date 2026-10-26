@@ -566,6 +566,7 @@ message Event {
     AgentNotice agent_notice = 48;
     ToolSnapshot tool_snapshot = 49;
     EncryptedReasoningReceivedEvent encrypted_reasoning_received = 50;
+    CompactionProgressEvent compaction_progress = 51;
   }
 }
 
@@ -708,6 +709,19 @@ message ExitReminderChanged {
 
 message SkillLoadedEvent {
   string path = 1;
+}
+
+enum CompactionPhase {
+  COMPACTION_PHASE_UNSPECIFIED = 0;
+  COMPACTION_PHASE_SUMMARIZING = 1;
+  COMPACTION_PHASE_SAVING = 2;
+}
+
+message CompactionProgressEvent {
+  CompactionPhase phase = 1;
+  // Conversation-group counts apply only to the summarizing phase.
+  uint64 completed_groups = 2;
+  uint64 total_groups = 3;
 }
 
 message CompactionStarted {}

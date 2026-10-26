@@ -808,11 +808,13 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
         );
         assert_eq!(conversation.messages(), before);
         let emitted = events.published.lock().unwrap().clone();
-        assert_eq!(emitted.len(), 2);
+        assert_eq!(emitted.len(), 3);
         assert!(emitted[0].has_compaction_started());
-        assert!(emitted[1].has_compaction_failed());
+        assert!(emitted[1].has_compaction_progress());
+        assert_eq!(emitted[1].compaction_progress().completed_groups, 0);
+        assert!(emitted[2].has_compaction_failed());
         assert!(
-            !emitted[1]
+            !emitted[2]
                 .compaction_failed()
                 .message
                 .contains("private-response-body")

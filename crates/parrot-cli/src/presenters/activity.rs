@@ -955,16 +955,21 @@ impl RawActivityView {
                 }
             }
             Some(Payload::CompactionStarted(_)) => {
-                if self
-                    .state(owner)
-                    .activities
-                    .insert(COMPACTION_ACTIVITY_ID.to_owned())
-                {
+                let state = self.state(owner);
+                if state.activities.insert(COMPACTION_ACTIVITY_ID.to_owned()) {
+                    state.compaction_progress = None;
                     self.activities
                         .push((owner.clone(), COMPACTION_ACTIVITY_ID.to_owned()));
                 }
             }
+            Some(Payload::CompactionProgress(progress)) => {
+                let state = self.state(owner);
+                if state.activities.contains(COMPACTION_ACTIVITY_ID) {
+                    state.compaction_progress = Some(progress.clone());
+                }
+            }
             Some(Payload::CompactionFinished(_)) | Some(Payload::CompactionFailed(_)) => {
+                self.state(owner).compaction_progress = None;
                 if self.state(owner).activities.remove(COMPACTION_ACTIVITY_ID) {
                     self.activities
                         .retain(|(id, activity)| id != owner || activity != COMPACTION_ACTIVITY_ID);

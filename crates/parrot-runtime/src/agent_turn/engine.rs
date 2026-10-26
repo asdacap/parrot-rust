@@ -12,8 +12,8 @@ use super::{
 use crate::{
     active_work::exit_reminders::{ExitReminders, ReminderError},
     compaction::{
-        ContextController, ContextError, ContextEvents, ContextResult, EpochInput, RetryObserver,
-        StatusInjection, provider_message,
+        CompactionObserver, ContextController, ContextError, ContextEvents, ContextResult,
+        EpochInput, StatusInjection, provider_message,
     },
     event_broker::{BrokerError, EventBroker},
     prompt_context::{SessionPrompt, SystemPrompt},
@@ -1106,7 +1106,7 @@ impl ProviderUsage for UsageBridge<'_> {
 struct ContextEmitter<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
 }
-impl<S, T> RetryObserver for ContextEmitter<'_, S, T>
+impl<S, T> CompactionObserver for ContextEmitter<'_, S, T>
 where
     S: AccessSnapshot + 'static,
     T: TurnTools<S> + 'static,
@@ -1133,6 +1133,26 @@ where
                 }
                 error => sessions::Error::Provider(error.to_string()),
             })
+        })
+    }
+    fn observe_progress<'a>(
+        &'a self,
+        progress: parrot_domain::protocol::messages::parrot::CompactionProgressEvent,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), sessions::Error>> {
+        Box::pin(async move {
+            let mut event = self.backend.event();
+            event.set_compaction_progress(progress);
+            self.backend
+                .emit(event, cancellation)
+                .await
+                .map_err(|error| {
+                    if error.is_cancelled() {
+                        sessions::Error::Cancelled
+                    } else {
+                        sessions::Error::Provider(error.to_string())
+                    }
+                })
         })
     }
 }

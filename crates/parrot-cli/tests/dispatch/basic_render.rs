@@ -627,3 +627,26 @@ async fn stream_cancellation_ends_only_reader_wait_while_callback_rpc_and_output
         .unwrap()
     );
 }
+
+#[test]
+fn compaction_progress_uses_its_own_readable_lines_after_streamed_text() {
+    let (output, error, _) = render(vec![
+        text("partial"),
+        event(Payload::CompactionProgress(wire::CompactionProgressEvent {
+            phase: wire::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
+            completed_groups: 2,
+            total_groups: 5,
+            ..Default::default()
+        })),
+        event(Payload::CompactionProgress(wire::CompactionProgressEvent {
+            phase: wire::CompactionPhase::COMPACTION_PHASE_SAVING.into(),
+            ..Default::default()
+        })),
+        event(Payload::CompactionFinished(wire::CompactionFinished::new())),
+    ]);
+    assert_eq!(
+        output,
+        "partial\n  compaction: summarizing (2/5 groups)\n  compaction: saving summary\n  compaction finished\n"
+    );
+    assert!(error.is_empty());
+}

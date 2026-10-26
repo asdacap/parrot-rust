@@ -53,6 +53,17 @@ async fn external_compact_waits_for_active_provider_before_starting_real_compact
         .position(|event| event.has_compaction_started())
         .unwrap();
     assert!(ended < started);
+    let progress = events
+        .iter()
+        .find(|event| event.has_compaction_progress())
+        .unwrap();
+    assert_eq!(progress.agent_session_id, events[started].agent_session_id);
+    assert_eq!(
+        progress.compaction_progress().phase,
+        protocol::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into()
+    );
+    assert_eq!(progress.compaction_progress().completed_groups, 0);
+    assert!(progress.compaction_progress().total_groups > 0);
     summary.open();
     assert!(bounded(compact).await.unwrap().unwrap().reduced);
     assert_eq!(
@@ -68,6 +79,36 @@ async fn external_compact_waits_for_active_provider_before_starting_real_compact
             .count(),
         1
     );
+    let events = fixture.events().await;
+    let progress = events
+        .iter()
+        .filter(|event| event.has_compaction_progress())
+        .map(|event| event.compaction_progress())
+        .collect::<Vec<_>>();
+    assert_eq!(progress.len(), 3);
+    assert_eq!(progress[1].completed_groups, progress[1].total_groups);
+    assert_eq!(progress[1].total_groups, progress[0].total_groups);
+    assert_eq!(
+        progress[2].phase,
+        protocol::CompactionPhase::COMPACTION_PHASE_SAVING.into()
+    );
+    let saving = events
+        .iter()
+        .position(|event| {
+            event.has_compaction_progress()
+                && event.compaction_progress().phase
+                    == protocol::CompactionPhase::COMPACTION_PHASE_SAVING.into()
+        })
+        .unwrap();
+    let finished = events
+        .iter()
+        .position(|event| event.has_compaction_finished())
+        .unwrap();
+    let committed = events
+        .iter()
+        .position(|event| event.has_agent_notice() && event.agent_notice().kind == "status")
+        .unwrap();
+    assert!(started < saving && saving < committed && committed < finished);
     runtime.close().await;
 }
 #[tokio::test]

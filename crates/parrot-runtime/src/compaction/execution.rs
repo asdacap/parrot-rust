@@ -4,6 +4,7 @@ use super::{
 };
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
+    protocol::messages::parrot::{CompactionPhase, CompactionProgressEvent},
     values::config::ModelProfiles,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -14,11 +15,19 @@ use parrot_provider::{
 use parrot_storage::artifacts::compaction::{self as artifact, CompactionGroupBlobStore};
 use std::{fmt, sync::Arc};
 
-/// Retry publication is awaited before consuming the next summary-provider event.
-pub trait RetryObserver: Send + Sync {
+/// Compaction progress and retry publication are awaited before execution continues.
+pub trait CompactionObserver: Send + Sync {
+    /// Publish a summary-provider retry before consuming its next event.
     fn observe<'a>(
         &'a self,
         event: &'a Event,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), sessions::Error>>;
+
+    /// Publish aggregate progress without exposing summary content.
+    fn observe_progress<'a>(
+        &'a self,
+        progress: CompactionProgressEvent,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), sessions::Error>>;
 }
@@ -143,7 +152,7 @@ impl Compactor {
         input: &PlanningInput<'_>,
         blobs: &mut CompactionGroupBlobStore,
         sessions: &ProviderSessions,
-        retry: &dyn RetryObserver,
+        observer: &dyn CompactionObserver,
         cancellation: &dyn Cancellation,
     ) -> Result<Option<CompactionResult>, CompactionError> {
         let model = &selected.canonical_model;
@@ -184,10 +193,13 @@ impl Compactor {
             compactor: self,
             selected: model,
             sessions,
-            retry,
+            observer,
             cancellation,
             maximum_output_tokens: plan.summary_output_tokens,
+            total_groups: pending.len(),
         };
+        let mut completed_groups = 0;
+        runner.report_progress(completed_groups).await?;
         let mut summary = String::new();
         let mut chunk = Vec::new();
         let mut chunk_tokens = 0;
@@ -200,7 +212,9 @@ impl Compactor {
                     &messages,
                 )? > plan.input_budget
             {
-                summary = runner.fold_groups(&summary, &chunk).await?;
+                summary = runner
+                    .fold_groups(&summary, &chunk, &mut completed_groups)
+                    .await?;
                 chunk.clear();
                 chunk_tokens = 0;
             }
@@ -232,7 +246,9 @@ impl Compactor {
             chunk.push(messages);
         }
         if !chunk.is_empty() {
-            summary = runner.fold_groups(&summary, &chunk).await?;
+            summary = runner
+                .fold_groups(&summary, &chunk, &mut completed_groups)
+                .await?;
         }
         let summary = Message::system(format!("{}{summary}", self.summary_prefix));
         let retained: Vec<_> = input.groups[plan.keep_group_from..]
@@ -299,21 +315,43 @@ struct SummaryRunner<'a> {
     compactor: &'a Compactor,
     selected: &'a ProviderModel,
     sessions: &'a ProviderSessions,
-    retry: &'a dyn RetryObserver,
+    observer: &'a dyn CompactionObserver,
     cancellation: &'a dyn Cancellation,
     maximum_output_tokens: i32,
+    total_groups: usize,
 }
 impl SummaryRunner<'_> {
+    async fn report_progress(&self, completed_groups: usize) -> Result<(), CompactionError> {
+        self.cancellation
+            .check()
+            .map_err(|_| CompactionError::Cancelled)?;
+        self.observer
+            .observe_progress(
+                CompactionProgressEvent {
+                    phase: CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
+                    completed_groups: completed_groups as u64,
+                    total_groups: self.total_groups as u64,
+                    ..CompactionProgressEvent::new()
+                },
+                self.cancellation,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Empty completions split only at group boundaries; each recursive branch
     /// strictly shrinks until a single empty group fails without discarding it.
     fn fold_groups<'a>(
         &'a self,
         preceding_summary: &'a str,
         pending: &'a [Vec<Message>],
+        completed_groups: &'a mut usize,
     ) -> BoxFuture<'a, Result<String, CompactionError>> {
         Box::pin(async move {
             let messages: Vec<_> = pending.iter().flatten().cloned().collect();
             if let Some(summary) = self.summarise(preceding_summary, &messages).await? {
+                *completed_groups += pending.len();
+                self.report_progress(*completed_groups).await?;
                 return Ok(summary);
             }
             if pending.len() == 1 {
@@ -323,9 +361,10 @@ impl SummaryRunner<'_> {
             }
             let half = pending.len().div_ceil(2);
             let first = self
-                .fold_groups(preceding_summary, &pending[..half])
+                .fold_groups(preceding_summary, &pending[..half], completed_groups)
                 .await?;
-            self.fold_groups(&first, &pending[half..]).await
+            self.fold_groups(&first, &pending[half..], completed_groups)
+                .await
         })
     }
 
@@ -355,7 +394,7 @@ impl SummaryRunner<'_> {
                     ));
                 }
                 match event.base_event() {
-                    Event::Retry { .. } => self.retry.observe(&event, self.cancellation).await?,
+                    Event::Retry { .. } => self.observer.observe(&event, self.cancellation).await?,
                     Event::Completed(completion) if !completion.assistant_text.is_empty() => {
                         summary = Some(completion.assistant_text.clone());
                     }

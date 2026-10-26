@@ -108,13 +108,30 @@ impl EventPublisher for Publisher {
     }
 }
 pub struct ContextPublisher(pub AgentHistoryView);
-impl RetryObserver for ContextPublisher {
+impl CompactionObserver for ContextPublisher {
     fn observe<'a>(
         &'a self,
         _: &'a sessions::Event,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move { cancellation.check().map_err(|_| Error::Cancelled) })
+    }
+    fn observe_progress<'a>(
+        &'a self,
+        progress: parrot_domain::protocol::messages::parrot::CompactionProgressEvent,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let mut event = Event {
+                id: parrot_domain::values::identifiers::Identifier::event_id().unwrap(),
+                agent_session_id: self.0.agent_session_id().into(),
+                ..Event::new()
+            };
+            event.set_compaction_progress(progress);
+            self.emit(event, cancellation)
+                .await
+                .map_err(|error| Error::Provider(error.to_string()))
+        })
     }
 }
 impl ContextEvents for ContextPublisher {
