@@ -117,8 +117,8 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
     .map(str::to_owned)
     .collect();
     assert_eq!(approved, expected);
-    assert_eq!(mapping(old_templates).len(), 73);
-    assert_eq!(mapping(new_templates).len(), 74);
+    assert_eq!(mapping(old_templates).len(), 75);
+    assert_eq!(mapping(new_templates).len(), 76);
     let legacy_warning = field(new_templates, "session.legacy-resume-warning");
     assert_eq!(mapping(legacy_warning).len(), 3);
     assert!(sequence(field(legacy_warning, "allowed_arguments")).is_empty());
@@ -200,7 +200,7 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
                 .unwrap_or("scalar")
                 == "scalar")
             .count(),
-        62
+        64
     );
 }
 
@@ -264,10 +264,12 @@ const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
     "agent-session.final-request",
     "agent-session.final-request-interrupted",
 ];
-const AGENT_COMMUNICATION_IDS: [&str; 6] = [
+const AGENT_COMMUNICATION_IDS: [&str; 8] = [
     "agent-session.agent-ask",
+    "agent-session.agent-ask-timeout",
     "agent-session.pending-ask-reminder",
     "tool-result.ask-reply",
+    "tool-result.ask-timeout",
     "tool-result.ask-replied",
     "agent-session.final-request",
     "agent-session.final-request-interrupted",
@@ -324,8 +326,8 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let new = yaml::parse_root(&compose(system_new)).unwrap();
     let old_templates = mapping(field(&old, "prompt_templates"));
     let new_templates = mapping(field(&new, "prompt_templates"));
-    assert_eq!(old_templates.len(), 98);
-    assert_eq!(new_templates.len(), 99);
+    assert_eq!(old_templates.len(), 100);
+    assert_eq!(new_templates.len(), 101);
     let expected_ids = expected
         .iter()
         .map(|row| row["id"].as_str().unwrap())

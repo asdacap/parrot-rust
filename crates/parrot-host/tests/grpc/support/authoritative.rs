@@ -591,6 +591,7 @@ impl Fixture {
             }),
             permissions: durable_permission_factory(None, Arc::new(Diagnostics)),
             user_input_timeout: None,
+            agent_ask_timeout: std::time::Duration::from_secs(300),
         }));
         let store = Arc::new(SessionStore::new(
             admissions,

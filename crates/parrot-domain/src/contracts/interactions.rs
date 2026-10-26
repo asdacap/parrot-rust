@@ -48,6 +48,12 @@ impl QuestionReply {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AgentAskReply {
+    Replied(String),
+    TimedOut,
+}
+
 /// Caller-scoped user questioning. The host rejects non-root invoking agents.
 pub trait QuestionRequester: Send + Sync {
     type Error: Send + Sync + 'static;
@@ -64,13 +70,13 @@ pub trait QuestionRequester: Send + Sync {
 pub trait AgentCommunication: Send + Sync {
     type Error: Send + Sync + 'static;
 
-    /// Resolves an agent path and waits for its reply or cancellation.
+    /// Resolves an agent path and waits for its reply, timeout or cancellation.
     fn ask<'a>(
         &'a self,
         name: &'a str,
         message: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, OperationError<Self::Error>>>;
+    ) -> BoxFuture<'a, Result<AgentAskReply, OperationError<Self::Error>>>;
 
     /// Immediately settles an ask addressed to this agent; stale IDs are errors.
     fn reply(&self, request_id: &str, message: String) -> Result<(), Self::Error>;

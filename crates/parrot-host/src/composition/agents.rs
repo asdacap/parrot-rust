@@ -5,7 +5,9 @@ use std::sync::{Arc, OnceLock, Weak};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
-        interactions::{AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester},
+        interactions::{
+            AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
+        },
         runtime::AgentRuntime,
         security::RestrictableAccessSnapshot,
         status::ProcessStatusSource,
@@ -351,7 +353,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentCommunication for ScopedAgent
         name: &'a str,
         message: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
+    ) -> BoxFuture<'a, Result<AgentAskReply, OperationError<AgentToolError>>> {
         Box::pin(async move {
             cancellation
                 .check()
@@ -392,6 +394,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentAskDelivery for ScopedAgentRu
     fn steer<'a>(
         &'a self,
         request: &'a PendingAgentAsk,
+        message_id: String,
         text: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>> {
         Box::pin(async move {
@@ -406,7 +409,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentAskDelivery for ScopedAgentRu
                 .session()
                 .send(
                     vec![ConversationPart::text(text)],
-                    request.id.clone(),
+                    message_id,
                     Delivery::DELIVERY_STEER,
                     IncomingActivity::default(),
                     Arc::new(Signal::new()),
@@ -450,6 +453,20 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentAskTemplates for ScopedAgentR
             .render(
                 "agent-session.pending-ask-reminder",
                 &[("requests".into(), pending.into())],
+                &NeverCancelled,
+            )
+            .map_err(|error| {
+                InteractionError::new(InteractionErrorKind::Delivery, error.to_string())
+            })
+    }
+    fn timeout(&self, request: &PendingAgentAsk) -> Result<String, InteractionError> {
+        self.templates
+            .render(
+                "agent-session.agent-ask-timeout",
+                &[
+                    ("asker_name".into(), request.asker.name.as_str().into()),
+                    ("request_id".into(), request.id.as_str().into()),
+                ],
                 &NeverCancelled,
             )
             .map_err(|error| {

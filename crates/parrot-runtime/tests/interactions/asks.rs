@@ -1,8 +1,11 @@
+use parrot_domain::contracts::interactions::AgentAskReply;
+
 use super::*;
 
 #[derive(Default)]
 struct AskDelivery {
     steers: Mutex<Vec<PendingAgentAsk>>,
+    messages: Mutex<Vec<(String, String)>>,
     fail: AtomicBool,
     block: AtomicBool,
 }
@@ -11,12 +14,13 @@ impl AgentAskDelivery for AskDelivery {
     fn steer<'a>(
         &'a self,
         request: &'a PendingAgentAsk,
+        message_id: String,
         text: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>> {
         Box::pin(async move {
             assert!(text.contains(&request.id));
-            assert!(text.contains(&request.message));
             self.steers.lock().unwrap().push(request.clone());
+            self.messages.lock().unwrap().push((message_id, text));
             if self.block.load(Ordering::SeqCst) {
                 std::future::pending::<()>().await;
             }
@@ -57,18 +61,28 @@ impl AgentAskTemplates for AskTemplates {
             .collect::<Vec<_>>()
             .join("\n"))
     }
+
+    fn timeout(&self, request: &PendingAgentAsk) -> Result<String, InteractionError> {
+        Ok(format!(
+            "{} from {} timed out",
+            request.id, request.asker.name
+        ))
+    }
 }
 
 struct Fixture {
     broker: Arc<AgentAskBroker>,
+    clock: Arc<ManualClock>,
     delivery: Arc<AskDelivery>,
     templates: Arc<AskTemplates>,
 }
 
 impl Fixture {
     fn new() -> Self {
+        let clock = Arc::new(ManualClock::new());
         Self {
-            broker: Arc::new(AgentAskBroker::new()),
+            broker: Arc::new(AgentAskBroker::new(Duration::from_secs(300), clock.clone())),
+            clock,
             delivery: Arc::new(AskDelivery::default()),
             templates: Arc::new(AskTemplates::default()),
         }
@@ -88,7 +102,7 @@ impl Fixture {
     }
 }
 
-fn cycle_error(result: Result<String, OperationError<InteractionError>>) {
+fn cycle_error(result: Result<AgentAskReply, OperationError<InteractionError>>) {
     assert!(
         matches!(result, Err(OperationError::Failed(error)) if error.message.contains("cycle") && error.message.contains("reply to existing asks first"))
     );
@@ -118,7 +132,41 @@ async fn delivery_uses_the_resolved_recipient_scope_adapter() {
     recipient
         .reply(&recipient.pending()[0].id, "answer".into())
         .unwrap();
-    assert_eq!(ask.await.unwrap(), "answer");
+    assert_eq!(ask.await.unwrap(), AgentAskReply::Replied("answer".into()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unanswered_ask_times_out_notifies_both_sides_and_clears_the_edge() {
+    let fixture = Fixture::new();
+    let asker = fixture.agent("asker");
+    let recipient = fixture.agent("recipient");
+    let token = Token::default();
+    let mut ask = Box::pin(asker.ask(&recipient, "anyone there".into(), &token));
+    assert_pending(ask.as_mut());
+    let request = recipient.pending()[0].clone();
+    fixture.clock.advance(Duration::from_secs(299));
+    assert_pending(ask.as_mut());
+    fixture.clock.advance(Duration::from_secs(1));
+    assert_eq!(ask.await.unwrap(), AgentAskReply::TimedOut);
+    let messages = fixture.delivery.messages.lock().unwrap().clone();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].0, request.id);
+    assert_ne!(messages[1].0, request.id);
+    assert_eq!(
+        messages[1].1,
+        format!("{} from asker timed out", request.id)
+    );
+    assert!(recipient.pending().is_empty());
+    assert!(matches!(
+        recipient.reply(&request.id, "late".into()),
+        Err(error) if error.message == "ask is no longer pending"
+    ));
+    let mut again = Box::pin(asker.ask(&recipient, "second try".into(), &token));
+    assert_pending(again.as_mut());
+    recipient
+        .reply(&recipient.pending()[0].id, "here".into())
+        .unwrap();
+    assert_eq!(again.await.unwrap(), AgentAskReply::Replied("here".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -140,13 +188,22 @@ async fn direct_indirect_and_self_cycles_are_rejected_without_delivery() {
     assert_eq!(c.pending().len(), 1);
     assert_eq!(fixture.delivery.steers.lock().unwrap().len(), 2);
     c.reply(&c.pending()[0].id, "c replied".into()).unwrap();
-    assert_eq!(bc.await.unwrap(), "c replied");
+    assert_eq!(
+        bc.await.unwrap(),
+        AgentAskReply::Replied("c replied".into())
+    );
     b.reply(&b.pending()[0].id, "b replied".into()).unwrap();
-    assert_eq!(ab.await.unwrap(), "b replied");
+    assert_eq!(
+        ab.await.unwrap(),
+        AgentAskReply::Replied("b replied".into())
+    );
     let mut ca = Box::pin(c.ask(&a, "now acyclic".into(), &token));
     assert_pending(ca.as_mut());
     a.reply(&a.pending()[0].id, "a replied".into()).unwrap();
-    assert_eq!(ca.await.unwrap(), "a replied");
+    assert_eq!(
+        ca.await.unwrap(),
+        AgentAskReply::Replied("a replied".into())
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -193,11 +250,17 @@ async fn fan_in_replies_are_exact_authorized_and_retryable() {
     assert!(c.reply("missing", "stale".into()).is_err());
     assert_eq!(c.pending().len(), 2);
     c.reply(&second, "second answer".into()).unwrap();
-    assert_eq!(bc.await.unwrap(), "second answer");
+    assert_eq!(
+        bc.await.unwrap(),
+        AgentAskReply::Replied("second answer".into())
+    );
     assert_eq!(c.pending().len(), 1);
     assert!(c.reply(&second, "duplicate".into()).is_err());
     c.reply(&first, "first answer".into()).unwrap();
-    assert_eq!(ac.await.unwrap(), "first answer");
+    assert_eq!(
+        ac.await.unwrap(),
+        AgentAskReply::Replied("first answer".into())
+    );
     assert!(c.completion_reminder().unwrap().is_none());
 }
 
@@ -255,7 +318,7 @@ async fn failed_validation_templates_and_delivery_leave_no_pending_state() {
     let mut ba = Box::pin(b.ask(&a, "no phantom edge".into(), &token));
     assert_pending(ba.as_mut());
     a.reply(&a.pending()[0].id, "ok".into()).unwrap();
-    assert_eq!(ba.await.unwrap(), "ok");
+    assert_eq!(ba.await.unwrap(), AgentAskReply::Replied("ok".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -286,7 +349,10 @@ async fn disposal_shutdown_and_identity_reuse_withdraw_incoming_and_outgoing() {
     replacement
         .reply(&replacement.pending()[0].id, "fresh answer".into())
         .unwrap();
-    assert_eq!(fresh.await.unwrap(), "fresh answer");
+    assert_eq!(
+        fresh.await.unwrap(),
+        AgentAskReply::Replied("fresh answer".into())
+    );
     let mut ca = Box::pin(c.ask(&a, "shutdown".into(), &token));
     assert_pending(ca.as_mut());
     fixture.broker.close();
@@ -370,10 +436,16 @@ async fn reply_wins_observed_cancellation_and_clears_edge_before_waiter_resumes(
     let mut ba = Box::pin(b.ask(&a, "reverse before observation".into(), &next_token));
     assert_pending(ba.as_mut());
     token.cancel();
-    assert_eq!(ab.await.unwrap(), "reply won");
+    assert_eq!(
+        ab.await.unwrap(),
+        AgentAskReply::Replied("reply won".into())
+    );
     a.reply(&a.pending()[0].id, "reverse answer".into())
         .unwrap();
-    assert_eq!(ba.await.unwrap(), "reverse answer");
+    assert_eq!(
+        ba.await.unwrap(),
+        AgentAskReply::Replied("reverse answer".into())
+    );
     assert!(a.pending().is_empty());
     assert!(b.pending().is_empty());
 }
@@ -413,7 +485,7 @@ fn concurrent_reply_and_cancellation_do_not_leak_requests() {
             result
         });
         assert!(
-            matches!(result, Ok(ref answer) if answer == "answer")
+            matches!(result, Ok(AgentAskReply::Replied(ref answer)) if answer == "answer")
                 || result == Err(OperationError::Cancelled)
         );
         assert!(b.pending().is_empty());

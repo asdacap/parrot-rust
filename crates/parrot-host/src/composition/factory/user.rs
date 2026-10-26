@@ -269,6 +269,7 @@ pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
     pub skills: UserSkillsFactory<S>,
     pub permissions: UserPermissionFactory,
     pub user_input_timeout: Option<Duration>,
+    pub agent_ask_timeout: Duration,
 }
 
 pub struct UserSessionFactory<S: RestrictableAccessSnapshot + 'static> {
@@ -578,7 +579,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         let questions = Arc::new(
             QuestionBroker::with_clock(
                 config.user_input_timeout,
-                question_clock,
+                question_clock.clone(),
                 config.interaction_diagnostics.clone(),
             )
             .map_err(invalid)?,
@@ -606,7 +607,10 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             broker,
             templates: config.templates.clone(),
             questions,
-            asks: Arc::new(AgentAskBroker::new()),
+            asks: Arc::new(AgentAskBroker::new(
+                config.agent_ask_timeout,
+                question_clock.clone(),
+            )),
             permissions,
             skills: (config.skills)(resources.workspace())?,
             lifetime: lifetime.clone(),

@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, OperationError};
 use parrot_domain::contracts::interactions::{
-    AgentCommunication, QuestionDefinition, QuestionOption, QuestionReplyKind, QuestionRequester,
+    AgentAskReply, AgentCommunication, QuestionDefinition, QuestionOption, QuestionReplyKind,
+    QuestionRequester,
 };
 use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
@@ -176,16 +177,24 @@ where
                 Ok(input) => input,
                 Err(error) => return error_result(self.templates.as_deref(), &error.0),
             };
-            let message = self
+            match self
                 .communication
                 .ask(&input.name, input.message, context.cancellation())
-                .await?;
-            render(
-                self.templates.as_deref(),
-                "tool-result.ask-reply",
-                &[("message", &message)],
-                || message.clone(),
-            )
+                .await?
+            {
+                AgentAskReply::Replied(message) => render(
+                    self.templates.as_deref(),
+                    "tool-result.ask-reply",
+                    &[("message", &message)],
+                    || message.clone(),
+                ),
+                AgentAskReply::TimedOut => render(
+                    self.templates.as_deref(),
+                    "tool-result.ask-timeout",
+                    &[("name", &input.name)],
+                    || format!("Ask to {} timed out without a reply.", input.name),
+                ),
+            }
             .map_err(OperationError::Failed)
         })
     }

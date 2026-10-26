@@ -798,7 +798,10 @@ mod fixture {
                 histories: histories.clone(),
                 built: Mutex::new(BTreeMap::new()),
                 providers: Mutex::new(BTreeMap::new()),
-                asks: Arc::new(parrot_runtime::interactions::AgentAskBroker::new()),
+                asks: Arc::new(parrot_runtime::interactions::AgentAskBroker::new(
+                    std::time::Duration::from_secs(300),
+                    Arc::new(parrot_runtime::interactions::TokioClock),
+                )),
                 user_questions: Arc::new(
                     parrot_runtime::interactions::QuestionBroker::new(
                         None,
@@ -1006,7 +1009,7 @@ mod fixture {
 use fixture::{Harness, bounded, done_completion, wait_completion};
 use parrot_domain::contracts::{
     async_ops::OperationError,
-    interactions::{AgentCommunication, QuestionRequester},
+    interactions::{AgentAskReply, AgentCommunication, QuestionRequester},
     runtime::AgentRuntime,
 };
 use parrot_provider::sessions;
@@ -1656,7 +1659,7 @@ async fn host_asks_resolve_all_agent_paths_without_send_permission_gates() {
             gate.open();
         };
         let (reply, ()) = tokio::join!(asking, replying);
-        assert_eq!(reply.unwrap(), "exact reply");
+        assert_eq!(reply.unwrap(), AgentAskReply::Replied("exact reply".into()));
         assert!(recipient.asks.pending().is_empty());
         bounded(async {
             while recipient.session.is_active() {
@@ -1797,6 +1800,7 @@ async fn host_real_ask_tool_wait_keeps_queued_steers_and_replies_without_deadloc
         bounded(parrot_runtime::interactions::AgentAskDelivery::steer(
             h.built.bridge.as_ref(),
             &incoming,
+            incoming.id.clone(),
             steer,
         ))
         .await
@@ -1821,7 +1825,10 @@ async fn host_real_ask_tool_wait_keeps_queued_steers_and_replies_without_deadloc
             .unwrap();
     };
     let (queued_result, ()) = tokio::join!(queued, settle_queued);
-    assert_eq!(queued_result.unwrap(), "queued reply");
+    assert_eq!(
+        queued_result.unwrap(),
+        AgentAskReply::Replied("queued reply".into())
+    );
     assert_eq!(first.asks.pending()[0].id, first_request.id);
     let reply_gate = h.built.provider.step(sessions::Completion {
         finish_reason: "tool_calls".into(),

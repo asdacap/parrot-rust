@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
+use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError};
+use parrot_domain::contracts::interactions::AgentAskReply;
 use parrot_domain::values::identifiers::Identifier;
 use tokio::sync::oneshot;
 
@@ -27,10 +29,11 @@ pub struct PendingAgentAsk {
 
 /// Delivers admitted asks to the agent scope that owns this adapter.
 pub trait AgentAskDelivery: Send + Sync {
-    /// Send the configured steer for this exact request to its recipient.
+    /// Send configured steer text about this exact request to its recipient under `message_id`.
     fn steer<'a>(
         &'a self,
         request: &'a PendingAgentAsk,
+        message_id: String,
         text: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>>;
 }
@@ -41,11 +44,14 @@ pub trait AgentAskTemplates: Send + Sync {
     fn ask(&self, request: &PendingAgentAsk) -> Result<String, InteractionError>;
     /// Render the requests that the recipient must answer before completing.
     fn reminder(&self, requests: &[PendingAgentAsk]) -> Result<String, InteractionError>;
+    /// Render the notice telling the recipient an ask timed out and must not be replied to.
+    fn timeout(&self, request: &PendingAgentAsk) -> Result<String, InteractionError>;
 }
 
-#[derive(Default)]
 pub struct AgentAskBroker {
     state: Mutex<State>,
+    timeout: Duration,
+    clock: Arc<dyn Clock>,
 }
 
 #[derive(Default)]
@@ -69,8 +75,12 @@ pub struct AgentAsks {
 }
 
 impl AgentAskBroker {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(timeout: Duration, clock: Arc<dyn Clock>) -> Self {
+        Self {
+            state: Mutex::default(),
+            timeout,
+            clock,
+        }
     }
 
     pub fn register(
@@ -134,7 +144,7 @@ impl AgentAsks {
         recipient: &Self,
         message: String,
         cancellation: &dyn Cancellation,
-    ) -> Result<String, OperationError<InteractionError>> {
+    ) -> Result<AgentAskReply, OperationError<InteractionError>> {
         cancellation
             .check()
             .map_err(|_| OperationError::Cancelled)?;
@@ -156,18 +166,51 @@ impl AgentAsks {
             .templates
             .ask(&request)
             .map_err(OperationError::Failed)?;
+        let deadline = self.broker.clock.now() + self.broker.timeout;
+        let mut expiry = self.broker.clock.sleep_until(deadline, cancellation);
         tokio::select! {
             biased;
             result = &mut reply => return Self::receive_reply(result),
             _ = cancellation.cancelled() => return Err(OperationError::Cancelled),
-            result = recipient.delivery.steer(&request, text) => {
+            Ok(()) = &mut expiry => return self.expire(recipient, &request, reply, cancellation).await,
+            result = recipient.delivery.steer(&request, request.id.clone(), text) => {
                 result.map_err(OperationError::Failed)?;
             }
         }
         tokio::select! {
             biased;
-            result = reply => Self::receive_reply(result),
+            result = &mut reply => Self::receive_reply(result),
             _ = cancellation.cancelled() => Err(OperationError::Cancelled),
+            Ok(()) = expiry => self.expire(recipient, &request, reply, cancellation).await,
+        }
+    }
+
+    async fn expire(
+        &self,
+        recipient: &Self,
+        request: &PendingAgentAsk,
+        reply: ReplyReceiver,
+        cancellation: &dyn Cancellation,
+    ) -> Result<AgentAskReply, OperationError<InteractionError>> {
+        if lock(&self.broker.state).remove(&request.id).is_none() {
+            return Self::receive_reply(reply.await);
+        }
+        let text = self
+            .templates
+            .timeout(request)
+            .map_err(OperationError::Failed)?;
+        let id = Identifier::message_id().map_err(|error| {
+            OperationError::Failed(InteractionError::new(
+                InteractionErrorKind::Identifier,
+                error.to_string(),
+            ))
+        })?;
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(OperationError::Cancelled),
+            result = recipient.delivery.steer(request, id, text) => result
+                .map(|()| AgentAskReply::TimedOut)
+                .map_err(OperationError::Failed),
         }
     }
 
@@ -230,9 +273,10 @@ impl AgentAsks {
 
     fn receive_reply(
         result: Result<Result<String, InteractionError>, oneshot::error::RecvError>,
-    ) -> Result<String, OperationError<InteractionError>> {
+    ) -> Result<AgentAskReply, OperationError<InteractionError>> {
         result
             .unwrap_or_else(|_| Err(InteractionError::rejected("ask is no longer pending")))
+            .map(AgentAskReply::Replied)
             .map_err(OperationError::Failed)
     }
 

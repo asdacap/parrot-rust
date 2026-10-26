@@ -6,6 +6,7 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
         events::EventPublisher,
+        interactions::AgentAskReply,
         status::{
             ActiveWorkObservation, ActiveWorkState, ProcessStatusSnapshot, ProcessStatusSource,
         },
@@ -202,6 +203,7 @@ impl AgentAskDelivery for AskDelivery {
         &'a self,
         _: &'a PendingAgentAsk,
         _: String,
+        _: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>> {
         Box::pin(async {
             self.0.fetch_add(1, Ordering::SeqCst);
@@ -227,6 +229,9 @@ impl AgentAskTemplates for AskTemplates {
             "Pending asks:\n- {}\nReply before finishing.",
             names.join("\n- ")
         ))
+    }
+    fn timeout(&self, request: &PendingAgentAsk) -> Result<String, InteractionError> {
+        Ok(format!("{} timed out", request.id))
     }
 }
 #[derive(Default)]
@@ -522,7 +527,10 @@ impl Harness {
         let factory = Arc::new(Factory {
             histories: histories.clone(),
             resources,
-            ask_broker: Arc::new(AgentAskBroker::new()),
+            ask_broker: Arc::new(AgentAskBroker::new(
+                Duration::from_secs(300),
+                Arc::new(TokioClock),
+            )),
             built: Mutex::new(BTreeMap::new()),
             providers: Mutex::new(BTreeMap::new()),
         });
@@ -1280,7 +1288,10 @@ async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidat
         root.asks.reply(&request.id, reply.into()).unwrap();
     }
     for ask in asks {
-        assert_eq!(bounded(ask).await.unwrap().unwrap(), reply);
+        assert_eq!(
+            bounded(ask).await.unwrap().unwrap(),
+            AgentAskReply::Replied(reply.into())
+        );
     }
     assert!(root.asks.pending().is_empty());
     root.queues

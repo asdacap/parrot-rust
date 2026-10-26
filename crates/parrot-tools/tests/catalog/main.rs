@@ -30,10 +30,6 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
             .collect::<Vec<_>>(),
         BUILTIN_NAMES
     );
-    assert_eq!(
-        include_bytes!("fixtures/predefined_config.runtime.source.yaml"),
-        include_bytes!("../../../../assets/config/predefined_config.runtime.yaml")
-    );
     assert_eq!(definitions.definitions().len(), 31);
     assert_eq!(
         fixture

@@ -6,14 +6,14 @@ use parrot_domain::contracts::async_ops::{
     BoxFuture, Cancellation, Cancelled, Clock, OperationError,
 };
 use parrot_domain::contracts::interactions::{
-    AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
+    AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
 };
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_runtime::interactions::{
     AgentAskBroker, AgentAskDelivery, AgentAskIdentity, AgentAskTemplates, AgentAsks,
     BrokerDiagnostic, InteractionDiagnostics, InteractionError, InteractionErrorKind,
-    PendingAgentAsk, QuestionBroker,
+    PendingAgentAsk, QuestionBroker, TokioClock,
 };
 use parrot_tools::agents::questions::{AskTool, QuestionTool, ReplyTool};
 use parrot_tools::agents::{AgentToolError, ResultTemplates};
@@ -253,6 +253,7 @@ impl AgentAskDelivery for Delivery {
         &'a self,
         request: &'a PendingAgentAsk,
         _: String,
+        _: String,
     ) -> BoxFuture<'a, Result<(), InteractionError>> {
         Box::pin(async move {
             self.0.lock().unwrap().push(request.clone());
@@ -268,6 +269,9 @@ impl AgentAskTemplates for Templates {
     fn reminder(&self, requests: &[PendingAgentAsk]) -> Result<String, InteractionError> {
         Ok(format!("{} pending asks", requests.len()))
     }
+    fn timeout(&self, request: &PendingAgentAsk) -> Result<String, InteractionError> {
+        Ok(format!("{} timed out", request.id))
+    }
 }
 struct Communication {
     scope: Arc<AgentAsks>,
@@ -280,7 +284,7 @@ impl AgentCommunication for Communication {
         name: &'a str,
         message: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
+    ) -> BoxFuture<'a, Result<AgentAskReply, OperationError<AgentToolError>>> {
         Box::pin(async move {
             let recipient = self.routes.get(name).ok_or_else(|| {
                 OperationError::Failed(AgentToolError::Registry("unknown agent".into()))
@@ -297,6 +301,12 @@ impl AgentCommunication for Communication {
     fn reply(&self, request_id: &str, message: String) -> Result<(), AgentToolError> {
         self.scope.reply(request_id, message).map_err(error)
     }
+}
+fn ask_broker() -> Arc<AgentAskBroker> {
+    Arc::new(AgentAskBroker::new(
+        Duration::from_secs(300),
+        Arc::new(TokioClock),
+    ))
 }
 fn register(broker: &Arc<AgentAskBroker>, name: &str) -> Arc<AgentAsks> {
     Arc::new(
@@ -330,7 +340,7 @@ async fn wait_pending_ask(scope: &AgentAsks) -> PendingAgentAsk {
 
 #[tokio::test]
 async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
-    let broker = Arc::new(AgentAskBroker::new());
+    let broker = ask_broker();
     let asker = register(&broker, "child");
     let recipient = register(&broker, "root");
     let other = register(&broker, "sibling");
@@ -397,7 +407,7 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
 
 #[tokio::test]
 async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies() {
-    let broker = Arc::new(AgentAskBroker::new());
+    let broker = ask_broker();
     let first = register(&broker, "first");
     let second = register(&broker, "second");
     let ask: AskTool<_, Security> = AskTool::new(
@@ -457,7 +467,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
 
 #[tokio::test]
 async fn invalid_ask_and_reply_inputs_do_not_reach_the_service() {
-    let broker = Arc::new(AgentAskBroker::new());
+    let broker = ask_broker();
     let scope = register(&broker, "agent");
     let ask: AskTool<_, Security> = AskTool::new(definition(), communication(scope.clone()), None);
     let reply: ReplyTool<_, Security> =
@@ -545,9 +555,9 @@ async fn question_uses_selected_result_templates() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn ask_and_reply_use_selected_result_templates() {
-    let broker = Arc::new(AgentAskBroker::new());
+    let broker = ask_broker();
     let first = register(&broker, "first");
     let second = register(&broker, "second");
     let ask: AskTool<_, Security> = AskTool::new(
@@ -586,5 +596,23 @@ async fn ask_and_reply_use_selected_result_templates() {
     assert_eq!(
         asking.await.unwrap().unwrap(),
         "tool-result.ask-reply:message=yes"
+    );
+    let unanswered: AskTool<_, Security> = AskTool::new(
+        definition(),
+        Arc::new(Communication {
+            scope: register(&broker, "third"),
+            routes: BTreeMap::from([("fourth", register(&broker, "fourth"))]),
+        }),
+        Some(Arc::new(Formatting)),
+    );
+    assert_eq!(
+        unanswered
+            .invoke(
+                invocation(r#"{"name":"fourth","message":"hello"}"#),
+                context(&NEVER),
+            )
+            .await
+            .unwrap(),
+        "tool-result.ask-timeout:name=fourth"
     );
 }

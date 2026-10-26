@@ -185,6 +185,7 @@ pub struct RuntimeSettings {
     pub live_buffer_rows: i32,
     /// -1 denotes the source's infinite timeout; all other values are positive milliseconds.
     pub user_input_timeout_ms: i32,
+    pub agent_ask_timeout_ms: i32,
     pub request_limits: RequestLimitsConfig,
     pub web_fetch_allow_private: bool,
     pub image_upload: Option<ImageUploadConfig>,
@@ -227,6 +228,8 @@ impl RuntimeSettings {
         let cli_utilities = read_cli_utilities(root)?;
         let read_only_exec_command_prefixes = read_prefixes(root)?;
         let user_input_timeout_ms = read_input_timeout(root, user_root)?;
+        let agent_ask_timeout_ms =
+            positive_integer(root, "agent_ask_timeout_ms", "agent_ask_timeout_ms")?;
         let live_buffer_rows = positive_integer(root, "live_buffer_rows", "live_buffer_rows")?;
         let compaction = read_compaction(root)?;
         let agent_tasks = read_agent_tasks(root)?;
@@ -260,6 +263,7 @@ impl RuntimeSettings {
             tools,
             live_buffer_rows,
             user_input_timeout_ms,
+            agent_ask_timeout_ms,
             request_limits,
             web_fetch_allow_private,
             image_upload,

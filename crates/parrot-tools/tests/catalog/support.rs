@@ -19,7 +19,9 @@ use parrot_domain::{
             FileReadError, FileReadErrorKind, LinkPolicy, MutationRead, MutationRequest,
             MutationTarget, ReadRequest,
         },
-        interactions::{AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester},
+        interactions::{
+            AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
+        },
         paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
         runtime::{AgentQueues, AgentRuntime, TaskController},
         security::AccessSnapshot,
@@ -487,11 +489,11 @@ impl AgentCommunication for Services {
         name: &'a str,
         message: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<String, AgentToolError>> {
+    ) -> BoxFuture<'a, OperationResult<AgentAskReply, AgentToolError>> {
         Box::pin(async move {
             cancelled(cancellation)?;
             self.record("ask", format!("{name} {message}"), None, None);
-            Ok("catalog reply".into())
+            Ok(AgentAskReply::Replied("catalog reply".into()))
         })
     }
     fn reply(&self, request_id: &str, message: String) -> Result<(), AgentToolError> {

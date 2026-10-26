@@ -293,6 +293,9 @@ impl ProductionHost {
             }),
             permissions: durable_permission_factory(timeout, diagnostics),
             user_input_timeout: timeout,
+            agent_ask_timeout: Duration::from_millis(
+                configuration.runtime.agent_ask_timeout_ms as u64,
+            ),
         });
         let factory = Arc::new(factory.with_event_load_progress(progress));
         let runtime = capture_runtime_identity(&host_key().map_err(internal)?).map_err(internal)?;

@@ -71,6 +71,7 @@ fn root() -> Node {
             ]),
         ),
         ("user_input_timeout_ms", scalar("120000")),
+        ("agent_ask_timeout_ms", scalar("300000")),
         ("live_buffer_rows", scalar("20")),
         (
             "compaction",
@@ -272,6 +273,17 @@ fn integer_settings_reject_signs_whitespace_zero_overflow_and_non_scalars() {
             "user_input_timeout_ms must be a positive integer or -1"
         );
     }
+    for value in ["0", "-1", "+1", " 1", "1 ", "null", "2147483648"] {
+        let mut node = root();
+        node.set("agent_ask_timeout_ms", scalar(value));
+        assert_eq!(
+            error(&node),
+            "agent_ask_timeout_ms must be a positive integer"
+        );
+    }
+    let mut node = root();
+    node.set("agent_ask_timeout_ms", scalar("1250"));
+    assert_eq!(read(&node).unwrap().agent_ask_timeout_ms, 1250);
     let mut node = root();
     node.set("user_input_timeout_ms", scalar("-1"));
     assert_eq!(read(&node).unwrap().user_input_timeout_ms, -1);

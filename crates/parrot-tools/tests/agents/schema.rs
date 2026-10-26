@@ -195,6 +195,19 @@ fn ask_guidance_and_results_are_configurable_with_explicit_request_ids() {
     .unwrap();
     assert!(reminder.contains("req-1 from child"));
     assert!(reminder.contains("Use reply"));
+    let timeout = ResultTemplates::render(
+        &templates,
+        "agent-session.agent-ask-timeout",
+        &[("asker_name", "child"), ("request_id", "req-1")],
+    )
+    .unwrap();
+    assert!(timeout.contains("child"));
+    assert!(timeout.contains("req-1"));
+    assert!(
+        ResultTemplates::render(&templates, "tool-result.ask-timeout", &[("name", "parent")])
+            .unwrap()
+            .contains("parent")
+    );
     assert_eq!(
         ResultTemplates::render(
             &templates,

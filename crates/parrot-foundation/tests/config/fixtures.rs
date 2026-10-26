@@ -57,10 +57,12 @@ pub const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
     "agent-session.final-request",
     "agent-session.final-request-interrupted",
 ];
-pub const AGENT_COMMUNICATION_IDS: [&str; 6] = [
+pub const AGENT_COMMUNICATION_IDS: [&str; 8] = [
     "agent-session.agent-ask",
+    "agent-session.agent-ask-timeout",
     "agent-session.pending-ask-reminder",
     "tool-result.ask-reply",
+    "tool-result.ask-timeout",
     "tool-result.ask-replied",
     "agent-session.final-request",
     "agent-session.final-request-interrupted",

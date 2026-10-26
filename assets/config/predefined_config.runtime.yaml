@@ -187,6 +187,9 @@ live_buffer_rows: 20
 # Milliseconds to wait for interactive user input. Set to -1 to wait indefinitely.
 user_input_timeout_ms: 1200000
 
+# Milliseconds an agent ask waits for a reply before timing out.
+agent_ask_timeout_ms: 300000
+
 # Limits for each compaction request.
 compaction:
   trigger_percent: 95
@@ -209,7 +212,7 @@ tools:
           description: Optional compaction target such as 100k or 20%.
       required: []
   ask:
-    description: Ask another agent in this user session a plain-text question and wait for its reply. Any valid relative or absolute agent path is allowed, including ancestors and siblings, without agent_send security restrictions. The call blocks until the recipient uses reply, or fails on cancellation, closure, or an ask cycle. Reply to incoming asks before creating a cycle.
+    description: Ask another agent in this user session a plain-text question and wait for its reply. Any valid relative or absolute agent path is allowed, including ancestors and siblings, without agent_send security restrictions. The call blocks until the recipient uses reply, or fails on cancellation, closure, or an ask cycle. Reply to incoming asks before creating a cycle. An ask that receives no reply within the configured timeout times out, and both agents are notified.
     parameters:
       type: object
       additionalProperties: false
