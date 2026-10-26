@@ -495,6 +495,13 @@ fn resource_names_are_contained_and_reserved_names_are_only_for_children() {
             resources.agents_directory().join(reserved)
         );
     }
+    let agent = resources.agent_scratch(&["main"]).unwrap();
+    let requests = agent.root().join("requests");
+    fs::create_dir_all(&requests).unwrap();
+    let record = requests.join("request_1.json");
+    fs::write(&record, "existing request").unwrap();
+    assert!(resources.agent_scratch(&["main", "requests"]).is_err());
+    assert_eq!(fs::read(&record).unwrap(), b"existing request");
     assert!(
         resources
             .owns(&resources.metadata_path(), &fixture.0)

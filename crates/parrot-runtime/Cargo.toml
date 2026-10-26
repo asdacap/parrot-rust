@@ -14,6 +14,9 @@ serde_json = "=1.0.138"
 sha2 = "=0.10.8"
 tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "time", "macros"] }
 
+[dev-dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+
 [[test]]
 name = "active_work"
 path = "tests/active_work/main.rs"

@@ -296,12 +296,8 @@ async fn request_limit_precedes_dump_trace_and_transport() {
 
 #[tokio::test]
 async fn exact_dump_and_trace_accounting_do_not_include_auth_or_body() {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let path = std::env::temp_dir().join(format!(
-        "t30-http-dump-{}-{}.json",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::SeqCst)
-    ));
+    let archive = HttpArchive::new();
+    let path = archive.directory.join("last_requests.json");
     let sink = Arc::new(Sink::default());
     let dump = Arc::new(LastRequestDumper::new(&path, sink.clone()));
     let bytes = br#"{"exact":9007199254740993,"secret":"body-canary"}"#.to_vec();
@@ -316,7 +312,16 @@ async fn exact_dump_and_trace_accounting_do_not_include_auth_or_body() {
     assert!(!path.exists());
     while stream.next(&Cancel::never()).await.unwrap().is_some() {}
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
-    std::fs::remove_file(path).unwrap();
+    let record = archive.read(1);
+    assert_eq!(
+        record.request,
+        Some(ArchivedHttpBody::Utf8(
+            String::from_utf8(bytes.clone()).unwrap()
+        ))
+    );
+    assert_eq!(record.response, vec![ArchivedHttpBody::Utf8(DONE.into())]);
+    assert_eq!(record.outcome, "completed");
+    assert_eq!(record.error_code, None);
     stream.close().await.unwrap();
     let events = sink.0.lock().unwrap();
     let finished: Vec<_> = events
@@ -712,7 +717,8 @@ async fn cancellation_snapshots_bytes_consumed_during_pending_partial_sse() {
     for protocol in [Protocol::ChatCompletions, Protocol::Responses] {
         let wire = Arc::new(Wire::default());
         let sink = Arc::new(Sink::default());
-        let trace = trace(sink.clone(), None);
+        let archive = HttpArchive::new();
+        let trace = archive.trace(sink.clone());
         let mut stream = driver(
             Arc::new(PartialTransport(wire.clone())),
             protocol,
@@ -738,6 +744,13 @@ async fn cancellation_snapshots_bytes_consumed_during_pending_partial_sse() {
         assert_eq!(wire.reads.load(Ordering::SeqCst), 2);
         assert_eq!(wire.drops.load(Ordering::SeqCst), 0);
         assert!(trace.cancel());
+        let record = archive.read(1);
+        assert_eq!(
+            record.response,
+            vec![ArchivedHttpBody::Utf8("data: ".into())]
+        );
+        assert_eq!(record.outcome, "cancelled");
+        assert_eq!(record.error_code.as_deref(), Some("cancelled"));
         {
             let events = sink.0.lock().unwrap();
             let terminal = events
@@ -1123,4 +1136,276 @@ async fn truncated_and_provider_error_streams_keep_adapter_validation() {
     };
     assert_eq!(error_code, "bad");
     assert!(response_body.contains("failed"));
+}
+
+struct HttpArchive {
+    directory: std::path::PathBuf,
+}
+impl HttpArchive {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        Self {
+            directory: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join(".tmp")
+                .join(format!(
+                    "http-response-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                )),
+        }
+    }
+    fn dumper(&self, sink: Arc<Sink>) -> Arc<LastRequestDumper> {
+        Arc::new(LastRequestDumper::new(
+            self.directory.join("last_requests.json"),
+            sink,
+        ))
+    }
+    fn trace(&self, sink: Arc<Sink>) -> Arc<CallTrace> {
+        trace(sink.clone(), Some(self.dumper(sink)))
+    }
+    fn read(&self, number: u64) -> ArchivedHttpRequest {
+        serde_json::from_slice(
+            &std::fs::read(self.directory.join(format!("request_{number}.json"))).unwrap(),
+        )
+        .unwrap()
+    }
+}
+impl Drop for HttpArchive {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum ArchivedHttpBody {
+    Utf8(String),
+    Bytes(Vec<u8>),
+}
+#[derive(serde::Deserialize)]
+struct ArchivedHttpRequest {
+    request: Option<ArchivedHttpBody>,
+    response: Vec<ArchivedHttpBody>,
+    outcome: String,
+    error_code: Option<String>,
+}
+
+#[tokio::test]
+async fn archived_sse_preserves_split_utf8_without_reading_past_completion() {
+    let archive = HttpArchive::new();
+    let sink = Arc::new(Sink::default());
+    let response =
+        format!("data: {{\"type\":\"response.output_text.delta\",\"delta\":\"雪\"}}\n\n{DONE}");
+    let wire = Arc::new(Wire::default());
+    let mut chunks: VecDeque<_> = response.as_bytes().iter().map(|byte| vec![*byte]).collect();
+    chunks.push_back(b"must not read".to_vec());
+    let transport = Arc::new(Transport {
+        wire: wire.clone(),
+        status: 200,
+        chunks: Mutex::new(Some(chunks)),
+    });
+    let mut stream = driver(
+        transport,
+        Protocol::Responses,
+        b"{}".to_vec(),
+        2,
+        Some(archive.trace(sink.clone())),
+    );
+    assert_eq!(wire.reads.load(Ordering::SeqCst), 0);
+    let mut text = String::new();
+    while let Some(event) = stream.next(&Cancel::never()).await.unwrap() {
+        if let Event::TextDelta(delta) = event {
+            text.push_str(&delta);
+        }
+    }
+    assert_eq!(text, "雪");
+    assert_eq!(wire.reads.load(Ordering::SeqCst), response.len());
+    let record = archive.read(1);
+    assert_eq!(record.response, vec![ArchivedHttpBody::Utf8(response)]);
+    assert_eq!(record.outcome, "completed");
+    assert_eq!(wire.drops.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn archived_http_error_preserves_only_bytes_consumed_by_the_bounded_reader() {
+    let archive = HttpArchive::new();
+    let sink = Arc::new(Sink::default());
+    let bytes = vec![b'x'; MAX_ERROR_BYTES + 40];
+    let wire = Arc::new(Wire::default());
+    let transport = Arc::new(Transport {
+        wire: wire.clone(),
+        status: 503,
+        chunks: Mutex::new(Some(VecDeque::from([bytes]))),
+    });
+    let mut stream = driver(
+        transport,
+        Protocol::Responses,
+        b"{}".to_vec(),
+        2,
+        Some(archive.trace(sink.clone())),
+    );
+    stream.next(&Cancel::never()).await.unwrap();
+    let Error::Http(HttpError::Response(failure)) =
+        stream.next(&Cancel::never()).await.unwrap_err()
+    else {
+        panic!("HTTP response failure");
+    };
+    assert_eq!(failure.status, 503);
+    assert_eq!(failure.response_body.len(), MAX_ERROR_BYTES);
+    let record = archive.read(1);
+    assert_eq!(
+        record.response,
+        vec![ArchivedHttpBody::Utf8("x".repeat(MAX_ERROR_BYTES + 4))]
+    );
+    assert_eq!(record.outcome, "failed");
+    assert!(record.error_code.is_some());
+    assert_eq!(wire.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(wire.drops.load(Ordering::SeqCst), 1);
+}
+
+struct InterruptedBody {
+    first: bool,
+}
+impl ByteStream for InterruptedBody {
+    fn read<'a>(
+        &'a mut self,
+        buffer: &'a mut [u8],
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<usize, HttpError>> {
+        Box::pin(async move {
+            if self.first {
+                self.first = false;
+                buffer[..6].copy_from_slice(b"data: ");
+                Ok(6)
+            } else {
+                Err(HttpError::Transport("SECRET-read-failure".into()))
+            }
+        })
+    }
+}
+struct InterruptedTransport(u16);
+impl HttpTransport for InterruptedTransport {
+    fn send<'a>(
+        &'a self,
+        _: HttpRequest,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+        Box::pin(async move {
+            Ok(HttpResponse {
+                status: self.0,
+                reason: "synthetic".into(),
+                headers: Vec::new(),
+                body: Box::new(InterruptedBody { first: true }),
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn archived_success_and_error_bodies_keep_bytes_preceding_a_read_failure() {
+    for status in [200, 503] {
+        let archive = HttpArchive::new();
+        let sink = Arc::new(Sink::default());
+        let mut stream = driver(
+            Arc::new(InterruptedTransport(status)),
+            Protocol::Responses,
+            b"{}".to_vec(),
+            2,
+            Some(archive.trace(sink.clone())),
+        );
+        stream.next(&Cancel::never()).await.unwrap();
+        if status == 200 {
+            stream.next(&Cancel::never()).await.unwrap();
+        }
+        let failure = stream.next(&Cancel::never()).await.unwrap_err();
+        if status == 503 {
+            let Error::Http(HttpError::Response(failure)) = failure else {
+                panic!("HTTP error bridge");
+            };
+            assert!(failure.response_body.is_empty());
+        } else {
+            assert_eq!(
+                failure,
+                Error::Http(HttpError::Transport("SECRET-read-failure".into()))
+            );
+        }
+        let record = archive.read(1);
+        assert_eq!(
+            record.response,
+            vec![ArchivedHttpBody::Utf8("data: ".into())]
+        );
+        assert_eq!(record.outcome, "failed");
+        assert!(!format!("{:?}", sink.0.lock().unwrap()).contains("SECRET-read-failure"));
+    }
+}
+
+#[tokio::test]
+async fn archived_response_is_settled_when_cancelled_between_pulls_without_draining() {
+    let archive = HttpArchive::new();
+    let sink = Arc::new(Sink::default());
+    let trace = archive.trace(sink);
+    let (transport, wire) = transport(200, &[TEXT, DONE]);
+    let mut stream = driver(
+        transport,
+        Protocol::Responses,
+        b"{}".to_vec(),
+        2,
+        Some(trace.clone()),
+    );
+    for _ in 0..3 {
+        stream.next(&Cancel::never()).await.unwrap();
+    }
+    assert_eq!(wire.reads.load(Ordering::SeqCst), 1);
+    trace.cancel();
+    let record = archive.read(1);
+    assert_eq!(record.response, vec![ArchivedHttpBody::Utf8(TEXT.into())]);
+    assert_eq!(record.outcome, "cancelled");
+    assert_eq!(wire.reads.load(Ordering::SeqCst), 1);
+    stream.close().await.unwrap();
+    assert_eq!(archive.read(1).outcome, "cancelled");
+}
+
+#[tokio::test]
+async fn archived_retries_keep_distinct_requests_responses_and_outcomes() {
+    let archive = HttpArchive::new();
+    let sink = Arc::new(Sink::default());
+    let (provider, wire) = retrying_chat(VecDeque::from([MALFORMED_CHAT, VALID_CHAT]));
+    let session = DiagnosticSession::new(
+        provider.open_session().unwrap(),
+        sink.clone(),
+        Arc::new(MonotonicDiagnosticClock::default()),
+        "agent".into(),
+        "p".into(),
+        Some(archive.dumper(sink)),
+    );
+    let mut stream = session
+        .call(Request {
+            model: "m".into(),
+            messages: vec![Message::user("hello")],
+            ..Request::default()
+        })
+        .unwrap();
+    let mut retries = 0;
+    while let Some(event) = stream.next(&Cancel::never()).await.unwrap() {
+        if matches!(event, Event::Retry { .. }) {
+            retries += 1;
+        }
+    }
+    assert_eq!(retries, 1);
+    assert_eq!(wire.requests.lock().unwrap().len(), 2);
+    let first = archive.read(1);
+    let second = archive.read(2);
+    assert_eq!(first.outcome, "failed");
+    assert_eq!(second.outcome, "completed");
+    assert_eq!(
+        first.response,
+        vec![ArchivedHttpBody::Utf8(MALFORMED_CHAT.into())]
+    );
+    assert_eq!(
+        second.response,
+        vec![ArchivedHttpBody::Utf8(VALID_CHAT.into())]
+    );
+    assert!(first.request.is_some());
+    assert_eq!(first.request, second.request);
+    stream.close().await.unwrap();
+    session.close().await.unwrap();
 }

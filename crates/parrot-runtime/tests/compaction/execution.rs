@@ -9,6 +9,8 @@ use parrot_domain::{
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{
     catalogs::Model,
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
+    responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     routing::{
         aliases::{ModelAliasCatalog, ModelRouter, ModelRouting, ResolvedModelSelection},
         registry::ProviderRegistry,
@@ -16,6 +18,10 @@ use parrot_provider::{
     sessions::{
         Completion, Content, Error, Event, EventStream, Message, Provider, ProviderSessions,
         Request, Role, Session, ToolCall,
+        diagnostics::{
+            DiagnosticEvent, DiagnosticSink, LastRequestDumper, MonotonicDiagnosticClock,
+        },
+        provider::{ApiKeySource, CompatibleOptions, OpenAICompatibleProvider},
     },
 };
 use parrot_runtime::compaction::{
@@ -332,6 +338,227 @@ fn tool_group(text: &str) -> Vec<Message> {
 }
 fn texts(request: &Request) -> Vec<&str> {
     request.messages.iter().map(Message::content).collect()
+}
+
+struct ArchiveKey;
+impl ApiKeySource for ArchiveKey {
+    fn api_key<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<String, Error>> {
+        Box::pin(async { Ok("private-archive-key".into()) })
+    }
+    fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
+        Box::pin(async { Ok(true) })
+    }
+}
+struct NoSocket;
+impl Connector for NoSocket {
+    fn connect<'a>(
+        &'a self,
+        _: &'a str,
+        _: &'a Headers,
+        _: Option<Duration>,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<ConnectedSocket, WebSocketError>> {
+        Box::pin(async { panic!("summary request must use HTTP") })
+    }
+}
+const SUMMARY_RESPONSE: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"private archive summary\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+struct SummaryBody(&'static [u8]);
+impl ByteStream for SummaryBody {
+    fn read<'a>(
+        &'a mut self,
+        buffer: &'a mut [u8],
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<usize, HttpError>> {
+        Box::pin(async move {
+            let count = buffer.len().min(self.0.len());
+            buffer[..count].copy_from_slice(&self.0[..count]);
+            self.0 = &self.0[count..];
+            Ok(count)
+        })
+    }
+}
+#[derive(Default)]
+struct SummaryTransport(Mutex<Vec<HttpRequest>>);
+impl HttpTransport for SummaryTransport {
+    fn send<'a>(
+        &'a self,
+        request: HttpRequest,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push(request);
+            Ok(HttpResponse {
+                status: 200,
+                reason: "OK".into(),
+                headers: Vec::new(),
+                body: Box::new(SummaryBody(SUMMARY_RESPONSE.as_bytes())),
+            })
+        })
+    }
+}
+#[derive(Default)]
+struct ArchiveDiagnostics(Mutex<Vec<DiagnosticEvent>>);
+impl DiagnosticSink for ArchiveDiagnostics {
+    fn write(&self, event: DiagnosticEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum ArchivedBody {
+    Utf8(String),
+    Bytes(Vec<u8>),
+}
+#[derive(serde::Deserialize)]
+struct ArchivedRequest {
+    number: u64,
+    transport: String,
+    request: Option<ArchivedBody>,
+    response: Vec<ArchivedBody>,
+    outcome: String,
+    error_code: Option<String>,
+}
+#[derive(serde::Deserialize)]
+struct SummaryRequest {
+    model: String,
+    messages: Vec<SummaryMessage>,
+    max_tokens: i32,
+}
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct SummaryMessage {
+    role: String,
+    content: String,
+}
+
+#[tokio::test]
+async fn summary_compaction_archives_real_provider_request_and_raw_response() {
+    let mut fixture = Fixture::new(1000, vec![]);
+    let transport = Arc::new(SummaryTransport::default());
+    let provider: Arc<dyn Provider> = Arc::new(
+        OpenAICompatibleProvider::new(
+            CompatibleOptions::new("provider", "https://archive.test/v1", Arc::new(ArchiveKey)),
+            transport.clone(),
+            Arc::new(NoSocket),
+        )
+        .unwrap(),
+    );
+    let mut model = Model::new("model", "provider");
+    model.context_window = 1000;
+    model.max_output_tokens = 1;
+    let registry = Arc::new(
+        ProviderRegistry::new(
+            vec![provider],
+            BTreeMap::from([("provider".into(), vec![model])]),
+        )
+        .unwrap(),
+    );
+    let aliases = Arc::new(ModelAliasCatalog::new(registry.clone(), []).unwrap());
+    let routing = Arc::new(ModelRouting::new(aliases, "provider/model"));
+    fixture.selection = ModelRouter::new(registry, routing)
+        .resolve("provider/model")
+        .unwrap();
+    let diagnostics = Arc::new(ArchiveDiagnostics::default());
+    let latest_path = fixture.path.join("agent/requests/last_requests.json");
+    fixture.sessions = ProviderSessions::with_diagnostics(
+        diagnostics.clone(),
+        Arc::new(MonotonicDiagnosticClock::default()),
+        "agent".into(),
+        Some(Arc::new(LastRequestDumper::new(
+            &latest_path,
+            diagnostics.clone(),
+        ))),
+    );
+    let history = vec![
+        Message::user("private old input"),
+        Message::assistant("private old answer", vec![]),
+        Message::user("retain this"),
+    ];
+    let result = fixture
+        .compact(&compactor(200), &history)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        result.history,
+        vec![
+            Message::system("S:private archive summary"),
+            Message::system("status"),
+            history[2].clone(),
+        ]
+    );
+    assert_eq!(result.summary, result.history[0]);
+    assert_eq!((result.retained_messages, result.watermark), (1, 2));
+    fixture.sessions.close().await.unwrap();
+
+    let latest = fs::read(&latest_path).unwrap();
+    {
+        let requests = transport.0.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(latest, requests[0].body);
+        assert!(requests[0].headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("Authorization") && value == "Bearer private-archive-key"
+        }));
+    }
+    let archived: ArchivedRequest = serde_json::from_slice(
+        &fs::read(fixture.path.join("agent/requests/request_1.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(archived.number, 1);
+    assert_eq!(archived.transport, "http_sse");
+    assert_eq!(
+        archived.request,
+        Some(ArchivedBody::Utf8(
+            String::from_utf8(latest.clone()).unwrap()
+        ))
+    );
+    assert_eq!(
+        archived.response,
+        vec![ArchivedBody::Utf8(SUMMARY_RESPONSE.into())]
+    );
+    assert_eq!(archived.outcome, "completed");
+    assert_eq!(archived.error_code, None);
+    let request: SummaryRequest = serde_json::from_slice(&latest).unwrap();
+    assert_eq!(request.model, "model");
+    assert_eq!(request.max_tokens, 45);
+    assert_eq!(
+        request.messages,
+        vec![
+            SummaryMessage {
+                role: "system".into(),
+                content: "Sum.".into()
+            },
+            SummaryMessage {
+                role: "user".into(),
+                content: "private old input".into()
+            },
+            SummaryMessage {
+                role: "assistant".into(),
+                content: "private old answer".into()
+            },
+        ]
+    );
+    let events = diagnostics.0.lock().unwrap();
+    for operation in ["call_finished", "request_finished"] {
+        let terminal = events
+            .iter()
+            .filter(|event| event.operation == operation)
+            .collect::<Vec<_>>();
+        assert_eq!(terminal.len(), 1);
+        assert_eq!(terminal[0].outcome.as_deref(), Some("completed"));
+    }
+    let metadata = format!("{events:?}").to_ascii_lowercase();
+    for sensitive in [
+        "private old input",
+        "private old answer",
+        "private archive summary",
+        "Sum.",
+        SUMMARY_RESPONSE,
+        "Authorization",
+        "Bearer",
+        "private-archive-key",
+    ] {
+        assert!(!metadata.contains(&sensitive.to_ascii_lowercase()));
+    }
 }
 
 #[tokio::test]

@@ -13,7 +13,11 @@ impl Cancellation for Cancel {
     }
 }
 #[derive(Default)]
-struct Trace(Mutex<Vec<String>>, Mutex<Vec<Vec<u8>>>);
+struct Trace(
+    Mutex<Vec<String>>,
+    Mutex<Vec<Vec<u8>>>,
+    Mutex<Vec<(Vec<u8>, bool)>>,
+);
 impl Trace {
     fn push(&self, value: impl Into<String>) {
         self.0.lock().unwrap().push(value.into());
@@ -39,6 +43,13 @@ impl WebSocketAttemptObserver for Observer {
     }
     fn record_response_bytes(&mut self, bytes: u64) {
         self.0.push(format!("response:{bytes}"));
+    }
+    fn capture_response(&mut self, body: &[u8], end_of_message: bool) {
+        self.0
+            .2
+            .lock()
+            .unwrap()
+            .push((body.to_vec(), end_of_message));
     }
     fn record_close_status(&mut self, status: u16) {
         self.0.push(format!("close:{status}"));
@@ -110,9 +121,17 @@ impl Socket for TestSocket {
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ReceivedFrame, WebSocketError>> {
         self.0.push("receive");
+        if self.2 == 5 && self.1 {
+            return Box::pin(async { Err(WebSocketError::Wire("read failed".into())) });
+        }
         let (body, kind, end, close_status) = match (self.2, self.1) {
             (1, false) => ("{", FrameKind::Text, false, None),
             (1, true) => ("", FrameKind::Close, true, Some(1009)),
+            (3, false) => (&TERMINAL[..17], FrameKind::Text, false, None),
+            (3, true) => (&TERMINAL[17..], FrameKind::Text, true, None),
+            (4, _) => ("{", FrameKind::Text, true, None),
+            (5, false) => ("{", FrameKind::Text, false, None),
+            (6, _) => ("binary", FrameKind::Binary, true, None),
             (2, _) => (
                 r#"{"type":"error","code":"previous_response_not_found","message":"missing"}"#,
                 FrameKind::Text,
@@ -480,6 +499,7 @@ async fn partial_close_counts_received_bytes_and_raw_close_before_failure() {
     ));
     drop(call);
     assert_source_observer("partial-message-close-byte-and-status", 0, &trace.values());
+    assert_eq!(*trace.2.lock().unwrap(), [(b"{".to_vec(), false)]);
     let values = trace.values();
     assert_eq!(
         values
@@ -649,4 +669,60 @@ async fn eager_precancel_preserves_existing_connection_path() {
     );
     drop(call);
     assert_eq!(trace.values(), ["auth", "connect"]);
+}
+
+#[tokio::test]
+async fn response_capture_preserves_fragmented_messages_once_before_parsing() {
+    let trace = Arc::new(Trace::default());
+    let http = Http(trace.clone());
+    let mut session = session_config(&trace, false, Ok(()), usize::MAX, 3);
+    let mut call = session
+        .call_lazy(|| Ok(request()), &http)
+        .unwrap()
+        .with_websocket_observer(Arc::new(Observer(trace.clone())));
+    while call.next(&Cancel(false)).await.unwrap().is_some() {}
+    drop(call);
+    assert_eq!(
+        *trace.2.lock().unwrap(),
+        [
+            (TERMINAL.as_bytes()[..17].to_vec(), false),
+            (TERMINAL.as_bytes()[17..].to_vec(), true),
+        ]
+    );
+    assert_eq!(
+        trace
+            .values()
+            .iter()
+            .filter(|value| *value == "completed")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn response_capture_precedes_parse_binary_and_partial_read_failures() {
+    for (mode, bytes, end) in [
+        (4, b"{".as_slice(), true),
+        (5, b"{".as_slice(), false),
+        (6, b"binary".as_slice(), true),
+    ] {
+        let trace = Arc::new(Trace::default());
+        let http = Http(trace.clone());
+        let mut session = session_config(&trace, false, Ok(()), usize::MAX, mode);
+        let mut call = session
+            .call_lazy(|| Ok(request()), &http)
+            .unwrap()
+            .with_websocket_observer(Arc::new(Observer(trace.clone())));
+        assert!(call.next(&Cancel(false)).await.is_err());
+        drop(call);
+        assert_eq!(*trace.2.lock().unwrap(), [(bytes.to_vec(), end)]);
+        assert_eq!(
+            trace
+                .values()
+                .iter()
+                .filter(|value| value.starts_with("failed:"))
+                .count(),
+            1
+        );
+    }
 }

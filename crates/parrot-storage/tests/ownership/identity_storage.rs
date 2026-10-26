@@ -205,10 +205,16 @@ fn agent_queue_directories_reject_all_ten_exact_unsafe_source_arguments() {
 }
 
 #[test]
-fn agent_scratch_rejects_all_four_reserved_child_names_but_not_root_names() {
+fn agent_scratch_rejects_reserved_child_names_but_not_root_names() {
     let fixture = Fixture::new();
     let resources = fixture.resources("session-one");
-    for reserved in ["blobs", "plan", "history.jsonl", "last_request.json"] {
+    for reserved in [
+        "blobs",
+        "plan",
+        "history.jsonl",
+        "last_request.json",
+        "requests",
+    ] {
         assert_eq!(
             resources
                 .agent_scratch(&["main", reserved])

@@ -4,10 +4,12 @@ use parrot_provider::{
     http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     responses_websocket as ws,
     sessions::{
-        Error, Event, EventStream, Message, Provider, Request, Session,
+        Error, Event, EventStream, Message, Provider, ProviderSessions, Request, Session,
         decorators::{RetrySleeper, RetryingProvider},
         diagnostic_session::DiagnosticSession,
-        diagnostics::{DiagnosticEvent, DiagnosticSink, MonotonicDiagnosticClock},
+        diagnostics::{
+            DiagnosticEvent, DiagnosticSink, LastRequestDumper, MonotonicDiagnosticClock,
+        },
         http::Protocol,
         provider::{
             ApiKeySource, ChatGptOptions, ChatGptProvider, CompatibleOptions, OAuthAccess,
@@ -1201,4 +1203,94 @@ async fn actual_chatgpt_independent_connections_each_send_one_request() {
     assert_eq!(sent(&second_record).len(), 1);
     first.close().await.unwrap();
     second.close().await.unwrap();
+}
+
+struct ArchiveRoot(std::path::PathBuf);
+impl Drop for ArchiveRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum ArchivedBody {
+    Utf8(String),
+    Bytes(Vec<u8>),
+}
+#[derive(serde::Deserialize)]
+struct ArchivedAttempt {
+    number: u64,
+    transport: String,
+    request: Option<ArchivedBody>,
+    response: Vec<ArchivedBody>,
+    outcome: String,
+    error_code: Option<String>,
+}
+
+#[tokio::test]
+async fn actual_fallback_archives_distinct_transport_attempts_in_isolated_agent_pools() {
+    let root = ArchiveRoot(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".tmp")
+            .join(format!("fallback-archive-{}", std::process::id())),
+    );
+    let connector = Connector::new(vec![upgrade(404), upgrade(404)]);
+    let http = Http::completed(2);
+    let provider = configured(false, connector.clone(), http.clone());
+    for (index, agent) in ["main", "worker"].into_iter().enumerate() {
+        let archive = root.0.join(agent).join("requests");
+        let log = Arc::new(Log::default());
+        let sessions = ProviderSessions::with_diagnostics(
+            log.clone(),
+            Arc::new(MonotonicDiagnosticClock::default()),
+            agent.into(),
+            Some(Arc::new(LastRequestDumper::new(
+                archive.join("last_requests.json"),
+                log.clone(),
+            ))),
+        );
+        let session = sessions.get(provider.clone()).await.unwrap();
+        let prompt = format!("private fallback prompt {agent}");
+        let events = successful(session.as_ref(), request(&prompt)).await;
+        assert_eq!(retries(&events).len(), 1);
+        let read = |number| -> ArchivedAttempt {
+            serde_json::from_slice(
+                &std::fs::read(archive.join(format!("request_{number}.json"))).unwrap(),
+            )
+            .unwrap()
+        };
+        let websocket = read(1);
+        assert_eq!(websocket.number, 1);
+        assert_eq!(websocket.transport, "websocket");
+        assert_eq!(websocket.request, None);
+        assert!(websocket.response.is_empty());
+        assert_eq!(websocket.outcome, "failed");
+        assert!(websocket.error_code.is_some());
+        let response = read(2);
+        assert_eq!(response.number, 2);
+        assert_eq!(response.transport, "http_sse");
+        let body = http.requests.lock().unwrap()[index].body.clone();
+        assert_eq!(
+            std::fs::read(archive.join("last_requests.json")).unwrap(),
+            body
+        );
+        assert_eq!(
+            response.request,
+            Some(ArchivedBody::Utf8(String::from_utf8(body).unwrap()))
+        );
+        assert_eq!(
+            response.response,
+            vec![ArchivedBody::Utf8(HTTP_COMPLETED.into())]
+        );
+        assert_eq!(response.outcome, "completed");
+        assert_eq!(response.error_code, None);
+        assert_eq!(std::fs::read_dir(&archive).unwrap().count(), 3);
+        let diagnostic = format!("{:?}", log.0.lock().unwrap());
+        for secret in [&prompt, "test-key", "Authorization", "private-sentinel"] {
+            assert!(!diagnostic.contains(secret));
+        }
+        sessions.close().await.unwrap();
+    }
+    assert_eq!(connector.count(), 2);
+    assert_eq!(http.count(), 2);
 }

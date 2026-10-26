@@ -27,6 +27,10 @@ mod https;
 
 const CHILD_TIMEOUT: Duration = Duration::from_secs(30);
 
+const PROVIDER_SUCCESS_BODY: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"local production answer\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n";
+const PROVIDER_FAILURE_BODY: &str =
+    r#"{"error":{"message":"synthetic provider failure","type":"invalid_request_error"}}"#;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 type Captured = Arc<Mutex<Vec<u8>>>;
@@ -259,17 +263,9 @@ impl Fixture {
                         let chat = request.starts_with("POST /v1/chat/completions ");
                         captured.lock().unwrap().push(request);
                         let (status, content_type, body) = if chat && fail {
-                            (
-                                "400 Bad Request",
-                                "application/json",
-                                r#"{"error":{"message":"synthetic provider failure","type":"invalid_request_error"}}"#,
-                            )
+                            ("400 Bad Request", "application/json", PROVIDER_FAILURE_BODY)
                         } else if chat {
-                            (
-                                "200 OK",
-                                "text/event-stream",
-                                "data: {\"choices\":[{\"delta\":{\"content\":\"local production answer\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n",
-                            )
+                            ("200 OK", "text/event-stream", PROVIDER_SUCCESS_BODY)
                         } else {
                             (
                                 "200 OK",
@@ -605,6 +601,21 @@ fn executable_creates_then_resumes_real_local_session_and_joins_owners() {
     let first = fixture.chat("first synthetic prompt");
     assert_success(&first);
     assert!(String::from_utf8_lossy(&first.stderr).contains("created user session"));
+    let session = std::fs::read_dir(fixture.root.join("state/parrotrust/sessions"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let agent = std::fs::read_dir(session.join("root-agents"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let legacy = agent.join("last_request.json");
+    std::fs::write(&legacy, "existing legacy log").unwrap();
+    let first_record = std::fs::read(agent.join("requests/request_1.json")).unwrap();
     let second = fixture.chat("second synthetic prompt");
     assert_success(&second);
     let stderr = String::from_utf8_lossy(&second.stderr);
@@ -632,6 +643,22 @@ fn executable_creates_then_resumes_real_local_session_and_joins_owners() {
     assert!(requests[1].contains("first synthetic prompt"));
     assert!(requests[1].contains("second synthetic prompt"));
     assert!(!String::from_utf8_lossy(&second.stderr).contains("LOCAL_CAPABILITY_UNAVAILABLE"));
+    assert_eq!(std::fs::read(&legacy).unwrap(), b"existing legacy log");
+    assert_eq!(
+        std::fs::read(agent.join("requests/request_1.json")).unwrap(),
+        first_record
+    );
+    let resumed: ArchivedProviderRequest =
+        serde_json::from_slice(&std::fs::read(agent.join("requests/request_2.json")).unwrap())
+            .unwrap();
+    assert_eq!(resumed.number, 2);
+    assert_eq!(
+        resumed.request,
+        Some(ArchivedProviderBody::Utf8(
+            requests[1].split_once("\r\n\r\n").unwrap().1.into()
+        ))
+    );
+    assert_eq!(resumed.outcome, "completed");
 }
 
 fn diagnostic_field<'a>(line: &'a str, name: &str) -> &'a str {
@@ -641,6 +668,22 @@ fn diagnostic_field<'a>(line: &'a str, name: &str) -> &'a str {
         .split('"')
         .next()
         .unwrap()
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
+enum ArchivedProviderBody {
+    Utf8(String),
+    Bytes(Vec<u8>),
+}
+#[derive(serde::Deserialize)]
+struct ArchivedProviderRequest {
+    number: u64,
+    transport: String,
+    request: Option<ArchivedProviderBody>,
+    response: Vec<ArchivedProviderBody>,
+    outcome: String,
+    error_code: Option<String>,
 }
 
 #[test]
@@ -665,14 +708,39 @@ fn executable_provider_diagnostics_capture_actual_requests_without_logging_paylo
             .filter(|path| path.is_dir())
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 1);
-        let dumped = std::fs::read_to_string(agents[0].join("last_request.json")).unwrap();
+        let archive = agents[0].join("requests");
+        let dumped = std::fs::read_to_string(archive.join("last_requests.json")).unwrap();
         assert_eq!(
             dumped, body,
             "dump must contain the actual prepared wire body"
         );
         assert!(dumped.contains(prompt));
         assert!(!dumped.contains("synthetic-key"));
-        assert!(!agents[0].join("last_request.json.tmp").exists());
+        assert!(!agents[0].join("last_request.json").exists());
+        assert!(!archive.join("last_requests.json.tmp").exists());
+        let record: ArchivedProviderRequest =
+            serde_json::from_slice(&std::fs::read(archive.join("request_1.json")).unwrap())
+                .unwrap();
+        assert_eq!(record.number, 1);
+        assert_eq!(record.transport, "http_sse");
+        assert_eq!(
+            record.request,
+            Some(ArchivedProviderBody::Utf8(body.into()))
+        );
+        assert_eq!(
+            record.response,
+            vec![ArchivedProviderBody::Utf8(
+                if failed {
+                    PROVIDER_FAILURE_BODY
+                } else {
+                    PROVIDER_SUCCESS_BODY
+                }
+                .into(),
+            )]
+        );
+        assert_eq!(record.outcome, if failed { "failed" } else { "completed" });
+        assert_eq!(record.error_code.is_some(), failed);
+        assert!(!archive.join("request_1.json.tmp").exists());
 
         let log = std::fs::read_to_string(sessions[0].join("session.log")).unwrap();
         let provider = log
