@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use parrot_cli::slash_sessions::{
     CompactCommand, GoalCommand, SandboxEnableCommand, SkillRefresh, SkillsCommand, SlashCommand,
-    SlashFailure, StandingInstructionCommand,
+    SlashFailure, StandingInstructionCommand, TaskLimitCommand,
 };
 use parrot_domain::protocol::messages::parrot::{ListedSkillScope, Skill, SkillLoadError};
 use tonic::{Code, Status};
@@ -40,6 +40,86 @@ impl Harness {
             &self.refresh,
             &self.token,
         )
+    }
+}
+
+#[test]
+fn task_limit_query_reads_without_setting_or_waiting_for_idle() {
+    let mut h = Harness::new();
+    h.session.current.extra_concurrent_tasks = 7;
+    let previous = h.session.current.clone();
+    h.run(&TaskLimitCommand, "").unwrap();
+    assert_eq!(
+        h.record.events(),
+        ["get_task_limit", "show:extra managed-task budget: 7"]
+    );
+    assert!(h.session.task_limits.is_empty());
+    assert_eq!(h.session.current, previous);
+    h.record.assert_same_token(&h.token);
+}
+
+#[test]
+fn task_limit_accepts_zero_positive_and_maximum() {
+    for (arguments, expected) in [("0", 0), ("12", 12), ("2147483647", i32::MAX)] {
+        let mut h = Harness::new();
+        h.run(&TaskLimitCommand, arguments).unwrap();
+        assert_eq!(h.session.task_limits, [expected]);
+        assert_eq!(
+            h.dialog.text(),
+            format!("extra managed-task budget: {expected}")
+        );
+        assert!(h.dialog.errors.is_empty());
+        assert!(!h.record.events().iter().any(|event| event == "wait"));
+        h.record.assert_same_token(&h.token);
+    }
+}
+
+#[test]
+fn task_limit_invalid_arguments_do_not_read_or_write() {
+    for arguments in [
+        "-1",
+        "+1",
+        "1.5",
+        "\"2\"",
+        "'2'",
+        "two",
+        "2147483648",
+        "1 2",
+        "1\t2",
+        "1e2",
+        "reset",
+        "１",
+        "0\0",
+    ] {
+        let mut h = Harness::new();
+        let previous = h.session.current.clone();
+        h.run(&TaskLimitCommand, arguments).unwrap();
+        assert_eq!(
+            h.dialog.errors,
+            ["usage: /task-limit [N] (N must be an integer from 0 to 2147483647)"],
+            "{arguments:?}"
+        );
+        assert_eq!(h.record.events().len(), 1);
+        assert!(h.dialog.shown.is_empty());
+        assert!(h.session.task_limits.is_empty());
+        assert_eq!(h.session.current, previous);
+    }
+}
+
+#[test]
+fn task_limit_failures_propagate_without_success_or_cache_change() {
+    for arguments in ["", "0"] {
+        let mut h = Harness::new();
+        let previous = h.session.current.clone();
+        h.session.task_limit_failure = Some(Status::unavailable("override write failed").into());
+        let failure = h.run(&TaskLimitCommand, arguments).unwrap_err();
+        assert!(
+            matches!(failure, SlashFailure::Rpc(status) if status.code() == Code::Unavailable && status.message() == "override write failed")
+        );
+        assert!(h.dialog.shown.is_empty());
+        assert!(h.session.task_limits.is_empty());
+        assert_eq!(h.session.current, previous);
+        h.record.assert_same_token(&h.token);
     }
 }
 

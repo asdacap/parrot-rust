@@ -45,7 +45,7 @@ use parrot_runtime::{
     prompt_context::{
         AgentSkills, PromptResult, SkillCatalog, SkillMetadata, SkillSnapshot, StandingInstruction,
     },
-    task_scheduler::TaskScheduler,
+    task_scheduler::{TaskConcurrencyBudget, TaskScheduler},
     tool_settlement::ToolSettlement,
 };
 use parrot_storage::{
@@ -118,6 +118,7 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub skills: Arc<dyn UserSkills<S>>,
     pub lifetime: Arc<Signal>,
     pub activation: Arc<StartupActivation>,
+    pub task_concurrency: Arc<TaskConcurrencyBudget>,
     pub standing: StandingInstruction,
     pub statistics: Arc<UserSessionStatistics>,
     pub root_identity: Arc<AgentIdentity>,
@@ -254,6 +255,7 @@ pub fn durable_permission_factory(
 
 pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
     pub agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
+    pub extra_concurrent_tasks: i32,
     pub router: Arc<ModelRouter>,
     pub modes: Arc<ModeRegistry<S>>,
     pub workflows: Vec<(String, Arc<dyn ModeWorkflowFactory<S>>)>,
@@ -615,6 +617,14 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             skills: (config.skills)(resources.workspace())?,
             lifetime: lifetime.clone(),
             activation: Arc::new(StartupActivation::new()),
+            task_concurrency: TaskConcurrencyBudget::new(
+                usize::try_from(
+                    initialization
+                        .extra_concurrent_tasks
+                        .unwrap_or(config.extra_concurrent_tasks),
+                )
+                .map_err(invalid)?,
+            ),
             standing: StandingInstruction::new(config.templates.clone()),
             statistics,
             root_identity: identity.clone(),
@@ -812,6 +822,9 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         for scheduler in &schedulers {
             scheduler.resolve_workers().await.map_err(internal)?;
         }
+        for scheduler in &schedulers {
+            scheduler.prepare_recovery().await.map_err(internal)?;
+        }
         let mut claimed = HashSet::new();
         for scheduler in &schedulers {
             claimed.extend(scheduler.claimed_worker_ids().await);
@@ -965,6 +978,8 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             id: self.services.id.clone(),
             model: model.requested_selector.value.clone(),
             mode,
+            extra_concurrent_tasks: i32::try_from(self.services.task_concurrency.get_limit())
+                .expect("the session task limit fits in i32"),
             working_directory: self
                 .services
                 .resources
@@ -991,8 +1006,20 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         &self,
         model: Option<ResolvedModelSelection>,
         mode: Option<String>,
+        extra_concurrent_tasks: Option<i32>,
     ) -> protocol::Result<()> {
         let _gate = self.update_gate.lock().await;
+        if let Some(limit) = extra_concurrent_tasks {
+            let capacity = usize::try_from(limit).map_err(invalid)?;
+            self.services
+                .lease
+                .update_task_limit_metadata(limit)
+                .map_err(internal)?;
+            self.services.task_concurrency.set_limit(capacity);
+        }
+        if model.is_none() && mode.is_none() {
+            return Ok(());
+        }
         let (previous, previous_mode, session, _) = self.selected();
         let next_mode = self
             .modes
@@ -1552,9 +1579,11 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
         &self,
         model: Option<ResolvedModelSelection>,
         mode: Option<String>,
+        extra_concurrent_tasks: Option<i32>,
     ) -> BoxFuture<'_, protocol::Result<()>> {
-        self.core
-            .owned_mutation(move |core| async move { core.update(model, mode).await })
+        self.core.owned_mutation(move |core| async move {
+            core.update(model, mode, extra_concurrent_tasks).await
+        })
     }
     fn update_selection(&self, model: ResolvedModelSelection) -> ConfigurationResult<()> {
         self.core

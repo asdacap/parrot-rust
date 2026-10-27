@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 mod admission_publisher;
 mod composites;
+mod concurrency;
 mod fixture;
 mod harness;
 mod history;

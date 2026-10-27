@@ -85,6 +85,7 @@ fn root() -> Node {
         (
             "agent_tasks",
             map(&[
+                ("extra_concurrent_tasks", scalar("2")),
                 ("maximum_attempts", scalar("5")),
                 ("maximum_response_repairs", scalar("3")),
                 ("fork_history_mode", scalar("dependency")),

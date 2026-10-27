@@ -98,6 +98,8 @@ pub struct Session {
     pub configure_failure: Option<SlashFailure>,
     pub goal_failure: Option<SlashFailure>,
     pub instruction_failure: Option<SlashFailure>,
+    pub task_limits: Vec<i32>,
+    pub task_limit_failure: Option<SlashFailure>,
 }
 
 impl Session {
@@ -124,6 +126,8 @@ impl Session {
             configure_failure: None,
             goal_failure: None,
             instruction_failure: None,
+            task_limits: Vec::new(),
+            task_limit_failure: None,
         }
     }
 }
@@ -131,6 +135,36 @@ impl Session {
 impl SlashSession for Session {
     fn current_session(&self) -> &UserSession {
         &self.current
+    }
+    fn get_task_limit<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>> {
+        Box::pin(async move {
+            self.record.note("get_task_limit", cancellation);
+            check(cancellation)?;
+            if let Some(failure) = self.task_limit_failure.take() {
+                return Err(failure);
+            }
+            Ok(self.current.extra_concurrent_tasks)
+        })
+    }
+    fn set_task_limit<'a>(
+        &'a mut self,
+        limit: i32,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>> {
+        Box::pin(async move {
+            self.record
+                .note(format!("set_task_limit:{limit}"), cancellation);
+            check(cancellation)?;
+            if let Some(failure) = self.task_limit_failure.take() {
+                return Err(failure);
+            }
+            self.task_limits.push(limit);
+            self.current.extra_concurrent_tasks = limit;
+            Ok(limit)
+        })
     }
     fn set_goal<'a>(
         &'a mut self,

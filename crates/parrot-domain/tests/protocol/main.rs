@@ -1,5 +1,7 @@
 use parrot_domain::protocol::{
-    messages::parrot::{SendMessageRequest, SetGoalRequest, set_goal_request},
+    messages::parrot::{
+        SendMessageRequest, SetGoalRequest, UpdateSessionRequest, UserSession, set_goal_request,
+    },
     messages::process::CompletedShellProcess,
 };
 use protobuf::Message;
@@ -134,6 +136,46 @@ fn malformed_payloads_and_noncanonical_varints_match_retained_oracle() {
     let (message, output): (SetGoalRequest, Vec<u8>) = roundtrip(&unhex("a0068100"));
     assert!(message.state.is_none());
     assert_eq!(output, unhex("a00601"));
+}
+
+#[test]
+fn task_limit_update_preserves_absence_explicit_zero_and_existing_wire_tags() {
+    let old_request = unhex("0a017312016d1a0162");
+    let mut request = UpdateSessionRequest::parse_from_bytes(&old_request).unwrap();
+    assert_eq!(request.user_session_id, "s");
+    assert_eq!(request.model, "m");
+    assert_eq!(request.mode, "b");
+    assert_eq!(request.extra_concurrent_tasks, None);
+    assert_eq!(request.write_to_bytes().unwrap(), old_request);
+    request.extra_concurrent_tasks = Some(0);
+    let encoded = request.write_to_bytes().unwrap();
+    assert_eq!(encoded, unhex("0a017312016d1a01622000"));
+    assert_eq!(
+        UpdateSessionRequest::parse_from_bytes(&encoded)
+            .unwrap()
+            .extra_concurrent_tasks,
+        Some(0)
+    );
+    request.extra_concurrent_tasks = Some(i32::MAX);
+    assert_eq!(
+        UpdateSessionRequest::parse_from_bytes(&request.write_to_bytes().unwrap())
+            .unwrap()
+            .extra_concurrent_tasks,
+        Some(i32::MAX)
+    );
+    let snapshot = UserSession {
+        id: "s".into(),
+        model: "m".into(),
+        mode: "b".into(),
+        loaded: true,
+        working_directory: "/".into(),
+        extra_concurrent_tasks: 3,
+        ..Default::default()
+    };
+    assert_eq!(
+        snapshot.write_to_bytes().unwrap(),
+        unhex("0a017312016d1a016220012a012f3003")
+    );
 }
 
 #[test]

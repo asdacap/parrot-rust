@@ -388,6 +388,7 @@ async fn legacy_resume_preserves_selected_root_and_metadata_and_uses_selector_fa
     assert!(opened.loaded);
     assert_eq!(opened.resources.selected_root(), &root);
     assert_eq!(opened.initialization.root_agent_name, "legacy-root");
+    assert_eq!(opened.initialization.extra_concurrent_tasks, None);
     assert_eq!(opened.initialization.mode, "query");
     assert_eq!(opened.initialization.model.selector, "provider/model");
     let published = index.find().unwrap().unwrap();
@@ -1751,6 +1752,104 @@ async fn same_owned_metadata_index_preserves_identity_timestamps_and_serializes_
     assert_eq!(latest.last_opened_at, Some((opened.clock)()));
     assert_eq!(latest.provider_id.as_deref(), Some("latest"));
     opened.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn task_limit_updates_preserve_other_metadata_and_survive_reopening() {
+    let fixture = Fixture::new();
+    let store = fixture.store(Arc::new(Factory::default()));
+    let mut opened = store
+        .open_admitted(
+            fixture.workspace.clone(),
+            fixture.admission(),
+            Some(model()),
+            "query",
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(opened.initialization.extra_concurrent_tasks, None);
+    let original = opened.resources.index.find().unwrap().unwrap();
+    opened.resources.update_task_limit_metadata(0).unwrap();
+    let changed = opened.resources.index.find().unwrap().unwrap();
+    assert_eq!(changed.extra_concurrent_tasks, Some(0));
+    let mut expected = original;
+    expected.extra_concurrent_tasks = Some(0);
+    assert_eq!(changed, expected);
+    assert!(matches!(
+        opened.resources.update_task_limit_metadata(-1),
+        Err(SessionStoreError::InvalidMetadata)
+    ));
+    assert_eq!(opened.resources.index.find().unwrap().unwrap(), expected);
+
+    let barrier = std::sync::Barrier::new(3);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            barrier.wait();
+            opened.resources.update_task_limit_metadata(4).unwrap();
+        });
+        scope.spawn(|| {
+            barrier.wait();
+            opened
+                .resources
+                .update_selection_metadata("other", "other/model", "alias", "mode")
+                .unwrap();
+        });
+        barrier.wait();
+    });
+    let concurrent = opened.resources.index.find().unwrap().unwrap();
+    assert_eq!(concurrent.extra_concurrent_tasks, Some(4));
+    assert_eq!(concurrent.provider_id.as_deref(), Some("other"));
+    assert_eq!(concurrent.model.as_deref(), Some("other/model"));
+    assert_eq!(concurrent.selector.as_deref(), Some("alias"));
+    assert_eq!(concurrent.mode.as_deref(), Some("mode"));
+    opened.resources.update_task_limit_metadata(0).unwrap();
+    opened.record_opened().unwrap();
+    opened.close().await.unwrap();
+    let mut resumed = store.resume(&fixture.id(), false, false).await.unwrap();
+    assert_eq!(resumed.initialization.extra_concurrent_tasks, Some(0));
+    assert_eq!(
+        resumed
+            .resources
+            .index
+            .find()
+            .unwrap()
+            .unwrap()
+            .extra_concurrent_tasks,
+        Some(0)
+    );
+    resumed.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn failed_task_limit_publication_retains_existing_metadata_and_malformed_values_error() {
+    let fixture = Fixture::new();
+    let store = fixture.store(Arc::new(Factory::default()));
+    let mut opened = store
+        .open_admitted(
+            fixture.workspace.clone(),
+            fixture.admission(),
+            Some(model()),
+            "query",
+            false,
+        )
+        .await
+        .unwrap();
+    opened.resources.update_task_limit_metadata(1).unwrap();
+    let path = opened.resources.index.metadata_path();
+    let bytes = fs::read(path).unwrap();
+    let staging = path.with_file_name("meta.json.staging");
+    fs::create_dir(&staging).unwrap();
+    assert!(opened.resources.update_task_limit_metadata(2).is_err());
+    assert_eq!(fs::read(path).unwrap(), bytes);
+    fs::remove_dir(staging).unwrap();
+    let mut malformed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    malformed["ExtraConcurrentTasks"] = serde_json::json!(-1);
+    fs::write(path, serde_json::to_vec(&malformed).unwrap()).unwrap();
+    assert!(opened.resources.index.find().is_err());
+    assert!(opened.resources.update_task_limit_metadata(2).is_err());
+    opened.close().await.unwrap();
+    assert!(store.resume(&fixture.id(), false, false).await.is_err());
 }
 
 #[tokio::test]

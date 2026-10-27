@@ -144,6 +144,356 @@ async fn reopen(fixture: &Fixture, id: &UserSessionId) -> Arc<dyn HostedSession>
     bounded(fixture.factory.bind_opened(opened)).await.unwrap()
 }
 
+async fn wait_task_request(fixture: &Fixture, name: &str) {
+    let marker = format!("Task: {name}\n");
+    bounded(async {
+        loop {
+            if fixture.requests.lock().unwrap().iter().any(|request| {
+                request
+                    .messages
+                    .iter()
+                    .any(|message| message.content().contains(&marker))
+            }) {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn actual_task_limit_live_increase_wakes_pending_and_decrease_does_not_preempt() {
+    let fixture = Fixture::with_config(
+        false,
+        false,
+        None,
+        None,
+        Arc::new(ChildProfiles),
+        |config| config.extra_concurrent_tasks = 0,
+    )
+    .await;
+    let hosted = bounded(fixture.open()).await.unwrap();
+    let root = fixture.root();
+    let gates: Vec<_> = (0..3).map(|_| Arc::new(Semaphore::new(0))).collect();
+    for (name, gate) in ["live-a", "live-b", "live-c"].into_iter().zip(&gates) {
+        script(
+            &fixture,
+            &format!("Task: {name}\n"),
+            reply(r#"{"result":"done","verdict":"accept"}"#),
+            Some(gate.clone()),
+        );
+    }
+    set(
+        &root,
+        json!([task("live-a"), task("live-b"), task("live-c")]),
+    )
+    .await;
+    wait_task_request(&fixture, "live-a").await;
+    assert_eq!(
+        root.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
+        ExecutionStatus::Pending
+    );
+    hosted.update(None, None, Some(1)).await.unwrap();
+    wait_task_request(&fixture, "live-b").await;
+    hosted.update(None, None, Some(0)).await.unwrap();
+    let tasks = root.get_service::<Scheduler>().unwrap().snapshot().await;
+    assert_eq!(tasks[0].state, ExecutionStatus::Running);
+    assert_eq!(tasks[1].state, ExecutionStatus::Running);
+    assert_eq!(tasks[2].state, ExecutionStatus::Pending);
+    gates[0].add_permits(1);
+    wait_tasks(&root, |tasks| tasks[0].state == ExecutionStatus::Succeeded).await;
+    let tasks = root.get_service::<Scheduler>().unwrap().snapshot().await;
+    assert_eq!(tasks[1].state, ExecutionStatus::Running);
+    assert_eq!(tasks[2].state, ExecutionStatus::Pending);
+    assert!(root.children().resolve("live-c").is_err());
+    gates[1].add_permits(1);
+    wait_task_request(&fixture, "live-c").await;
+    gates[2].add_permits(1);
+    wait_tasks(&root, |tasks| {
+        tasks
+            .iter()
+            .all(|task| task.state == ExecutionStatus::Succeeded)
+    })
+    .await;
+    hosted.close().await.unwrap();
+    std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[tokio::test]
+async fn actual_task_budget_is_shared_by_owners_but_isolated_between_user_sessions() {
+    let fixture = Fixture::with_config(
+        false,
+        false,
+        None,
+        None,
+        Arc::new(ChildProfiles),
+        |config| config.extra_concurrent_tasks = 1,
+    )
+    .await;
+    let first = bounded(fixture.open()).await.unwrap();
+    let first_root = fixture.root();
+    let gates: Vec<_> = (0..6).map(|_| Arc::new(Semaphore::new(0))).collect();
+    for (name, gate) in [
+        "shared-a",
+        "shared-b",
+        "shared-c",
+        "shared-d",
+        "isolated-a",
+        "isolated-b",
+    ]
+    .into_iter()
+    .zip(&gates)
+    {
+        script(
+            &fixture,
+            &format!("Task: {name}\n"),
+            reply(r#"{"result":"done","verdict":"accept"}"#),
+            Some(gate.clone()),
+        );
+    }
+    set(&first_root, json!([task("shared-a"), task("shared-b")])).await;
+    wait_task_request(&fixture, "shared-a").await;
+    wait_task_request(&fixture, "shared-b").await;
+    let child = spawn(&fixture, &first_root, "direct-child").await;
+    assert!(!child.session().is_active());
+    set(&child, json!([task("shared-c"), task("shared-d")])).await;
+    wait_task_request(&fixture, "shared-c").await;
+    assert_eq!(
+        child.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
+        ExecutionStatus::Pending
+    );
+    assert!(child.children().resolve("shared-d").is_err());
+
+    let second = bounded(fixture.open()).await.unwrap();
+    assert_ne!(first.snapshot().id, second.snapshot().id);
+    let second_root = fixture.root();
+    set(
+        &second_root,
+        json!([task("isolated-a"), task("isolated-b")]),
+    )
+    .await;
+    wait_task_request(&fixture, "isolated-a").await;
+    wait_task_request(&fixture, "isolated-b").await;
+    assert_eq!(
+        child.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
+        ExecutionStatus::Pending
+    );
+    gates[0].add_permits(1);
+    wait_task_request(&fixture, "shared-d").await;
+    for gate in &gates[1..] {
+        gate.add_permits(1);
+    }
+    for scope in [&first_root, &child, &second_root] {
+        wait_tasks(scope, |tasks| {
+            tasks
+                .iter()
+                .all(|task| task.state == ExecutionStatus::Succeeded)
+        })
+        .await;
+    }
+    bounded(first.close()).await.unwrap();
+    bounded(second.close()).await.unwrap();
+    std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+async fn wait_task_notices(scope: &Arc<Scope<Security>>) {
+    bounded(async {
+        loop {
+            if scope
+                .agent_state()
+                .load()
+                .await
+                .unwrap()
+                .unwrap()
+                .tasks
+                .notifications
+                .is_empty()
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn actual_zero_budget_allows_nested_task_owners_to_make_progress() {
+    let fixture = Fixture::with_config(
+        false,
+        false,
+        None,
+        None,
+        Arc::new(ChildProfiles),
+        |config| config.extra_concurrent_tasks = 0,
+    )
+    .await;
+    let hosted = bounded(fixture.open()).await.unwrap();
+    let root = fixture.root();
+    let parent_release = Arc::new(Semaphore::new(0));
+    let nested_release = Arc::new(Semaphore::new(0));
+    for (name, gate) in [
+        ("parent", parent_release.clone()),
+        ("nested", nested_release.clone()),
+    ] {
+        script(
+            &fixture,
+            &format!("Task: {name}\n"),
+            reply(r#"{"result":"done","verdict":"accept"}"#),
+            Some(gate),
+        );
+    }
+    for name in ["root-next", "leaf"] {
+        script(
+            &fixture,
+            &format!("Task: {name}\n"),
+            reply(r#"{"result":"done","verdict":"accept"}"#),
+            None,
+        );
+    }
+    set(&root, json!([task("parent"), task("root-next")])).await;
+    wait_task_request(&fixture, "parent").await;
+    let parent = root.children().resolve("parent").unwrap();
+    set(&parent, json!([task("nested")])).await;
+    wait_task_request(&fixture, "nested").await;
+    let nested = parent.children().resolve("nested").unwrap();
+    set(&nested, json!([task("leaf")])).await;
+    wait_tasks(&nested, |tasks| {
+        tasks[0].state == ExecutionStatus::Succeeded
+    })
+    .await;
+    assert_eq!(
+        root.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
+        ExecutionStatus::Pending
+    );
+    wait_task_notices(&nested).await;
+    script(
+        &fixture,
+        "Task: nested\n",
+        reply(r#"{"result":"nested done","verdict":"accept"}"#),
+        None,
+    );
+    nested_release.add_permits(1);
+    wait_tasks(&parent, |tasks| {
+        tasks[0].state == ExecutionStatus::Succeeded
+    })
+    .await;
+    wait_task_notices(&parent).await;
+    script(
+        &fixture,
+        "Task: parent\n",
+        reply(r#"{"result":"parent done","verdict":"accept"}"#),
+        None,
+    );
+    parent_release.add_permits(1);
+    wait_tasks(&root, |tasks| {
+        tasks
+            .iter()
+            .all(|task| task.state == ExecutionStatus::Succeeded)
+    })
+    .await;
+    bounded(hosted.close()).await.unwrap();
+    std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[tokio::test]
+async fn actual_recovery_counts_later_owners_before_admitting_earlier_pending_work() {
+    let fixture = Fixture::with_config(
+        false,
+        false,
+        None,
+        None,
+        Arc::new(ChildProfiles),
+        |config| config.extra_concurrent_tasks = 1,
+    )
+    .await;
+    let hosted = bounded(fixture.open()).await.unwrap();
+    let root = fixture.root();
+    finish(&root, "initialize root lineage").await;
+    let later = spawn(&fixture, &root, "later-owner").await;
+    finish(&later, "initialize later owner lineage").await;
+    for name in ["restored-a", "restored-b", "restored-c"] {
+        script(
+            &fixture,
+            &format!("Task: {name}\n"),
+            reply(r#"{"result":"unused","verdict":"accept"}"#),
+            Some(Arc::new(Semaphore::new(0))),
+        );
+    }
+    set(&later, json!([task("restored-b"), task("restored-c")])).await;
+    wait_task_request(&fixture, "restored-b").await;
+    wait_task_request(&fixture, "restored-c").await;
+    set(&root, json!([task("restored-a"), task("fresh-pending")])).await;
+    wait_task_request(&fixture, "restored-a").await;
+    assert_eq!(
+        root.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
+        ExecutionStatus::Pending
+    );
+    let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
+    bounded(hosted.close()).await.unwrap();
+    let root_before = root.agent_state().load().await.unwrap().unwrap().tasks;
+    let later_before = later.agent_state().load().await.unwrap().unwrap().tasks;
+    let release: Vec<_> = (0..3).map(|_| Arc::new(Semaphore::new(0))).collect();
+    for (name, gate) in ["restored-a", "restored-b", "restored-c"]
+        .into_iter()
+        .zip(&release)
+    {
+        script(
+            &fixture,
+            &format!("Task: {name}\n"),
+            reply(r#"{"result":"restored","verdict":"accept"}"#),
+            Some(gate.clone()),
+        );
+    }
+    script(
+        &fixture,
+        "Task: fresh-pending\n",
+        reply(r#"{"result":"fresh","verdict":"accept"}"#),
+        None,
+    );
+    let resumed = reopen(&fixture, &id).await;
+    let restored_root = fixture.root();
+    let restored_later = restored_root.children().resolve("later-owner").unwrap();
+    for (scope, saved) in [
+        (&restored_root, &root_before),
+        (&restored_later, &later_before),
+    ] {
+        let current = scope.agent_state().load().await.unwrap().unwrap().tasks;
+        for (current, saved) in current.entries.iter().zip(&saved.entries) {
+            assert_eq!(current.worker_session_id, saved.worker_session_id);
+            assert_eq!(current.runner, saved.runner);
+        }
+    }
+    assert_eq!(
+        restored_root
+            .get_service::<Scheduler>()
+            .unwrap()
+            .snapshot()
+            .await[1]
+            .state,
+        ExecutionStatus::Pending
+    );
+    assert!(restored_root.children().resolve("fresh-pending").is_err());
+    release[1].add_permits(1);
+    wait_tasks(&restored_root, |tasks| {
+        tasks[1].state == ExecutionStatus::Succeeded
+    })
+    .await;
+    release[0].add_permits(1);
+    release[2].add_permits(1);
+    for scope in [&restored_root, &restored_later] {
+        wait_tasks(scope, |tasks| {
+            tasks
+                .iter()
+                .all(|task| task.state == ExecutionStatus::Succeeded)
+        })
+        .await;
+    }
+    bounded(resumed.close()).await.unwrap();
+    std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
 #[tokio::test]
 async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_without_requests() {
     let fixture = fixture().await;

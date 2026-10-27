@@ -15,6 +15,7 @@ impl FilenameGenerator for Names {
 fn config(h: &Harness, owner: &Arc<Scope<Security>>) -> SchedulerConfig<Security, Parser> {
     let built = h.factory.get(&owner.identity().session.name);
     SchedulerConfig {
+        concurrency: TaskConcurrencyBudget::new(2),
         owner_identity: owner.identity().clone(),
         state: owner.agent_state().clone(),
         registry: Arc::downgrade(&h.registry),

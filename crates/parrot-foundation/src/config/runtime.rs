@@ -122,6 +122,7 @@ pub enum AgentTaskForkHistoryMode {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentTaskConfig {
+    pub extra_concurrent_tasks: i32,
     pub maximum_attempts: i32,
     pub maximum_response_repairs: i32,
     pub fork_history_mode: AgentTaskForkHistoryMode,
@@ -675,6 +676,7 @@ fn read_agent_tasks(root: &Node) -> Result<AgentTaskConfig> {
         node,
         "agent_tasks",
         &[
+            "extra_concurrent_tasks",
             "maximum_attempts",
             "maximum_response_repairs",
             "fork_history_mode",
@@ -690,7 +692,20 @@ fn read_agent_tasks(root: &Node) -> Result<AgentTaskConfig> {
             ));
         }
     };
+    if node.get("extra_concurrent_tasks").is_some_and(|value| {
+        !matches!(value.style, Style::Plain | Style::Any)
+            || !matches!(value.tag.as_str(), "" | "tag:yaml.org,2002:int")
+    }) {
+        return Err(error(
+            "agent_tasks.extra_concurrent_tasks must be a non-negative integer",
+        ));
+    }
     Ok(AgentTaskConfig {
+        extra_concurrent_tasks: nonnegative_integer(
+            node,
+            "extra_concurrent_tasks",
+            "agent_tasks.extra_concurrent_tasks",
+        )?,
         maximum_attempts: positive_integer(
             node,
             "maximum_attempts",

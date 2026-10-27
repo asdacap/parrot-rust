@@ -1,4 +1,6 @@
 mod a008_templates;
+#[path = "cases/agent_task_configuration_parses_extra_concurrent_tasks.rs"]
+mod agent_task_configuration_parses_extra_concurrent_tasks;
 mod fixtures;
 mod integration;
 mod model_transaction;

@@ -338,7 +338,7 @@ impl HostedSessionFactory for Factory {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Call {
-    Update(Option<String>, Option<String>),
+    Update(Option<String>, Option<String>, Option<i32>),
     Send(Vec<ConversationPart>, String, wire::Delivery),
     Interrupt,
     Compact(Option<ContextSize>),
@@ -426,12 +426,14 @@ impl HostedSession for FakeHostedSession {
         &self,
         model: Option<ResolvedModelSelection>,
         mode: Option<String>,
+        extra_concurrent_tasks: Option<i32>,
     ) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             self.route(
                 Call::Update(
                     model.as_ref().map(|m| m.requested_selector.value.clone()),
                     mode.clone(),
+                    extra_concurrent_tasks,
                 ),
                 active().as_ref(),
             )?;
@@ -441,6 +443,9 @@ impl HostedSession for FakeHostedSession {
             }
             if let Some(mode) = mode {
                 value.mode = mode;
+            }
+            if let Some(limit) = extra_concurrent_tasks {
+                value.extra_concurrent_tasks = limit;
             }
             Ok(())
         })

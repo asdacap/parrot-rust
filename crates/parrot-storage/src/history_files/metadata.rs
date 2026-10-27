@@ -23,6 +23,13 @@ pub struct SessionMeta {
     pub selector: Option<String>,
     #[serde(rename = "Mode", default)]
     pub mode: Option<String>,
+    #[serde(
+        rename = "ExtraConcurrentTasks",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_task_limit"
+    )]
+    pub extra_concurrent_tasks: Option<i32>,
     #[serde(rename = "LastOpenedAt", default)]
     pub last_opened_at: Option<String>,
     #[serde(rename = "CreatedAt", default)]
@@ -44,10 +51,24 @@ impl SessionMeta {
             model: Some(model.into()),
             selector: Some(String::new()),
             mode: Some(String::new()),
+            extra_concurrent_tasks: None,
             last_opened_at: Some(String::new()),
             created_at: Some(String::new()),
         }
     }
+}
+
+fn deserialize_task_limit<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let limit = Option::<i32>::deserialize(deserializer)?;
+    if limit.is_some_and(|limit| limit < 0) {
+        return Err(serde::de::Error::custom(
+            "ExtraConcurrentTasks must be nonnegative",
+        ));
+    }
+    Ok(limit)
 }
 
 fn deserialize_present_nullable<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -161,6 +182,40 @@ mod tests {
         assert_eq!(omitted.mode, None);
         assert_eq!(omitted.last_opened_at, None);
         assert_eq!(omitted.created_at, None);
+    }
+
+    #[test]
+    fn task_limit_override_preserves_zero_and_rejects_invalid_values() {
+        let metadata = SessionMeta::new("listed", "/workspace", "provider", "model");
+        let legacy = serde_json::to_value(&metadata).unwrap();
+        assert!(legacy.get("ExtraConcurrentTasks").is_none());
+        assert_eq!(
+            serde_json::from_value::<SessionMeta>(legacy.clone())
+                .unwrap()
+                .extra_concurrent_tasks,
+            None
+        );
+        for limit in [0, 3, i32::MAX] {
+            let mut saved = metadata.clone();
+            saved.extra_concurrent_tasks = Some(limit);
+            let encoded = serde_json::to_value(&saved).unwrap();
+            assert_eq!(encoded["ExtraConcurrentTasks"], limit);
+            assert_eq!(
+                serde_json::from_value::<SessionMeta>(encoded).unwrap(),
+                saved
+            );
+        }
+        for invalid in [
+            json!(-1),
+            json!(2147483648_i64),
+            json!(1.5),
+            json!("2"),
+            json!(true),
+        ] {
+            let mut malformed = legacy.clone();
+            malformed["ExtraConcurrentTasks"] = invalid;
+            assert!(serde_json::from_value::<SessionMeta>(malformed).is_err());
+        }
     }
 
     #[test]

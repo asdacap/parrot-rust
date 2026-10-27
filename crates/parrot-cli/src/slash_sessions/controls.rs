@@ -8,6 +8,57 @@ use crate::dispatch::dialog::DialogOption;
 
 use super::{CommandContext, SlashCommand, SlashFailure, load_command};
 
+pub struct TaskLimitCommand;
+
+impl SlashCommand for TaskLimitCommand {
+    fn name(&self) -> &str {
+        "/task-limit"
+    }
+
+    fn summary(&self) -> &str {
+        "Show or set the session's extra managed-task budget"
+    }
+
+    fn run<'a>(
+        &'a self,
+        arguments: &'a str,
+        context: &'a mut CommandContext<'_>,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), SlashFailure>> {
+        Box::pin(async move {
+            let value = arguments.trim();
+            let limit = if value.is_empty() {
+                context.session.get_task_limit(cancellation).await?
+            } else {
+                let parsed = value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit())
+                    .then(|| value.parse::<i32>().ok())
+                    .flatten();
+                let Some(limit) = parsed else {
+                    context
+                        .dialog
+                        .show_error(
+                            "usage: /task-limit [N] (N must be an integer from 0 to 2147483647)",
+                            cancellation,
+                        )
+                        .await?;
+                    return Ok(());
+                };
+                context.session.set_task_limit(limit, cancellation).await?
+            };
+            context
+                .dialog
+                .show(
+                    &[format!("extra managed-task budget: {limit}")],
+                    cancellation,
+                )
+                .await?;
+            Ok(())
+        })
+    }
+}
+
 pub struct CompactCommand;
 
 impl SlashCommand for CompactCommand {

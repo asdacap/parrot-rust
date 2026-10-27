@@ -229,6 +229,7 @@ impl ProductionHost {
             .then(|| Duration::from_millis(configuration.runtime.user_input_timeout_ms as u64));
         let factory = UserSessionFactory::new(UserSessionFactoryConfig {
             agent_limits: configuration.runtime.agent_limits,
+            extra_concurrent_tasks: configuration.runtime.agent_tasks.extra_concurrent_tasks,
             router: router.clone(),
             modes,
             workflows: vec![(

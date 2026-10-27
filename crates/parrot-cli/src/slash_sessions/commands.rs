@@ -11,7 +11,7 @@ use super::{
     ApplicationExit, CommandContext, CompactCommand, GoalCommand, ModeCommand, ModeSelection,
     ModesCommand, SandboxEnableCommand, SessionsCommand, SkillsCommand, SlashCommand,
     SlashCommandRegistry, SlashFailure, StandingInstructionCommand, StatusCommand,
-    WorkspaceNavigation, WorkspaceSessionsCommand,
+    TaskLimitCommand, WorkspaceNavigation, WorkspaceSessionsCommand,
 };
 
 pub struct ClearCommand;
@@ -193,6 +193,7 @@ impl SlashCommands {
             Box::new(SandboxEnableCommand),
             Box::new(SetContextLimitCommand),
             Box::new(SkillsCommand),
+            Box::new(TaskLimitCommand),
             Box::new(VersionCommand::new(version)),
         ]);
         if let Some(navigation) = navigation {

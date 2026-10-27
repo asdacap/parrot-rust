@@ -113,6 +113,44 @@ read fallback must still authorize the actual resolved target, including symlink
 Root selection/fallback itself grants **no access permission** and does not repair
 the unresolved production filesystem/security capability.
 
+## Managed task concurrency
+
+Set the shared extra-task budget in the new-root `config.yaml`:
+
+```yaml
+agent_tasks:
+  extra_concurrent_tasks: 2
+```
+
+The default is `2`. Each agent can run one eligible managed AgentTask without
+using this budget. Additional tasks across all agents in the same user session
+share the extra slots. Setting `0` allows one running managed task per owning
+agent, including agents that own nested task graphs. Use an unquoted integer
+between `0` and `2147483647`.
+
+The limit applies only to new managed-task starts, including restarts on retained
+workers. It does not limit direct `agent_spawn` calls or the total number of
+agents. Tasks without capacity stay pending and start automatically when a slot
+becomes available. Existing running tasks are not stopped, and internal retries
+keep their admission.
+
+Use `/task-limit` to read the current session's effective extra-task budget from
+the host. Use `/task-limit N` to persist a session override, including
+`/task-limit 0`. `N` must be one decimal integer from `0` to `2147483647`; there
+is no reset-to-default command. The override is stored in the selected session's
+`meta.json` and survives reopening, even if the global default changes. Sessions
+without an override, including older sessions, use the configured default.
+Querying does not write an override. Other sessions and global configuration are
+unchanged.
+
+Increasing the session limit wakes eligible pending work immediately. Decreasing
+it does not stop running tasks: new extra starts wait until usage falls below the
+new limit, and each owner's free start remains available. On session recovery,
+saved running tasks resume even if usage exceeds the effective limit. The global
+configuration is read when the session runtime is constructed, not automatically
+reloaded into a running session; `/task-limit N` changes that session's live
+budget only after its override has been persisted successfully.
+
 ## Retained agents and task recovery
 
 The composed session runtime now persists retained agents and task orchestration.

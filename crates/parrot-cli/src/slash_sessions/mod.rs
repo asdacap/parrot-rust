@@ -20,6 +20,7 @@ pub use completion::{SkillCompletion, SlashCommandCompletion};
 pub use contracts::*;
 pub use controls::{
     CompactCommand, GoalCommand, SandboxEnableCommand, SkillsCommand, StandingInstructionCommand,
+    TaskLimitCommand,
 };
 pub use operations::{load_command, native_call};
 pub use registry::SlashCommandRegistry;

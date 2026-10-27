@@ -159,6 +159,7 @@ profiles:
 
 # Maximum payload execution attempts for each AgentTask invocation.
 agent_tasks:
+  extra_concurrent_tasks: 2
   maximum_attempts: 5
   # Maximum re-prompts per role turn when the response is not the required strict JSON.
   maximum_response_repairs: 3

@@ -116,6 +116,17 @@ pub trait SlashSession: Send {
     fn mode(&self) -> &str {
         &self.current_session().mode
     }
+    /// Read the current extra-task budget from the host and refresh the session snapshot.
+    fn get_task_limit<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>>;
+    /// Persist the session's extra-task budget and return its effective value.
+    fn set_task_limit<'a>(
+        &'a mut self,
+        limit: i32,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>>;
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

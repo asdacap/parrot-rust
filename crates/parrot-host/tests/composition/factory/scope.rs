@@ -774,6 +774,26 @@ impl Fixture {
     ) -> Self {
         let root =
             std::env::temp_dir().join(format!("t62-scope-{}", Identifier::event_id().unwrap()));
+        Self::with_root_config(
+            root,
+            reject_permission,
+            invalid_prompt,
+            refresh_barrier,
+            status_barrier,
+            profiles,
+            configure,
+        )
+        .await
+    }
+    async fn with_root_config(
+        root: PathBuf,
+        reject_permission: bool,
+        invalid_prompt: bool,
+        refresh_barrier: Option<Arc<RefreshBarrier>>,
+        status_barrier: Option<Arc<StatusBuildBarrier>>,
+        profiles: Arc<dyn ProfileResolver<Security>>,
+        configure: impl FnOnce(&mut UserSessionFactoryConfig<Security>),
+    ) -> Self {
         let workspace = root.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let runtime = RuntimeIdentity::new(
@@ -879,6 +899,7 @@ impl Fixture {
         });
         let skill_templates = templates.clone();
         let mut config = UserSessionFactoryConfig {
+            extra_concurrent_tasks: configuration.runtime.agent_tasks.extra_concurrent_tasks,
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
                 ..Default::default()
@@ -1587,6 +1608,7 @@ async fn actual_hosted_selection_updates_preserve_open_metadata_and_record_opene
     bounded(hosted.update(
         Some(fixture.router.resolve("local/model-next").unwrap()),
         Some("build".into()),
+        None,
     ))
     .await
     .unwrap();
@@ -2804,6 +2826,7 @@ mod original_adapters_v8;
 mod original_rpc_v8;
 mod resume_histories;
 mod session_resume;
+mod task_limit;
 
 #[path = "../../e2e_scenarios/scenarios.rs"]
 mod e2e_scenarios;

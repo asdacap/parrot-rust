@@ -99,6 +99,40 @@ impl SlashSession for RpcSlashSession {
         &self.current
     }
 
+    fn get_task_limit<'a>(
+        &'a mut self,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            Ok(self.current.extra_concurrent_tasks)
+        })
+    }
+    fn set_task_limit<'a>(
+        &'a mut self,
+        limit: i32,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    extra_concurrent_tasks: Some(limit),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            Ok(self.current.extra_concurrent_tasks)
+        })
+    }
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

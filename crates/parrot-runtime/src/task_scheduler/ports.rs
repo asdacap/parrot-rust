@@ -324,6 +324,7 @@ pub struct SchedulerConfig<S: RestrictableAccessSnapshot + 'static, P: TaskArtif
     pub parser: Arc<P>,
     pub router: Arc<dyn TaskModelRouter>,
     pub configuration: TaskConfiguration,
+    pub concurrency: Arc<super::TaskConcurrencyBudget>,
     pub output_blobs: Arc<ToolOutputBlobStore>,
     pub publisher: Arc<TaskPublisher>,
     pub diagnostics: Arc<dyn TaskDiagnostics>,

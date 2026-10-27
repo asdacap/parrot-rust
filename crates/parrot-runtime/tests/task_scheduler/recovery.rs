@@ -55,6 +55,336 @@ async fn wait_saved(
 }
 
 #[tokio::test]
+async fn recovery_prepares_all_owners_before_pending_admission_and_preserves_reduced_limits() {
+    use parrot_runtime::task_scheduler::TaskConcurrencyBudget;
+
+    for restored_limit in [1, 0] {
+        let first = Harness::new();
+        *first.factory.concurrency.lock().unwrap() = Some(TaskConcurrencyBudget::new(1));
+        let earlier = first.root("earlier-owner").await;
+        let later = first.root("later-owner").await;
+        let initial: Vec<_> = (0..3).map(|_| Gate::new()).collect();
+        let resumed: Vec<_> = (0..4).map(|_| Gate::new()).collect();
+        for (index, name) in ["a", "b", "c"].into_iter().enumerate() {
+            first.provider.script(
+                name,
+                [
+                    Reply::held("answer", &initial[index]),
+                    Reply::held("answer", &resumed[index]),
+                ],
+            );
+        }
+        first
+            .provider
+            .script("pending", [Reply::held("answer", &resumed[3])]);
+        set(&later, vec![task("b"), task("c")]).await;
+        initial[1].entered().await;
+        initial[2].entered().await;
+        set(&earlier, vec![task("a"), task("pending")]).await;
+        initial[0].entered().await;
+        assert_eq!(snapshot(&earlier).await[1].state, Pending);
+        for root in [&earlier, &later] {
+            root.get_service::<Scheduler>()
+                .unwrap()
+                .suspend()
+                .join()
+                .await
+                .unwrap();
+        }
+        first.registry.shutdown().join().await.unwrap();
+        let earlier_saved = earlier.agent_state().load().await.unwrap().unwrap().tasks;
+        let later_saved = later.agent_state().load().await.unwrap().unwrap().tasks;
+
+        let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+        *second.factory.concurrency.lock().unwrap() =
+            Some(TaskConcurrencyBudget::new(restored_limit));
+        let earlier_restored = second.reopen_root(earlier.identity().clone()).await;
+        let later_restored = second.reopen_root(later.identity().clone()).await;
+        for root in [&earlier_restored, &later_restored] {
+            let scheduler = root.get_service::<Scheduler>().unwrap();
+            scheduler.resolve_workers().await.unwrap();
+            scheduler.prepare_recovery().await.unwrap();
+            scheduler.prepare_recovery().await.unwrap();
+        }
+        assert_eq!(
+            earlier_restored
+                .agent_state()
+                .load()
+                .await
+                .unwrap()
+                .unwrap()
+                .tasks,
+            earlier_saved
+        );
+        assert_eq!(
+            later_restored
+                .agent_state()
+                .load()
+                .await
+                .unwrap()
+                .unwrap()
+                .tasks,
+            later_saved
+        );
+        activate(&earlier_restored).await;
+        resumed[0].entered().await;
+        assert_eq!(snapshot(&earlier_restored).await[1].state, Pending);
+        assert!(requests(&second.provider, "pending").is_empty());
+        assert!(earlier_restored.children().resolve("pending").is_err());
+        activate(&later_restored).await;
+        resumed[1].entered().await;
+        resumed[2].entered().await;
+        for (root, saved) in [
+            (&earlier_restored, &earlier_saved),
+            (&later_restored, &later_saved),
+        ] {
+            let current = root.agent_state().load().await.unwrap().unwrap().tasks;
+            for (current, saved) in current.entries.iter().zip(&saved.entries) {
+                assert_eq!(current.worker_session_id, saved.worker_session_id);
+                assert_eq!(current.runner, saved.runner);
+            }
+        }
+        let free_owner = second.root("free-owner").await;
+        let free = Gate::new();
+        second
+            .provider
+            .script("free", [Reply::held("answer", &free)]);
+        set(&free_owner, vec![task("free")]).await;
+        free.entered().await;
+
+        resumed[1].open();
+        wait_tasks(&later_restored, |tasks| tasks[0].state == Succeeded).await;
+        if restored_limit == 0 {
+            assert_eq!(snapshot(&earlier_restored).await[1].state, Pending);
+            assert!(requests(&second.provider, "pending").is_empty());
+            resumed[0].open();
+        }
+        resumed[3].entered().await;
+        if restored_limit != 0 {
+            resumed[0].open();
+        }
+        resumed[2].open();
+        resumed[3].open();
+        free.open();
+        complete(&earlier_restored).await;
+        complete(&later_restored).await;
+        complete(&free_owner).await;
+        second.close().await;
+    }
+}
+
+#[tokio::test]
+async fn recovery_normalizes_pending_stops_under_zero_budget_before_waiting_owners_activate() {
+    use parrot_runtime::task_scheduler::TaskConcurrencyBudget;
+
+    for stopped in [false, true] {
+        let first = Harness::new();
+        *first.factory.concurrency.lock().unwrap() = Some(TaskConcurrencyBudget::new(1));
+        let root = first.root("owner").await;
+        let waiting = first.root("waiting-owner").await;
+        let initial: Vec<_> = (0..3).map(|_| Gate::new()).collect();
+        let resumed: Vec<_> = (0..4).map(|_| Gate::new()).collect();
+        for (index, name) in ["a", "b", "c"].into_iter().enumerate() {
+            first.provider.script(
+                name,
+                [
+                    Reply::held("answer", &initial[index]),
+                    Reply::held("answer", &resumed[index]),
+                ],
+            );
+        }
+        first
+            .provider
+            .script("d", [Reply::held("answer", &resumed[3])]);
+        set(&root, vec![task("a"), task("b")]).await;
+        initial[0].entered().await;
+        initial[1].entered().await;
+        set(&waiting, vec![task("c"), task("d")]).await;
+        initial[2].entered().await;
+        assert_eq!(snapshot(&waiting).await[1].state, Pending);
+        waiting
+            .get_service::<Scheduler>()
+            .unwrap()
+            .freeze_for_suspension()
+            .join()
+            .await
+            .unwrap();
+        let record = Gate::new();
+        let worker = first.factory.get("a");
+        *worker.task_session.record_gate.lock().unwrap() = Some(record.clone());
+        let mut replacement = task("a");
+        replacement.acceptance_criteria = "replacement".into();
+        set(&root, vec![replacement]).await;
+        record.entered().await;
+        wait_saved(&root, |graph| {
+            graph.entries[0].task.state == Running && graph.entries[0].pending_stop.is_some()
+        })
+        .await;
+        root.get_service::<Scheduler>()
+            .unwrap()
+            .freeze_for_suspension()
+            .join()
+            .await
+            .unwrap();
+        worker.adapter.session().suspend_handle();
+        let suspension = root.get_service::<Scheduler>().unwrap().suspend();
+        record.open();
+        bounded(suspension.join()).await.unwrap();
+        freeze(&first, &waiting).await;
+        let mut saved = root.agent_state().load().await.unwrap().unwrap().tasks;
+        assert_eq!(saved.entries[0].task.state, Running);
+        saved.entries[0].pending_stop.as_mut().unwrap().stopped = stopped;
+        root.agent_state()
+            .update(AgentStateUpdate::Tasks(saved.clone()))
+            .await
+            .unwrap();
+
+        let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+        *second.factory.concurrency.lock().unwrap() = Some(TaskConcurrencyBudget::new(0));
+        let restored = second.reopen_root(root.identity().clone()).await;
+        let waiting_restored = second.reopen_root(waiting.identity().clone()).await;
+        for owner in [&restored, &waiting_restored] {
+            let scheduler = owner.get_service::<Scheduler>().unwrap();
+            scheduler.resolve_workers().await.unwrap();
+            scheduler.prepare_recovery().await.unwrap();
+            scheduler.prepare_recovery().await.unwrap();
+        }
+        let normalized = restored.agent_state().load().await.unwrap().unwrap().tasks;
+        let mut expected = saved;
+        expected.entries[0].task.state = Pending;
+        assert_eq!(normalized, expected);
+        let stop_record = Gate::new();
+        *second
+            .factory
+            .get("a")
+            .task_session
+            .record_gate
+            .lock()
+            .unwrap() = Some(stop_record.clone());
+        activate(&waiting_restored).await;
+        resumed[2].entered().await;
+        activate(&restored).await;
+        resumed[1].entered().await;
+        stop_record.entered().await;
+        assert_eq!(snapshot(&restored).await[0].state, Pending);
+        assert_eq!(snapshot(&waiting_restored).await[1].state, Pending);
+        assert_eq!(requests(&second.provider, "a").len(), 1);
+        assert!(requests(&second.provider, "d").is_empty());
+
+        resumed[1].open();
+        let tasks = wait_tasks(&restored, |tasks| tasks[1].state == Succeeded).await;
+        assert_eq!(tasks[0].state, if stopped { Running } else { Pending });
+        stop_record.open();
+        resumed[0].entered().await;
+        assert_eq!(snapshot(&waiting_restored).await[1].state, Pending);
+        resumed[2].open();
+        resumed[3].entered().await;
+        resumed[0].open();
+        resumed[3].open();
+        complete(&restored).await;
+        complete(&waiting_restored).await;
+        second.close().await;
+    }
+}
+
+#[tokio::test]
+async fn suspension_releases_prepared_recovery_admissions_without_changing_checkpoints() {
+    use parrot_runtime::task_scheduler::TaskConcurrencyBudget;
+
+    let first = Harness::new();
+    let root = first.root("owner").await;
+    let held: Vec<_> = (0..3).map(|_| Gate::new()).collect();
+    for (name, gate) in ["a", "b", "c"].into_iter().zip(&held) {
+        first.provider.script(name, [Reply::held("answer", gate)]);
+    }
+    set(&root, vec![task("a"), task("b"), task("c")]).await;
+    for gate in &held {
+        gate.entered().await;
+    }
+    freeze(&first, &root).await;
+    let saved = root.agent_state().load().await.unwrap().unwrap().tasks;
+    let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+    *second.factory.concurrency.lock().unwrap() = Some(TaskConcurrencyBudget::new(1));
+    let restored = second.reopen_root(root.identity().clone()).await;
+    let scheduler = restored.get_service::<Scheduler>().unwrap();
+    scheduler.prepare_recovery().await.unwrap();
+    scheduler.prepare_recovery().await.unwrap();
+    scheduler.suspend().join().await.unwrap();
+    assert_eq!(
+        restored.agent_state().load().await.unwrap().unwrap().tasks,
+        saved
+    );
+    let fresh = second.root("fresh-owner").await;
+    let available: Vec<_> = (0..2).map(|_| Gate::new()).collect();
+    for (name, gate) in ["new-a", "new-b"].into_iter().zip(&available) {
+        second.provider.script(name, [Reply::held("answer", gate)]);
+    }
+    set(&fresh, vec![task("new-a"), task("new-b")]).await;
+    for gate in &available {
+        gate.entered().await;
+    }
+    for gate in &available {
+        gate.open();
+    }
+    complete(&fresh).await;
+    second.close().await;
+}
+
+#[tokio::test]
+async fn failed_recovery_activation_releases_prepared_usage_during_suspension() {
+    use parrot_runtime::task_scheduler::TaskConcurrencyBudget;
+
+    let first = Harness::new();
+    let root = first.root("owner").await;
+    let held: Vec<_> = (0..3).map(|_| Gate::new()).collect();
+    for (name, gate) in ["a", "b", "c"].into_iter().zip(&held) {
+        first.provider.script(
+            name,
+            [Reply::held("answer", gate), Reply::held("answer", gate)],
+        );
+    }
+    set(&root, vec![task("a"), task("b"), task("c")]).await;
+    for gate in &held {
+        gate.entered().await;
+    }
+    freeze(&first, &root).await;
+    let budget = TaskConcurrencyBudget::new(1);
+    let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+    *second.factory.concurrency.lock().unwrap() = Some(budget.clone());
+    let restored = second.reopen_root(root.identity().clone()).await;
+    let scheduler = restored.get_service::<Scheduler>().unwrap();
+    scheduler.prepare_recovery().await.unwrap();
+    *second.factory.graph_faults.owner.lock().unwrap() = "owner".into();
+    second
+        .factory
+        .graph_faults
+        .fail_before
+        .store(true, Ordering::SeqCst);
+    let failure = bounded(scheduler.activate_executions().join())
+        .await
+        .unwrap_err();
+    assert_eq!(failure.code(), "io");
+    freeze(&second, &restored).await;
+
+    let third = Harness::new();
+    *third.factory.concurrency.lock().unwrap() = Some(budget);
+    let fresh = third.root("fresh-owner").await;
+    let available: Vec<_> = (0..2).map(|_| Gate::new()).collect();
+    for (name, gate) in ["new-a", "new-b"].into_iter().zip(&available) {
+        third.provider.script(name, [Reply::held("answer", gate)]);
+    }
+    set(&fresh, vec![task("new-a"), task("new-b")]).await;
+    for gate in &available {
+        gate.entered().await;
+    }
+    for gate in &available {
+        gate.open();
+    }
+    complete(&fresh).await;
+    third.close().await;
+}
+
+#[tokio::test]
 async fn suspended_stop_record_preserves_notice_without_poisoning_close_and_replays_on_reopen() {
     let first = Harness::new();
     let root = first.root("owner").await;

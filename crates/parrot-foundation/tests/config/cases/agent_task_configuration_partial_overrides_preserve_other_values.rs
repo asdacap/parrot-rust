@@ -24,6 +24,7 @@ fn source_assertions() {
     ] {
         let context = Context::new();
         let tasks = context.configured(yaml).unwrap().runtime.agent_tasks;
+        assert_eq!(tasks.extra_concurrent_tasks, 2);
         assert_eq!(tasks.maximum_attempts, attempts);
         assert_eq!(tasks.maximum_response_repairs, repairs);
         assert_eq!(tasks.fork_history_mode, mode);
