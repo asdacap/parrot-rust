@@ -237,6 +237,50 @@ async fn many_agent_text_flood_keeps_draft_and_escape_responsive_with_bounded_dr
 }
 
 #[tokio::test]
+async fn escape_dismisses_slash_completion_before_interrupting() {
+    for busy in [false, true] {
+        let mut rpc = Fixture::start().await;
+        let mut terminal = TerminalFixture::new();
+        let cli = rpc.cli(terminal.take(), "", None);
+        let stop = rpc.stopping.clone();
+        let result = fixture::run_flow(cli, stop.clone(), terminal.end_input(), async {
+            terminal.output_contains("❯ ").await;
+            if busy {
+                terminal.input.type_text("first prompt\r");
+                rpc.wait(|state| state.sent.len() == 1).await;
+            }
+            terminal.input.type_text("/m");
+            terminal
+                .output_contains("Switch the mode for this session")
+                .await;
+            let dismissed = terminal.output.text().len();
+            terminal.input.type_text("\x1b");
+            wait_until(|| terminal.output.text()[dismissed..].contains("❯ /m")).await;
+            assert!(rpc.state.lock().unwrap().interrupted.is_empty());
+            assert!(!terminal.output.text()[dismissed..].contains("Switch the mode"));
+
+            let redrawn = terminal.output.text().len();
+            terminal.columns.store(81, Ordering::Release);
+            wait_until(|| terminal.output.text()[redrawn..].contains("❯ /m")).await;
+            assert!(!terminal.output.text()[redrawn..].contains("Switch the mode"));
+
+            if busy {
+                terminal.input.type_text("\x1b");
+                rpc.wait(|state| state.interrupted.len() == 1).await;
+            }
+            terminal.input.type_text("o");
+            wait_until(|| terminal.output.text()[redrawn..].contains("Switch the mode")).await;
+            terminal.input.type_text("\x01\x0b");
+            terminal.input.end();
+        })
+        .await;
+        assert_eq!(result.unwrap(), 0);
+        assert!(terminal.restored.load(Ordering::Acquire));
+        rpc.close().await;
+    }
+}
+
+#[tokio::test]
 async fn history_up_recalls_last_prompt_and_down_discards_recall() {
     let mut rpc = Fixture::start().await;
     let mut terminal = TerminalFixture::new();

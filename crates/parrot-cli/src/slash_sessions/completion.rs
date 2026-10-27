@@ -17,6 +17,7 @@ pub struct SlashCommandCompletion {
     indices: Vec<usize>,
     commands: Vec<CommandDescription>,
     selected: usize,
+    dismissed: Option<String>,
 }
 
 impl SlashCommandCompletion {
@@ -32,7 +33,18 @@ impl SlashCommandCompletion {
         self.selected
     }
 
+    pub fn dismiss(&mut self, entered: &str) {
+        self.dismissed = Some(entered.to_owned());
+        self.indices.clear();
+        self.commands.clear();
+        self.selected = 0;
+    }
+
     pub fn refresh(&mut self, entered: &str, registry: &SlashCommandRegistry) {
+        if self.dismissed.as_deref() == Some(entered) {
+            return;
+        }
+        self.dismissed = None;
         let selected = self.indices.get(self.selected).copied();
         self.indices = if entered.contains([' ', '\t', '\r', '\n']) {
             Vec::new()
