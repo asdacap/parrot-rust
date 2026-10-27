@@ -621,6 +621,33 @@ async fn summary_request_uses_actual_templates_profiles_model_and_retained_histo
 }
 
 #[tokio::test]
+async fn progress_counts_one_summary_request_for_many_history_groups() {
+    let mut fixture = Fixture::new(1000, vec![vec![done("summary")]]);
+    let mut history = vec![Message::user("old input"); 37];
+    history.push(Message::user("tail"));
+    fixture
+        .compact(&compactor(500), &history)
+        .await
+        .unwrap()
+        .unwrap();
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].messages.len(), 38);
+    assert_eq!(
+        fixture
+            .state
+            .progress
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|progress| (progress.completed_groups, progress.total_groups))
+            .collect::<Vec<_>>(),
+        [(0, 1), (1, 1)]
+    );
+    fixture.close().await;
+}
+
+#[tokio::test]
 async fn chunk_budget_folds_in_order_carrying_only_previous_summary() {
     let compactor = compactor(100);
     let mut fixture = Fixture::new(
@@ -652,7 +679,7 @@ async fn chunk_budget_folds_in_order_carrying_only_previous_summary() {
             .iter()
             .map(|progress| (progress.completed_groups, progress.total_groups))
             .collect::<Vec<_>>(),
-        [(0, 3), (1, 3), (2, 3), (3, 3)]
+        [(0, 1), (1, 1), (1, 2), (2, 2), (2, 3), (3, 3)]
     );
     let requests = fixture.requests();
     assert_eq!(requests.len(), 3);
@@ -712,7 +739,18 @@ async fn empty_summary_halves_odd_group_count_without_losing_or_reordering_any_g
             .iter()
             .map(|progress| (progress.completed_groups, progress.total_groups))
             .collect::<Vec<_>>(),
-        [(0, 3), (1, 3), (2, 3), (3, 3)]
+        [
+            (0, 1),
+            (1, 1),
+            (1, 2),
+            (2, 2),
+            (2, 3),
+            (3, 3),
+            (3, 4),
+            (4, 4),
+            (4, 5),
+            (5, 5)
+        ]
     );
     let requests = fixture.requests();
     assert_eq!(
@@ -1016,6 +1054,17 @@ async fn stream_failure_is_preserved_and_disposal_failure_is_not_silenced() {
         .unwrap_err();
     assert!(
         matches!(error, CompactionError::Provider(Error::Io(ref text)) if text == "stream failure")
+    );
+    assert_eq!(
+        fixture
+            .state
+            .progress
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|progress| (progress.completed_groups, progress.total_groups))
+            .collect::<Vec<_>>(),
+        [(0, 1)]
     );
     assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 1);
     fixture.close().await;

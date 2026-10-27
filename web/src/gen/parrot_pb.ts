@@ -2583,7 +2583,8 @@ export type CompactionProgressEvent = Message<"parrot.v1.CompactionProgressEvent
   phase: CompactionPhase;
 
   /**
-   * Conversation-group counts apply only to the summarizing phase.
+   * Summary-request counts apply only to the summarizing phase, including empty attempts.
+   * The total grows as summary-dependent batches and subdivisions are discovered.
    *
    * @generated from field: uint64 completed_groups = 2;
    */

@@ -196,10 +196,8 @@ impl Compactor {
             observer,
             cancellation,
             maximum_output_tokens: plan.summary_output_tokens,
-            total_groups: pending.len(),
         };
-        let mut completed_groups = 0;
-        runner.report_progress(completed_groups).await?;
+        let mut progress = SummaryProgress::default();
         let mut summary = String::new();
         let mut chunk = Vec::new();
         let mut chunk_tokens = 0;
@@ -212,9 +210,7 @@ impl Compactor {
                     &messages,
                 )? > plan.input_budget
             {
-                summary = runner
-                    .fold_groups(&summary, &chunk, &mut completed_groups)
-                    .await?;
+                summary = runner.fold_groups(&summary, &chunk, &mut progress).await?;
                 chunk.clear();
                 chunk_tokens = 0;
             }
@@ -246,9 +242,7 @@ impl Compactor {
             chunk.push(messages);
         }
         if !chunk.is_empty() {
-            summary = runner
-                .fold_groups(&summary, &chunk, &mut completed_groups)
-                .await?;
+            summary = runner.fold_groups(&summary, &chunk, &mut progress).await?;
         }
         let summary = Message::system(format!("{}{summary}", self.summary_prefix));
         let retained: Vec<_> = input.groups[plan.keep_group_from..]
@@ -316,6 +310,12 @@ enum SummaryOutcome {
     NoSummary(String),
 }
 
+#[derive(Default)]
+struct SummaryProgress {
+    completed_groups: usize,
+    total_groups: usize,
+}
+
 struct SummaryRunner<'a> {
     compactor: &'a Compactor,
     selected: &'a ProviderModel,
@@ -323,10 +323,9 @@ struct SummaryRunner<'a> {
     observer: &'a dyn CompactionObserver,
     cancellation: &'a dyn Cancellation,
     maximum_output_tokens: i32,
-    total_groups: usize,
 }
 impl SummaryRunner<'_> {
-    async fn report_progress(&self, completed_groups: usize) -> Result<(), CompactionError> {
+    async fn report_progress(&self, progress: &SummaryProgress) -> Result<(), CompactionError> {
         self.cancellation
             .check()
             .map_err(|_| CompactionError::Cancelled)?;
@@ -334,8 +333,8 @@ impl SummaryRunner<'_> {
             .observe_progress(
                 CompactionProgressEvent {
                     phase: CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
-                    completed_groups: completed_groups as u64,
-                    total_groups: self.total_groups as u64,
+                    completed_groups: progress.completed_groups as u64,
+                    total_groups: progress.total_groups as u64,
                     ..CompactionProgressEvent::new()
                 },
                 self.cancellation,
@@ -350,16 +349,17 @@ impl SummaryRunner<'_> {
         &'a self,
         preceding_summary: &'a str,
         pending: &'a [Vec<Message>],
-        completed_groups: &'a mut usize,
+        progress: &'a mut SummaryProgress,
     ) -> BoxFuture<'a, Result<String, CompactionError>> {
         Box::pin(async move {
             let messages: Vec<_> = pending.iter().flatten().cloned().collect();
-            match self.summarise(preceding_summary, &messages).await? {
-                SummaryOutcome::Summary(summary) => {
-                    *completed_groups += pending.len();
-                    self.report_progress(*completed_groups).await?;
-                    return Ok(summary);
-                }
+            progress.total_groups += 1;
+            self.report_progress(progress).await?;
+            let outcome = self.summarise(preceding_summary, &messages).await?;
+            progress.completed_groups += 1;
+            self.report_progress(progress).await?;
+            match outcome {
+                SummaryOutcome::Summary(summary) => return Ok(summary),
                 SummaryOutcome::NoSummary(reason) if pending.len() == 1 => {
                     return Err(CompactionError::InvalidOperation(reason));
                 }
@@ -367,10 +367,9 @@ impl SummaryRunner<'_> {
             }
             let half = pending.len().div_ceil(2);
             let first = self
-                .fold_groups(preceding_summary, &pending[..half], completed_groups)
+                .fold_groups(preceding_summary, &pending[..half], progress)
                 .await?;
-            self.fold_groups(&first, &pending[half..], completed_groups)
-                .await
+            self.fold_groups(&first, &pending[half..], progress).await
         })
     }
 

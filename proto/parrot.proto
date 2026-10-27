@@ -721,7 +721,8 @@ enum CompactionPhase {
 
 message CompactionProgressEvent {
   CompactionPhase phase = 1;
-  // Conversation-group counts apply only to the summarizing phase.
+  // Summary-request counts apply only to the summarizing phase, including empty attempts.
+  // The total grows as summary-dependent batches and subdivisions are discovered.
   uint64 completed_groups = 2;
   uint64 total_groups = 3;
 }
