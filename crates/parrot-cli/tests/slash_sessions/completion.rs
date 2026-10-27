@@ -74,6 +74,30 @@ fn completion_filters_wraps_preserves_selection_and_accepts_command_token() {
 }
 
 #[test]
+fn dismissed_completion_stays_closed_until_the_text_changes() {
+    let registry =
+        SlashCommandRegistry::new(vec![command("/mode", "mode"), command("/model", "model")]);
+    let mut completion = SlashCommandCompletion::new();
+    completion.refresh("/m", &registry);
+    completion.select_next();
+    completion.dismiss("/m");
+    assert!(completion.commands().is_empty());
+    assert!(completion.accept("/m").is_none());
+
+    completion.refresh("/m", &registry);
+    completion.select_previous();
+    completion.select_next();
+    assert!(completion.commands().is_empty());
+    assert_eq!(completion.selected(), 0);
+
+    completion.refresh("/mo", &registry);
+    assert_eq!(completion.commands().len(), 2);
+    assert_eq!(completion.accept("/mo").as_deref(), Some("/mode"));
+    completion.refresh("/m", &registry);
+    assert_eq!(completion.commands().len(), 2);
+}
+
+#[test]
 fn completion_retains_command_object_index_even_for_duplicate_spellings() {
     let registry = SlashCommandRegistry::new(vec![
         command("/mode", "first object"),

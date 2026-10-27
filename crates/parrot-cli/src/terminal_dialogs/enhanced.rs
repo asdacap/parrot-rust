@@ -624,6 +624,11 @@ impl EnhancedInput {
                     TerminalKey::new(TerminalKeyKind::Submit)
                 }
             };
+            if key.kind == TerminalKeyKind::Escape && !slash.commands().is_empty() {
+                slash.dismiss(&editor.prompt().text);
+                draw_prompt(&shared, &mut slash, &mut skills, &editor, &commands)?;
+                continue;
+            }
             if matches!(
                 key.kind,
                 TerminalKeyKind::Escape | TerminalKeyKind::Interrupt
