@@ -130,6 +130,13 @@ impl EnhancedSessionPresenter {
     }
 
     pub fn observe(&mut self, published: &wire::Event) -> PresenterResult<PresentationUpdate> {
+        let mut update = self.apply_event(published)?;
+        update.live = self.snapshot()?;
+        Ok(update)
+    }
+
+    /// Applies an event and returns its durable and interaction effects without materializing live items.
+    pub fn apply_event(&mut self, published: &wire::Event) -> PresenterResult<PresentationUpdate> {
         let (replaying, replay_completed) = {
             let mut replay = self
                 .replay
@@ -164,7 +171,6 @@ impl EnhancedSessionPresenter {
             Some(Payload::ProviderCallUsage(usage)) => {
                 self.rates
                     .observe(self.elapsed, usage.input_tokens, usage.output_tokens);
-                update.live = self.snapshot()?;
                 return Ok(update);
             }
             Some(Payload::SessionUsageSnapshot(snapshot)) => {
@@ -177,7 +183,6 @@ impl EnhancedSessionPresenter {
                     );
                 }
                 self.usage.observe(snapshot);
-                update.live = self.snapshot()?;
                 return Ok(update);
             }
             _ => {}
@@ -195,7 +200,6 @@ impl EnhancedSessionPresenter {
                         &mut self.main_activity,
                     );
                 }
-                update.live = self.snapshot()?;
                 return Ok(update);
             }
             StreamObservation::Forward => {}
@@ -213,13 +217,11 @@ impl EnhancedSessionPresenter {
                         &mut self.main_activity,
                     );
                 }
-                update.live = self.snapshot()?;
                 return Ok(update);
             }
             StreamObservation::Forward => {}
         }
         if root_lifecycle(published) {
-            update.live = self.snapshot()?;
             return Ok(update);
         }
         self.hierarchy.observe(published);
@@ -235,7 +237,7 @@ impl EnhancedSessionPresenter {
                 self.plan = Some(plan.clone());
             }
         }
-        let turn = self.turn.observe(published, replaying)?;
+        let turn = self.turn.apply_event(published, replaying)?;
         update.commits.extend(turn.commits);
         update.errors.extend(turn.errors);
         update.completion = turn.completion;
@@ -256,7 +258,6 @@ impl EnhancedSessionPresenter {
                 update.complete_plan = Some(plan);
             }
         }
-        update.live = self.snapshot()?;
         Ok(update)
     }
 
@@ -301,6 +302,13 @@ impl EnhancedSessionPresenter {
     }
 
     pub fn tick(&mut self, elapsed: Duration) -> PresenterResult<PresentationUpdate> {
+        let mut update = self.advance_time(elapsed)?;
+        update.live = self.snapshot()?;
+        Ok(update)
+    }
+
+    /// Advances animation and delayed commits without materializing live items.
+    pub fn advance_time(&mut self, elapsed: Duration) -> PresenterResult<PresentationUpdate> {
         self.elapsed = elapsed;
         self.frame = (elapsed.as_millis() / 80) as usize;
         self.turn.set_frame(self.frame);
@@ -311,7 +319,6 @@ impl EnhancedSessionPresenter {
             &mut update,
             &mut self.main_activity,
         );
-        update.live = self.snapshot()?;
         Ok(update)
     }
 

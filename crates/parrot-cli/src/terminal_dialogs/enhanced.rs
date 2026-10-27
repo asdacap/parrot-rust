@@ -38,7 +38,8 @@ use crate::{
     },
     slash_settings::{AuthServices, SettingsServices},
     terminal_frames::{
-        CancellationToken, LiveBufferItem, SPINNER_INTERVAL, ScrollbackItem, TerminalFrameRenderer,
+        CancellationToken, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
+        SPINNER_INTERVAL, ScrollbackItem, TerminalFrameRenderer,
     },
     terminal_input::{IncrementalEditor, PromptState, TerminalKey, TerminalKeyKind},
 };
@@ -61,6 +62,8 @@ use super::{
 #[path = "enhanced_tests.rs"]
 mod tests;
 
+const PUBLISH_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);
+const EVENT_BATCH_SIZE: usize = 32;
 const SUBMIT_DELAY: Duration = Duration::from_millis(100);
 const RECONCILIATION_INTERVAL: Duration = Duration::from_millis(250);
 const PROMPT: &str = "❯ ";
@@ -280,6 +283,7 @@ impl EnhancedCli {
                 prepared_skills: None,
             }),
             presenter: Mutex::new(presenter),
+            live_dirty: AtomicBool::new(false),
             presenter_created: Mutex::new(Instant::now()),
             registry,
             frame: frame.clone(),
@@ -522,6 +526,7 @@ impl EnhancedInput {
                 if pending.generation() != snapshot.generation {
                     continue;
                 }
+                shared.publish()?;
                 match pending {
                     Interaction::Question {
                         session_id,
@@ -930,6 +935,36 @@ impl Drop for KeyboardLease {
     }
 }
 
+// A publication owns this cache; the next spinner tick must reevaluate timed items.
+struct CachedLiveValue {
+    item: Arc<dyn LiveBufferItem>,
+    rendered: Mutex<Option<(LiveBufferRenderContext, LiveBufferRender)>>,
+}
+impl CachedLiveValue {
+    fn new(item: Arc<dyn LiveBufferItem>) -> Self {
+        Self {
+            item,
+            rendered: Mutex::new(None),
+        }
+    }
+}
+impl LiveBufferItem for CachedLiveValue {
+    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+        let mut cached = self
+            .rendered
+            .lock()
+            .map_err(|_| io::Error::other("terminal live render cache lock poisoned"))?;
+        if let Some((previous, rendered)) = &*cached {
+            if *previous == context {
+                return Ok(rendered.clone());
+            }
+        }
+        let rendered = self.item.render(context)?;
+        *cached = Some((context, rendered.clone()));
+        Ok(rendered)
+    }
+}
+
 struct FrameState {
     body: Vec<Arc<dyn LiveBufferItem>>,
     pending: VecDeque<Arc<dyn ScrollbackItem>>,
@@ -987,13 +1022,28 @@ impl FrameView {
             .state
             .lock()
             .map_err(|_| io::Error::other("terminal frame lock poisoned"))?;
-        state.body = update.live;
+        state.body = update
+            .live
+            .into_iter()
+            .map(|item| Arc::new(CachedLiveValue::new(item)) as Arc<dyn LiveBufferItem>)
+            .collect();
         state.pending.extend(update.commits);
         self.flush_commits(&mut state)?;
         for error in update.errors {
             writeln!(self.error.clone(), "{error}")?;
         }
         self.draw(&state)
+    }
+    fn enqueue(&self, update: PresentationUpdate) -> io::Result<()> {
+        self.state
+            .lock()
+            .map_err(|_| io::Error::other("terminal frame lock poisoned"))?
+            .pending
+            .extend(update.commits);
+        for error in update.errors {
+            writeln!(self.error.clone(), "{error}")?;
+        }
+        Ok(())
     }
     fn clear(&self) -> io::Result<()> {
         let mut state = self
@@ -1060,6 +1110,7 @@ struct EnhancedSession {
     binding_stop: Mutex<Arc<Signal>>,
     state: Mutex<SessionState>,
     presenter: Mutex<EnhancedSessionPresenter>,
+    live_dirty: AtomicBool,
     presenter_created: Mutex<Instant>,
     registry: Arc<ToolPresenterRegistry>,
     frame: Arc<FrameView>,
@@ -1119,6 +1170,41 @@ impl EnhancedSession {
         self.apply(update)
     }
     fn apply(&self, update: PresentationUpdate) -> Result<(), EnhancedFailure> {
+        self.apply_effects(&update);
+        self.frame.apply(update)?;
+        self.live_dirty.store(false, Ordering::Release);
+        Ok(())
+    }
+    fn defer_presenter(
+        &self,
+        action: impl FnOnce(
+            &mut EnhancedSessionPresenter,
+        ) -> crate::presenters::PresenterResult<PresentationUpdate>,
+    ) -> Result<(), EnhancedFailure> {
+        let update = {
+            let mut presenter = self
+                .presenter
+                .lock()
+                .map_err(|_| Status::internal("presenter lock poisoned"))?;
+            action(&mut presenter).map_err(presenter_error)?
+        };
+        self.apply_effects(&update);
+        self.frame.enqueue(update)?;
+        self.live_dirty.store(true, Ordering::Release);
+        Ok(())
+    }
+    fn publish(&self) -> Result<(), EnhancedFailure> {
+        if self.live_dirty.load(Ordering::Acquire) {
+            self.apply_presenter(|presenter| {
+                Ok(PresentationUpdate {
+                    live: presenter.snapshot()?,
+                    ..Default::default()
+                })
+            })?;
+        }
+        Ok(())
+    }
+    fn apply_effects(&self, update: &PresentationUpdate) {
         if update.started_main_turn {
             self.busy.store(true, Ordering::Release);
         }
@@ -1145,8 +1231,6 @@ impl EnhancedSession {
                 });
             self.changed.notify_one();
         }
-        self.frame.apply(update)?;
-        Ok(())
     }
     fn interrupt(&self) -> bool {
         if !self.busy.load(Ordering::Acquire)
@@ -1180,6 +1264,7 @@ impl EnhancedSession {
         }
     }
     async fn render_loop(&self) -> Result<(), EnhancedFailure> {
+        let mut processed = 0;
         loop {
             let mut binding = self.binding.lock().await;
             let stopping = binding.stop.clone();
@@ -1203,7 +1288,12 @@ impl EnhancedSession {
                         continue;
                     }
                     self.observe_before_render(&event, &snapshot, replaying);
-                    self.apply_presenter(|presenter| presenter.observe(&event))?;
+                    self.defer_presenter(|presenter| presenter.apply_event(&event))?;
+                    processed += 1;
+                    if processed == EVENT_BATCH_SIZE {
+                        processed = 0;
+                        tokio::task::yield_now().await;
+                    }
                 }
                 Some(Err(status))
                     if status.code() == Code::Cancelled && self.lifetime.is_cancelled() =>
@@ -1218,11 +1308,15 @@ impl EnhancedSession {
     }
     async fn tick_loop(&self) -> Result<(), EnhancedFailure> {
         let mut interval = tokio::time::interval(SPINNER_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut publication = tokio::time::interval(PUBLISH_INTERVAL);
+        publication.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut columns = None;
         loop {
             tokio::select! {
                 biased;
                 () = self.lifetime.cancelled() => return Ok(()),
+                _ = publication.tick() => self.publish()?,
                 _ = interval.tick() => {
                     let current_columns = (self.frame.dimensions)().0.max(1) as usize;
                     if columns != Some(current_columns) {
@@ -1230,7 +1324,7 @@ impl EnhancedSession {
                         columns = Some(current_columns);
                     }
                     let elapsed = self.presenter_created.lock().expect("presenter clock poisoned").elapsed();
-                    self.apply_presenter(|presenter| presenter.tick(elapsed))?;
+                    self.defer_presenter(|presenter| presenter.advance_time(elapsed))?;
                 }
             }
         }

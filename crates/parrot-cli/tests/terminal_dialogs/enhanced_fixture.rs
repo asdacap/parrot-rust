@@ -702,14 +702,18 @@ impl OAuthClient for UnusedOAuth {
 }
 
 #[derive(Clone, Default)]
-pub struct Capture(pub Arc<Mutex<Vec<u8>>>);
+pub struct Capture(pub Arc<Mutex<Vec<u8>>>, Arc<AtomicUsize>);
 impl Capture {
     pub fn text(&self) -> String {
         String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
     }
+    pub fn write_count(&self) -> usize {
+        self.1.load(Ordering::Acquire)
+    }
 }
 impl Write for Capture {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.1.fetch_add(1, Ordering::Release);
         self.0.lock().unwrap().extend_from_slice(bytes);
         Ok(bytes.len())
     }

@@ -7,7 +7,10 @@ mod fixture;
 use fixture::{Fixture, TerminalFixture, event, question, wait_until};
 use parrot_domain::{contracts::async_ops::Cancellation, protocol::messages::parrot as wire};
 use std::{
-    sync::{Arc, atomic::Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tonic::{Code, Status};
@@ -96,6 +99,141 @@ async fn busy_input_and_escape_or_control_c_preserve_draft_and_interrupt_once() 
         assert!(terminal.restored.load(Ordering::Acquire));
         rpc.close().await;
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn many_agent_text_flood_keeps_draft_and_escape_responsive_with_bounded_draws() {
+    const AGENTS: usize = 16;
+    let mut rpc = Fixture::start().await;
+    let mut terminal = TerminalFixture::new();
+    let cli = rpc.cli(terminal.take(), "", None);
+    let stop = rpc.stopping.clone();
+    let result = fixture::run_flow(cli, stop.clone(), terminal.end_input(), async {
+        terminal.output_contains("❯ ").await;
+        terminal.input.type_text("start workers\r");
+        rpc.wait(|state| state.sent.len() == 1).await;
+        rpc.publish(
+            "session-1",
+            event(
+                "root-started",
+                wire::event::Payload::TurnStarted(wire::TurnStarted::new()),
+            ),
+        )
+        .await;
+        for agent in 0..AGENTS {
+            let owner = format!("worker-{agent}");
+            let mut started = event(
+                &format!("{owner}-started"),
+                wire::event::Payload::AgentStarted(wire::AgentStarted {
+                    name: owner.clone(),
+                    parent_agent_session_id: "root".into(),
+                    ..Default::default()
+                }),
+            );
+            started.agent_session_id = owner.clone();
+            rpc.publish("session-1", started).await;
+            let mut turn = event(
+                &format!("{owner}-turn"),
+                wire::event::Payload::TurnStarted(wire::TurnStarted::new()),
+            );
+            turn.agent_session_id = owner;
+            rpc.publish("session-1", turn).await;
+        }
+        terminal.output_contains("[worker-15]").await;
+        let published = AtomicUsize::new(0);
+        let finished = AtomicBool::new(false);
+        let started = Instant::now();
+        let writes_before = terminal.output.write_count();
+        let flooding = async {
+            let mut sequence = 0;
+            while !finished.load(Ordering::Acquire) {
+                let mut chunk = event(
+                    &format!("flood-{sequence}"),
+                    wire::event::Payload::TextChunk(wire::TextChunk {
+                        fragment: format!("{sequence:x} "),
+                        ..Default::default()
+                    }),
+                );
+                chunk.agent_session_id = format!("worker-{}", sequence % AGENTS);
+                rpc.publish("session-1", chunk).await;
+                sequence += 1;
+                published.store(sequence, Ordering::Release);
+                if sequence % AGENTS == 0 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }
+        };
+        let interacting = async {
+            wait_until(|| published.load(Ordering::Acquire) >= 512).await;
+            terminal.input.type_text("draft during flood");
+            terminal.output_contains("❯ draft during flood").await;
+            let after_draft = published.load(Ordering::Acquire);
+            terminal.input.type_text("\x1b");
+            rpc.wait(|state| state.interrupted.len() == 1).await;
+            assert_eq!(rpc.state.lock().unwrap().interrupted, ["session-1"]);
+            assert!(!stop.is_cancelled());
+            wait_until(|| published.load(Ordering::Acquire) > after_draft).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            finished.store(true, Ordering::Release);
+        };
+        tokio::join!(flooding, interacting);
+        for agent in 0..AGENTS {
+            let mut ended = event(
+                &format!("worker-{agent}-ended"),
+                wire::event::Payload::TurnEnded(wire::TurnEnded {
+                    finish_reason: "stop".into(),
+                    ..Default::default()
+                }),
+            );
+            ended.agent_session_id = format!("worker-{agent}");
+            rpc.publish("session-1", ended).await;
+        }
+        rpc.publish(
+            "session-1",
+            event(
+                "durable-result",
+                wire::event::Payload::TextChunk(wire::TextChunk {
+                    fragment: "Durable flood result".into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        rpc.publish(
+            "session-1",
+            event(
+                "root-completed",
+                wire::event::Payload::ModeTurnCompleted(wire::ModeTurnCompleted::new()),
+            ),
+        )
+        .await;
+        terminal.output_contains("Durable flood result").await;
+        let elapsed = started.elapsed();
+        let writes = terminal.output.write_count() - writes_before;
+        let write_budget = 64 + (elapsed.as_secs_f64() * 120.0).ceil() as usize;
+        assert!(
+            writes <= write_budget,
+            "{writes} terminal writes for {} chunks in {elapsed:?}; budget {write_budget}",
+            published.load(Ordering::Acquire)
+        );
+        terminal.input.type_text("\r");
+        rpc.wait(|state| state.sent.len() == 2).await;
+        assert_eq!(rpc.state.lock().unwrap().sent[1].text, "draft during flood");
+        terminal.input.end();
+    })
+    .await;
+    assert_eq!(result.unwrap(), 0);
+    assert!(terminal.restored.load(Ordering::Acquire));
+    assert!(terminal.output.text().contains("Durable flood result"));
+    rpc.wait(|state| {
+        state
+            .streams
+            .values()
+            .flatten()
+            .all(|sender| sender.is_closed())
+    })
+    .await;
+    rpc.close().await;
 }
 
 #[tokio::test]

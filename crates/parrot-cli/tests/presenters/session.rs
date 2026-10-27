@@ -16,6 +16,29 @@ fn configured(columns: usize) -> EnhancedSessionPresenter {
     presenter
 }
 #[test]
+fn deferred_events_preserve_text_and_completion_without_live_materialization() {
+    let mut presenter = configured(2048);
+    let started = presenter.apply_event(&start("root")).unwrap();
+    assert!(started.started_main_turn);
+    assert!(started.live.is_empty());
+    for _ in 0..1024 {
+        let update = presenter.apply_event(&text("root", "x")).unwrap();
+        assert!(update.live.is_empty());
+        assert!(update.commits.is_empty());
+    }
+    let tick = presenter.advance_time(Duration::from_millis(80)).unwrap();
+    assert!(tick.live.is_empty());
+    assert!(tick.commits.is_empty());
+    assert!(live(&presenter.snapshot().unwrap(), 2048).contains(&"x".repeat(1024)));
+    let finished = presenter.apply_event(&completed("root")).unwrap();
+    assert!(finished.live.is_empty());
+    assert!(finished.finished_main_turn);
+    assert_eq!(finished.completion, Some(true));
+    assert_eq!(commits(&finished.commits, 2048).matches('x').count(), 1024);
+    assert!(presenter.finish().unwrap().commits.is_empty());
+}
+
+#[test]
 fn resize_preserves_pending_live_text_and_zero_width_clamps_like_one() {
     let mut outputs = Vec::new();
     for columns in [8, 0, 1] {

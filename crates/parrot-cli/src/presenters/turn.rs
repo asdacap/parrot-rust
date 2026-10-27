@@ -48,6 +48,16 @@ impl EnhancedTurnRenderer {
         published: &Event,
         replaying: bool,
     ) -> PresenterResult<TurnPresentation> {
+        let mut update = self.apply_event(published, replaying)?;
+        update.live = self.snapshot();
+        Ok(update)
+    }
+
+    pub(crate) fn apply_event(
+        &mut self,
+        published: &Event,
+        replaying: bool,
+    ) -> PresenterResult<TurnPresentation> {
         self.hierarchy.observe(published);
         let mut update = if response_boundary(published) {
             self.flush_response(response_owner(published))?
@@ -123,7 +133,6 @@ impl EnhancedTurnRenderer {
             }
             _ => {}
         }
-        update.live = self.snapshot();
         Ok(update)
     }
 

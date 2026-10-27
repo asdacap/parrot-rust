@@ -174,6 +174,31 @@ impl ScrollbackItem for CommitItem {
 }
 
 #[test]
+fn deferred_commits_wait_for_publication_and_survive_clear() {
+    let (view, output, _) = frame_view(80, vec![prompt("> ", "draft", 0)]);
+    let first = CommitItem::new("deferred-first", false);
+    let second = CommitItem::new("deferred-second", false);
+    for item in [&first, &second] {
+        view.enqueue(PresentationUpdate {
+            commits: vec![item.clone()],
+            ..Default::default()
+        })
+        .unwrap();
+    }
+    assert!(output.text().is_empty());
+    assert_eq!(first.rendered.load(Ordering::SeqCst), 0);
+    assert_eq!(second.rendered.load(Ordering::SeqCst), 0);
+    view.replace_input(vec![prompt("> ", "responsive", 0)])
+        .unwrap();
+    assert!(output.text().contains("responsive"));
+    assert!(!output.text().contains("deferred-first"));
+    view.clear().unwrap();
+    assert_eq!(output.text().matches("deferred-first").count(), 1);
+    assert_eq!(output.text().matches("deferred-second").count(), 1);
+    assert!(view.state.lock().unwrap().pending.is_empty());
+}
+
+#[test]
 fn failed_commit_retains_same_arc_and_does_not_replay_successful_prefix() {
     let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
     let first = CommitItem::new("commit-first", false);
@@ -218,4 +243,86 @@ fn failed_commit_retains_same_arc_and_does_not_replay_successful_prefix() {
         );
     }
     assert_eq!(reads.load(Ordering::SeqCst), 0);
+}
+
+#[derive(Default)]
+struct CountedLiveValue {
+    rendered: AtomicUsize,
+    tick: AtomicUsize,
+}
+impl LiveBufferItem for CountedLiveValue {
+    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+        self.rendered.fetch_add(1, Ordering::SeqCst);
+        Ok(LiveBufferRender {
+            lines: vec![crate::terminal_frames::TerminalLine::new(
+                format!(
+                    "tick-{} width-{}",
+                    self.tick.load(Ordering::SeqCst),
+                    context.columns
+                ),
+                crate::terminal_frames::TerminalStyle::default(),
+            )],
+            caret: None,
+            retention: crate::terminal_frames::LiveBufferRetention::Fixed,
+        })
+    }
+}
+
+#[test]
+fn body_render_cache_survives_input_changes_and_commits_but_invalidates_on_resize() {
+    let (mut view, _, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
+    let columns = Arc::new(AtomicUsize::new(80));
+    let dimensions = columns.clone();
+    view.dimensions = Arc::new(move || (dimensions.load(Ordering::SeqCst) as isize, 30));
+    let body = Arc::new(CountedLiveValue::default());
+    view.apply(PresentationUpdate {
+        live: vec![body.clone()],
+        commits: vec![CommitItem::new("first", false)],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(body.rendered.load(Ordering::SeqCst), 1);
+    view.replace_input(vec![prompt("> ", "draft changed", 3)])
+        .unwrap();
+    view.commit(CommitItem::new("second", false)).unwrap();
+    assert_eq!(body.rendered.load(Ordering::SeqCst), 1);
+
+    columns.store(40, Ordering::SeqCst);
+    view.replace_input(vec![prompt("> ", "draft changed", 4)])
+        .unwrap();
+    assert_eq!(body.rendered.load(Ordering::SeqCst), 2);
+    view.replace_input(vec![prompt("> ", "draft changed", 5)])
+        .unwrap();
+    assert_eq!(body.rendered.load(Ordering::SeqCst), 2);
+    view.apply(PresentationUpdate {
+        live: vec![body.clone()],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(body.rendered.load(Ordering::SeqCst), 3);
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn fresh_body_publication_refreshes_time_dependent_item_even_with_the_same_arc() {
+    let (view, output, _) = frame_view(80, vec![prompt("> ", "draft", 0)]);
+    let body = Arc::new(CountedLiveValue::default());
+    view.apply(PresentationUpdate {
+        live: vec![body.clone()],
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(output.text().contains("tick-0"));
+
+    body.tick.store(1, Ordering::SeqCst);
+    view.replace_input(vec![prompt("> ", "typed", 0)]).unwrap();
+    assert_eq!(body.rendered.load(Ordering::SeqCst), 1);
+    assert!(!output.text().contains("tick-1"));
+    view.apply(PresentationUpdate {
+        live: vec![body.clone()],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(body.rendered.load(Ordering::SeqCst), 2);
+    assert!(output.text().contains("tick-1"));
 }
