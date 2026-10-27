@@ -101,6 +101,7 @@ pub struct SessionInitialization {
     pub root_agent_name: String,
     pub model: SessionModelSelection,
     pub mode: String,
+    pub extra_concurrent_tasks: Option<i32>,
     pub interactive_permissions: bool,
     pub resumed: bool,
 }
@@ -621,6 +622,24 @@ impl SessionResourceLease {
             .publish(&metadata)
             .map_err(SessionStoreError::failure)
     }
+    pub fn update_task_limit_metadata(&self, limit: i32) -> Result<(), SessionStoreError> {
+        if limit < 0 {
+            return Err(SessionStoreError::InvalidMetadata);
+        }
+        let _guard = self
+            .metadata_gate
+            .lock()
+            .expect("session metadata poisoned");
+        let mut metadata = self
+            .index
+            .find()
+            .map_err(SessionStoreError::failure)?
+            .ok_or(SessionStoreError::InvalidMetadata)?;
+        metadata.extra_concurrent_tasks = Some(limit);
+        self.index
+            .publish(&metadata)
+            .map_err(SessionStoreError::failure)
+    }
     async fn close_with_session(
         &self,
         session: Option<Box<dyn StoredUserSession>>,
@@ -929,6 +948,9 @@ impl SessionStore {
                     mode
                 }
                 .to_owned(),
+                extra_concurrent_tasks: existing
+                    .as_ref()
+                    .and_then(|metadata| metadata.extra_concurrent_tasks),
                 interactive_permissions: interactive,
                 resumed: existing.is_some(),
             };
@@ -994,6 +1016,7 @@ impl SessionStore {
                 model: Some(selected.canonical_model),
                 selector: Some(selected.selector),
                 mode: Some(constructed.mode()),
+                extra_concurrent_tasks: initialization.extra_concurrent_tasks,
                 last_opened_at: Some((self.clock)()),
                 created_at: existing
                     .as_ref()

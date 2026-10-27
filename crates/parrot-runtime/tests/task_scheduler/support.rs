@@ -470,6 +470,7 @@ pub struct Factory {
     pub router: Arc<Router>,
     pub task_diagnostics: Arc<TaskLog>,
     pub configuration: Mutex<Option<TaskConfiguration>>,
+    pub concurrency: Mutex<Option<Arc<TaskConcurrencyBudget>>>,
     pub graph_faults: Arc<GraphFaults>,
 }
 #[derive(Default)]
@@ -609,7 +610,14 @@ impl Factory {
                 configuration.fork_history_mode = ForkHistoryMode::Empty;
                 configuration
             });
+        let concurrency = self
+            .concurrency
+            .lock()
+            .unwrap()
+            .get_or_insert_with(|| TaskConcurrencyBudget::new(2))
+            .clone();
         let scheduler = TaskScheduler::new(SchedulerConfig {
+            concurrency,
             owner_identity: prepared.identity.clone(),
             state: GraphState::bind(
                 prepared.agent_state.clone(),

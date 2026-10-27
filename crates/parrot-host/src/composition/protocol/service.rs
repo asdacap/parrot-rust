@@ -395,7 +395,17 @@ impl ParrotService {
         } else {
             Some(self.models.resolve(&request.model)?)
         };
-        session.update(model, mode).await?;
+        if request
+            .extra_concurrent_tasks
+            .is_some_and(|limit| limit < 0)
+        {
+            return Err(invalid("extra concurrent tasks must be nonnegative"));
+        }
+        if model.is_some() || mode.is_some() || request.extra_concurrent_tasks.is_some() {
+            session
+                .update(model, mode, request.extra_concurrent_tasks)
+                .await?;
+        }
         Ok(map_session(session.as_ref(), false))
     }
     pub async fn set_goal(

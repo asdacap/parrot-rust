@@ -271,7 +271,8 @@ async fn mode_and_model_updates_resolve_before_dispatch_and_keep_other_session_u
         session.calls(),
         vec![Call::Update(
             Some("scripted/new".into()),
-            Some("plan".into())
+            Some("plan".into()),
+            None
         )]
     );
     assert_eq!(other.snapshot().model, "scripted/model");
@@ -289,6 +290,85 @@ async fn mode_and_model_updates_resolve_before_dispatch_and_keep_other_session_u
         RpcCode::InvalidArgument,
     );
     assert_eq!(f.factory.created.lock().unwrap().len(), 2);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn task_limit_query_reads_live_snapshot_without_update_or_metadata_write() {
+    let f = Fixture::new();
+    let session = f.create().await;
+    session.value.lock().unwrap().extra_concurrent_tasks = 6;
+    let path = session.resources.selected_root().path().join("meta.json");
+    let before = std::fs::read(&path).unwrap();
+    *session.failure.lock().unwrap() =
+        Some(RpcError::new(RpcCode::Internal, "update must not run"));
+    let queried = f
+        .service
+        .update_session(&wire::UpdateSessionRequest {
+            user_session_id: session.id(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(queried.extra_concurrent_tasks, 6);
+    assert!(session.calls().is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    *session.failure.lock().unwrap() = None;
+    f.close().await;
+}
+
+#[tokio::test]
+async fn task_limit_updates_validate_and_preserve_omitted_old_client_fields() {
+    let f = Fixture::new();
+    let session = f.create().await;
+    let other = f.create().await;
+    session.value.lock().unwrap().extra_concurrent_tasks = 3;
+    code(
+        f.service
+            .update_session(&wire::UpdateSessionRequest {
+                user_session_id: session.id(),
+                extra_concurrent_tasks: Some(-1),
+                ..Default::default()
+            })
+            .await,
+        RpcCode::InvalidArgument,
+    );
+    assert!(session.calls().is_empty());
+    assert_eq!(session.snapshot().extra_concurrent_tasks, 3);
+    let updated = f
+        .service
+        .update_session(&wire::UpdateSessionRequest {
+            user_session_id: session.id(),
+            model: "scripted/new".into(),
+            mode: "plan".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(updated.extra_concurrent_tasks, 3);
+    for limit in [0, i32::MAX] {
+        let updated = f
+            .service
+            .update_session(&wire::UpdateSessionRequest {
+                user_session_id: session.id(),
+                extra_concurrent_tasks: Some(limit),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(updated.extra_concurrent_tasks, limit);
+        assert_eq!(updated.model, "scripted/new");
+        assert_eq!(updated.mode, "plan");
+    }
+    assert_eq!(
+        session.calls(),
+        [
+            Call::Update(Some("scripted/new".into()), Some("plan".into()), None),
+            Call::Update(None, None, Some(0)),
+            Call::Update(None, None, Some(i32::MAX)),
+        ]
+    );
+    assert_eq!(other.snapshot().extra_concurrent_tasks, 0);
     f.close().await;
 }
 
@@ -2356,6 +2436,7 @@ async fn cancellation_and_session_failures_are_forwarded_without_fabricating_suc
         f.service
             .update_session(&wire::UpdateSessionRequest {
                 user_session_id: id.clone(),
+                extra_concurrent_tasks: Some(0),
                 ..Default::default()
             })
             .await

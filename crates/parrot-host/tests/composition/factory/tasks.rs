@@ -122,8 +122,10 @@ async fn root_with_controller(
         ));
     let mut configuration = TaskConfiguration::defaults(support::templates());
     configuration.fork_history_mode = mode;
+    let concurrency = h.factory.concurrency.lock().unwrap().clone().unwrap();
     let controller = Controller::new(SchedulerConfig {
         owner_identity: identity.clone(),
+        concurrency,
         state: agent_state.clone(),
         registry: Arc::downgrade(&h.registry),
         owner_session: task_session.clone(),

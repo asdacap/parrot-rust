@@ -528,6 +528,12 @@ impl Rpc {
         let resolver = Arc::new(Physical(root.clone()));
         let factory_resolver = resolver.clone();
         let factory_config = UserSessionFactoryConfig {
+            extra_concurrent_tasks: configuration
+                .lock()
+                .unwrap()
+                .runtime
+                .agent_tasks
+                .extra_concurrent_tasks,
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
                 ..Default::default()

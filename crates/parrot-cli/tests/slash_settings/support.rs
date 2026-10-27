@@ -293,6 +293,19 @@ impl SlashSession for Session {
     fn current_session(&self) -> &wire::UserSession {
         &self.current
     }
+    fn get_task_limit<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>> {
+        unused_session(cancellation)
+    }
+    fn set_task_limit<'a>(
+        &'a mut self,
+        _: i32,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<i32, SlashFailure>> {
+        unused_session(cancellation)
+    }
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

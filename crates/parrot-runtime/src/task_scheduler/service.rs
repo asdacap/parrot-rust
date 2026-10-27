@@ -1,6 +1,8 @@
 use super::{
     ForkHistoryMode, SchedulerConfig, TaskDiagnostic, TaskRunner, TaskSession,
-    apply_visibility_changes, has_same_definition, has_same_visibility,
+    apply_visibility_changes,
+    concurrency::{TaskAdmission, TaskConcurrencyOwner},
+    has_same_definition, has_same_visibility,
     notifier::{Notification, TaskNotifier},
     ports::{
         CapturedSelection, RunCancellation, TaskRunProgress, TaskWorkerLease, render, state_error,
@@ -66,6 +68,8 @@ struct Entry<S: RestrictableAccessSnapshot + 'static> {
     run: Option<Arc<Run>>,
     last_execution: Option<Operation<()>>,
     stopping_run: Option<Arc<Run>>,
+    reserved_admission: Option<TaskAdmission>,
+    recovered_stop_admission: Option<TaskAdmission>,
 }
 struct Run {
     cancellation: Arc<RunCancellation>,
@@ -75,6 +79,8 @@ struct Run {
 }
 struct State<S: RestrictableAccessSnapshot + 'static> {
     entries: Vec<Entry<S>>,
+    recovery_prepared: bool,
+    waiting_for_capacity: bool,
     executions: Vec<Operation<()>>,
     execution_failure: Option<ChildError>,
     revision: u64,
@@ -198,6 +204,9 @@ pub struct TaskScheduler<S: RestrictableAccessSnapshot + 'static, P: TaskArtifac
     gate: tokio::sync::Mutex<State<S>>,
     admission: Mutex<Admission>,
     worker_gates: Mutex<HashMap<String, Arc<WorkerGate>>>,
+    concurrency: Arc<TaskConcurrencyOwner>,
+    capacity_stop: Arc<Signal>,
+    capacity_observer: Mutex<Option<Operation<()>>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> TaskScheduler<S, P> {
     pub fn work_owner(self: &Arc<Self>) -> Arc<dyn OwnedWork<Error = ChildError>> {
@@ -345,6 +354,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 run: None,
                 last_execution: None,
                 stopping_run: None,
+                reserved_admission: None,
+                recovered_stop_admission: None,
             });
         }
         let fresh = entries.is_empty() && saved.tasks.notifications.is_empty();
@@ -353,7 +364,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             lifetime: config.lifetime.clone(),
             stop: stop.clone(),
         });
-        Ok(Arc::new(Self {
+        let capacity_changes = config.concurrency.subscribe();
+        let concurrency = config.concurrency.owner();
+        let scheduler = Arc::new(Self {
             runner: TaskRunner::new(config.configuration.clone(), config.parser.clone()),
             notifier: TaskNotifier::new(config.diagnostics.clone(), config.lifetime.clone()),
             config,
@@ -361,6 +374,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             lifetime,
             gate: tokio::sync::Mutex::new(State {
                 entries,
+                recovery_prepared: fresh,
+                waiting_for_capacity: false,
                 executions: Vec::new(),
                 execution_failure: None,
                 revision: saved.tasks.revision,
@@ -381,7 +396,112 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             }),
             admission: Mutex::new(Admission::default()),
             worker_gates: Mutex::new(HashMap::new()),
-        }))
+            concurrency,
+            capacity_stop: Arc::new(Signal::new()),
+            capacity_observer: Mutex::new(None),
+        });
+        scheduler.observe_capacity(capacity_changes);
+        Ok(scheduler)
+    }
+    /// Accounts saved running generations before any recovered graph admits pending work.
+    /// Repeated calls do not charge a generation again.
+    pub async fn prepare_recovery(&self) -> ChildResult<()> {
+        let mut state = self.gate.lock().await;
+        self.ensure_healthy(&state)?;
+        if state.recovery_prepared {
+            return Ok(());
+        }
+        let mut normalized = false;
+        for entry in &mut state.entries {
+            if let Some(stop) = &entry.pending_stop {
+                if entry.task.state == ExecutionStatus::Running {
+                    entry.task.state = ExecutionStatus::Pending;
+                    normalized = true;
+                }
+                if !stop.stopped {
+                    entry.recovered_stop_admission = self.concurrency.acquire(true);
+                }
+            } else if entry.task.state == ExecutionStatus::Running && entry.runner.is_some() {
+                entry.reserved_admission = self.concurrency.acquire(true);
+            }
+        }
+        if normalized {
+            self.save_graph(&mut state).await?;
+        }
+        state.recovery_prepared = true;
+        Ok(())
+    }
+    fn observe_capacity(self: &Arc<Self>, mut changes: tokio::sync::watch::Receiver<()>) {
+        let weak = Arc::downgrade(self);
+        let stop = self.capacity_stop.clone();
+        let lifetime = self.config.lifetime.clone();
+        let operation = Operation::start(async move {
+            loop {
+                tokio::select! {
+                    _ = stop.cancelled() => return Ok(()),
+                    _ = lifetime.cancelled() => return Ok(()),
+                    changed = changes.changed() => {
+                        if changed.is_err() { return Ok(()); }
+                    }
+                }
+                let Some(scheduler) = weak.upgrade() else {
+                    return Ok(());
+                };
+                let mut state = tokio::select! {
+                    _ = stop.cancelled() => return Ok(()),
+                    _ = lifetime.cancelled() => return Ok(()),
+                    state = scheduler.gate.lock() => state,
+                };
+                if stop.is_cancelled() || lifetime.is_cancelled() {
+                    return Ok(());
+                }
+                if state.settling
+                    || state.suspended
+                    || !state.execution_active
+                    || !state.waiting_for_capacity
+                {
+                    continue;
+                }
+                let result: ChildResult<()> = async {
+                    if scheduler.reconcile(&mut state).await? {
+                        scheduler.notify_completion(&mut state)?;
+                        scheduler.publish(&mut state).await?;
+                        scheduler.kick_stops(&mut state)?;
+                        scheduler.kick_notifications(&mut state)?;
+                    }
+                    Ok(())
+                }
+                .await;
+                if let Err(error) = &result {
+                    state.persistence_failure.get_or_insert(error.clone());
+                    scheduler.failure_diagnostic("capacity", error);
+                    return result;
+                }
+            }
+        });
+        *self
+            .capacity_observer
+            .lock()
+            .expect("task capacity observer poisoned") = Some(operation);
+    }
+    async fn release_reserved_admissions(&self) {
+        let mut state = self.gate.lock().await;
+        for entry in &mut state.entries {
+            entry.reserved_admission = None;
+            entry.recovered_stop_admission = None;
+        }
+    }
+    async fn join_capacity_observer(&self) -> ChildResult<()> {
+        let observer = self
+            .capacity_observer
+            .lock()
+            .expect("task capacity observer poisoned")
+            .take();
+        if let Some(observer) = observer {
+            observer.join().await
+        } else {
+            Ok(())
+        }
     }
     /// Admission and FIFO reservation are synchronous. Dropping the returned
     /// observer cannot abandon the update, publication, or any spawned execution.
@@ -507,6 +627,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         run: None,
                         last_execution: None,
                         stopping_run: None,
+                        reserved_admission: None,
+                        recovered_stop_admission: None,
                     });
                 }
             }
@@ -660,7 +782,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             state.execution_active = false;
             state.notifications_active = false;
             scheduler.notifier.suspend();
-            Ok(())
+            scheduler.capacity_stop.cancel();
+            drop(state);
+            scheduler.join_capacity_observer().await
         });
         admission.freeze = Some(operation.clone());
         operation
@@ -674,7 +798,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         }
         let scheduler = self.clone();
         let operation = Operation::start(async move {
-            freeze.join().await?;
+            let mut result = freeze.join().await;
             let (sessions, runs, executions) = {
                 let state = scheduler.gate.lock().await;
                 let sessions = state
@@ -691,7 +815,6 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     .collect::<Vec<_>>();
                 (sessions, runs, state.executions.clone())
             };
-            let mut result = Ok(());
             for session in sessions {
                 first(&mut result, session.suspend().await, |error| {
                     scheduler.failure_diagnostic("suspension", error)
@@ -706,6 +829,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     scheduler.failure_diagnostic("execution", error)
                 });
             }
+            scheduler.release_reserved_admissions().await;
             first(
                 &mut result,
                 scheduler.notifier.suspend().join().await,
@@ -732,7 +856,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             if let Some(previous) = previous {
                 let _ = previous.join().await;
             }
-            let mut result = Ok(());
+            scheduler.capacity_stop.cancel();
+            let mut result = scheduler.join_capacity_observer().await;
             let executions = {
                 let mut state = scheduler.gate.lock().await;
                 state.settling = true;
@@ -778,6 +903,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     scheduler.failure_diagnostic("execution", error)
                 });
             }
+            scheduler.release_reserved_admissions().await;
             scheduler.stop.cancel();
             first(
                 &mut result,
@@ -855,19 +981,22 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         }
         Ok(())
     }
-    async fn reconcile(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<()> {
+    async fn reconcile(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<bool> {
+        let mut changed = false;
         for index in 0..state.entries.len() {
             if state.entries[index].owns_attempt()
                 && effective(state, index) == ExecutionStatus::Canceled
             {
                 self.stop_run(state, index, "agent-task.stop-dependency-canceled")?;
                 state.entries[index].task.state = ExecutionStatus::Pending;
+                changed = true;
             }
         }
         self.ensure_healthy(state)?;
         if state.settling || state.suspended || !state.execution_active {
-            return Ok(());
+            return Ok(changed);
         }
+        state.waiting_for_capacity = false;
         for index in 0..state.entries.len() {
             if state.entries[index].pending_stop.is_some()
                 && state.entries[index].task.state == ExecutionStatus::Pending
@@ -878,29 +1007,35 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     })
                 })
             {
-                if state.entries[index].runner.is_none() {
-                    let task = state.entries[index].task.clone();
-                    let siblings = state
-                        .entries
-                        .iter()
-                        .enumerate()
-                        .filter(|(other, _)| *other != index)
-                        .map(|(_, entry)| entry.task.clone())
-                        .collect();
-                    let dependencies = task
-                        .dependencies
-                        .iter()
-                        .map(|name| {
-                            state.entries[find(state, name).expect("validated dependency")]
-                                .task
-                                .clone()
-                        })
-                        .collect();
-                    state.entries[index].runner =
-                        Some(self.runner.begin(task, siblings, dependencies)?);
+                if let Some(admission) = self.concurrency.acquire(false) {
+                    if state.entries[index].runner.is_none() {
+                        let task = state.entries[index].task.clone();
+                        let siblings = state
+                            .entries
+                            .iter()
+                            .enumerate()
+                            .filter(|(other, _)| *other != index)
+                            .map(|(_, entry)| entry.task.clone())
+                            .collect();
+                        let dependencies = task
+                            .dependencies
+                            .iter()
+                            .map(|name| {
+                                state.entries[find(state, name).expect("validated dependency")]
+                                    .task
+                                    .clone()
+                            })
+                            .collect();
+                        state.entries[index].runner =
+                            Some(self.runner.begin(task, siblings, dependencies)?);
+                    }
+                    state.entries[index].task.state = ExecutionStatus::Running;
+                    self.save_graph(state).await?;
+                    state.entries[index].reserved_admission = Some(admission);
+                    changed = true;
+                } else {
+                    state.waiting_for_capacity = true;
                 }
-                state.entries[index].task.state = ExecutionStatus::Running;
-                self.save_graph(state).await?;
             }
             let entry = &state.entries[index];
             if entry.run.is_none()
@@ -917,13 +1052,21 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     })
                 })
             {
-                self.start(state, index).await?;
+                changed |= self.start(state, index).await?;
             }
         }
-        Ok(())
+        Ok(changed)
     }
-    async fn start(self: &Arc<Self>, state: &mut State<S>, index: usize) -> ChildResult<()> {
+    async fn start(self: &Arc<Self>, state: &mut State<S>, index: usize) -> ChildResult<bool> {
         self.ensure_healthy(state)?;
+        let admission = state.entries[index]
+            .reserved_admission
+            .take()
+            .or_else(|| self.concurrency.acquire(false));
+        let Some(admission) = admission else {
+            state.waiting_for_capacity = true;
+            return Ok(false);
+        };
         prune_executions(
             &mut state.executions,
             &mut state.execution_failure,
@@ -962,7 +1105,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 Err(ChildError::Suspended) => {
                     state.execution_active = false;
                     state.notifications_active = false;
-                    return Ok(());
+                    return Ok(false);
                 }
                 Err(error) => {
                     let task = state.entries[index].task.clone();
@@ -981,7 +1124,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         true,
                     )?;
                     self.save_graph(state).await?;
-                    return Ok(());
+                    return Ok(true);
                 }
             }
         }
@@ -1005,14 +1148,18 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let entry = &mut state.entries[index];
         entry.run = Some(run.clone());
         let previous = entry.last_execution.clone();
-        let execution = Operation::start(self.clone().execute(index, run.clone(), previous));
+        let execution =
+            Operation::start(
+                self.clone()
+                    .execute(index, run.clone(), previous, admission),
+            );
         state.reservations.retain(|ready| !ready.is_ready());
         state.reservations.push(run.ready.clone());
         let entry = &mut state.entries[index];
         entry.last_execution = Some(execution.clone());
         self.diagnostic(entry, "running", run.started);
         state.executions.push(execution);
-        Ok(())
+        Ok(true)
     }
     fn owner(self: &Arc<Self>) -> ChildResult<Arc<Scope<S>>> {
         let registry = self
@@ -1091,6 +1238,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         index: usize,
         run: Arc<Run>,
         previous: Option<Operation<()>>,
+        admission: TaskAdmission,
     ) -> BoxFuture<'static, ChildResult<()>> {
         Box::pin(async move {
             if let Some(previous) = previous {
@@ -1130,6 +1278,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     .await
             }
             .await;
+            drop(admission);
             let mut state = self.gate.lock().await;
             if state.suspended
                 || !state.entries[index]
@@ -1209,6 +1358,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     }
     fn stop_run(&self, state: &mut State<S>, index: usize, template: &str) -> ChildResult<()> {
         if state.entries[index].pending_stop.is_some() {
+            state.entries[index].reserved_admission = None;
             return Ok(());
         }
         let reason = render(&self.config.configuration, template, &[])?;
@@ -1226,6 +1376,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let message_id = Identifier::message_id()
             .map_err(|error| ChildError::failure("unexpected", error.to_string()))?;
         entry.stopping_run = run.clone();
+        if run.is_none() {
+            entry.recovered_stop_admission = entry.reserved_admission.take();
+        }
         entry.pending_stop = Some(TaskStopCheckpoint {
             generation_id: checkpoint.generation_id,
             prompt_message_id: checkpoint.prompt_message_id,
@@ -1555,6 +1708,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let scheduler = self.clone();
         Operation::start(async move {
             scheduler.resolve_workers().await?;
+            scheduler.prepare_recovery().await?;
             {
                 let mut state = scheduler.gate.lock().await;
                 scheduler.ensure_healthy(&state)?;
@@ -1615,6 +1769,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 .get_service::<dyn TaskSession>()?;
             let live = state.entries[index].stopping_run.clone();
             let previous = state.entries[index].last_execution.clone();
+            let reserved_admission = state.entries[index].recovered_stop_admission.take();
             let scheduler = self.clone();
             let ready = Arc::new(Readiness::default());
             state.reservations.retain(|ready| !ready.is_ready());
@@ -1727,6 +1882,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     Ok(())
                 }
                 .await;
+                drop(reserved_admission);
                 let mut state = scheduler.gate.lock().await;
                 let result = if state.suspended
                     && result.as_ref().is_err_and(|error| {

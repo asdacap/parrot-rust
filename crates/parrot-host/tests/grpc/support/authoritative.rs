@@ -518,7 +518,7 @@ impl Fixture {
         let users = Arc::new(Mutex::new(Vec::new()));
         let gate = Arc::new(RefreshGate::default());
         let actual = AuthoritativeAgentSource::new(AgentSourceConfig {
-            configuration,
+            configuration: configuration.clone(),
             router: router.clone(),
             filesystem: Files::<SharedSecurity<Security>>(PhantomData),
             launcher: Arc::new(DenyExternal),
@@ -540,6 +540,7 @@ impl Fixture {
         let skill_templates = templates.clone();
         let skill_gate = gate.clone();
         let factory = Arc::new(UserSessionFactory::new(UserSessionFactoryConfig {
+            extra_concurrent_tasks: configuration.runtime.agent_tasks.extra_concurrent_tasks,
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
                 ..Default::default()

@@ -137,6 +137,33 @@ outbox entries reconcile before new generations replace their work. A snapshot
 write failure is reported and blocks further graph transitions rather than
 starting unrecorded work.
 
+## Task-run concurrency
+
+`agent_tasks.extra_concurrent_tasks` defaults to `2` and sets extra task-run
+admissions shared across the user session. Every scheduler owner has one free
+concurrent task run, even when the setting is `0`; nested owners receive that
+same per-owner allowance. The budget counts `max(ongoing admitted runs - 1, 0)`
+per owner, not particular task identities. Internal retries retain their
+admission, and direct `agent_spawn` calls are outside this budget.
+
+The limit controls admission only: pending runs wait for capacity and wake
+automatically when an admission is released or the limit increases. Decreasing
+the limit does not stop ongoing runs; new extra admissions wait until usage falls
+below the new limit, while every owner's free allowance remains available.
+
+`/task-limit` queries the current host value without writing an override.
+`/task-limit N` accepts one decimal integer from `0` to `2147483647` and changes
+only the current user session's budget. The host persists this override in the
+selected session's `meta.json` before changing the live limit. It survives
+reopening under a different configured default. Sessions without an override use
+`agent_tasks.extra_concurrent_tasks`; there is no reset command or automatic
+reload of the global configuration.
+
+On recovery, the effective override or configured default is loaded before all
+saved running usage is prepared and fresh work starts. Saved running work is
+grandfathered even when it exceeds a subsequently reduced budget. Slot/admission
+state is not persisted.
+
 ## Runner and notifications
 
 Defaults come from `predefined_config.agent_tasks.yaml`: five attempts, three

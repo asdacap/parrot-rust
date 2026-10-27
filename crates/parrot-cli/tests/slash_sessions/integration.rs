@@ -120,6 +120,92 @@ fn refresh_noop() -> SkillRefresh {
     Arc::new(|_| Box::pin(async { Ok(()) }))
 }
 
+#[tokio::test]
+async fn task_limit_rpc_preserves_presence_and_refreshes_query_and_set_snapshots() {
+    let effective = Arc::new(Mutex::new(7));
+    let observed = effective.clone();
+    let writes = Arc::new(AtomicUsize::new(0));
+    let write_count = writes.clone();
+    let mut fixture = Fixture::start(move |method, bytes| {
+        assert_eq!(method, "update_session");
+        let request = wire::UpdateSessionRequest::parse_from_bytes(bytes).unwrap();
+        assert_eq!(request.user_session_id, "old");
+        assert!(request.model.is_empty());
+        assert!(request.mode.is_empty());
+        let mut effective = observed.lock().unwrap();
+        if let Some(limit) = request.extra_concurrent_tasks {
+            write_count.fetch_add(1, Ordering::SeqCst);
+            *effective = limit;
+        }
+        Ok(wire::UserSession {
+            extra_concurrent_tasks: *effective,
+            mode: "fresh-mode".into(),
+            ..initial()
+        }
+        .write_to_bytes()
+        .unwrap())
+    })
+    .await;
+    let mut session = session(
+        fixture.client(),
+        configuration(&fixture.root),
+        inert_binding(),
+    );
+    assert_eq!(session.current_session().extra_concurrent_tasks, 0);
+    let stop = Stop::new();
+    assert_eq!(session.get_task_limit(&stop).await.unwrap(), 7);
+    assert_eq!(session.current_session().extra_concurrent_tasks, 7);
+    assert_eq!(session.mode(), "fresh-mode");
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    *effective.lock().unwrap() = 9;
+    assert_eq!(session.get_task_limit(&stop).await.unwrap(), 9);
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    assert_eq!(session.set_task_limit(0, &stop).await.unwrap(), 0);
+    assert_eq!(session.current_session().extra_concurrent_tasks, 0);
+    assert_eq!(session.set_task_limit(12, &stop).await.unwrap(), 12);
+    assert_eq!(session.current_session().extra_concurrent_tasks, 12);
+    assert_eq!(writes.load(Ordering::SeqCst), 2);
+    let requests: Vec<_> = fixture
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|call| {
+            wire::UpdateSessionRequest::parse_from_bytes(&call.body)
+                .unwrap()
+                .extra_concurrent_tasks
+        })
+        .collect();
+    assert_eq!(requests, [None, None, Some(0), Some(12)]);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn task_limit_rpc_failure_leaves_cached_snapshot_unchanged() {
+    let mut fixture = Fixture::start(|method, _| {
+        assert_eq!(method, "update_session");
+        Err(Status::unavailable("override write failed"))
+    })
+    .await;
+    let mut session = session(
+        fixture.client(),
+        configuration(&fixture.root),
+        inert_binding(),
+    );
+    let previous = session.current_session().clone();
+    let stop = Stop::new();
+    for failure in [
+        session.get_task_limit(&stop).await.unwrap_err(),
+        session.set_task_limit(0, &stop).await.unwrap_err(),
+    ] {
+        assert!(
+            matches!(failure, SlashFailure::Rpc(status) if status.code() == Code::Unavailable && status.message() == "override write failed")
+        );
+        assert_eq!(session.current_session(), &previous);
+    }
+    fixture.close().await;
+}
+
 struct NoNavigation;
 impl WorkspaceNavigation for NoNavigation {
     fn list<'a>(
@@ -158,7 +244,7 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
         Some(application.clone()),
         "fixture-version",
     );
-    let expected = "/auth|/auth-preset-select|/auth-preset-set|/clear|/compact|/effort|/exit|/goal|/standing-instruction|/help|/mode|/model|/model-alias|/model-preset-select|/model-preset-set|/models|/modes|/sessions|/status|/sandbox_enable|/set-context-limit|/skills|/version";
+    let expected = "/auth|/auth-preset-select|/auth-preset-set|/clear|/compact|/effort|/exit|/goal|/standing-instruction|/help|/mode|/model|/model-alias|/model-preset-select|/model-preset-set|/models|/modes|/sessions|/status|/sandbox_enable|/set-context-limit|/skills|/task-limit|/version";
     assert_eq!(
         registry
             .descriptions()
@@ -183,6 +269,7 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
             .collect::<Vec<_>>(),
         ["/model-preset-select", "/model-preset-set"]
     );
+    assert_eq!(registry.complete("/task-l")[0].name, "/task-limit");
     let terminal = SlashCommands::create_terminal(
         services.clone(),
         Some(application),
@@ -242,6 +329,7 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
         .await
         .unwrap();
     assert_eq!(exits.load(Ordering::SeqCst), 1);
+    assert!(dialog.shown.iter().any(|line| line.contains("/task-limit")));
     assert!(
         dialog
             .shown

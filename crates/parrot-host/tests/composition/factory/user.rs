@@ -592,6 +592,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
         skills,
         lifetime: Arc::new(Signal::new()),
         activation: Arc::new(parrot_runtime::agent_turn::lifecycle::StartupActivation::new()),
+        task_concurrency: TaskConcurrencyBudget::new(2),
         standing: StandingInstruction::new(catalog.clone()),
         statistics: lease.events.get_runtime_statistics().await.unwrap(),
         root_identity: AgentIdentity::root("agent-first".into(), "main".into(), catalog),

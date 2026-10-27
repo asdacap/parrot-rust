@@ -1493,6 +1493,7 @@ where
                 let tasks = ScopedTaskController::new(
                     SchedulerConfig {
                         owner_identity: identity.clone(),
+                        concurrency: self.user.task_concurrency.clone(),
                         state: prepared.agent_state.clone(),
                         registry: Arc::downgrade(&registry),
                         owner_session: task_session.clone(),
