@@ -5,6 +5,7 @@ See also [Design philosophy](docs/design-philosophy.md).
 
 ## Guideline
 
+- Prefer faster compilation over runtime performance.
 - No comment unless necessary
 - Traits should have comments at the top level and on each method to document the behavior except if the name of the
 method is already obvious.
