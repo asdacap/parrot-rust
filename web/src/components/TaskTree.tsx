@@ -76,7 +76,9 @@ function TaskList({ nodes }: { nodes: TaskNode[] }) {
           <span>{icons[node.status]} </span>
           <span>{node.description || node.name}</span>
           {node.detail && <span className="text-muted-foreground"> · {node.detail}</span>}
-          {node.children.length > 0 && <TaskList nodes={node.children} />}
+          {node.status !== AgentTaskProgressStatus.SUCCEEDED &&
+            node.status !== AgentTaskProgressStatus.CANCELED &&
+            node.children.length > 0 && <TaskList nodes={node.children} />}
         </li>
       ))}
     </ul>

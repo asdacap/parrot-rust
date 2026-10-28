@@ -664,39 +664,49 @@ fn hidden_successful_graph_flush_does_not_commit_an_empty_task_block() {
 }
 
 #[test]
-fn flushed_terminal_tree_retains_hidden_descendants_for_later_activity() {
-    for separate_child_graph in [false, true] {
-        let mut view = view();
-        view.observe(&turn("root")).unwrap();
-        view.observe(&child("worker", "worker", "root")).unwrap();
-        let descendant = task(
-            "hidden descendant",
-            "worker",
-            true,
-            wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_SUCCEEDED,
-        );
-        let mut ancestor = task(
-            "visible ancestor",
-            if separate_child_graph { "ancestor" } else { "" },
-            false,
-            wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_SUCCEEDED,
-        );
-        if separate_child_graph {
-            view.observe(&child("ancestor", "ancestor", "root"))
+fn terminal_parents_hide_retained_descendants_even_during_worker_activity() {
+    for status in [
+        wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_SUCCEEDED,
+        wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_CANCELED,
+    ] {
+        for separate_child_graph in [false, true] {
+            let mut view = view();
+            view.observe(&turn("root")).unwrap();
+            view.observe(&child("worker", "worker", "root")).unwrap();
+            let descendant = task(
+                "hidden descendant",
+                "worker",
+                true,
+                wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
+            );
+            let mut ancestor = task(
+                "visible ancestor",
+                if separate_child_graph { "ancestor" } else { "" },
+                false,
+                status,
+            );
+            if separate_child_graph {
+                view.observe(&child("ancestor", "ancestor", "root"))
+                    .unwrap();
+                view.observe(&progress("ancestor", 1, vec![descendant]))
+                    .unwrap();
+            } else {
+                ancestor.children.push(descendant);
+            }
+            view.observe(&progress("root", 1, vec![ancestor.clone()]))
                 .unwrap();
-            view.observe(&progress("ancestor", 1, vec![descendant]))
-                .unwrap();
-        } else {
-            ancestor.children.push(descendant);
+            let flushed = view.tick(Duration::from_secs(1)).unwrap();
+            assert!(commits(&flushed).join("|").contains("visible ancestor"));
+            view.observe(&turn("worker")).unwrap();
+            assert!(live(&view).contains("visible ancestor"));
+            assert!(!live(&view).contains("hidden descendant"));
+            ancestor.status =
+                wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING.into();
+            view.observe(&progress("root", 2, vec![ancestor])).unwrap();
+            assert!(live(&view).contains("hidden descendant"));
+            view.observe(&ended("worker")).unwrap();
+            assert!(!live(&view).contains("hidden descendant"));
         }
-        view.observe(&progress("root", 1, vec![ancestor])).unwrap();
-        let flushed = view.tick(Duration::from_secs(1)).unwrap();
-        assert!(commits(&flushed).join("|").contains("visible ancestor"));
-        view.observe(&turn("worker")).unwrap();
-        assert!(live(&view).contains("visible ancestor"));
-        assert!(live(&view).contains("hidden descendant"));
-        view.observe(&ended("worker")).unwrap();
-        assert!(!live(&view).contains("hidden descendant"));
     }
 }
 

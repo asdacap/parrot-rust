@@ -174,7 +174,17 @@ fn select_visible_nodes(
             continue;
         }
         let mut copy = node.clone();
-        copy.children = children;
+        copy.children = if matches!(
+            node.status.enum_value(),
+            Ok(
+                wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_SUCCEEDED
+                    | wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_CANCELED
+            )
+        ) {
+            Vec::new()
+        } else {
+            children
+        };
         visible.push(copy);
     }
     visible

@@ -326,7 +326,7 @@ fn snapshot_event(hidden: bool, status: i32) -> wire::Event {
 }
 
 #[test]
-fn progress_snapshots_append_complete_trees_after_partial_text_and_flush() {
+fn progress_snapshots_hide_succeeded_descendants_after_partial_text_and_flush() {
     let (mut output, mut error) = (FlushWriter::default(), Vec::new());
     let mut renderer = BasicRenderer::new();
     for event in [
@@ -344,11 +344,7 @@ fn progress_snapshots_append_complete_trees_after_partial_text_and_flush() {
     assert_eq!(output.flushes[0], first.as_bytes());
     assert_eq!(
         output.flushes[1],
-        format!(
-            "{first}{}",
-            first.trim_start_matches("partial\n").replacen('◐', "✓", 1)
-        )
-        .as_bytes()
+        format!("{first}Agent tasks:\n✓ root[2J    日本\n").as_bytes()
     );
     assert!(error.is_empty());
 }

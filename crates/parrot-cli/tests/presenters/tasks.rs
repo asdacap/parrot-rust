@@ -127,6 +127,79 @@ fn pending_and_starting_tasks_have_no_unrelated_agent_links() {
 }
 
 #[test]
+fn successful_and_canceled_parents_hide_active_descendants_only_in_the_view() {
+    for status in [0, 1, 2, 3, 4, 6, 91] {
+        let mut parent = node("parent", "", status, "parent-agent");
+        parent.children = vec![node("active child", "", 2, "child-agent")];
+        let mut root = node("root", "", 2, "");
+        root.children = vec![parent];
+        let snapshot = wire::AgentTaskProgressSnapshot {
+            root_nodes: vec![root],
+            ..Default::default()
+        };
+        let before = snapshot.clone();
+        let lines = BTreeMap::from([(
+            "child-agent".into(),
+            TaskAgentLine::new("working child", None),
+        )]);
+        let active = BTreeSet::from(["child-agent".into()]);
+        let show_child = ![3, 6].contains(&status);
+        assert_eq!(
+            row_text(&snapshot, Some(&lines), Some(&active)).contains("working child"),
+            show_child
+        );
+        assert_eq!(
+            AgentTaskProgressFormatter::format(&snapshot)
+                .join("\n")
+                .contains("active child"),
+            show_child
+        );
+        assert_eq!(
+            parrot_cli::dispatch::task_format::ProgressFormatter::format(&snapshot)
+                .join("\n")
+                .contains("active child"),
+            show_child
+        );
+        assert_eq!(
+            AgentTaskProgressFormatter::get_embedded_agent_session_ids(&snapshot, &lines, &active)
+                .contains(&"child-agent".to_owned()),
+            show_child
+        );
+        assert_eq!(
+            AgentTaskProgressFormatter::get_visible_child_graph_owner_session_ids(
+                &snapshot, &active
+            )
+            .contains(&"parent-agent".to_owned()),
+            show_child
+        );
+        assert_eq!(snapshot, before);
+    }
+}
+
+#[test]
+fn hidden_terminal_parent_still_follows_activity_without_showing_its_children() {
+    for status in [3, 6] {
+        let mut parent = node("hidden parent", "", status, "parent-agent");
+        parent.hidden = true;
+        parent.children = vec![node("active child", "", 2, "child-agent")];
+        let snapshot = wire::AgentTaskProgressSnapshot {
+            root_nodes: vec![parent],
+            ..Default::default()
+        };
+        assert!(AgentTaskProgressFormatter::format(&snapshot).is_empty());
+        assert_eq!(
+            AgentTaskProgressFormatter::format_rows(
+                &snapshot,
+                None,
+                Some(&BTreeSet::from(["child-agent".into()])),
+            )
+            .len(),
+            2
+        );
+    }
+}
+
+#[test]
 fn rows_hang_at_description_start_for_all_four_source_cases() {
     let rows = AgentTaskProgressFormatter::format_rows(&snapshot(), None, None);
     for (index, indent) in ["", "  ", "      ", "          "].into_iter().enumerate() {

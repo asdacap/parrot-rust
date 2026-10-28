@@ -145,7 +145,7 @@ impl ProgressFormatter {
         let mut lines = Vec::new();
         for root in snapshot.root_nodes.iter().filter(|root| !root.hidden) {
             append_progress_node(root, "", &mut lines);
-            append_progress_children(&root.children, "", &mut lines);
+            append_progress_children(root, "", &mut lines);
         }
         if !lines.is_empty() {
             lines.insert(0, "Agent tasks:".into());
@@ -155,11 +155,24 @@ impl ProgressFormatter {
 }
 
 fn append_progress_children(
-    nodes: &[wire::AgentTaskProgressNode],
+    parent: &wire::AgentTaskProgressNode,
     ancestors: &str,
     lines: &mut Vec<String>,
 ) {
-    let mut visible = nodes.iter().filter(|node| !node.hidden).peekable();
+    if matches!(
+        parent.status.enum_value(),
+        Ok(
+            wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_SUCCEEDED
+                | wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_CANCELED
+        )
+    ) {
+        return;
+    }
+    let mut visible = parent
+        .children
+        .iter()
+        .filter(|node| !node.hidden)
+        .peekable();
     while let Some(node) = visible.next() {
         let last = visible.peek().is_none();
         append_progress_node(
@@ -168,7 +181,7 @@ fn append_progress_children(
             lines,
         );
         append_progress_children(
-            &node.children,
+            node,
             &format!("{ancestors}{}", if last { "    " } else { "│   " }),
             lines,
         );
