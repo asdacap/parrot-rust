@@ -334,6 +334,11 @@ mod unix_fs {
     use rustix::fs::{AtFlags, CWD, Mode, OFlags, Stat};
     #[cfg(target_os = "linux")]
     use std::os::fd::AsRawFd;
+    #[cfg(target_os = "linux")]
+    use std::{
+        ffi::CStr,
+        sync::atomic::{AtomicBool, Ordering},
+    };
     use std::{
         ffi::{CString, OsStr},
         fs::{self, File},
@@ -389,6 +394,10 @@ mod unix_fs {
         )
     }
 
+    /// Set by the first ENOSYS: openat2 is absent before Linux 5.6 and in gVisor.
+    #[cfg(target_os = "linux")]
+    static OPENAT2_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
+
     #[cfg(target_os = "linux")]
     fn open_at(
         directory: BorrowedFd<'_>,
@@ -398,18 +407,104 @@ mod unix_fs {
         reject_links: bool,
     ) -> Result<OwnedFd> {
         let name = c_path(name)?;
-        rustix::fs::openat2(
-            directory,
-            name.as_c_str(),
-            flags | OFlags::CLOEXEC,
-            Mode::from_raw_mode(mode),
-            if reject_links {
-                rustix::fs::ResolveFlags::NO_SYMLINKS
-            } else {
-                rustix::fs::ResolveFlags::empty()
-            },
-        )
-        .map_err(|error| io(error.into()))
+        let flags = flags | OFlags::CLOEXEC;
+        let mode = Mode::from_raw_mode(mode);
+        if !OPENAT2_UNSUPPORTED.load(Ordering::Relaxed) {
+            match rustix::fs::openat2(
+                directory,
+                name.as_c_str(),
+                flags,
+                mode,
+                if reject_links {
+                    rustix::fs::ResolveFlags::NO_SYMLINKS
+                } else {
+                    rustix::fs::ResolveFlags::empty()
+                },
+            ) {
+                Err(rustix::io::Errno::NOSYS) => OPENAT2_UNSUPPORTED.store(true, Ordering::Relaxed),
+                result => return result.map_err(|error| io(error.into())),
+            }
+        }
+        open_without_openat2(directory, name.as_c_str(), flags, mode, reject_links)
+            .map_err(|error| io(error.into()))
+    }
+
+    /// openat2 from openat alone. Rejecting links walks the path one component
+    /// at a time without following any, so a symlink fails with ELOOP wherever
+    /// RESOLVE_NO_SYMLINKS would fail: anywhere, except a final link opened
+    /// with O_PATH | O_NOFOLLOW, which is returned. `.` and `..` resolve as
+    /// openat2 resolves them, including `..` above `directory`.
+    #[cfg(target_os = "linux")]
+    pub(super) fn open_without_openat2(
+        directory: BorrowedFd<'_>,
+        path: &CStr,
+        flags: OFlags,
+        mode: Mode,
+        reject_links: bool,
+    ) -> rustix::io::Result<OwnedFd> {
+        use rustix::{fs::FileType, io::Errno};
+        if !reject_links {
+            return rustix::fs::openat(directory, path, flags, mode);
+        }
+        let bytes = path.to_bytes();
+        // A trailing slash demands a directory, and NOFOLLOW below keeps a link from being one.
+        let flags = if bytes.ends_with(b"/") {
+            flags | OFlags::DIRECTORY
+        } else {
+            flags
+        };
+        let mut names = bytes
+            .split(|byte| *byte == b'/')
+            .filter(|name| !name.is_empty());
+        let Some(mut name) = names.next() else {
+            // `/` is not a link, and the empty path fails alike.
+            return rustix::fs::openat(directory, path, flags, mode);
+        };
+        let mut current = if bytes.starts_with(b"/") {
+            Some(rustix::fs::openat(
+                CWD,
+                c"/",
+                DIRECTORY_FLAGS | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?)
+        } else {
+            None
+        };
+        let kind = |descriptor: &OwnedFd| {
+            rustix::fs::fstat(descriptor).map(|status| FileType::from_raw_mode(status.st_mode))
+        };
+        for next in names {
+            let parent = current.as_ref().map_or(directory, AsFd::as_fd);
+            let component = rustix::fs::openat(
+                parent,
+                OsStr::from_bytes(name),
+                OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?;
+            match kind(&component)? {
+                FileType::Symlink => return Err(Errno::LOOP),
+                FileType::Directory => current = Some(component),
+                _ => return Err(Errno::NOTDIR),
+            }
+            name = next;
+        }
+        let parent = current.as_ref().map_or(directory, AsFd::as_fd);
+        let name = OsStr::from_bytes(name);
+        let opened = match rustix::fs::openat(parent, name, flags | OFlags::NOFOLLOW, mode) {
+            // O_PATH | O_DIRECTORY | O_NOFOLLOW reports a final link as ENOTDIR.
+            Err(Errno::NOTDIR)
+                if rustix::fs::statat(parent, name, AtFlags::SYMLINK_NOFOLLOW).is_ok_and(
+                    |status| FileType::from_raw_mode(status.st_mode) == FileType::Symlink,
+                ) =>
+            {
+                return Err(Errno::LOOP);
+            }
+            result => result?,
+        };
+        if !flags.contains(OFlags::PATH | OFlags::NOFOLLOW) && kind(&opened)? == FileType::Symlink {
+            return Err(Errno::LOOP);
+        }
+        Ok(opened)
     }
 
     #[cfg(target_os = "macos")]
@@ -1175,6 +1270,125 @@ mod tests {
         match result {
             Err(OperationError::Failed(error)) => error.kind,
             _ => panic!("expected filesystem failure"),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn open_without_openat2_resolves_exactly_like_openat2() {
+        use rustix::{
+            fs::{Mode, OFlags, ResolveFlags},
+            io::Errno,
+        };
+        use std::{ffi::CString, os::fd::OwnedFd};
+        let fixture = Fixture::new();
+        let root = fs::canonicalize(&fixture.root).unwrap();
+        let nested = root.join("dir/nested");
+        let file = nested.join("file.txt");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(&file, "inside").unwrap();
+        fs::write(root.join("outside.txt"), "outside").unwrap();
+        symlink(&nested, root.join("dir/link-dir")).unwrap();
+        symlink(&file, root.join("dir/link-file")).unwrap();
+        let start = rustix::fs::open(
+            root.join("dir"),
+            OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap();
+        let absolute = |path: &Path| path.to_str().unwrap().to_owned();
+        let path = OFlags::PATH;
+        let read = OFlags::RDONLY;
+        for (name, flags, reject_links, expected) in [
+            ("nested/file.txt".to_owned(), read, true, Ok(file.clone())),
+            (absolute(&file), path, true, Ok(file.clone())),
+            ("./nested/./file.txt".into(), read, true, Ok(file.clone())),
+            (
+                "nested/../nested/file.txt".into(),
+                read,
+                true,
+                Ok(file.clone()),
+            ),
+            (
+                "../outside.txt".into(),
+                read,
+                true,
+                Ok(root.join("outside.txt")),
+            ),
+            ("/".into(), path | OFlags::DIRECTORY, true, Ok("/".into())),
+            ("link-dir/file.txt".into(), read, true, Err(Errno::LOOP)),
+            (
+                absolute(&root.join("dir/link-dir/file.txt")),
+                path,
+                true,
+                Err(Errno::LOOP),
+            ),
+            ("link-dir/..".into(), path, true, Err(Errno::LOOP)),
+            ("link-file".into(), read, true, Err(Errno::LOOP)),
+            ("link-file".into(), path, true, Err(Errno::LOOP)),
+            (
+                "link-dir".into(),
+                path | OFlags::DIRECTORY,
+                true,
+                Err(Errno::LOOP),
+            ),
+            (
+                "link-file".into(),
+                path | OFlags::NOFOLLOW,
+                true,
+                Ok(root.join("dir/link-file")),
+            ),
+            ("nested/file.txt/..".into(), path, true, Err(Errno::NOTDIR)),
+            ("nested/".into(), path, true, Ok(root.join("dir/nested"))),
+            ("nested/file.txt/".into(), read, true, Err(Errno::NOTDIR)),
+            (
+                "link-dir/".into(),
+                path | OFlags::NOFOLLOW,
+                true,
+                Err(Errno::LOOP),
+            ),
+            ("missing/file.txt".into(), read, true, Err(Errno::NOENT)),
+            ("link-dir/file.txt".into(), read, false, Ok(file.clone())),
+            ("link-file".into(), read, false, Ok(file.clone())),
+        ] {
+            let expected = expected.map(|path| {
+                let metadata = fs::symlink_metadata(path).unwrap();
+                (metadata.dev(), metadata.ino())
+            });
+            let identity = |result: rustix::io::Result<OwnedFd>| {
+                result.map(|descriptor| {
+                    let status = rustix::fs::fstat(descriptor).unwrap();
+                    (status.st_dev, status.st_ino)
+                })
+            };
+            let name = CString::new(name).unwrap();
+            let flags = flags | OFlags::CLOEXEC;
+            let case = format!("{name:?} {flags:?} reject_links={reject_links}");
+            assert_eq!(
+                identity(unix_fs::open_without_openat2(
+                    start.as_fd(),
+                    &name,
+                    flags,
+                    Mode::empty(),
+                    reject_links,
+                )),
+                expected,
+                "fallback: {case}"
+            );
+            match rustix::fs::openat2(
+                start.as_fd(),
+                &name,
+                flags,
+                Mode::empty(),
+                if reject_links {
+                    ResolveFlags::NO_SYMLINKS
+                } else {
+                    ResolveFlags::empty()
+                },
+            ) {
+                Err(Errno::NOSYS) => {}
+                result => assert_eq!(identity(result), expected, "openat2: {case}"),
+            }
         }
     }
 
