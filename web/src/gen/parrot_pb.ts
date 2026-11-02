@@ -3184,7 +3184,9 @@ export const TurnEndedSchema: GenMessage<TurnEnded> = /*@__PURE__*/
 
 /**
  * A queued prompt's run is over: its turns, the mode's completion and any
- * repair turns. A client ends the main agent's turn here, not at TurnEnded.
+ * repair turns. A main-agent turn that no queued prompt owns, such as one woken
+ * by a steer or a child's completion, ends here once its drain settles. A client
+ * ends the main agent's turn here, not at TurnEnded.
  *
  * @generated from message parrot.v1.ModeTurnCompleted
  */

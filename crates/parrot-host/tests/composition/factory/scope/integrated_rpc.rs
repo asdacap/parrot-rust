@@ -1144,7 +1144,6 @@ async fn actual_listener_inventory_follows_durable_replay_and_preserves_monitor_
         first.tool_snapshot().owner_agent_session_id,
         f.user().root_identity.session.session_id
     );
-    drop(fresh);
     let root = f.root();
     let runtime = root.get_service::<RuntimeSession<Security>>().unwrap();
     let sent = bounded(runtime.send(
@@ -1161,6 +1160,17 @@ async fn actual_listener_inventory_follows_durable_replay_and_preserves_monitor_
     .await
     .unwrap();
     bounded(sent.execution.join()).await.unwrap();
+    bounded(async {
+        while !fresh
+            .next(&NeverCancelled)
+            .await
+            .unwrap()
+            .unwrap()
+            .has_mode_turn_completed()
+        {}
+    })
+    .await;
+    drop(fresh);
     let stored = f.user().lease.events.replay().await.unwrap();
     let admission = stored
         .iter()
