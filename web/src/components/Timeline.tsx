@@ -17,7 +17,7 @@ const noticeTones = {
   error: "text-destructive",
 } as const satisfies Record<NoticeTone, string>
 
-function TimelineEntry({ item }: { item: TimelineItem }) {
+const TimelineEntry = memo(function TimelineEntry({ item }: { item: TimelineItem }) {
   switch (item.kind) {
     case "user":
       return <div className="self-end rounded-lg bg-secondary px-3 py-2 text-sm whitespace-pre-wrap">{item.text}</div>
@@ -54,23 +54,41 @@ function TimelineEntry({ item }: { item: TimelineItem }) {
     case "error":
       return <div className="text-xs text-destructive">{item.message}</div>
   }
+})
+
+// Consecutive items of one agent, shown under a single badge.
+interface AgentBlock {
+  start: number
+  agentSessionId: string | undefined
+  items: TimelineItem[]
 }
 
-interface TimelineRowProps {
-  item: TimelineItem
+function groupConsecutiveByAgent(items: TimelineItem[]): AgentBlock[] {
+  const blocks: AgentBlock[] = []
+  items.forEach((item, index) => {
+    const agentSessionId = "agentSessionId" in item ? item.agentSessionId : undefined
+    const last = blocks.at(-1)
+    if (last && last.agentSessionId === agentSessionId) last.items.push(item)
+    else blocks.push({ start: index, agentSessionId, items: [item] })
+  })
+  return blocks
+}
+
+interface TimelineBlockProps {
+  items: TimelineItem[]
   agent: AgentInfo | undefined
   depth: number
 }
 
-const TimelineRow = memo(function TimelineRow({ item, agent, depth }: TimelineRowProps) {
+function TimelineBlock({ items, agent, depth }: TimelineBlockProps) {
   return (
     // Nested under its agent, as the terminal CLI indents a subagent's activity.
-    <div className={cn("flex flex-col gap-1", depth > 0 && "border-l pl-3", depthIndents[Math.min(depth, 4)])}>
+    <div className={cn("flex flex-col gap-2", depth > 0 && "border-l pl-3", depthIndents[Math.min(depth, 4)])}>
       {agent && <Badge variant="outline">{agent.name}</Badge>}
-      <TimelineEntry item={item} />
+      {items.map((item, offset) => <TimelineEntry key={offset} item={item} />)}
     </div>
   )
-})
+}
 
 interface TimelineProps {
   items: TimelineItem[]
@@ -96,17 +114,14 @@ export function Timeline({ items, agents }: TimelineProps) {
       }}
     >
       <div className="mx-auto flex max-w-4xl flex-col gap-2 px-4 py-4">
-        {items.map((item, index) => {
-          const agentSessionId = "agentSessionId" in item ? item.agentSessionId : undefined
-          return (
-            <TimelineRow
-              key={index}
-              item={item}
-              agent={agentSessionId === undefined ? undefined : agents.get(agentSessionId)}
-              depth={agentSessionId === undefined ? 0 : agentDepth(agents, agentSessionId)}
-            />
-          )
-        })}
+        {groupConsecutiveByAgent(items).map((block) => (
+          <TimelineBlock
+            key={block.start}
+            items={block.items}
+            agent={block.agentSessionId === undefined ? undefined : agents.get(block.agentSessionId)}
+            depth={block.agentSessionId === undefined ? 0 : agentDepth(agents, block.agentSessionId)}
+          />
+        ))}
       </div>
     </div>
   )
