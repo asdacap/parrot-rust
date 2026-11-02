@@ -11,7 +11,10 @@ function scaled(value: number, fractionDigits: number) {
 
 export const formatTokenCount = (count: number) => scaled(count, 1)
 
-export function formatTokens(usage: SessionUsageSnapshot): string {
+// The session's usage or one agent's statistics, which count tokens alike.
+type TokenUsage = Pick<SessionUsageSnapshot, "inputTokens" | "cachedInputTokens" | "outputTokens" | "contextSize" | "contextLimit">
+
+export function formatTokens(usage: TokenUsage): string {
   const input = Number(usage.inputTokens)
   const output = Number(usage.outputTokens)
   if (input === 0 && output === 0) return ""
@@ -20,7 +23,7 @@ export function formatTokens(usage: SessionUsageSnapshot): string {
   return cached > 0 && input > 0 ? `${tokens} (+${((cached / input) * 100).toFixed(2)}% cache)` : tokens
 }
 
-export function formatContext(usage: SessionUsageSnapshot): string {
+export function formatContext(usage: TokenUsage): string {
   const size = Number(usage.contextSize)
   const limit = Number(usage.contextLimit)
   if (limit > 0) return `${formatTokenCount(size)}/${formatTokenCount(limit)}`

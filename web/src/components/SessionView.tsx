@@ -121,7 +121,14 @@ function SessionChat({ session, onCycleMode, onSessionChanged }: SessionChatProp
   return (
     <>
       <Timeline items={timeline.items} agents={timeline.agents} />
-      <LiveActivity queues={timeline.queues} processes={timeline.processes} taskProgress={timeline.taskProgress} />
+      <LiveActivity
+        agents={timeline.agents}
+        agentActivity={timeline.agentActivity}
+        activity={timeline.activity}
+        queues={timeline.queues}
+        processes={timeline.processes}
+        taskProgress={timeline.taskProgress}
+      />
       {slash.queued.length > 0 && (
         <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
           waiting for the turn to finish:

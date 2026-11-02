@@ -4,6 +4,7 @@ import {
   AgentTaskProgressSnapshotSchema,
   ProviderRequestPhase,
   ReasoningKind,
+  type AgentStatisticsUpdatedEvent,
   type AgentTaskProgressSnapshot,
   type Event,
   type PlanCompleted,
@@ -58,12 +59,25 @@ export interface Activity {
 
 const idle: Activity = { requestAttempt: 0, waitingForFirstToken: false, tools: [], thinkingCharacters: 0, compacting: false }
 
+// What a subagent is doing now, as the terminal CLI keeps per agent session for its live agent tree.
+export interface AgentActivity {
+  activity: Activity
+  // From the start of a turn until it ends, fails or the agent itself ends.
+  inTurn: boolean
+  modelIcon: TurnModelAliasIcon | undefined
+  statistics: AgentStatisticsUpdatedEvent | undefined
+}
+
+const quietAgent: AgentActivity = { activity: idle, inTurn: false, modelIcon: undefined, statistics: undefined }
+
 export interface TimelineState {
   items: TimelineItem[]
   // Every subagent seen; an agent session not in it is the main agent.
   agents: ReadonlyMap<string, AgentInfo>
   busy: boolean
   activity: Activity
+  // Every subagent's activity, by agent session.
+  agentActivity: ReadonlyMap<string, AgentActivity>
   modelIcon: TurnModelAliasIcon | undefined
   usage: SessionUsageSnapshot | undefined
   // The main agent's plan still waiting for the user's decision; any later input settles it.
@@ -87,6 +101,7 @@ export const emptyTimeline: TimelineState = {
   agents: new Map(),
   busy: false,
   activity: idle,
+  agentActivity: new Map(),
   modelIcon: undefined,
   usage: undefined,
   pendingPlan: undefined,
@@ -235,9 +250,34 @@ function reduceActivity(activity: Activity, event: Event): Activity {
   }
 }
 
+function reduceAgentActivity(current: AgentActivity, event: Event): AgentActivity {
+  const activity = reduceActivity(current.activity, event)
+  const payload = event.payload
+  switch (payload.case) {
+    case "turnStarted":
+      return { ...current, activity, inTurn: true, modelIcon: payload.value.modelAliasIcon }
+    case "turnEnded":
+    case "turnFailed":
+      return { ...current, activity, inTurn: false }
+    case "agentFinished":
+    case "agentFailed":
+      return { ...current, activity: idle, inTurn: false }
+    case "agentStatisticsUpdated":
+      return { ...current, statistics: payload.value }
+    default:
+      return activity === current.activity ? current : { ...current, activity }
+  }
+}
+
 function reduceEvent(state: TimelineState, event: Event): TimelineState {
-  const activity = state.agents.has(event.agentSessionId) ? state.activity : reduceActivity(state.activity, event)
-  return reduceItems(activity === state.activity ? state : { ...state, activity }, event)
+  const { agentSessionId } = event
+  if (!state.agents.has(agentSessionId)) {
+    const activity = reduceActivity(state.activity, event)
+    return reduceItems(activity === state.activity ? state : { ...state, activity }, event)
+  }
+  const current = state.agentActivity.get(agentSessionId) ?? quietAgent
+  const next = reduceAgentActivity(current, event)
+  return reduceItems(next === current ? state : { ...state, agentActivity: new Map(state.agentActivity).set(agentSessionId, next) }, event)
 }
 
 function reduceItems(state: TimelineState, event: Event): TimelineState {
