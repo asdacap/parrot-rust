@@ -5,7 +5,7 @@ import { Timeline } from "@/components/Timeline"
 import type { AgentInfo, TimelineItem } from "@/session/timeline"
 
 describe("Timeline", () => {
-  it("shows one badge per run of consecutive items from the same subagent", () => {
+  it("shows one agent header per run of consecutive items from the same subagent", () => {
     const agents = new Map<string, AgentInfo>([
       ["explorer", { name: "explorer", parentAgentSessionId: "root" }],
       ["reviewer", { name: "reviewer", parentAgentSessionId: "root" }],
@@ -20,8 +20,8 @@ describe("Timeline", () => {
       { kind: "assistant", agentSessionId: "explorer", text: "explorer fourth" },
     ]
 
-    const badges = [...renderToStaticMarkup(<Timeline items={items} agents={agents} />).matchAll(/data-slot="badge"[^>]*>([^<]*)</g)]
+    const headers = [...renderToStaticMarkup(<Timeline items={items} agents={agents} />).matchAll(/<header[^>]*>.*?<\/svg>([^<]*)<\/header>/g)]
 
-    expect(badges.map(([, name]) => name)).toEqual(["explorer", "reviewer", "explorer"])
+    expect(headers.map(([, name]) => name)).toEqual(["explorer", "reviewer", "explorer"])
   })
 })

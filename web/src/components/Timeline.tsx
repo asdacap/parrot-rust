@@ -1,9 +1,9 @@
+import { BotIcon } from "lucide-react"
 import { memo, useEffect, useRef } from "react"
 
 import { Markdown } from "@/components/Markdown"
 import { TaskTree, fromDeclaration } from "@/components/TaskTree"
 import { ToolEntry } from "@/components/ToolEntry"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { agentDepth, type AgentInfo, type NoticeTone, type TimelineItem } from "@/session/timeline"
 
@@ -56,7 +56,7 @@ const TimelineEntry = memo(function TimelineEntry({ item }: { item: TimelineItem
   }
 })
 
-// Consecutive items of one agent, shown under a single badge.
+// Consecutive items of one agent, shown under a single header.
 interface AgentBlock {
   start: number
   agentSessionId: string | undefined
@@ -81,12 +81,17 @@ interface TimelineBlockProps {
 }
 
 function TimelineBlock({ items, agent, depth }: TimelineBlockProps) {
+  const entries = items.map((item, offset) => <TimelineEntry key={offset} item={item} />)
+  if (!agent) return <div className="flex flex-col gap-2">{entries}</div>
   return (
-    // Nested under its agent, as the terminal CLI indents a subagent's activity.
-    <div className={cn("flex flex-col gap-2", depth > 0 && "border-l pl-3", depthIndents[Math.min(depth, 4)])}>
-      {agent && <Badge variant="outline">{agent.name}</Badge>}
-      {items.map((item, offset) => <TimelineEntry key={offset} item={item} />)}
-    </div>
+    // Framed under its agent's name, nested as the terminal CLI indents a subagent's activity.
+    <section className={cn("overflow-hidden rounded-md border", depthIndents[Math.min(depth, 4)])}>
+      <header className="flex items-center gap-1.5 border-b bg-muted px-3 py-1.5 text-sm font-semibold">
+        <BotIcon className="size-4 shrink-0" />
+        {agent.name}
+      </header>
+      <div className="flex flex-col gap-2 px-3 py-2">{entries}</div>
+    </section>
   )
 }
 
