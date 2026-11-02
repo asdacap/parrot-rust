@@ -194,4 +194,28 @@ describe("reduceTimeline", () => {
   ])("%s", (_name, events, expected) => {
     expect(replay(events)).toMatchObject(expected)
   })
+
+  it("follows each subagent's turn, tools and statistics until the agent ends", () => {
+    const worker = "worker-agent"
+    const { activity, agentActivity } = replay([
+      [child, { case: "agentStarted", value: { parentAgentSessionId: root, name: "helper" } }],
+      [worker, { case: "agentStarted", value: { parentAgentSessionId: child, name: "worker" } }],
+      [child, { case: "turnStarted", value: { modelAliasIcon: { glyph: "*" } } }],
+      [child, { case: "providerRequestPhaseChanged", value: { phase: ProviderRequestPhase.HEADERS_RECEIVED } }],
+      [child, { case: "agentStatisticsUpdated", value: { contextSize: 10n, contextLimit: 100n } }],
+      [child, { case: "toolStarted", value: { toolCallId: "call-1", toolName: "read" } }],
+      [worker, { case: "turnStarted", value: {} }],
+      [worker, { case: "toolStarted", value: { toolCallId: "call-2", toolName: "edit" } }],
+      [worker, { case: "agentFinished", value: { parentAgentSessionId: child, name: "worker" } }],
+    ])
+
+    expect(agentActivity.get(child)).toMatchObject({
+      inTurn: true,
+      modelIcon: { glyph: "*" },
+      statistics: { contextSize: 10n, contextLimit: 100n },
+      activity: { waitingForFirstToken: true, tools: [{ toolCallId: "call-1", name: "read" }] },
+    })
+    expect(agentActivity.get(worker)).toMatchObject({ inTurn: false, activity: { tools: [] } })
+    expect(activity).toMatchObject({ waitingForFirstToken: false, tools: [] })
+  })
 })

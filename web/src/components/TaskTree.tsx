@@ -4,6 +4,7 @@ import {
   type AgentTaskProgressSnapshot,
   type PlanTaskDeclaration,
 } from "@/gen/parrot_pb"
+import { AgentStatus, type AgentLine } from "@/components/AgentStatus"
 
 // The terminal CLI's task icons (AgentTaskProgressFormatter).
 const icons: Record<AgentTaskProgressStatus, string> = {
@@ -15,11 +16,15 @@ const icons: Record<AgentTaskProgressStatus, string> = {
   [AgentTaskProgressStatus.CANCELED]: "■",
 }
 
-interface TaskNode {
+export interface TaskNode {
   name: string
   status: AgentTaskProgressStatus
   description: string
   detail: string
+  hidden: boolean
+  agentSessionId: string
+  // The working agent's live line, standing in for the status icon.
+  agent: AgentLine | undefined
   children: TaskNode[]
 }
 
@@ -36,6 +41,9 @@ export function fromProgress(
     status: node.status,
     description: node.description,
     detail: "",
+    hidden: node.hidden,
+    agentSessionId: node.agentSessionId,
+    agent: undefined,
     children: (nested ? nested.rootNodes : node.children).map((child) => fromProgress(child, trees, inner)),
   }
 }
@@ -44,6 +52,23 @@ export function fromProgress(
 export const isSettled = (node: TaskNode): boolean =>
   (node.status === AgentTaskProgressStatus.SUCCEEDED || node.status === AgentTaskProgressStatus.CANCELED) &&
   node.children.every(isSettled)
+
+// Settled tasks keep their subtasks out of view.
+export const showsChildren = (node: TaskNode): boolean =>
+  node.status !== AgentTaskProgressStatus.SUCCEEDED && node.status !== AgentTaskProgressStatus.CANCELED
+
+// As the terminal CLI's live task tree: a hidden task shows only while its agent works or a task below it shows,
+// and a working agent's line stands in for its task's icon.
+export function selectLive(nodes: TaskNode[], agentLines: ReadonlyMap<string, AgentLine>): TaskNode[] {
+  const select = (candidates: TaskNode[], hiddenAncestor: boolean): TaskNode[] =>
+    candidates.flatMap((node) => {
+      const hidden = hiddenAncestor || node.hidden
+      const children = select(node.children, hidden)
+      const agent = agentLines.get(node.agentSessionId)
+      return hidden && children.length === 0 && !agent ? [] : [{ ...node, agent, children }]
+    })
+  return select(nodes, false)
+}
 
 export const fromDeclaration = (task: PlanTaskDeclaration): TaskNode => ({
   name: task.name,
@@ -56,6 +81,9 @@ export const fromDeclaration = (task: PlanTaskDeclaration): TaskNode => ({
   ]
     .filter(Boolean)
     .join(" · "),
+  hidden: task.hidden,
+  agentSessionId: "",
+  agent: undefined,
   children: task.payload.case === "children" ? task.payload.value.tasks.map(fromDeclaration) : [],
 })
 
@@ -73,12 +101,10 @@ function TaskList({ nodes }: { nodes: TaskNode[] }) {
     <ul className="border-l pl-3">
       {nodes.map((node, index) => (
         <li key={index}>
-          <span>{icons[node.status]} </span>
+          {node.agent ? <AgentStatus line={node.agent} /> : <span>{icons[node.status]} </span>}
           <span>{node.description || node.name}</span>
           {node.detail && <span className="text-muted-foreground"> · {node.detail}</span>}
-          {node.status !== AgentTaskProgressStatus.SUCCEEDED &&
-            node.status !== AgentTaskProgressStatus.CANCELED &&
-            node.children.length > 0 && <TaskList nodes={node.children} />}
+          {showsChildren(node) && node.children.length > 0 && <TaskList nodes={node.children} />}
         </li>
       ))}
     </ul>

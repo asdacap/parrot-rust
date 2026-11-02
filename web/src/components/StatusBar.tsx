@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { Activity } from "@/session/timeline"
 import { formatContext, formatCost, formatRate, formatTokenCount, formatTokens, type TokenRate } from "@/session/usageFormat"
 
-const iconColors: Record<TurnModelAliasIconColor, string> = {
+export const iconColors: Record<TurnModelAliasIconColor, string> = {
   [TurnModelAliasIconColor.BLACK]: "text-foreground",
   [TurnModelAliasIconColor.RED]: "text-red-500",
   [TurnModelAliasIconColor.GREEN]: "text-green-500",
@@ -21,7 +21,7 @@ const iconColors: Record<TurnModelAliasIconColor, string> = {
 }
 
 // The terminal CLI's modeline activity, most specific first.
-function activityLabel(activity: Activity, busy: boolean): string {
+export function activityLabel(activity: Activity, busy: boolean): string {
   if (activity.waitingForFirstToken) return "Waiting for first token…"
   if (activity.requestAttempt > 0) {
     return activity.requestAttempt === 1 ? "Requesting…" : `Requesting (attempt ${String(activity.requestAttempt)})…`
