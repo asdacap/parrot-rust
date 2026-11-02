@@ -571,3 +571,73 @@ async fn actual_permission_broker_grant_refreshes_future_write_and_rejection_doe
         bounded(host.close()).await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn every_main_agent_turn_ends_with_mode_turn_completed_however_it_was_woken() {
+    for first in [
+        wire::Delivery::DELIVERY_QUEUE,
+        wire::Delivery::DELIVERY_STEER,
+    ] {
+        let fixture = Fixture::new();
+        let scripts = Arc::new(Mutex::new(std::collections::VecDeque::from([
+            reply(None),
+            reply(None),
+        ])));
+        let host = fixture.host_with(Arc::new(ScriptedProvider(scripts)));
+        let session = bounded(host.service().create_session(
+            &wire::CreateSessionRequest {
+                model: "local/test".into(),
+                mode: "build".into(),
+                interactive_permissions: true,
+                ..Default::default()
+            },
+            Arc::new(NeverCancelled),
+        ))
+        .await
+        .unwrap();
+        let mut stream = host
+            .service()
+            .listen(
+                &wire::ListenRequest {
+                    user_session_id: session.id.clone(),
+                    ..Default::default()
+                },
+                Arc::new(NeverCancelled),
+            )
+            .unwrap();
+        let mut lifecycle = Vec::new();
+        for delivery in [first, wire::Delivery::DELIVERY_QUEUE] {
+            bounded(host.service().send_message(
+                &wire::SendMessageRequest {
+                    user_session_id: session.id.clone(),
+                    text: "wake the main agent".into(),
+                    delivery: delivery.into(),
+                    ..Default::default()
+                },
+                Arc::new(NeverCancelled),
+            ))
+            .await
+            .unwrap();
+            bounded(async {
+                loop {
+                    let event = stream.next(&NeverCancelled).await.unwrap().unwrap();
+                    if event.has_turn_started() {
+                        lifecycle.push("started");
+                    } else if event.has_turn_ended() {
+                        lifecycle.push("ended");
+                    } else if event.has_mode_turn_completed() {
+                        lifecycle.push("completed");
+                        break;
+                    }
+                }
+            })
+            .await;
+        }
+        assert_eq!(
+            lifecycle,
+            ["started", "ended", "completed"].repeat(2),
+            "{first:?}"
+        );
+        bounded(host.close()).await.unwrap();
+    }
+}

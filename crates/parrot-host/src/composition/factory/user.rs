@@ -23,7 +23,9 @@ use parrot_provider::routing::{
 use parrot_runtime::{
     agent_turn::{
         engine::RuntimeBackend,
-        lifecycle::{AgentSession, DrainBackend, IncomingActivity, Signal, StartupActivation},
+        lifecycle::{
+            AgentSession, DrainBackend, DrainState, IncomingActivity, Signal, StartupActivation,
+        },
         services::{SelectionSource, TurnSkills},
     },
     children::{
@@ -32,7 +34,7 @@ use parrot_runtime::{
         PolicyLineage, PreparedScope, RegistryConfig, Scope, ScopeConfig, ScopeFactory,
         SelectionCell,
     },
-    event_broker::EventBroker,
+    event_broker::{EventBroker, Subscription},
     interactions::{
         AgentAskBroker, InteractionDiagnostics, InteractionError, PermissionBroker,
         PermissionTargetDescription, PermissionTargetDescriptionKind, QuestionBroker, TokioClock,
@@ -62,7 +64,10 @@ use parrot_tools::session::{WriteTarget, WriteTargetKind};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{
+        Arc, Mutex, OnceLock, Weak,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::{Mutex as AsyncMutex, oneshot};
@@ -519,6 +524,20 @@ impl Drop for CancelObservation {
     }
 }
 
+/// A queued prompt in flight; its run publishes the main agent's ModeTurnCompleted.
+struct QueuedPrompt(Arc<AtomicUsize>);
+impl QueuedPrompt {
+    fn hold(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(count.clone())
+    }
+}
+impl Drop for QueuedPrompt {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 pub struct UserSessionCore<S: RestrictableAccessSnapshot + 'static> {
     pub services: Arc<UserServices<S>>,
     pub registry: Arc<AgentRegistry<S>>,
@@ -528,6 +547,7 @@ pub struct UserSessionCore<S: RestrictableAccessSnapshot + 'static> {
     main: Mutex<Main<S>>,
     update_gate: AsyncMutex<()>,
     mutations: OwnedMutations,
+    queued_prompts: Arc<AtomicUsize>,
     close: AsyncMutex<Option<protocol::Result<()>>>,
 }
 
@@ -749,9 +769,15 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 }),
                 update_gate: AsyncMutex::new(()),
                 mutations: OwnedMutations::new(services.lease.runtime_handle()),
+                queued_prompts: Arc::new(AtomicUsize::new(0)),
                 close: AsyncMutex::new(None),
             });
             cleanup_core = Some(core.clone());
+            let events = services.broker.subscribe();
+            let drain_state = session.watch_drain_state();
+            let weak = Arc::downgrade(&core);
+            core.mutations
+                .spawn(move || Self::complete_unowned_turns(weak, events, drain_state))?;
             if legacy {
                 let notice = services
                     .templates
@@ -1282,6 +1308,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         })
             as parrot_runtime::agent_turn::lifecycle::AdmissionCallback);
         let core = self.clone();
+        let queued_prompt = QueuedPrompt::hold(&self.queued_prompts);
         self.mutations.spawn(move || async move {
             tokio::task::yield_now().await;
             let outcome: protocol::Result<()> = async {
@@ -1341,11 +1368,69 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             if core.publish(event).await.is_err() {
                 core.diagnostic_failure("queued_prompt_failed");
             }
+            drop(queued_prompt);
         })?;
         tokio::select! {
             biased;
             result = receive => result.map_err(internal)?,
             _ = caller.cancelled() => Err(RpcError::cancelled()),
+        }
+    }
+    /// A raw wake (a steer while idle, a child's completion, a task notification
+    /// or recovery) runs a main-agent turn that no queued prompt owns. Clients end
+    /// the main agent's turn only at ModeTurnCompleted, so publish it once such a
+    /// turn's drain settles.
+    async fn complete_unowned_turns(
+        core: Weak<Self>,
+        events: Subscription,
+        mut drain_state: tokio::sync::watch::Receiver<DrainState>,
+    ) {
+        let Some((root, lifetime, queued_prompts)) = core.upgrade().map(|core| {
+            (
+                core.services.root_identity.session.session_id.clone(),
+                core.services.lifetime.clone(),
+                core.queued_prompts.clone(),
+            )
+        }) else {
+            return;
+        };
+        let observe = |open: bool, event: &wire::Event| match &event.payload {
+            Some(wire::event::Payload::ModeTurnCompleted(_)) => false,
+            Some(wire::event::Payload::TurnStarted(_)) if event.agent_session_id == root => true,
+            Some(wire::event::Payload::TurnFailed(_)) if event.agent_session_id == root => false,
+            _ => open,
+        };
+        let mut turn_open = false;
+        loop {
+            tokio::select! {
+                event = events.next(lifetime.as_ref()) => match event {
+                    Ok(Some(event)) => turn_open = observe(turn_open, &event),
+                    _ => return,
+                },
+                changed = drain_state.changed() => if changed.is_err() {
+                    return;
+                },
+            }
+            if !turn_open
+                || *drain_state.borrow() != DrainState::Idle
+                || queued_prompts.load(Ordering::SeqCst) > 0
+            {
+                continue;
+            }
+            while let Some(event) = events.try_next() {
+                turn_open = observe(turn_open, &event);
+            }
+            if !turn_open {
+                continue;
+            }
+            turn_open = false;
+            let Some(core) = core.upgrade() else { return };
+            let mut event = wire::Event::new();
+            event.agent_session_id = root.clone();
+            event.set_mode_turn_completed(wire::ModeTurnCompleted::new());
+            if core.publish(event).await.is_err() {
+                core.diagnostic_failure("unowned_turn_completion_failed");
+            }
         }
     }
     fn diagnostic_failure(&self, name: &str) {

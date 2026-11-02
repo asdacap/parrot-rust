@@ -474,6 +474,7 @@ struct Inner<B: DrainBackend> {
     activation: Arc<StartupActivation>,
     suspending: AtomicBool,
     interrupting: AtomicBool,
+    drain_states: tokio::sync::watch::Sender<DrainState>,
 }
 pub struct AgentSession<B: DrainBackend> {
     inner: Arc<Inner<B>>,
@@ -641,6 +642,7 @@ impl<B: DrainBackend> AgentSession<B> {
                 activation,
                 suspending: AtomicBool::new(false),
                 interrupting: AtomicBool::new(false),
+                drain_states: tokio::sync::watch::Sender::new(DrainState::Idle),
             }),
         }
     }
@@ -653,6 +655,10 @@ impl<B: DrainBackend> AgentSession<B> {
             .lock()
             .expect("session poisoned")
             .drain_state
+    }
+    /// Reports Idle only after a drain's last pass has settled.
+    pub fn watch_drain_state(&self) -> tokio::sync::watch::Receiver<DrainState> {
+        self.inner.drain_states.subscribe()
     }
     pub fn is_idle(&self) -> bool {
         let state = self.inner.state.lock().expect("session poisoned");
@@ -747,6 +753,7 @@ impl<B: DrainBackend> AgentSession<B> {
         });
         state.drain_state = DrainState::Running;
         self.inner.backend.drain_state_changed(DrainState::Running);
+        self.inner.drain_states.send_replace(DrainState::Running);
         state.last_drain = execution.clone();
         state.drain = Some(DrainSlot {
             id,
@@ -1615,6 +1622,9 @@ impl<B: DrainBackend> AgentSession<B> {
             self.inner
                 .backend
                 .drain_state_changed(DrainState::Interrupting);
+            self.inner
+                .drain_states
+                .send_replace(DrainState::Interrupting);
         }
         let session = self.clone();
         spawn_tracked(&mut state, async move {
@@ -1671,6 +1681,9 @@ impl<B: DrainBackend> AgentSession<B> {
                 self.inner
                     .backend
                     .drain_state_changed(DrainState::Interrupting);
+                self.inner
+                    .drain_states
+                    .send_replace(DrainState::Interrupting);
             }
             state.drain.as_ref().unwrap().cancellation.cancel();
         }
@@ -1788,6 +1801,7 @@ impl<B: DrainBackend> AgentSession<B> {
                 state.drain = None;
                 state.drain_state = DrainState::Idle;
                 self.inner.backend.drain_state_changed(DrainState::Idle);
+                self.inner.drain_states.send_replace(DrainState::Idle);
                 while let Some(request) = state.scheduled.pop_front() {
                     request.completion.finish(Err(canceled()));
                 }
@@ -1929,6 +1943,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     state.drain = None;
                     state.drain_state = DrainState::Idle;
                     self.inner.backend.drain_state_changed(DrainState::Idle);
+                    self.inner.drain_states.send_replace(DrainState::Idle);
                     while let Some(request) = state.scheduled.pop_front() {
                         request.completion.finish(Err(canceled()));
                     }
