@@ -5,6 +5,7 @@ import { formatDuration } from "@/lib/duration"
 import { cn } from "@/lib/utils"
 import type { ToolItem, ToolStatus } from "@/session/timeline"
 import {
+  agentSendMessage,
   isUnifiedDiff,
   parseToolArguments,
   questionArguments,
@@ -59,6 +60,8 @@ function ToolBody({ item, args }: { item: ToolItem; args: Record<string, unknown
       return isUnifiedDiff(item.output) ? <DiffBlock diff={item.output} /> : <Output text={item.output} />
     case "exec_command":
       return <Output text={tailLines(item.output, 10)} full={item.output} />
+    case "agent_send":
+      return <div className="mt-2 whitespace-pre-wrap">{agentSendMessage(args)}</div>
     case "question":
       return (
         <ul className="mt-2 flex flex-col gap-1">

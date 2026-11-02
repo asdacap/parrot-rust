@@ -46,6 +46,8 @@ export function toolLabel(name: string, args: Arguments): string {
       return `${text(args, "method") || "GET"} ${text(args, "url")}`
     case "agent_spawn":
       return `agent_spawn ${text(args, "name")}`
+    case "agent_send":
+      return `Send to ${text(args, "name")}`
     case "wait":
       return "Wait for incoming activity"
     case "question": {
@@ -55,6 +57,10 @@ export function toolLabel(name: string, args: Arguments): string {
     default:
       return name
   }
+}
+
+export function agentSendMessage(args: Arguments): string {
+  return text(args, "message")
 }
 
 export function waitDurationMilliseconds(args: Arguments): number | undefined {

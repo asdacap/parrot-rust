@@ -9,6 +9,7 @@ describe("toolLabel", () => {
     ["glob", '{"pattern":"**/*.cs","path":"src"}', 'glob "**/*.cs" in src'],
     ["exec_command", '{"cmd":"ls -la"}', "$ ls -la"],
     ["web_fetch", '{"url":"https://example.com"}', "GET https://example.com"],
+    ["agent_send", '{"name":"parent/reviewer","message":"done"}', "Send to parent/reviewer"],
     ["question", '{"questions":[{"prompt":"a"},{"prompt":"b"}]}', "Question · 2 items"],
     ["wait", '{"duration_ms":1000}', "Wait for incoming activity"],
     ["status", "{", "status"],
