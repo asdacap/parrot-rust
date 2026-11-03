@@ -206,7 +206,7 @@ fn environment_templates_reject_invalid_syntax_even_in_dormant_branches() {
 fn runtime_default_record_shapes_and_timeout_legacy_precedence_match_source() {
     let root = root();
     let settings = read(&root).unwrap();
-    assert_eq!(settings.profiles.len(), 9);
+    assert_eq!(settings.profiles.len(), PROFILE_IDS.len());
     assert_eq!(settings.cli_utilities.optional, vec!["git"]);
     assert_eq!(
         settings.agent_tasks.fork_history_mode,

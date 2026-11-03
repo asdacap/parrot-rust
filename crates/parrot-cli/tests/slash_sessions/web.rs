@@ -228,7 +228,7 @@ async fn web_clear_uses_defaults_without_prompts_then_emits_replacement_not_upda
         "create_session" => {
             let request = wire::CreateSessionRequest::parse_from_bytes(bytes).unwrap();
             assert_eq!(request.model, "provider/current");
-            assert_eq!(request.mode, "coordinator");
+            assert_eq!(request.mode, "general");
             assert!(request.interactive_permissions);
             Ok(wire::UserSession {
                 id: "replacement".into(),
@@ -266,7 +266,7 @@ async fn web_clear_uses_defaults_without_prompts_then_emits_replacement_not_upda
     assert_eq!(replacements.len(), 1);
     assert_eq!(replacements[0].id, "replacement");
     assert_eq!(replacements[0].model, "provider/current");
-    assert_eq!(replacements[0].mode, "coordinator");
+    assert_eq!(replacements[0].mode, "general");
     assert!(
         !frames
             .iter()

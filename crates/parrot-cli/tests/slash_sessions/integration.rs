@@ -409,7 +409,7 @@ async fn clear_uses_configured_defaults_without_model_or_mode_prompts_before_new
         "create_session" => {
             let request = wire::CreateSessionRequest::parse_from_bytes(bytes).unwrap();
             assert_eq!(request.model, "provider/default");
-            assert_eq!(request.mode, "coordinator");
+            assert_eq!(request.mode, "general");
             assert!(request.interactive_permissions);
             Ok(wire::UserSession {
                 id: "fresh".into(),
@@ -463,7 +463,7 @@ async fn clear_uses_configured_defaults_without_model_or_mode_prompts_before_new
         .unwrap();
     assert_eq!(session.id(), "fresh");
     assert_eq!(session.model(), "provider/default");
-    assert_eq!(session.mode(), "coordinator");
+    assert_eq!(session.mode(), "general");
     assert!(dialog.pickers.is_empty());
     assert!(dialog.loads.is_empty());
     assert_eq!(dialog.shown, ["new session fresh"]);

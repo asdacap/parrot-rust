@@ -1,7 +1,7 @@
 use crate::support::Context;
 #[test]
 fn source_assertions() {
-    for id in ["coordinator", "build", "plan", "query"] {
+    for id in ["general", "coordinator", "build", "plan", "query"] {
         let context = Context::new();
         assert_eq!(
             context

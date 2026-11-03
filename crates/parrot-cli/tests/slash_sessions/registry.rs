@@ -256,7 +256,7 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
         .unwrap();
     assert_eq!(session.id(), "session-1");
     assert_eq!(session.model(), "provider/current");
-    assert_eq!(session.mode(), "coordinator");
+    assert_eq!(session.mode(), "general");
     assert!(clear_dialog.pickers.is_empty());
     assert_eq!(
         record

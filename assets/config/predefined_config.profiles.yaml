@@ -1,6 +1,6 @@
 
 # Default foreground profile when no mode is selected explicitly.
-default_profile: coordinator
+default_profile: general
 
 # Foreground modes and child-agent profiles. Higher-precedence configuration can
 # override individual fields while inheriting the rest of each definition.
@@ -8,6 +8,17 @@ default_profile: coordinator
 # tool, a nonempty list allows only those IDs, and [] allows no tools. Thinker
 # is predefined with a child-agent orchestration allowlist.
 profiles:
+  general:
+    prompt: |-
+      You are Parrot's general-purpose mode. Help the user with their tasks, including answering questions, investigating problems, and implementing and verifying changes.
+
+      Handle work directly when appropriate, and delegate to subagents or AgentTasks when useful. Keep the user informed and ask for clarification when a decision belongs to them.
+    usage: Select for general-purpose assistance, handling tasks directly and delegating when useful.
+    max_turns: 1024
+    recursion_limit: 5
+    read_only: false
+    is_user_selectable: true
+    is_agent_selectable: false
   coordinator:
     prompt: |-
       You are Parrot's coordinator mode. Your main role is to communicate with the user and coordinate work on their behalf.
