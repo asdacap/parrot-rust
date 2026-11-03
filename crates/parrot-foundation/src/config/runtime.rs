@@ -60,7 +60,8 @@ impl<T> std::ops::Deref for ReadOnlyCollection<T> {
     }
 }
 
-pub const PROFILE_IDS: [&str; 9] = [
+pub const PROFILE_IDS: [&str; 10] = [
+    "general",
     "coordinator",
     "build",
     "plan",
