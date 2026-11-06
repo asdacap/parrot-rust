@@ -49,6 +49,7 @@ struct MemoryState {
     maximum: i32,
     reduced: bool,
     clear_work_on_retry: bool,
+    availability_restored: bool,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
@@ -69,6 +70,7 @@ impl MemoryState {
             maximum: 10,
             reduced: true,
             clear_work_on_retry: false,
+            availability_restored: false,
             fail_at: None,
         }
     }
@@ -115,8 +117,16 @@ impl State for MemoryState {
             self.step("begin")?;
             self.open = true;
             self.work = true;
+            self.availability_restored = false;
             self.turns = self.turns.saturating_sub(1);
             Ok(self.maximum)
+        })
+    }
+    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), Self::Error>> {
+        Box::pin(async move {
+            self.step("restore")?;
+            self.availability_restored = true;
+            Ok(())
         })
     }
     fn promote_input(&mut self) -> BoxFuture<'_, Result<(), Self::Error>> {
@@ -214,9 +224,10 @@ impl Tools<MemoryState> for MemoryTools {
     }
     fn snapshot(
         &self,
-        _state: &MemoryState,
+        state: &MemoryState,
         _selection: &i32,
     ) -> Result<Self::Snapshot, &'static str> {
+        assert!(!state.availability_restored);
         Ok(vec!["read", "write"])
     }
     fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [&'static str] {
@@ -271,6 +282,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
         [
             "reconcile",
             "begin",
+            "restore",
             "promote",
             "prepare",
             "invoke",
@@ -507,6 +519,7 @@ fn adapter_errors_stop_at_the_failing_effect() {
     for (stage, kind) in [
         ("reconcile", ResponseKind::Final),
         ("begin", ResponseKind::Final),
+        ("restore", ResponseKind::Final),
         ("promote", ResponseKind::Final),
         ("prepare", ResponseKind::Final),
         ("invoke", ResponseKind::Final),

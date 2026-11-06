@@ -78,6 +78,8 @@ pub trait State: Send {
     fn has_work(&self) -> BoxFuture<'_, Result<bool, Self::Error>>;
     /// Opens a turn and prepares its initial immutable selection.
     fn begin_turn(&mut self) -> BoxFuture<'_, Result<Self::Selection, Self::Error>>;
+    /// Restores tool availability after capturing the new turn's tool snapshot.
+    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), Self::Error>>;
     /// Promotes eligible input into the current conversation.
     fn promote_input(&mut self) -> BoxFuture<'_, Result<(), Self::Error>>;
     /// Returns the request allowance for the selected turn.
@@ -183,6 +185,7 @@ where
             budget.begin_turn();
             let selection = state.begin_turn().await?;
             let snapshot = tools.snapshot(state, &selection)?;
+            state.restore_tool_availability().await?;
             selected = Some((selection, snapshot));
         }
         state.promote_input().await?;
