@@ -101,6 +101,67 @@ async fn busy_input_and_escape_or_control_c_preserve_draft_and_interrupt_once() 
     }
 }
 
+#[tokio::test]
+async fn effort_picker_returns_to_prompt_without_ending_the_running_turn() {
+    let mut rpc = Fixture::start().await;
+    rpc.state.lock().unwrap().model_variants = ["low", "high"]
+        .into_iter()
+        .map(|effort| wire::ModelVariant {
+            name: effort.into(),
+            reasoning_effort: effort.into(),
+            ..Default::default()
+        })
+        .collect();
+    let mut terminal = TerminalFixture::new();
+    let cli = rpc.cli(terminal.take(), "", None);
+    let stop = rpc.stopping.clone();
+    let result = fixture::run_flow(cli, stop.clone(), terminal.end_input(), async {
+        terminal.output_contains("❯ ").await;
+        terminal.input.type_text("running prompt\r");
+        rpc.wait(|state| state.sent.len() == 1).await;
+        rpc.publish(
+            "session-1",
+            event(
+                "started",
+                wire::event::Payload::TurnStarted(wire::TurnStarted::new()),
+            ),
+        )
+        .await;
+        terminal.input.type_text("/effort\r");
+        terminal.output_contains("Select model effort").await;
+        terminal.input.type_text("high\r");
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            terminal.output_contains("Model effort selected: high"),
+        )
+        .await
+        .expect("effort selection must finish before the running turn ends");
+        rpc.wait(|state| state.updated.len() == 1).await;
+        assert_eq!(
+            rpc.state.lock().unwrap().updated[0].model,
+            "provider/model/high"
+        );
+        let confirmed = terminal.output.text().len();
+        terminal.input.type_text("\r");
+        wait_until(|| terminal.output.text()[confirmed..].contains("❯ ")).await;
+        terminal.input.type_text("still running\r");
+        rpc.wait(|state| state.sent.len() == 2).await;
+        let state = rpc.state.lock().unwrap();
+        assert_eq!(state.sent[1].text, "still running");
+        assert_eq!(
+            state.sent[1].delivery.enum_value().unwrap(),
+            wire::Delivery::DELIVERY_STEER
+        );
+        assert!(state.interrupted.is_empty());
+        drop(state);
+        terminal.input.end();
+    })
+    .await;
+    assert_eq!(result.unwrap(), 0);
+    assert!(terminal.restored.load(Ordering::Acquire));
+    rpc.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn many_agent_text_flood_keeps_draft_and_escape_responsive_with_bounded_draws() {
     const AGENTS: usize = 16;

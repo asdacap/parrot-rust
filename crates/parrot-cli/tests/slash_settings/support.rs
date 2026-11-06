@@ -482,7 +482,7 @@ pub async fn run_with_session(
     arguments: &str,
     session: &mut dyn SlashSession,
     dialog: &mut Dialog,
-    activity: &Activity,
+    activity: &dyn SlashActivity,
     cancellation: &dyn Cancellation,
 ) -> Result<(), SlashFailure> {
     let refresh: SkillRefresh = Arc::new(|cancellation| {
