@@ -42,8 +42,18 @@ associated types, so the core does not depend on runtime or provider implementat
 `parrot-runtime` implements those traits with private adapters. Persistence,
 prompt preparation, compaction, security policy, streaming, usage accounting,
 cancellation, event delivery, and session lifecycle remain outside the core.
-Tools and providers borrow the state adapter to perform in-turn effects without
-re-entering the session drain or introducing a second state lock.
+`Tools` and `Provider` have independent associated types and do not depend on the
+`State` trait. The loop passes each adapter its own context instead of the whole
+state. Runtime contexts are explicitly restricted by two smaller traits:
+
+- `ToolTurn` exposes mutable conversation/context resources and the retained
+  request-status binding, but not lifecycle state or backend services.
+- `ProviderFeedback` permits synchronous token-estimate calibration for each
+  streamed completion, before durable usage recording.
+
+These runtime seams keep the existing in-drain tool settlement and streaming
+behavior available for later assessment without exposing the full state or
+introducing another state lock.
 
 ## Compiler cache
 

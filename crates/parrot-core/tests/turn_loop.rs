@@ -169,10 +169,10 @@ impl State for MemoryState {
     type ToolContext = dyn ToolEffects;
     type ProviderContext = dyn ProviderReplies;
 
-    fn tool_context(&mut self) -> &mut Self::ToolContext {
+    fn borrow_tool_context(&mut self) -> &mut Self::ToolContext {
         &mut self.tools
     }
-    fn provider_context(&mut self) -> &mut Self::ProviderContext {
+    fn borrow_provider_context(&mut self) -> &mut Self::ProviderContext {
         &mut self.provider
     }
     fn disables_request_limit(&self) -> bool {

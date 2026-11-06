@@ -69,9 +69,9 @@ pub trait State: Send {
     type ProviderContext: ?Sized + Send;
 
     /// Borrows only the invocation capabilities required by the tool adapter.
-    fn tool_context(&mut self) -> &mut Self::ToolContext;
+    fn borrow_tool_context(&mut self) -> &mut Self::ToolContext;
     /// Borrows only the feedback capabilities required by the provider adapter.
-    fn provider_context(&mut self) -> &mut Self::ProviderContext;
+    fn borrow_provider_context(&mut self) -> &mut Self::ProviderContext;
     /// Reports whether provider-request limits are disabled for this run.
     fn disables_request_limit(&self) -> bool;
     /// Reports whether a durable turn is already open.
@@ -204,7 +204,7 @@ where
         if !state.is_turn_open() && state.has_scheduled_work() {
             return Ok(Outcome::Completed(answer));
         }
-        tools.reconcile(state.tool_context()).await?;
+        tools.reconcile(state.borrow_tool_context()).await?;
         state.check_cancellation()?;
         if !retry_pending && !state.has_work().await? {
             return Ok(Outcome::Completed(answer));
@@ -233,7 +233,10 @@ where
             .prepare_request(selection, &definitions, phase)
             .await?;
         let attempt = budget.count_request();
-        let response = match provider.invoke(request, state.provider_context()).await {
+        let response = match provider
+            .invoke(request, state.borrow_provider_context())
+            .await
+        {
             Ok(response) => response,
             Err(ProviderError::RequestTooLarge(error)) if !compacted_oversized => {
                 compacted_oversized = true;
@@ -258,7 +261,7 @@ where
             ResponseKind::ToolCalls => {
                 state.record_tool_calls(&response.value).await?;
                 tools
-                    .execute_pending(state.tool_context(), selection, &snapshot)
+                    .execute_pending(state.borrow_tool_context(), selection, &snapshot)
                     .await?;
                 if phase.final_phase && !budget.try_extend_settlement() {
                     return Ok(Outcome::Failed(state.fail_runaway().await?));

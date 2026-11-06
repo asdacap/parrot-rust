@@ -10,13 +10,82 @@ struct RuntimeState<'a, S: AccessSnapshot, T: TurnTools<S>> {
     state: &'a mut State,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
-    request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
+    cancellation: &'a dyn Cancellation,
 }
-struct RuntimeProvider;
+struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
+    backend: &'a RuntimeBackend<S, T>,
+    cancellation: &'a dyn Cancellation,
+}
+
+/// Grants tools access only to in-turn conversation and context mutations.
+pub(super) trait ToolTurn: Send {
+    /// Borrows mutations without exposing lifecycle, turn bookkeeping, or backend services.
+    fn borrow_mutations(&mut self) -> ToolMutations<'_>;
+}
+
+pub(super) struct ToolMutations<'a> {
+    pub(super) conversation: &'a mut AgentConversation,
+    pub(super) context: &'a mut ContextController,
+    request_status: Option<&'a Arc<dyn crate::compaction::ContextStatus>>,
+}
+
+impl ToolTurn for State {
+    fn borrow_mutations(&mut self) -> ToolMutations<'_> {
+        ToolMutations {
+            conversation: &mut self.conversation,
+            context: &mut self.context,
+            request_status: self.request_status.as_ref(),
+        }
+    }
+}
+
+/// Grants a provider synchronous, per-completion token calibration only.
+trait ProviderFeedback: Send + Sync {
+    /// Calibrates input estimates before durable usage recording is awaited.
+    fn observe_completion(
+        &mut self,
+        selector: &str,
+        estimate: i64,
+        completed: &sessions::Completion,
+    );
+}
+
+impl ProviderFeedback for crate::compaction::ProviderTokenBudget {
+    fn observe_completion(
+        &mut self,
+        selector: &str,
+        estimate: i64,
+        completed: &sessions::Completion,
+    ) {
+        self.observe_usage(selector, estimate, completed);
+    }
+}
+
+struct UsageBridge<'a> {
+    recorder: &'a SessionUsageRecorder,
+    selected: &'a ProviderModel,
+    feedback: &'a mut dyn ProviderFeedback,
+    estimate: i64,
+}
+impl ProviderUsage for UsageBridge<'_> {
+    fn observe_completion<'a>(
+        &'a mut self,
+        request: &'a sessions::Request,
+        completed: &'a sessions::Completion,
+    ) -> BoxFuture<'a, Result<(), EventError>> {
+        Box::pin(async move {
+            self.feedback
+                .observe_completion(&self.selected.selector(), self.estimate, completed);
+            self.recorder
+                .record_request(self.selected, request.reasoning.as_ref(), completed)
+                .await
+        })
+    }
+}
 
 struct PreparedRequest {
     request: sessions::Request,
@@ -35,14 +104,24 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    state.request_status = None;
     let mut state = RuntimeState {
         backend,
         state,
         cancellation,
         work,
-        request_status: None,
     };
-    match parrot_core::run(&mut state, &RuntimeTools { backend }, &RuntimeProvider).await {
+    let tools = RuntimeTools {
+        backend,
+        cancellation,
+    };
+    let provider = RuntimeProvider {
+        backend,
+        cancellation,
+    };
+    let outcome = parrot_core::run(&mut state, &tools, &provider).await;
+    state.state.request_status = None;
+    match outcome {
         Ok(parrot_core::Outcome::Completed(answer)) => Ok(Execution::succeeded(answer)),
         Ok(parrot_core::Outcome::Failed(message)) => Ok(Execution::failed(&message)),
         Err(parrot_core::Error::Adapter(error)) => Err(error),
@@ -63,7 +142,15 @@ where
     type Response = sessions::Completion;
     type ToolDefinition = sessions::Tool;
     type Error = TurnError;
+    type ToolContext = dyn ToolTurn;
+    type ProviderContext = dyn ProviderFeedback;
 
+    fn borrow_tool_context(&mut self) -> &mut Self::ToolContext {
+        self.state
+    }
+    fn borrow_provider_context(&mut self) -> &mut Self::ProviderContext {
+        self.state.context.budget_mut()
+    }
     fn disables_request_limit(&self) -> bool {
         self.backend.agent_limits.disable_max_turns
     }
@@ -205,7 +292,7 @@ where
                     .await?;
             }
             let status = backend.status.bind(selection);
-            self.request_status = Some(status.clone());
+            state.request_status = Some(status.clone());
             let epoch = state
                 .context
                 .prepare_epoch(
@@ -269,7 +356,7 @@ where
             let state = &mut *self.state;
             let cancellation = self.cancellation;
             let events = ContextEmitter { backend };
-            let status = self
+            let status = state
                 .request_status
                 .as_ref()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
@@ -417,30 +504,28 @@ where
     }
 }
 
-impl<S, T> CoreTools<RuntimeState<'_, S, T>> for RuntimeTools<'_, S, T>
+impl<S, T> CoreTools for RuntimeTools<'_, S, T>
 where
     S: AccessSnapshot + 'static,
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    type Context = dyn ToolTurn;
+    type Selection = TurnSelection<S>;
+    type Definition = sessions::Tool;
     type Snapshot = T::Snapshot;
+    type Error = TurnError;
 
     fn reconcile<'a>(
         &'a self,
-        state: &'a mut RuntimeState<'_, S, T>,
+        context: &'a mut Self::Context,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
-            self.backend
-                .reconcile(state.state, state.cancellation)
-                .await?;
+            self.backend.reconcile(context, self.cancellation).await?;
             Ok(())
         })
     }
-    fn snapshot(
-        &self,
-        _state: &RuntimeState<'_, S, T>,
-        selection: &TurnSelection<S>,
-    ) -> Result<Self::Snapshot, TurnError> {
+    fn snapshot(&self, selection: &TurnSelection<S>) -> Result<Self::Snapshot, TurnError> {
         self.backend.snapshot(selection)
     }
     fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
@@ -451,15 +536,15 @@ where
     }
     fn execute_pending<'a>(
         &'a self,
-        state: &'a mut RuntimeState<'_, S, T>,
+        context: &'a mut Self::Context,
         selection: &'a TurnSelection<S>,
         snapshot: &'a Self::Snapshot,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
             let backend = self.backend;
-            let status = state
+            let mutations = context.borrow_mutations();
+            let status = mutations
                 .request_status
-                .as_ref()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
             let events = ContextEmitter { backend };
             backend
@@ -467,8 +552,8 @@ where
                 .reconcile(
                     TurnResources {
                         history: &backend.history,
-                        conversation: &mut state.state.conversation,
-                        context: &mut state.state.context,
+                        conversation: mutations.conversation,
+                        context: mutations.context,
                         prompt: &backend.prompt,
                         sessions: &backend.sessions,
                         status: status.as_ref(),
@@ -478,26 +563,31 @@ where
                     selection,
                     snapshot,
                     backend.selection.as_ref(),
-                    state.cancellation,
+                    self.cancellation,
                 )
                 .await
         })
     }
 }
 
-impl<S, T> parrot_core::Provider<RuntimeState<'_, S, T>> for RuntimeProvider
+impl<S, T> parrot_core::Provider for RuntimeProvider<'_, S, T>
 where
     S: AccessSnapshot + 'static,
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    type Context = dyn ProviderFeedback;
+    type Request = PreparedRequest;
+    type Response = sessions::Completion;
+    type Error = TurnError;
+
     fn invoke<'a>(
         &'a self,
-        state: &'a mut RuntimeState<'_, S, T>,
         prepared: PreparedRequest,
+        feedback: &'a mut Self::Context,
     ) -> BoxFuture<'a, Result<Response<sessions::Completion>, ProviderError<TurnError>>> {
         Box::pin(async move {
-            let backend = state.backend;
+            let backend = self.backend;
             let session = backend
                 .sessions
                 .get(prepared.model.provider.clone())
@@ -508,7 +598,7 @@ where
             let mut usage = UsageBridge {
                 recorder: &backend.usage,
                 selected: &prepared.model,
-                budget: state.state.context.budget_mut(),
+                feedback,
                 estimate: prepared.estimate,
             };
             let mut call = ProviderCall {
@@ -520,7 +610,7 @@ where
                 usage: &mut usage,
             };
             let event = match call
-                .stream(session.as_ref(), prepared.request, state.cancellation)
+                .stream(session.as_ref(), prepared.request, self.cancellation)
                 .await
             {
                 Ok(event) => event,

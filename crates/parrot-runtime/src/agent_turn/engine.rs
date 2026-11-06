@@ -80,6 +80,7 @@ struct State {
     context: ContextController,
     turn: Option<TurnKey>,
     diagnostic_turn: Option<String>,
+    request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
 }
 
 /// A real storage/provider backend. No service has a success default, and no
@@ -194,6 +195,7 @@ where
                 context: config.context,
                 turn: None,
                 diagnostic_turn: None,
+                request_status: None,
             }),
             notices,
             execution_activity: std::sync::Mutex::new(None),
@@ -341,19 +343,20 @@ where
     }
     async fn reconcile(
         &self,
-        state: &mut State,
+        context: &mut dyn core_loop::ToolTurn,
         cancellation: &dyn Cancellation,
     ) -> Result<TurnSelection<S>, TurnError> {
         let selection = self.selection.capture()?;
         let snapshot = self.snapshot(&selection)?;
         let status = self.status.bind(&selection);
         let events = ContextEmitter { backend: self };
+        let mutations = context.borrow_mutations();
         self.tools
             .reconcile(
                 TurnResources {
                     history: &self.history,
-                    conversation: &mut state.conversation,
-                    context: &mut state.context,
+                    conversation: mutations.conversation,
+                    context: mutations.context,
                     prompt: &self.prompt,
                     sessions: &self.sessions,
                     status: status.as_ref(),
@@ -732,27 +735,6 @@ impl ProviderActivity for ActivityBridge<'_> {
         self.0.finish_provider_request();
     }
 }
-struct UsageBridge<'a> {
-    recorder: &'a SessionUsageRecorder,
-    selected: &'a parrot_provider::routing::registry::ProviderModel,
-    budget: &'a mut crate::compaction::ProviderTokenBudget,
-    estimate: i64,
-}
-impl ProviderUsage for UsageBridge<'_> {
-    fn observe_completion<'a>(
-        &'a mut self,
-        request: &'a sessions::Request,
-        completed: &'a sessions::Completion,
-    ) -> BoxFuture<'a, Result<(), EventError>> {
-        Box::pin(async move {
-            self.budget
-                .observe_usage(&self.selected.selector(), self.estimate, completed);
-            self.recorder
-                .record_request(self.selected, request.reasoning.as_ref(), completed)
-                .await
-        })
-    }
-}
 struct ContextEmitter<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
 }
@@ -1124,7 +1106,7 @@ where
     ) -> BoxFuture<'a, Result<Self::Selection, LifecycleError>> {
         Box::pin(async move {
             let mut state = self.state.lock().await;
-            self.reconcile(&mut state, cancellation)
+            self.reconcile(&mut *state, cancellation)
                 .await
                 .map_err(|e| e.lifecycle_error())
         })
