@@ -26,6 +26,25 @@ on bounded agent scope, delegation, parent attention and model-tier selection,
 ported from the .NET repository. Repository contributor guidance is in
 [AGENTS.md](AGENTS.md).
 
+## Core and runtime
+
+`parrot-core` is a dependency-free crate containing the agent turn loop and three
+traits:
+
+- `State`: conversation and turn operations, prepared requests, and completion admission.
+- `Tools`: retained tool definitions, final-phase filtering, and pending tool execution.
+- `Provider`: model invocation with normalized response and error outcomes.
+
+The core owns request budgets, retry decisions, tool/model ordering, and turn
+termination. Request, response, selection, and tool-definition values are opaque
+associated types, so the core does not depend on runtime or provider implementations.
+
+`parrot-runtime` implements those traits with private adapters. Persistence,
+prompt preparation, compaction, security policy, streaming, usage accounting,
+cancellation, event delivery, and session lifecycle remain outside the core.
+Tools and providers borrow the state adapter to perform in-turn effects without
+re-entering the session drain or introducing a second state lock.
+
 ## Compiler cache
 
 `nix develop` provides `sccache` and sets `RUSTC_WRAPPER` to use it. The compiler
