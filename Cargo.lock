@@ -1413,6 +1413,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "parrot-core"
+version = "0.0.0-dev"
+
+[[package]]
 name = "parrot-domain"
 version = "0.0.0-dev"
 dependencies = [
