@@ -3,6 +3,25 @@ use crate::terminal_layout::ToolYamlFormatter;
 use serde_json::Value;
 #[derive(Default)]
 pub struct ReadToolPresenter;
+impl ReadToolPresenter {
+    fn label(call: &ToolCallPresentation) -> PresenterResult<String> {
+        let value: Value = serde_json::from_str(&call.arguments_json)?;
+        let path = value
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let offset = value.get("offset").and_then(Value::as_i64);
+        let limit = value.get("limit").and_then(Value::as_i64);
+        Ok(if offset.is_some() || limit.is_some() {
+            let offset = offset.unwrap_or(1);
+            let limit = limit.unwrap_or(2000);
+            let end = offset.saturating_add(limit.saturating_sub(1));
+            format!("read L{offset}-L{end} {path}")
+        } else {
+            format!("read {path}")
+        })
+    }
+}
 impl ToolPresenter for ReadToolPresenter {
     fn tool_name(&self) -> &str {
         "read"
@@ -19,7 +38,7 @@ impl ToolPresenter for ReadToolPresenter {
         frame: usize,
     ) -> PresenterResult<Presentation> {
         Ok(Presentation::Tool(ToolReport::live(
-            format!("read {}", path(&call.arguments_json)?),
+            Self::label(call)?,
             ToolBlock::empty(),
             self.metadata(),
             frame,
@@ -30,7 +49,7 @@ impl ToolPresenter for ReadToolPresenter {
         call: &ToolCallPresentation,
         terminal: &ToolTerminalPresentation,
     ) -> PresenterResult<Option<Presentation>> {
-        let path = path(&call.arguments_json)?;
+        let label = Self::label(call)?;
         let status = terminal.resolve_status();
         let block = if matches!(
             status,
@@ -45,18 +64,10 @@ impl ToolPresenter for ReadToolPresenter {
             ToolBlock::empty()
         };
         Ok(Some(Presentation::Tool(ToolReport::terminal(
-            format!("read {path}"),
+            label,
             block,
             status,
             self.metadata(),
         ))))
     }
-}
-fn path(json: &str) -> PresenterResult<String> {
-    let value: Value = serde_json::from_str(json)?;
-    Ok(value
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .into())
 }
