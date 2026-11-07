@@ -94,12 +94,15 @@ pub trait States: Send {
     fn promote_input(&mut self) -> BoxFuture<'_, Result<(), Error>>;
     /// Consumes a request to enter the interrupted final phase.
     fn take_interruption(&mut self) -> bool;
-    /// Prepares context and a provider request using exactly the advertised definitions.
-    fn prepare_request<'a>(
+    /// Prepares context using exactly the supplied definitions and core-selected phase.
+    /// Returns rendered instructions and the resulting output-token budget.
+    fn prepare_context<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
         phase: budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<ProviderRequest, Error>>;
+    ) -> BoxFuture<'a, Result<ContextSnapshot, Error>>;
+    /// Reads the current provider-visible conversation after context preparation.
+    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
     /// Attempts to reduce context after a provider rejects an oversized request.
     fn compact_request<'a>(
         &'a mut self,
@@ -266,9 +269,19 @@ pub struct ToolCatalog {
     pub final_phase: Vec<ToolDefinition>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TurnOptions {
     pub maximum_requests: i32,
+    pub model: String,
+    pub reasoning: Option<Reasoning>,
+    pub provider_preferences: String,
+    pub include_router_metadata: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextSnapshot {
+    pub instructions: String,
+    pub max_output_tokens: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

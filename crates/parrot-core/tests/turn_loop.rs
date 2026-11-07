@@ -1,8 +1,8 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionDecision, Error, ErrorCode, ErrorKind, FinishReason,
-    Outcome, Provider, ProviderRequest, ProviderResponse, RetryReason, States, ToolCall,
-    ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
-    budget::TurnRequestPhase, run,
+    BoxFuture, CancellationToken, CompletionDecision, Content, ContextSnapshot, Error, ErrorCode,
+    ErrorKind, FinishReason, Message, Outcome, Provider, ProviderRequest, ProviderResponse,
+    Reasoning, RetryReason, Role, States, ToolCall, ToolCatalog, ToolDefinition, ToolImage,
+    ToolResult, ToolStatus, Tools, TurnOptions, budget::TurnRequestPhase, run,
 };
 use std::{
     collections::VecDeque,
@@ -17,6 +17,8 @@ use std::{
 
 #[path = "turn_loop/cancellation.rs"]
 mod cancellation;
+#[path = "turn_loop/request_assembly.rs"]
+mod request_assembly;
 #[path = "turn_loop/tool_execution.rs"]
 mod tool_execution;
 
@@ -196,10 +198,18 @@ struct MemoryState {
     provider: MemoryProvider,
     decisions: VecDeque<CompletionDecision>,
     requests: Vec<(TurnRequestPhase, Vec<String>)>,
+    prepared_definitions: Vec<Vec<ToolDefinition>>,
     retries: Vec<(RetryReason, i32)>,
     recorded_tools: Vec<ProviderResponse>,
     applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
+    model: String,
+    reasoning: Option<Reasoning>,
+    provider_preferences: String,
+    include_router_metadata: bool,
+    context: ContextSnapshot,
+    messages: Vec<Message>,
+    preparations: VecDeque<(ContextSnapshot, Vec<Message>)>,
     work: bool,
     turns: usize,
     open: bool,
@@ -234,10 +244,21 @@ impl MemoryState {
             },
             decisions: VecDeque::new(),
             requests: Vec::new(),
+            prepared_definitions: Vec::new(),
             retries: Vec::new(),
             recorded_tools: Vec::new(),
             applied_results: Vec::new(),
             recorded_catalogs: Vec::new(),
+            model: "memory/model".into(),
+            reasoning: None,
+            provider_preferences: String::new(),
+            include_router_metadata: false,
+            context: ContextSnapshot {
+                instructions: "core request".into(),
+                max_output_tokens: 0,
+            },
+            messages: Vec::new(),
+            preparations: VecDeque::new(),
             work: true,
             turns: 1,
             open: false,
@@ -316,6 +337,10 @@ impl States for MemoryState {
             self.turns = self.turns.saturating_sub(1);
             Ok(TurnOptions {
                 maximum_requests: self.maximum,
+                model: self.model.clone(),
+                reasoning: self.reasoning.clone(),
+                provider_preferences: self.provider_preferences.clone(),
+                include_router_metadata: self.include_router_metadata,
             })
         })
     }
@@ -332,24 +357,30 @@ impl States for MemoryState {
     fn take_interruption(&mut self) -> bool {
         std::mem::take(&mut self.interrupted)
     }
-    fn prepare_request<'a>(
+    fn prepare_context<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
         phase: TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<ProviderRequest, Error>> {
+    ) -> BoxFuture<'a, Result<ContextSnapshot, Error>> {
         Box::pin(async move {
             self.step("prepare")?;
             let names: Vec<_> = definitions
                 .iter()
                 .map(|definition| definition.name.clone())
                 .collect();
-            self.requests.push((phase, names.clone()));
-            Ok(ProviderRequest {
-                model: "memory/model".into(),
-                instructions: "core request".into(),
-                tools: definitions.to_vec(),
-                ..ProviderRequest::default()
-            })
+            self.requests.push((phase, names));
+            self.prepared_definitions.push(definitions.to_vec());
+            if let Some((context, messages)) = self.preparations.pop_front() {
+                self.context = context;
+                self.messages = messages;
+            }
+            Ok(self.context.clone())
+        })
+    }
+    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async move {
+            self.trace.step("messages", self.fail_at)?;
+            Ok(self.messages.clone())
         })
     }
     fn compact_request<'a>(
@@ -435,12 +466,14 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "restore",
             "promote",
             "prepare",
+            "messages",
             "invoke",
             "record_tools",
             "execute",
             "record_results",
             "promote",
             "prepare",
+            "messages",
             "invoke",
             "evaluate",
             "complete",
@@ -690,6 +723,7 @@ fn adapter_errors_stop_at_the_failing_effect() {
         ("restore", Reply::final_response("response")),
         ("promote", Reply::final_response("response")),
         ("prepare", Reply::final_response("response")),
+        ("messages", Reply::final_response("response")),
         ("invoke", Reply::final_response("response")),
         ("retry", Reply::invalid("response")),
         ("record_tools", Reply::tools("response")),
@@ -885,6 +919,10 @@ fn state_preparation_receives_phase_and_provider_receives_advertised_tools() {
     assert!(!states.requests[0].0.final_phase);
     assert!(states.requests[1].0.final_phase && states.requests[1].0.enters_final_phase);
     let requests = states.provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), states.prepared_definitions.len());
+    for (request, definitions) in requests.iter().zip(&states.prepared_definitions) {
+        assert_eq!(&request.tools, definitions);
+    }
     assert_eq!(
         requests[0]
             .tools

@@ -30,22 +30,26 @@ ported from the .NET repository. Repository contributor guidance is in
 
 `parrot-core` owns the agent turn protocol and loop, with exactly three traits:
 
-- `States`: conversation and turn effects, stored-result restoration, crash errors
-  for unfinished calls, result recording, prepared requests, and completion admission.
+- `States`: conversation and turn effects, frozen model settings, prepared context
+  information, explicit messages, result recording, and completion admission.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
 Requests, responses, tool execution results, messages, tool definitions, and errors
 are concrete core-owned types. Adapters implement the same interface; they do not
-choose their own associated payload types. `Provider` and `Tools` accept only their
-requests. Runtime state privately binds the executable selection during preparation;
-execution receives no workflow phase or adapter-specific callbacks. Attempts and
-request phases stay in the core loop, and input estimates stay in runtime state.
+choose their own associated payload types. `Provider` accepts a complete request;
+`Tools` accepts explicit calls and the caller's cancellation token. Core assembles
+each provider request from turn settings, prepared context values, an explicit
+message read, and its selected tool definitions. States never returns a provider
+request. Runtime state privately binds the executable selection during context
+preparation; execution receives no workflow phase or adapter-specific callbacks.
+Attempts and request phases stay in the core loop, and input estimates stay in
+runtime state.
 
 The core specifies and implements:
 
-- Request admission/counting, interruption, final-phase catalog selection, and
-  bounded tool-settlement extensions.
+- Provider-request assembly, request admission/counting, interruption, final-phase
+  catalog selection, and bounded tool-settlement extensions.
 - Truncated tool-call detection and JSON-argument validation before recording or
   executing calls.
 - The one-compaction retry guard for oversized requests, completion-policy retries,

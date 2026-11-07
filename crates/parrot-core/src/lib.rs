@@ -43,7 +43,18 @@ pub async fn run<'a>(
         } else {
             &catalog.normal
         };
-        let request = states.prepare_request(definitions, phase).await?;
+        let context = states.prepare_context(definitions, phase).await?;
+        let messages = states.read_messages().await?;
+        let request = ProviderRequest {
+            model: options.model.clone(),
+            instructions: context.instructions,
+            messages,
+            tools: definitions.to_vec(),
+            max_output_tokens: context.max_output_tokens,
+            reasoning: options.reasoning.clone(),
+            provider_preferences: options.provider_preferences.clone(),
+            include_router_metadata: options.include_router_metadata,
+        };
         let attempt = budget.count_request();
         let response = match provider.invoke(request).await {
             Ok(response) => response,

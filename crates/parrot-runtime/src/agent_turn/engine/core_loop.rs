@@ -1,8 +1,9 @@
 use super::*;
 use parrot_core::{
-    CompletionDecision as CoreCompletionDecision, Error as CoreError, ErrorCode, ErrorKind,
-    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCall, ToolCatalog,
-    ToolDefinition, ToolResult, ToolStatus, TurnOptions,
+    CompletionDecision as CoreCompletionDecision, ContextSnapshot as CoreContextSnapshot,
+    Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse, RetryReason,
+    States as CoreStates, ToolCall, ToolCatalog, ToolDefinition, ToolResult, ToolStatus,
+    TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -328,9 +329,15 @@ where
                 tokio::task::yield_now().await;
             }
             backend.skills.begin_turn(cancellation).await?;
-            let maximum_requests = selection.profile.maximum_requests;
+            let options = TurnOptions {
+                maximum_requests: selection.profile.maximum_requests,
+                model: selection.model.canonical_model.model.id.clone(),
+                reasoning: selection.model.canonical_model.reasoning().map(Into::into),
+                provider_preferences: String::new(),
+                include_router_metadata: false,
+            };
             self.binding.bind(selection);
-            Ok(TurnOptions { maximum_requests })
+            Ok(options)
         })
     }
     fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
@@ -360,11 +367,11 @@ where
     fn take_interruption(&mut self) -> bool {
         self.backend.interruption.swap(false, Ordering::AcqRel)
     }
-    fn prepare_request<'a>(
+    fn prepare_context<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
         phase: parrot_core::budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<ProviderRequest, CoreError>> {
+    ) -> BoxFuture<'a, Result<CoreContextSnapshot, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
@@ -431,21 +438,27 @@ where
                     &selection.model.canonical_model.model,
                 )
                 .map_err(TurnError::Planning)?;
-            let request = sessions::Request {
-                model: selection.model.canonical_model.model.id.clone(),
-                instructions: epoch.instructions,
-                messages,
-                tools: definitions.to_vec(),
-                max_output_tokens: maximum,
-                reasoning: selection.model.canonical_model.reasoning(),
-                ..Default::default()
-            };
             state.request_accounting = Some(RequestAccounting {
                 selected: selection.model.canonical_model.clone(),
                 estimated_input_tokens: estimate,
             });
             self.request_tools = Some(self.binding.capture_tools(phase.final_phase)?);
-            Ok(request.into())
+            Ok(CoreContextSnapshot {
+                instructions: epoch.instructions,
+                max_output_tokens: maximum,
+            })
+        })
+    }
+    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
+        adapt_operation(async move {
+            let state = self.backend.state.lock().await;
+            Ok(state
+                .conversation
+                .messages()
+                .iter()
+                .map(provider_message)
+                .map(Into::into)
+                .collect())
         })
     }
     fn compact_request<'a>(
