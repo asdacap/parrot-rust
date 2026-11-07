@@ -1,4 +1,5 @@
 //! Provider composition, scoped sessions, retry policy and request diagnostics.
+mod core_protocol;
 pub mod decorators;
 pub mod diagnostic_session;
 pub mod diagnostics;

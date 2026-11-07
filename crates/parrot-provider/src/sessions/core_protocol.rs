@@ -1,0 +1,428 @@
+use super::{Completion, Content, Message, Reasoning, Request, Role, Tool, ToolCall};
+
+impl From<Request> for parrot_core::ProviderRequest {
+    fn from(request: Request) -> Self {
+        Self {
+            model: request.model,
+            instructions: request.instructions,
+            messages: request.messages.into_iter().map(Into::into).collect(),
+            tools: request.tools.into_iter().map(Into::into).collect(),
+            max_output_tokens: request.max_output_tokens,
+            reasoning: request.reasoning.map(Into::into),
+            provider_preferences: request.provider_preferences,
+            include_router_metadata: request.include_router_metadata,
+        }
+    }
+}
+
+impl From<parrot_core::ProviderRequest> for Request {
+    fn from(request: parrot_core::ProviderRequest) -> Self {
+        Self {
+            model: request.model,
+            instructions: request.instructions,
+            messages: request.messages.into_iter().map(Into::into).collect(),
+            tools: request.tools.into_iter().map(Into::into).collect(),
+            max_output_tokens: request.max_output_tokens,
+            reasoning: request.reasoning.map(Into::into),
+            provider_preferences: request.provider_preferences,
+            include_router_metadata: request.include_router_metadata,
+        }
+    }
+}
+
+impl From<Completion> for parrot_core::ProviderResponse {
+    fn from(completion: Completion) -> Self {
+        Self {
+            response_id: completion.response_id,
+            finish_reason: completion.finish_reason,
+            input_tokens: completion.input_tokens,
+            cached_input_tokens: completion.cached_input_tokens,
+            output_tokens: completion.output_tokens,
+            assistant_text: completion.assistant_text,
+            tool_calls: completion.tool_calls.into_iter().map(Into::into).collect(),
+            provider_id: completion.provider_id,
+            provider_content: completion.provider_content,
+        }
+    }
+}
+
+impl From<parrot_core::ProviderResponse> for Completion {
+    fn from(response: parrot_core::ProviderResponse) -> Self {
+        Self {
+            response_id: response.response_id,
+            finish_reason: response.finish_reason,
+            input_tokens: response.input_tokens,
+            cached_input_tokens: response.cached_input_tokens,
+            output_tokens: response.output_tokens,
+            assistant_text: response.assistant_text,
+            tool_calls: response.tool_calls.into_iter().map(Into::into).collect(),
+            provider_id: response.provider_id,
+            provider_content: response.provider_content,
+        }
+    }
+}
+
+impl From<Message> for parrot_core::Message {
+    fn from(message: Message) -> Self {
+        Self {
+            role: message.role.into(),
+            contents: message.contents().iter().cloned().map(Into::into).collect(),
+            tool_calls: message.tool_calls.into_iter().map(Into::into).collect(),
+            tool_call_id: message.tool_call_id,
+            provider_id: message.provider_id,
+            provider_content: message.provider_content,
+        }
+    }
+}
+
+impl From<parrot_core::Message> for Message {
+    fn from(message: parrot_core::Message) -> Self {
+        let mut converted = Self::new(
+            message.role.into(),
+            message.contents.into_iter().map(Into::into).collect(),
+        );
+        converted.tool_calls = message.tool_calls.into_iter().map(Into::into).collect();
+        converted.tool_call_id = message.tool_call_id;
+        converted.provider_id = message.provider_id;
+        converted.provider_content = message.provider_content;
+        converted
+    }
+}
+
+impl From<Content> for parrot_core::Content {
+    fn from(content: Content) -> Self {
+        match content {
+            Content::Text(text) => Self::Text(text),
+            Content::Image {
+                path,
+                url,
+                media_type,
+                width,
+                height,
+                bytes,
+            } => Self::Image {
+                path,
+                url,
+                media_type,
+                width,
+                height,
+                bytes,
+            },
+        }
+    }
+}
+
+impl From<parrot_core::Content> for Content {
+    fn from(content: parrot_core::Content) -> Self {
+        match content {
+            parrot_core::Content::Text(text) => Self::Text(text),
+            parrot_core::Content::Image {
+                path,
+                url,
+                media_type,
+                width,
+                height,
+                bytes,
+            } => Self::Image {
+                path,
+                url,
+                media_type,
+                width,
+                height,
+                bytes,
+            },
+        }
+    }
+}
+
+impl From<Role> for parrot_core::Role {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::System => Self::System,
+            Role::User => Self::User,
+            Role::Assistant => Self::Assistant,
+            Role::Tool => Self::Tool,
+        }
+    }
+}
+
+impl From<parrot_core::Role> for Role {
+    fn from(role: parrot_core::Role) -> Self {
+        match role {
+            parrot_core::Role::System => Self::System,
+            parrot_core::Role::User => Self::User,
+            parrot_core::Role::Assistant => Self::Assistant,
+            parrot_core::Role::Tool => Self::Tool,
+        }
+    }
+}
+
+impl From<Reasoning> for parrot_core::Reasoning {
+    fn from(reasoning: Reasoning) -> Self {
+        Self {
+            effort: reasoning.effort,
+            summary: reasoning.summary,
+        }
+    }
+}
+
+impl From<parrot_core::Reasoning> for Reasoning {
+    fn from(reasoning: parrot_core::Reasoning) -> Self {
+        Self {
+            effort: reasoning.effort,
+            summary: reasoning.summary,
+        }
+    }
+}
+
+impl From<Tool> for parrot_core::ToolDefinition {
+    fn from(tool: Tool) -> Self {
+        Self {
+            name: tool.name,
+            description: tool.description,
+            parameters_json: tool.parameters_json,
+        }
+    }
+}
+
+impl From<parrot_core::ToolDefinition> for Tool {
+    fn from(tool: parrot_core::ToolDefinition) -> Self {
+        Self {
+            name: tool.name,
+            description: tool.description,
+            parameters_json: tool.parameters_json,
+        }
+    }
+}
+
+impl From<ToolCall> for parrot_core::ToolCall {
+    fn from(call: ToolCall) -> Self {
+        Self {
+            id: call.id,
+            name: call.name,
+            arguments_json: call.arguments_json,
+        }
+    }
+}
+
+impl From<parrot_core::ToolCall> for ToolCall {
+    fn from(call: parrot_core::ToolCall) -> Self {
+        Self {
+            id: call.id,
+            name: call.name,
+            arguments_json: call.arguments_json,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parrot_core::{Content as CoreContent, Message as CoreMessage};
+
+    #[test]
+    fn request_round_trip_preserves_all_fields_and_ordered_values() {
+        let mut native_message = Message::new(
+            Role::Assistant,
+            vec![
+                Content::text("prefix "),
+                Content::image_file("relative/image.png", "image/png", -4, 719),
+                Content::text("suffix"),
+                Content::Image {
+                    path: "/opaque/image.bin".into(),
+                    url: "https://example.test/image?x=1&y=2".into(),
+                    media_type: "application/x-opaque".into(),
+                    width: i32::MIN,
+                    height: i32::MAX,
+                    bytes: Some(vec![0, 1, 127, 255]),
+                },
+            ],
+        );
+        native_message.tool_calls = vec![ToolCall {
+            id: "call id with spaces".into(),
+            name: "tool alias".into(),
+            arguments_json: " { \"unknown\" : [1.2300, -999999999999999999999] } ".into(),
+        }];
+        native_message.tool_call_id = "response-bound-call".into();
+        native_message.provider_id = "future-provider-id".into();
+        native_message.provider_content = "  {\"unknown\":\"opaque\\u003dstring\"}\n".into();
+        let request = Request {
+            model: "provider/model:variant ".into(),
+            instructions: "system\nwith whitespace".into(),
+            messages: vec![Message::user("first"), native_message],
+            tools: vec![
+                Tool {
+                    name: "read".into(),
+                    description: "description with whitespace  ".into(),
+                    parameters_json: " { \"$schema\" : \"future\", \"limit\":1.2300 } ".into(),
+                },
+                Tool {
+                    name: "another".into(),
+                    description: "second".into(),
+                    parameters_json: "[true,null,3]".into(),
+                },
+            ],
+            max_output_tokens: -17,
+            reasoning: Some(Reasoning {
+                effort: "effort \n verbatim".into(),
+                summary: "summary".into(),
+            }),
+            provider_preferences: "routing prefs {future=opaque}".into(),
+            include_router_metadata: true,
+        };
+        let core: parrot_core::ProviderRequest = request.clone().into();
+        assert_eq!(Request::from(core.clone()), request);
+        assert_eq!(
+            core.tools[0].parameters_json,
+            request.tools[0].parameters_json
+        );
+        assert_eq!(
+            core.messages[1].provider_content,
+            request.messages[1].provider_content
+        );
+        assert_eq!(request.messages[1].content(), "prefix suffix");
+
+        let no_reasoning = Request {
+            model: "provider/no-reasoning".into(),
+            reasoning: None,
+            ..Request::default()
+        };
+        assert_eq!(
+            Request::from(parrot_core::ProviderRequest::from(no_reasoning.clone())),
+            no_reasoning
+        );
+    }
+
+    #[test]
+    fn completion_round_trip_preserves_signed_usage_and_unknown_provider_bytes() {
+        let completion = Completion {
+            response_id: "response\nunknown fields".into(),
+            finish_reason: "unrecognized_finish_reason".into(),
+            input_tokens: -13,
+            cached_input_tokens: i32::MIN,
+            output_tokens: i32::MAX,
+            assistant_text: "assistant \u{0000} text".into(),
+            tool_calls: vec![ToolCall {
+                id: "tool-call".into(),
+                name: "tool".into(),
+                arguments_json: "{\"n\":123456789012345678901234567890.00100}".into(),
+            }],
+            provider_id: "native-v99".into(),
+            provider_content: " {\"unknown\": [1.2300, \"raw\\\\text\"]} \n".into(),
+        };
+        let core: parrot_core::ProviderResponse = completion.clone().into();
+        assert_eq!(Completion::from(core.clone()), completion);
+        assert_eq!(core.input_tokens, -13);
+        assert_eq!(core.cached_input_tokens, i32::MIN);
+        assert_eq!(core.provider_content, completion.provider_content);
+    }
+
+    #[test]
+    fn message_round_trip_preserves_role_contents_order_calls_and_cached_text() {
+        let mut native = Message::new(
+            Role::Assistant,
+            vec![
+                Content::text("prefix "),
+                Content::image_file("relative/image.png", "image/png", -4, 719),
+                Content::text("suffix"),
+                Content::Image {
+                    path: "/opaque/image.bin".into(),
+                    url: "https://example.test/image?x=1&y=2".into(),
+                    media_type: "application/x-opaque".into(),
+                    width: i32::MIN,
+                    height: i32::MAX,
+                    bytes: Some(vec![0, 1, 127, 255]),
+                },
+            ],
+        );
+        native.tool_calls = vec![ToolCall {
+            id: "call id with spaces".into(),
+            name: "tool alias".into(),
+            arguments_json: " { \"unknown\" : [1.2300, -999999999999999999999] } ".into(),
+        }];
+        native.tool_call_id = "response-bound-call".into();
+        native.provider_id = "future-provider-id".into();
+        native.provider_content = "  {\"unknown\":\"opaque\\u003dstring\"}\n".into();
+        let original_projection = native.content().to_owned();
+        let core: CoreMessage = native.clone().into();
+        assert_eq!(core.contents.len(), 4);
+        assert!(matches!(
+            &core.contents[1],
+            CoreContent::Image { bytes: None, .. }
+        ));
+        assert!(
+            matches!(&core.contents[3], CoreContent::Image { bytes: Some(bytes), .. } if bytes == &[0, 1, 127, 255])
+        );
+        let restored = Message::from(core);
+        assert_eq!(restored, native);
+        assert_eq!(restored.content(), original_projection);
+    }
+
+    #[test]
+    fn content_round_trip_preserves_both_image_byte_representations() {
+        let contents = [
+            Content::text("plain"),
+            Content::image_file("path", "image/jpeg", -1, 2),
+            Content::Image {
+                path: String::new(),
+                url: "https://e.test/raw?query=1".into(),
+                media_type: "image/unknown".into(),
+                width: i32::MAX,
+                height: i32::MIN,
+                bytes: Some(vec![0, 255, 10]),
+            },
+        ];
+        for content in contents {
+            assert_eq!(
+                Content::from(parrot_core::Content::from(content.clone())),
+                content
+            );
+        }
+    }
+
+    #[test]
+    fn role_round_trip_preserves_every_variant() {
+        for role in [Role::System, Role::User, Role::Assistant, Role::Tool] {
+            assert_eq!(Role::from(parrot_core::Role::from(role)), role);
+        }
+    }
+
+    #[test]
+    fn reasoning_round_trip_preserves_both_strings() {
+        let reasoning = Reasoning {
+            effort: "future-effort ".into(),
+            summary: "raw\nsummary".into(),
+        };
+        assert_eq!(
+            Reasoning::from(parrot_core::Reasoning::from(reasoning.clone())),
+            reasoning
+        );
+    }
+
+    #[test]
+    fn tool_definition_round_trip_preserves_raw_schema() {
+        let tool = Tool {
+            name: "name".into(),
+            description: "description".into(),
+            parameters_json: " { \"integer\" : 12345678901234567890.0001, \"extra\" : true } "
+                .into(),
+        };
+        assert_eq!(
+            Tool::from(parrot_core::ToolDefinition::from(tool.clone())),
+            tool
+        );
+    }
+
+    #[test]
+    fn tool_call_round_trip_preserves_raw_arguments() {
+        let call = ToolCall {
+            id: "  id  ".into(),
+            name: "alias.name".into(),
+            arguments_json: " {\"unknown\": [1.2300,\"escaped\\\\line\"]} ".into(),
+        };
+        assert_eq!(
+            ToolCall::from(parrot_core::ToolCall::from(call.clone())),
+            call
+        );
+    }
+}

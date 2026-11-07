@@ -1513,6 +1513,7 @@ dependencies = [
  "chrono",
  "getrandom 0.2.17",
  "hmac",
+ "parrot-core",
  "parrot-domain",
  "parrot-foundation",
  "reqwest",
