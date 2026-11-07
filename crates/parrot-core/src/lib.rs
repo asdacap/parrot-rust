@@ -28,15 +28,9 @@ pub enum CompletionDecision {
 
 /// Invokes models using the core protocol while owning transport and stream cleanup.
 pub trait Provider: Send + Sync {
-    /// Uses the core-assigned attempt, estimate, and phase without replacing them.
-    /// Every observed completion calibrates input usage before its durable usage
-    /// record is awaited, including intermediate completions before a later failure.
-    /// Stream cleanup is joined before returning, also after errors or cancellation.
-    fn invoke(
-        &self,
-        request: ProviderRequest,
-        context: ProviderContext,
-    ) -> BoxFuture<'_, Result<ProviderResponse, Error>>;
+    /// Invokes the request and joins stream cleanup before returning, including
+    /// after errors or cancellation.
+    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>>;
 }
 
 /// Retains executable tools and settles calls recorded through [`States`].
@@ -78,7 +72,7 @@ pub trait States: Send {
         &'a mut self,
         definitions: &'a [ToolDefinition],
         phase: budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<PreparedRequest, Error>>;
+    ) -> BoxFuture<'a, Result<ProviderRequest, Error>>;
     /// Attempts to reduce context after a provider rejects an oversized request.
     fn compact_request<'a>(
         &'a mut self,
@@ -147,14 +141,9 @@ pub async fn run(
         } else {
             &catalog.normal
         };
-        let prepared = states.prepare_request(definitions, phase).await?;
+        let request = states.prepare_request(definitions, phase).await?;
         let attempt = budget.count_request();
-        let context = ProviderContext {
-            attempt,
-            estimated_input_tokens: prepared.estimated_input_tokens,
-            phase,
-        };
-        let response = match provider.invoke(prepared.request, context).await {
+        let response = match provider.invoke(request).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;

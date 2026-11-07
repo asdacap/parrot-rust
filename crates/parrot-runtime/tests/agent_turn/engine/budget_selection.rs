@@ -361,6 +361,87 @@ async fn actual_reported_usage_triggers_compaction_before_consuming_reserved_out
 }
 
 #[tokio::test]
+async fn intermediate_usage_calibrates_later_requests_even_when_the_stream_fails() {
+    for stream_fails in [false, true] {
+        let fixture = Fixture::new();
+        let mut first = Step::complete("first answer");
+        first
+            .events
+            .push_back(sessions::Event::Completed(Completion {
+                input_tokens: 147_776,
+                ..Completion::default()
+            }));
+        first.completion.as_mut().unwrap().input_tokens = 0;
+        if stream_fails {
+            first.completion = Err(Error::Provider("failure after completion".into()));
+        }
+        let provider = Scripted::new(vec![
+            first,
+            Step::complete("compacted summary"),
+            Step::complete("done"),
+        ]);
+        let runtime = BudgetRuntime::new(
+            &fixture,
+            &provider,
+            180_000,
+            0,
+            0,
+            profile(),
+            BudgetTools::new(&[]),
+        )
+        .await;
+        let first = runtime
+            .send("first prompt", protocol::Delivery::DELIVERY_STEER)
+            .await;
+        let first = bounded(first.execution.join()).await.unwrap();
+        assert_eq!(
+            first.status,
+            if stream_fails {
+                ExecutionStatus::Failed
+            } else {
+                ExecutionStatus::Succeeded
+            }
+        );
+        assert_eq!(provider.stream_closes.load(Ordering::SeqCst), 1);
+        let next = runtime
+            .send("second prompt", protocol::Delivery::DELIVERY_STEER)
+            .await;
+        assert_eq!(
+            bounded(next.execution.join()).await.unwrap().status,
+            ExecutionStatus::Succeeded
+        );
+        {
+            let requests = provider.requests.lock().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert_eq!(requests[1].max_output_tokens, 1024);
+            assert_eq!(requests[2].max_output_tokens, 32_768);
+        }
+        let events = fixture.events().await;
+        let usage: Vec<_> = events
+            .iter()
+            .filter(|event| event.has_request_usage_recorded())
+            .map(|event| event.request_usage_recorded().input_tokens)
+            .collect();
+        assert_eq!(
+            usage,
+            if stream_fails {
+                vec![147_776, 17]
+            } else {
+                vec![147_776, 0, 17]
+            }
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.has_compaction_finished())
+                .count(),
+            1
+        );
+        runtime.close().await;
+    }
+}
+
+#[tokio::test]
 async fn actual_input_and_exhausted_context_fail_before_any_provider_request_with_typed_diagnostics()
  {
     for (context, input_limit, message) in [

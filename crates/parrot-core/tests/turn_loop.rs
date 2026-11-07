@@ -1,7 +1,7 @@
 use parrot_core::{
-    BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, Outcome, PreparedRequest, Provider,
-    ProviderContext, ProviderRequest, ProviderResponse, RetryReason, States, ToolCall, ToolCatalog,
-    ToolContext, ToolDefinition, ToolPhase, Tools, TurnOptions, budget::TurnRequestPhase, run,
+    BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, Outcome, Provider, ProviderRequest,
+    ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolContext, ToolDefinition,
+    ToolPhase, Tools, TurnOptions, budget::TurnRequestPhase, run,
 };
 use std::{
     collections::VecDeque,
@@ -143,19 +143,13 @@ struct MemoryProvider {
     trace: Trace,
     replies: Arc<Mutex<VecDeque<Reply>>>,
     fail_at: Arc<Mutex<Option<&'static str>>>,
-    contexts: Arc<Mutex<Vec<ProviderContext>>>,
     requests: Arc<Mutex<Vec<ProviderRequest>>>,
 }
 impl Provider for MemoryProvider {
-    fn invoke(
-        &self,
-        request: ProviderRequest,
-        context: ProviderContext,
-    ) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
         Box::pin(async move {
             self.trace.step("invoke", *self.fail_at.lock().unwrap())?;
             self.requests.lock().unwrap().push(request);
-            self.contexts.lock().unwrap().push(context);
             match self
                 .replies
                 .lock()
@@ -191,7 +185,6 @@ struct MemoryState {
     reduced: bool,
     clear_work_on_retry: bool,
     availability_restored: Arc<AtomicBool>,
-    estimated_input_tokens: i64,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
@@ -211,7 +204,6 @@ impl MemoryState {
                 trace,
                 replies: Arc::new(Mutex::new(replies.into_iter().collect())),
                 fail_at: Arc::default(),
-                contexts: Arc::default(),
                 requests: Arc::default(),
             },
             decisions: VecDeque::new(),
@@ -229,7 +221,6 @@ impl MemoryState {
             reduced: true,
             clear_work_on_retry: false,
             availability_restored,
-            estimated_input_tokens: 37,
             fail_at: None,
         }
     }
@@ -293,7 +284,7 @@ impl States for MemoryState {
         &'a mut self,
         definitions: &'a [ToolDefinition],
         phase: TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<PreparedRequest, Error>> {
+    ) -> BoxFuture<'a, Result<ProviderRequest, Error>> {
         Box::pin(async move {
             self.step("prepare")?;
             let names: Vec<_> = definitions
@@ -302,14 +293,11 @@ impl States for MemoryState {
                 .collect();
             self.requests.push((phase, names.clone()));
             *self.tools.advertised.lock().unwrap() = names;
-            Ok(PreparedRequest {
-                request: ProviderRequest {
-                    model: "memory/model".into(),
-                    instructions: "core request".into(),
-                    tools: definitions.to_vec(),
-                    ..ProviderRequest::default()
-                },
-                estimated_input_tokens: self.estimated_input_tokens,
+            Ok(ProviderRequest {
+                model: "memory/model".into(),
+                instructions: "core request".into(),
+                tools: definitions.to_vec(),
+                ..ProviderRequest::default()
             })
         })
     }
@@ -732,7 +720,7 @@ fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() 
 }
 
 #[test]
-fn tools_and_provider_operate_with_standalone_core_contexts_without_states() {
+fn tools_and_provider_operate_without_states() {
     let state = MemoryState::new([Reply::final_response("standalone")]);
     let tools: &dyn Tools = &state.tools;
     finish(tools.reconcile_pending()).unwrap();
@@ -763,19 +751,7 @@ fn tools_and_provider_operate_with_standalone_core_contexts_without_states() {
         ["read"]
     );
     let provider: &dyn Provider = &state.provider;
-    let response = finish(provider.invoke(
-        ProviderRequest::default(),
-        ProviderContext {
-            attempt: 1,
-            estimated_input_tokens: 4,
-            phase: TurnRequestPhase {
-                final_phase: false,
-                enters_final_phase: false,
-                interrupted: false,
-            },
-        },
-    ))
-    .unwrap();
+    let response = finish(provider.invoke(ProviderRequest::default())).unwrap();
     assert_eq!(response.assistant_text, "standalone");
     assert!(response.tool_calls.is_empty());
     assert!(state.provider.replies.lock().unwrap().is_empty());
@@ -784,14 +760,8 @@ fn tools_and_provider_operate_with_standalone_core_contexts_without_states() {
 
 struct EchoProvider;
 impl Provider for EchoProvider {
-    fn invoke(
-        &self,
-        request: ProviderRequest,
-        context: ProviderContext,
-    ) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
         Box::pin(async move {
-            assert_eq!(context.attempt, 1);
-            assert_eq!(context.estimated_input_tokens, 37);
             assert_eq!(request.model, "memory/model");
             assert_eq!(
                 request
@@ -830,21 +800,13 @@ fn different_provider_implementations_share_the_same_states_tools_and_protocol()
 }
 
 #[test]
-fn provider_context_assigns_attempts_estimates_and_advertised_phase() {
+fn state_preparation_receives_phase_and_provider_receives_advertised_tools() {
     let mut states = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     states.maximum = 2;
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
-    let contexts = states.provider.contexts.lock().unwrap();
-    assert_eq!(contexts.len(), 2);
-    assert_eq!(contexts[0].attempt, 1);
-    assert_eq!(contexts[1].attempt, 2);
-    assert!(
-        contexts
-            .iter()
-            .all(|context| context.estimated_input_tokens == 37)
-    );
-    assert!(!contexts[0].phase.final_phase);
-    assert!(contexts[1].phase.final_phase && contexts[1].phase.enters_final_phase);
+    assert_eq!(states.requests.len(), 2);
+    assert!(!states.requests[0].0.final_phase);
+    assert!(states.requests[1].0.final_phase && states.requests[1].0.enters_final_phase);
     let requests = states.provider.requests.lock().unwrap();
     assert_eq!(
         requests[0]

@@ -1,10 +1,9 @@
 use super::*;
 use parrot_core::{
     CompletionDecision as CoreCompletionDecision, Error as CoreError, ErrorCode, ErrorKind,
-    PreparedRequest, ProviderContext, ProviderRequest, ProviderResponse, RetryReason,
-    States as CoreStates, ToolCatalog, ToolContext, ToolDefinition, ToolPhase, TurnOptions,
+    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCatalog, ToolContext,
+    ToolDefinition, ToolPhase, TurnOptions,
 };
-use parrot_provider::routing::registry::ProviderModel;
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
@@ -83,28 +82,6 @@ impl<S: AccessSnapshot, T: TurnTools<S>> TurnBinding<S, T> {
     }
 }
 
-struct UsageBridge<'a> {
-    recorder: &'a SessionUsageRecorder,
-    selected: &'a ProviderModel,
-    budget: &'a mut crate::compaction::ProviderTokenBudget,
-    estimate: i64,
-}
-impl ProviderUsage for UsageBridge<'_> {
-    fn observe_completion<'a>(
-        &'a mut self,
-        request: &'a sessions::Request,
-        completed: &'a sessions::Completion,
-    ) -> BoxFuture<'a, Result<(), EventError>> {
-        Box::pin(async move {
-            self.budget
-                .observe_usage(&self.selected.selector(), self.estimate, completed);
-            self.recorder
-                .record_request(self.selected, request.reasoning.as_ref(), completed)
-                .await
-        })
-    }
-}
-
 fn adapt_operation<'a, T: Send + 'a>(
     operation: impl std::future::Future<Output = Result<T, TurnError>> + Send + 'a,
 ) -> BoxFuture<'a, Result<T, CoreError>> {
@@ -159,7 +136,11 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    backend.state.lock().await.request_status = None;
+    {
+        let mut state = backend.state.lock().await;
+        state.request_status = None;
+        state.request_accounting = None;
+    }
     let binding = TurnBinding::new();
     let mut states = RuntimeStates {
         backend,
@@ -178,7 +159,11 @@ where
         cancellation,
     };
     let outcome = parrot_core::run(&mut states, &tools, &provider).await;
-    backend.state.lock().await.request_status = None;
+    {
+        let mut state = backend.state.lock().await;
+        state.request_status = None;
+        state.request_accounting = None;
+    }
     match outcome {
         Ok(parrot_core::Outcome::Completed(answer)) => Ok(Execution::succeeded(answer)),
         Ok(parrot_core::Outcome::Failed(message)) => Ok(Execution::failed(&message)),
@@ -317,7 +302,7 @@ where
         &'a mut self,
         definitions: &'a [ToolDefinition],
         phase: parrot_core::budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<PreparedRequest, CoreError>> {
+    ) -> BoxFuture<'a, Result<ProviderRequest, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
@@ -393,10 +378,11 @@ where
                 reasoning: selection.model.canonical_model.reasoning(),
                 ..Default::default()
             };
-            Ok(PreparedRequest {
-                request: request.into(),
+            state.request_accounting = Some(RequestAccounting {
+                selected: selection.model.canonical_model.clone(),
                 estimated_input_tokens: estimate,
-            })
+            });
+            Ok(request.into())
         })
     }
     fn compact_request<'a>(
@@ -659,7 +645,6 @@ where
     fn invoke(
         &self,
         request: ProviderRequest,
-        context: ProviderContext,
     ) -> BoxFuture<'_, Result<ProviderResponse, CoreError>> {
         Box::pin(async move {
             let backend = self.backend;
@@ -673,19 +658,13 @@ where
                 .map_err(|error| CoreError::from(TurnError::Provider(error)))?;
             let output = OutputBridge(backend.output.as_ref());
             let activity = ActivityBridge(backend.activity.as_ref());
-            let mut usage = UsageBridge {
-                recorder: &backend.usage,
-                selected,
-                budget: state.context.budget_mut(),
-                estimate: context.estimated_input_tokens,
-            };
             let mut call = ProviderCall {
                 history: &backend.history,
                 publisher: backend.publisher.as_ref(),
                 event_id: backend.event_id.as_ref(),
                 output: &output,
                 activity: &activity,
-                usage: &mut usage,
+                usage: &mut *state,
             };
             let event = match call
                 .stream(session.as_ref(), request.into(), self.cancellation)

@@ -33,7 +33,10 @@ use parrot_domain::{
 use parrot_foundation::{
     config::runtime::AgentLimitsConfig, template_catalog::PromptTemplateCatalog,
 };
-use parrot_provider::sessions::{self, ProviderSessions};
+use parrot_provider::{
+    routing::registry::ProviderModel,
+    sessions::{self, ProviderSessions},
+};
 use parrot_storage::{
     conversation::{
         AgentConversation, AgentHistoryView, ConversationReadView, ModelContent, ModelMessage,
@@ -81,6 +84,36 @@ struct State {
     turn: Option<TurnKey>,
     diagnostic_turn: Option<String>,
     request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
+    request_accounting: Option<RequestAccounting>,
+    usage: Arc<SessionUsageRecorder>,
+}
+
+struct RequestAccounting {
+    selected: ProviderModel,
+    estimated_input_tokens: i64,
+}
+
+impl ProviderUsage for State {
+    fn observe_completion<'a>(
+        &'a mut self,
+        request: &'a sessions::Request,
+        completed: &'a sessions::Completion,
+    ) -> BoxFuture<'a, Result<(), EventError>> {
+        Box::pin(async move {
+            let accounting = self
+                .request_accounting
+                .as_ref()
+                .ok_or_else(|| EventError::Invalid("request accounting is unavailable".into()))?;
+            self.context.budget_mut().observe_usage(
+                &accounting.selected.selector(),
+                accounting.estimated_input_tokens,
+                completed,
+            );
+            self.usage
+                .record_request(&accounting.selected, request.reasoning.as_ref(), completed)
+                .await
+        })
+    }
 }
 
 /// A real storage/provider backend. No service has a success default, and no
@@ -101,7 +134,7 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     parent_completion: Arc<dyn ParentCompletion>,
     event_id: Arc<dyn Fn() -> String + Send + Sync>,
     sessions: ProviderSessions,
-    usage: SessionUsageRecorder,
+    usage: Arc<SessionUsageRecorder>,
     reminders: Arc<ExitReminders<Publisher>>,
     interruption: AtomicBool,
     suspending: AtomicBool,
@@ -143,13 +176,15 @@ where
             ));
         }
         let conversation = AgentConversation::new(config.history.clone()).await?;
-        let usage = SessionUsageRecorder::new(
-            config.history.clone(),
-            config.identity.parent_session_id.clone(),
-            config.broker.clone(),
-            config.ancestors,
-        )
-        .await?;
+        let usage = Arc::new(
+            SessionUsageRecorder::new(
+                config.history.clone(),
+                config.identity.parent_session_id.clone(),
+                config.broker.clone(),
+                config.ancestors,
+            )
+            .await?,
+        );
         let reminders = config.reminders;
         let render = |key: &str| {
             config
@@ -182,7 +217,7 @@ where
             parent_completion: config.parent_completion,
             event_id: config.event_id,
             sessions,
-            usage,
+            usage: usage.clone(),
             reminders,
             interruption: AtomicBool::new(false),
             suspending: AtomicBool::new(false),
@@ -196,6 +231,8 @@ where
                 turn: None,
                 diagnostic_turn: None,
                 request_status: None,
+                request_accounting: None,
+                usage,
             }),
             notices,
             execution_activity: std::sync::Mutex::new(None),

@@ -34,11 +34,12 @@ ported from the .NET repository. Repository contributor guidance is in
 - `Tools`: turn-bound catalogs and awaited durable settlement of accepted calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
-Requests, responses, messages, tool definitions, errors, and contexts are concrete
+Requests, responses, messages, tool definitions, errors, and tool contexts are concrete
 core-owned types. Adapters implement the same interface; they do not choose their
-own associated payload or context types. `ProviderContext` specifies the request
-attempt, input estimate, and request phase. `ToolContext` specifies normal or
-final-phase execution. Neither exposes state objects or adapter-specific callbacks.
+own associated payload or context types. `Provider` accepts only the request;
+attempts and request phases stay in the core loop, and input estimates stay in
+runtime state. `ToolContext` specifies normal or final-phase execution without
+exposing state objects or adapter-specific callbacks.
 
 The core specifies and implements:
 
@@ -59,9 +60,11 @@ multimodal content. Runtime bindings retain the actual selected model and execut
 tool snapshots; tools are never reconstructed from advertised definitions.
 
 The session drain serializes operations. Each adapter borrows the existing runtime
-state lock only for its operation, including live token calibration during streaming
-and borrowed-resource tool execution. The core depends on neither runtime, storage,
-nor provider implementations.
+state lock only for its operation, including borrowed-resource tool execution.
+Runtime state observes every streamed completion through the existing usage hook,
+calibrates its token budget, then awaits durable usage recording—even if the stream
+later fails. The provider adapter does not own estimates or calibration. The core
+depends on neither runtime, storage, nor provider implementations.
 
 ## Compiler cache
 

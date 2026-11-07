@@ -1,4 +1,3 @@
-use crate::budget::TurnRequestPhase;
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -77,20 +76,6 @@ pub struct ProviderResponse {
     pub tool_calls: Vec<ToolCall>,
     pub provider_id: String,
     pub provider_content: String,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PreparedRequest {
-    pub request: ProviderRequest,
-    pub estimated_input_tokens: i64,
-}
-
-/// Core-assigned request attempt, input estimate, and final-phase metadata.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProviderContext {
-    pub attempt: i32,
-    pub estimated_input_tokens: i64,
-    pub phase: TurnRequestPhase,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
