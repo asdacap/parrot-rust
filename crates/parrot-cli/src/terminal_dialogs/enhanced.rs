@@ -826,9 +826,11 @@ impl EnhancedInput {
             return Err(Status::cancelled("session binding changed").into());
         }
         editor.remember(entered);
-        shared
-            .frame
-            .commit(Arc::new(ImmediateScrollbackValue::user(entered)))?;
+        if message.delivery != wire::Delivery::DELIVERY_STEER.into() {
+            shared
+                .frame
+                .commit(Arc::new(ImmediateScrollbackValue::user(entered)))?;
+        }
         shared.busy.store(true, Ordering::Release);
         shared.apply_presenter(|presenter| presenter.begin_turn())?;
         crate::slash_sessions::native_call(snapshot.client.clone().send_message(message), c)

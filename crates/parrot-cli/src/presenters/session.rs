@@ -16,9 +16,10 @@ use super::streams::{
 };
 use super::turn::{response_boundary, response_owner};
 use super::{
-    AgentTaskDeclarationFormatter, AgentTaskProgressFormatter, EnhancedTurnRenderer, ModelineValue,
-    Presentation, PresenterError, PresenterResult, RollingTokenRateWindow, RuntimeUsage,
-    RuntimeUsageTracker, SessionReplayContext, ToolPresenterRegistry,
+    AgentTaskDeclarationFormatter, AgentTaskProgressFormatter, EnhancedTurnRenderer,
+    ImmediateScrollbackValue, ModelineValue, Presentation, PresenterError, PresenterResult,
+    RollingTokenRateWindow, RuntimeUsage, RuntimeUsageTracker, SessionReplayContext,
+    ToolPresenterRegistry,
 };
 
 #[derive(Default)]
@@ -62,6 +63,7 @@ pub struct EnhancedSessionPresenter {
     question_remaining: Option<i64>,
     awaiting_question: bool,
     plan: Option<wire::PlanCompleted>,
+    pending_steers: Vec<wire::InputAdmitted>,
 }
 
 impl EnhancedSessionPresenter {
@@ -126,6 +128,7 @@ impl EnhancedSessionPresenter {
             question_remaining: None,
             awaiting_question: false,
             plan: None,
+            pending_steers: Vec::new(),
         }
     }
 
@@ -226,6 +229,33 @@ impl EnhancedSessionPresenter {
         }
         self.hierarchy.observe(published);
         let main = self.hierarchy.is_root(&published.agent_session_id);
+        let foreground = !self.hierarchy.is_child(&published.agent_session_id);
+        match &published.payload {
+            Some(Payload::InputAdmitted(input))
+                if foreground
+                    && input.delivery == wire::Delivery::DELIVERY_STEER.into()
+                    && input.source != wire::InputSource::INPUT_SOURCE_MONITOR.into() =>
+            {
+                self.pending_steers.push(input.clone());
+            }
+            Some(Payload::InputPromoted(input)) if foreground => {
+                if let Some(index) = self
+                    .pending_steers
+                    .iter()
+                    .position(|pending| pending.input_id == input.input_id)
+                {
+                    let pending = self.pending_steers.remove(index);
+                    update
+                        .commits
+                        .push(Arc::new(ImmediateScrollbackValue::user(&pending.content)));
+                }
+            }
+            Some(Payload::InputCanceled(input)) if foreground => {
+                self.pending_steers
+                    .retain(|pending| pending.input_id != input.input_id);
+            }
+            _ => {}
+        }
         if !replaying {
             update.live_event = true;
             update.started_main_turn =
@@ -325,6 +355,16 @@ impl EnhancedSessionPresenter {
     pub fn snapshot(&self) -> PresenterResult<Vec<Arc<dyn LiveBufferItem>>> {
         let mut items = self.turn.snapshot();
         items.extend(self.activity.snapshot()?);
+        for pending in &self.pending_steers {
+            items.push(Arc::new(Presentation::Lines {
+                lines: TerminalText::layout_words_hanging(
+                    &format!("◇ {} (pending)", TerminalText::sanitize(&pending.content)),
+                    self.columns,
+                    "  ",
+                ),
+                layout: ScrollbackLayout::User,
+            }));
+        }
         items.push(Arc::new(self.modeline()));
         if let Some(seconds) = self.question_remaining {
             items.push(Arc::new(super::status::QuestionCountdownValue(seconds)));

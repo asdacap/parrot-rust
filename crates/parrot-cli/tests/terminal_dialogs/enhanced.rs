@@ -102,6 +102,81 @@ async fn busy_input_and_escape_or_control_c_preserve_draft_and_interrupt_once() 
 }
 
 #[tokio::test]
+async fn steer_stays_live_until_the_agent_promotes_it() {
+    let mut rpc = Fixture::start().await;
+    let mut terminal = TerminalFixture::new();
+    let cli = rpc.cli(terminal.take(), "", None);
+    let stop = rpc.stopping.clone();
+    let result = fixture::run_flow(cli, stop, terminal.end_input(), async {
+        terminal.output_contains("❯ ").await;
+        terminal.input.type_text("first prompt\r");
+        rpc.wait(|state| state.sent.len() == 1).await;
+        rpc.publish(
+            "session-1",
+            event(
+                "started",
+                wire::event::Payload::TurnStarted(wire::TurnStarted::new()),
+            ),
+        )
+        .await;
+        terminal.input.type_text("steer message\r");
+        rpc.wait(|state| state.sent.len() == 2).await;
+        assert!(
+            !terminal.output.text().contains("◆ steer message"),
+            "a steer must not enter scrollback before the agent takes it"
+        );
+        rpc.publish(
+            "session-1",
+            event(
+                "admitted",
+                wire::event::Payload::InputAdmitted(wire::InputAdmitted {
+                    input_id: "steer-1".into(),
+                    content: "steer message".into(),
+                    delivery: wire::Delivery::DELIVERY_STEER.into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        terminal.output_contains("◇ steer message").await;
+        let before_response = terminal.output.text().len();
+        rpc.publish(
+            "session-1",
+            event(
+                "response",
+                wire::event::Payload::TextChunk(wire::TextChunk {
+                    fragment: "still working".into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        wait_until(|| {
+            let output = terminal.output.text();
+            output[before_response..].contains("still working")
+                && output[before_response..].contains("◇ steer message")
+        })
+        .await;
+        rpc.publish(
+            "session-1",
+            event(
+                "promoted",
+                wire::event::Payload::InputPromoted(wire::InputPromoted {
+                    input_id: "steer-1".into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        terminal.output_contains("◆ steer message").await;
+        terminal.input.end();
+    })
+    .await;
+    assert_eq!(result.unwrap(), 0);
+    rpc.close().await;
+}
+
+#[tokio::test]
 async fn effort_picker_returns_to_prompt_without_ending_the_running_turn() {
     let mut rpc = Fixture::start().await;
     rpc.state.lock().unwrap().model_variants = ["low", "high"]

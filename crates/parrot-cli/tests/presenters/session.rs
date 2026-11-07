@@ -16,6 +16,104 @@ fn configured(columns: usize) -> EnhancedSessionPresenter {
     presenter
 }
 #[test]
+fn steer_remains_pending_across_turn_boundaries_until_its_own_promotion() {
+    let mut presenter = configured(120);
+    presenter.observe(&start("root")).unwrap();
+    presenter.observe(&child("root")).unwrap();
+    for (id, content) in [("first", "first steer"), ("second", "second steer")] {
+        let admitted = presenter
+            .observe(&event(
+                "root",
+                Payload::InputAdmitted(wire::InputAdmitted {
+                    input_id: id.into(),
+                    content: content.into(),
+                    delivery: wire::Delivery::DELIVERY_STEER.into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        assert!(admitted.commits.is_empty());
+        assert!(live(&admitted.live, 120).contains(&format!("◇ {content}")));
+    }
+    for published in [
+        text("root", "still working"),
+        ended("root"),
+        start("root"),
+        event(
+            "child",
+            Payload::InputPromoted(wire::InputPromoted {
+                input_id: "first".into(),
+                ..Default::default()
+            }),
+        ),
+    ] {
+        let update = presenter.observe(&published).unwrap();
+        let pending = live(&update.live, 120);
+        assert!(pending.contains("◇ first steer"));
+        assert!(pending.contains("◇ second steer"));
+        assert!(!commits(&update.commits, 120).contains("◆ first steer"));
+    }
+    let promotion = event(
+        "root",
+        Payload::InputPromoted(wire::InputPromoted {
+            input_id: "first".into(),
+            ..Default::default()
+        }),
+    );
+    let promoted = presenter.observe(&promotion).unwrap();
+    assert_eq!(commits(&promoted.commits, 120), "◆ first steer\r\n");
+    assert!(!live(&promoted.live, 120).contains("first steer"));
+    assert!(live(&promoted.live, 120).contains("◇ second steer"));
+    assert!(presenter.observe(&promotion).unwrap().commits.is_empty());
+    let canceled = presenter
+        .observe(&event(
+            "root",
+            Payload::InputCanceled(wire::InputCanceled {
+                input_id: "second".into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    assert!(canceled.commits.is_empty());
+    assert!(!live(&canceled.live, 120).contains("second steer"));
+}
+
+#[test]
+fn replay_restores_pending_steers_and_commits_only_promoted_ones() {
+    let mut presenter = EnhancedSessionPresenter::new(120, false, true);
+    for (id, content) in [("taken", "taken steer"), ("pending", "pending steer")] {
+        let update = presenter
+            .observe(&event(
+                "root",
+                Payload::InputAdmitted(wire::InputAdmitted {
+                    input_id: id.into(),
+                    content: content.into(),
+                    delivery: wire::Delivery::DELIVERY_STEER.into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        assert!(update.commits.is_empty());
+        assert!(live(&update.live, 120).contains(&format!("◇ {content}")));
+    }
+    presenter.observe(&start("root")).unwrap();
+    let promoted = presenter
+        .observe(&event(
+            "root",
+            Payload::InputPromoted(wire::InputPromoted {
+                input_id: "taken".into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    assert_eq!(commits(&promoted.commits, 120), "◆ taken steer\r\n");
+    assert!(!live(&promoted.live, 120).contains("taken steer"));
+    assert!(live(&promoted.live, 120).contains("◇ pending steer"));
+    let resized = presenter.resize(20).unwrap();
+    assert!(live(&resized.live, 20).contains("pending steer"));
+}
+
+#[test]
 fn deferred_events_preserve_text_and_completion_without_live_materialization() {
     let mut presenter = configured(2048);
     let started = presenter.apply_event(&start("root")).unwrap();

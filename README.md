@@ -75,6 +75,13 @@ listed in [.github/workflows/check.yml](.github/workflows/check.yml).
 - [Configuration, legacy selection, backups and rollback](docs/operator/state-and-rollback.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
+### Steering a running agent
+
+In interactive chat, messages submitted while the agent is busy stay in the live
+buffer as `◇ … (pending)`. They move to scrollback as `◆ …` only when the agent
+takes them into its conversation at the next turn boundary. A new response or a
+turn ending alone does not mark a pending steer as consumed.
+
 ### HTTPS certificates for `serve`
 
 HTTPS serving uses the Rust-native Tonic/Rustls TLS stack with explicitly supplied
