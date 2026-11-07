@@ -1,74 +1,92 @@
 use super::*;
 use parrot_core::{
-    CompletionDecision as CoreCompletionDecision, ProviderError, Response, ResponseKind,
-    RetryReason, State as CoreState, Tools as CoreTools,
+    CompletionDecision as CoreCompletionDecision, Error as CoreError, ErrorCode, ErrorKind,
+    PreparedRequest, ProviderContext, ProviderRequest, ProviderResponse, RetryReason,
+    States as CoreStates, ToolCatalog, ToolContext, ToolDefinition, ToolPhase, TurnOptions,
 };
 use parrot_provider::routing::registry::ProviderModel;
 
-struct RuntimeState<'a, S: AccessSnapshot, T: TurnTools<S>> {
+struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
-    state: &'a mut State,
+    binding: &'a TurnBinding<S, T>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
+    binding: &'a TurnBinding<S, T>,
     cancellation: &'a dyn Cancellation,
 }
+
 struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
+    binding: &'a TurnBinding<S, T>,
     cancellation: &'a dyn Cancellation,
 }
 
-/// Grants tools access only to in-turn conversation and context mutations.
-pub(super) trait ToolTurn: Send {
-    /// Borrows mutations without exposing lifecycle, turn bookkeeping, or backend services.
-    fn borrow_mutations(&mut self) -> ToolMutations<'_>;
+struct CapturedTools<T> {
+    normal: T,
+    final_phase: T,
 }
 
-pub(super) struct ToolMutations<'a> {
-    pub(super) conversation: &'a mut AgentConversation,
-    pub(super) context: &'a mut ContextController,
-    request_status: Option<&'a Arc<dyn crate::compaction::ContextStatus>>,
+struct BoundTurn<S: AccessSnapshot, T: TurnTools<S>> {
+    selection: TurnSelection<S>,
+    tools: Option<CapturedTools<T::Snapshot>>,
 }
 
-impl ToolTurn for State {
-    fn borrow_mutations(&mut self) -> ToolMutations<'_> {
-        ToolMutations {
-            conversation: &mut self.conversation,
-            context: &mut self.context,
-            request_status: self.request_status.as_ref(),
+struct TurnBinding<S: AccessSnapshot, T: TurnTools<S>> {
+    turn: std::sync::Mutex<Option<BoundTurn<S, T>>>,
+}
+
+impl<S: AccessSnapshot, T: TurnTools<S>> TurnBinding<S, T> {
+    fn new() -> Self {
+        Self {
+            turn: std::sync::Mutex::new(None),
         }
     }
-}
-
-/// Grants a provider synchronous, per-completion token calibration only.
-trait ProviderFeedback: Send + Sync {
-    /// Calibrates input estimates before durable usage recording is awaited.
-    fn observe_completion(
-        &mut self,
-        selector: &str,
-        estimate: i64,
-        completed: &sessions::Completion,
-    );
-}
-
-impl ProviderFeedback for crate::compaction::ProviderTokenBudget {
-    fn observe_completion(
-        &mut self,
-        selector: &str,
-        estimate: i64,
-        completed: &sessions::Completion,
-    ) {
-        self.observe_usage(selector, estimate, completed);
+    fn bind(&self, selection: TurnSelection<S>) {
+        *self.turn.lock().expect("turn binding poisoned") = Some(BoundTurn {
+            selection,
+            tools: None,
+        });
+    }
+    fn capture_selection(&self) -> Result<TurnSelection<S>, TurnError> {
+        self.turn
+            .lock()
+            .expect("turn binding poisoned")
+            .as_ref()
+            .map(|turn| turn.selection.clone())
+            .ok_or_else(|| TurnError::Service("turn selection is unavailable".into()))
+    }
+    fn retain_tools(&self, normal: T::Snapshot, final_phase: T::Snapshot) -> Result<(), TurnError> {
+        let mut guard = self.turn.lock().expect("turn binding poisoned");
+        let turn = guard
+            .as_mut()
+            .ok_or_else(|| TurnError::Service("turn selection is unavailable".into()))?;
+        turn.tools = Some(CapturedTools {
+            normal,
+            final_phase,
+        });
+        Ok(())
+    }
+    fn capture_tools(&self, phase: ToolPhase) -> Result<T::Snapshot, TurnError> {
+        let guard = self.turn.lock().expect("turn binding poisoned");
+        let tools = guard
+            .as_ref()
+            .and_then(|turn| turn.tools.as_ref())
+            .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
+        Ok(match phase {
+            ToolPhase::Normal => tools.normal.clone(),
+            ToolPhase::Final => tools.final_phase.clone(),
+        })
     }
 }
 
 struct UsageBridge<'a> {
     recorder: &'a SessionUsageRecorder,
     selected: &'a ProviderModel,
-    feedback: &'a mut dyn ProviderFeedback,
+    budget: &'a mut crate::compaction::ProviderTokenBudget,
     estimate: i64,
 }
 impl ProviderUsage for UsageBridge<'_> {
@@ -78,8 +96,8 @@ impl ProviderUsage for UsageBridge<'_> {
         completed: &'a sessions::Completion,
     ) -> BoxFuture<'a, Result<(), EventError>> {
         Box::pin(async move {
-            self.feedback
-                .observe_completion(&self.selected.selector(), self.estimate, completed);
+            self.budget
+                .observe_usage(&self.selected.selector(), self.estimate, completed);
             self.recorder
                 .record_request(self.selected, request.reasoning.as_ref(), completed)
                 .await
@@ -87,15 +105,52 @@ impl ProviderUsage for UsageBridge<'_> {
     }
 }
 
-struct PreparedRequest {
-    request: sessions::Request,
-    model: ProviderModel,
-    estimate: i64,
+fn adapt_operation<'a, T: Send + 'a>(
+    operation: impl std::future::Future<Output = Result<T, TurnError>> + Send + 'a,
+) -> BoxFuture<'a, Result<T, CoreError>> {
+    Box::pin(async move { operation.await.map_err(Into::into) })
+}
+
+impl From<TurnError> for CoreError {
+    fn from(error: TurnError) -> Self {
+        match error {
+            TurnError::Core(error) => error,
+            error => {
+                let kind = if error.is_cancelled() {
+                    ErrorKind::Cancelled
+                } else {
+                    ErrorKind::Failed
+                };
+                let code = match error.diagnostic_code() {
+                    "cancelled" => ErrorCode::Cancelled,
+                    "access_denied" => ErrorCode::AccessDenied,
+                    "io" => ErrorCode::Io,
+                    "timeout" => ErrorCode::Timeout,
+                    "http" => ErrorCode::Http,
+                    "argument" => ErrorCode::Argument,
+                    "invalid_operation" => ErrorCode::InvalidOperation,
+                    "websocket_closed" => ErrorCode::WebSocketClosed,
+                    "websocket" => ErrorCode::WebSocket,
+                    "wire_protocol" => ErrorCode::WireProtocol,
+                    "websocket_upgrade" => ErrorCode::WebSocketUpgrade,
+                    "websocket_message_too_large" => ErrorCode::WebSocketMessageTooLarge,
+                    "request_too_large" => ErrorCode::RequestTooLarge,
+                    "websocket_transport" => ErrorCode::WebSocketTransport,
+                    _ => ErrorCode::Unexpected,
+                };
+                Self {
+                    kind,
+                    code,
+                    message: error.to_string(),
+                    response_body: error.response_body().to_owned(),
+                }
+            }
+        }
+    }
 }
 
 pub(super) async fn run<S, T>(
     backend: &RuntimeBackend<S, T>,
-    state: &mut State,
     cancellation: &dyn Cancellation,
     work: &dyn DrainWork,
 ) -> Result<Execution, TurnError>
@@ -104,75 +159,65 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    state.request_status = None;
-    let mut state = RuntimeState {
+    backend.state.lock().await.request_status = None;
+    let binding = TurnBinding::new();
+    let mut states = RuntimeStates {
         backend,
-        state,
+        binding: &binding,
         cancellation,
         work,
     };
     let tools = RuntimeTools {
         backend,
+        binding: &binding,
         cancellation,
     };
     let provider = RuntimeProvider {
         backend,
+        binding: &binding,
         cancellation,
     };
-    let outcome = parrot_core::run(&mut state, &tools, &provider).await;
-    state.state.request_status = None;
+    let outcome = parrot_core::run(&mut states, &tools, &provider).await;
+    backend.state.lock().await.request_status = None;
     match outcome {
         Ok(parrot_core::Outcome::Completed(answer)) => Ok(Execution::succeeded(answer)),
         Ok(parrot_core::Outcome::Failed(message)) => Ok(Execution::failed(&message)),
-        Err(parrot_core::Error::Adapter(error)) => Err(error),
-        Err(parrot_core::Error::MissingTurn) => {
-            Err(TurnError::Service("turn selection is unavailable".into()))
-        }
+        Err(error) => Err(TurnError::Core(error)),
     }
 }
 
-impl<S, T> CoreState for RuntimeState<'_, S, T>
+impl<S, T> CoreStates for RuntimeStates<'_, S, T>
 where
     S: AccessSnapshot + 'static,
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    type Selection = TurnSelection<S>;
-    type Request = PreparedRequest;
-    type Response = sessions::Completion;
-    type ToolDefinition = sessions::Tool;
-    type Error = TurnError;
-    type ToolContext = dyn ToolTurn;
-    type ProviderContext = dyn ProviderFeedback;
-
-    fn borrow_tool_context(&mut self) -> &mut Self::ToolContext {
-        self.state
-    }
-    fn borrow_provider_context(&mut self) -> &mut Self::ProviderContext {
-        self.state.context.budget_mut()
-    }
     fn disables_request_limit(&self) -> bool {
         self.backend.agent_limits.disable_max_turns
-    }
-    fn is_turn_open(&self) -> bool {
-        self.state.turn.is_some()
     }
     fn has_scheduled_work(&self) -> bool {
         self.work.has_scheduled()
     }
-    fn check_cancellation(&self) -> Result<(), TurnError> {
-        self.cancellation.check().map_err(|_| TurnError::Cancelled)
+    fn check_cancellation(&self) -> Result<(), CoreError> {
+        self.cancellation
+            .check()
+            .map_err(|_| CoreError::cancelled())
     }
-    fn has_work(&self) -> BoxFuture<'_, Result<bool, TurnError>> {
-        Box::pin(async move {
-            Ok(self.state.conversation.is_answerable()
+    fn is_turn_open(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move { self.backend.state.lock().await.turn.is_some() })
+    }
+    fn has_work(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
+        adapt_operation(async move {
+            let state = self.backend.state.lock().await;
+            Ok(state.conversation.is_answerable()
                 || self.backend.history.has_pending_inputs().await?)
         })
     }
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<Self::Selection, TurnError>> {
-        Box::pin(async move {
+    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, CoreError>> {
+        adapt_operation(async move {
             let backend = self.backend;
-            let state = &mut *self.state;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
             let cancellation = self.cancellation;
             let events = ContextEmitter { backend };
             backend.skills.end_turn().await;
@@ -236,17 +281,21 @@ where
                 tokio::task::yield_now().await;
             }
             backend.skills.begin_turn(cancellation).await?;
-            Ok(selection)
+            let maximum_requests = selection.profile.maximum_requests;
+            self.binding.bind(selection);
+            Ok(TurnOptions { maximum_requests })
         })
     }
-    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), TurnError>> {
-        Box::pin(async move {
+    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
             let backend = self.backend;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
             let events = ContextEmitter { backend };
-            self.state
+            state
                 .context
                 .restore_tool_availability(
-                    &mut self.state.conversation,
+                    &mut state.conversation,
                     &backend.notices.restored,
                     &events,
                     self.cancellation,
@@ -255,25 +304,30 @@ where
             Ok(())
         })
     }
-    fn promote_input(&mut self) -> BoxFuture<'_, Result<(), TurnError>> {
-        Box::pin(self.backend.promote(self.state, self.cancellation))
-    }
-    fn maximum_requests(&self, selection: &Self::Selection) -> i32 {
-        selection.profile.maximum_requests
+    fn promote_input(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let mut state = self.backend.state.lock().await;
+            self.backend.promote(&mut state, self.cancellation).await
+        })
     }
     fn take_interruption(&mut self) -> bool {
         self.backend.interruption.swap(false, Ordering::AcqRel)
     }
     fn prepare_request<'a>(
         &'a mut self,
-        selection: &'a Self::Selection,
-        definitions: &'a [Self::ToolDefinition],
+        definitions: &'a [ToolDefinition],
         phase: parrot_core::budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<Self::Request, TurnError>> {
-        Box::pin(async move {
+    ) -> BoxFuture<'a, Result<PreparedRequest, CoreError>> {
+        adapt_operation(async move {
             let backend = self.backend;
-            let state = &mut *self.state;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let selection = self.binding.capture_selection()?;
+            let selection = &selection;
             let cancellation = self.cancellation;
+            let definitions: Vec<sessions::Tool> =
+                definitions.iter().cloned().map(Into::into).collect();
+            let definitions = definitions.as_slice();
             let events = ContextEmitter { backend };
             if phase.enters_final_phase {
                 let content = if phase.interrupted {
@@ -340,21 +394,25 @@ where
                 ..Default::default()
             };
             Ok(PreparedRequest {
-                request,
-                model: selection.model.canonical_model.clone(),
-                estimate,
+                request: request.into(),
+                estimated_input_tokens: estimate,
             })
         })
     }
     fn compact_request<'a>(
         &'a mut self,
-        selection: &'a Self::Selection,
-        definitions: &'a [Self::ToolDefinition],
-    ) -> BoxFuture<'a, Result<bool, TurnError>> {
-        Box::pin(async move {
+        definitions: &'a [ToolDefinition],
+    ) -> BoxFuture<'a, Result<bool, CoreError>> {
+        adapt_operation(async move {
             let backend = self.backend;
-            let state = &mut *self.state;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let selection = self.binding.capture_selection()?;
+            let selection = &selection;
             let cancellation = self.cancellation;
+            let definitions: Vec<sessions::Tool> =
+                definitions.iter().cloned().map(Into::into).collect();
+            let definitions = definitions.as_slice();
             let events = ContextEmitter { backend };
             let status = state
                 .request_status
@@ -383,23 +441,28 @@ where
         &mut self,
         reason: RetryReason,
         attempt: i32,
-    ) -> BoxFuture<'_, Result<(), TurnError>> {
-        let message = match reason {
-            RetryReason::TruncatedToolCalls => &self.backend.notices.truncated,
-            RetryReason::InvalidToolCalls => &self.backend.notices.invalid,
-        };
-        Box::pin(
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let message = match reason {
+                RetryReason::TruncatedToolCalls => &self.backend.notices.truncated,
+                RetryReason::InvalidToolCalls => &self.backend.notices.invalid,
+            };
+            let mut state = self.backend.state.lock().await;
             self.backend
-                .retry_notice(self.state, message, attempt, self.cancellation),
-        )
+                .retry_notice(&mut state, message, attempt, self.cancellation)
+                .await
+        })
     }
     fn record_tool_calls<'a>(
         &'a mut self,
-        completed: &'a Self::Response,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move {
+        completed: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let completed: sessions::Completion = completed.clone().into();
+            let completed = &completed;
             let backend = self.backend;
-            let state = &mut *self.state;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
             let cancellation = self.cancellation;
             let published = backend.event();
             backend
@@ -422,12 +485,15 @@ where
     }
     fn evaluate_completion<'a>(
         &'a mut self,
-        selection: &'a Self::Selection,
-        completed: &'a Self::Response,
-    ) -> BoxFuture<'a, Result<CoreCompletionDecision, TurnError>> {
-        Box::pin(async move {
+        completed: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<CoreCompletionDecision, CoreError>> {
+        adapt_operation(async move {
+            let completed: sessions::Completion = completed.clone().into();
+            let completed = &completed;
             let backend = self.backend;
-            let state = &mut *self.state;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let selection = self.binding.capture_selection()?;
             let cancellation = self.cancellation;
             let work = self.work;
             work.join_mutations()
@@ -474,11 +540,14 @@ where
     }
     fn complete_turn<'a>(
         &'a mut self,
-        completed: &'a Self::Response,
-    ) -> BoxFuture<'a, Result<String, TurnError>> {
-        Box::pin(async move {
+        completed: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<String, CoreError>> {
+        adapt_operation(async move {
+            let completed: sessions::Completion = completed.clone().into();
+            let completed = &completed;
             let backend = self.backend;
-            let state = &mut *self.state;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
             let cancellation = self.cancellation;
             let work = self.work;
             work.join_mutations()
@@ -494,8 +563,8 @@ where
             Ok(completed.assistant_text.clone())
         })
     }
-    fn fail_runaway(&mut self) -> BoxFuture<'_, Result<String, TurnError>> {
-        Box::pin(async move {
+    fn fail_runaway(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
+        adapt_operation(async move {
             self.backend
                 .fail(self.backend.notices.runaway.clone(), String::new())
                 .await?;
@@ -504,47 +573,58 @@ where
     }
 }
 
-impl<S, T> CoreTools for RuntimeTools<'_, S, T>
+impl<S, T> parrot_core::Tools for RuntimeTools<'_, S, T>
 where
     S: AccessSnapshot + 'static,
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    type Context = dyn ToolTurn;
-    type Selection = TurnSelection<S>;
-    type Definition = sessions::Tool;
-    type Snapshot = T::Snapshot;
-    type Error = TurnError;
-
-    fn reconcile<'a>(
-        &'a self,
-        context: &'a mut Self::Context,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move {
-            self.backend.reconcile(context, self.cancellation).await?;
+    fn reconcile_pending(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let mut state = self.backend.state.lock().await;
+            self.backend
+                .reconcile(&mut state, self.cancellation)
+                .await?;
             Ok(())
         })
     }
-    fn snapshot(&self, selection: &TurnSelection<S>) -> Result<Self::Snapshot, TurnError> {
-        self.backend.snapshot(selection)
+    fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            let normal = self.backend.snapshot(&selection)?;
+            let final_phase = self.backend.tools.enabled_after_interruption(&normal);
+            let catalog = ToolCatalog {
+                normal: self
+                    .backend
+                    .tools
+                    .definitions(&normal)
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect(),
+                final_phase: self
+                    .backend
+                    .tools
+                    .definitions(&final_phase)
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect(),
+            };
+            self.binding.retain_tools(normal, final_phase)?;
+            Ok(catalog)
+        })
     }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
-        self.backend.tools.definitions(snapshot)
-    }
-    fn restrict_for_final_phase(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
-        self.backend.tools.enabled_after_interruption(snapshot)
-    }
-    fn execute_pending<'a>(
-        &'a self,
-        context: &'a mut Self::Context,
-        selection: &'a TurnSelection<S>,
-        snapshot: &'a Self::Snapshot,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move {
+    fn execute_pending(&self, context: ToolContext) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
             let backend = self.backend;
-            let mutations = context.borrow_mutations();
-            let status = mutations
+            let selection = self.binding.capture_selection()?;
+            let snapshot = self.binding.capture_tools(context.phase)?;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let status = state
                 .request_status
+                .as_ref()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
             let events = ContextEmitter { backend };
             backend
@@ -552,16 +632,16 @@ where
                 .reconcile(
                     TurnResources {
                         history: &backend.history,
-                        conversation: mutations.conversation,
-                        context: mutations.context,
+                        conversation: &mut state.conversation,
+                        context: &mut state.context,
                         prompt: &backend.prompt,
                         sessions: &backend.sessions,
                         status: status.as_ref(),
                         events: &events,
                         usage: &backend.usage,
                     },
-                    selection,
-                    snapshot,
+                    &selection,
+                    &snapshot,
                     backend.selection.as_ref(),
                     self.cancellation,
                 )
@@ -576,30 +656,28 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    type Context = dyn ProviderFeedback;
-    type Request = PreparedRequest;
-    type Response = sessions::Completion;
-    type Error = TurnError;
-
-    fn invoke<'a>(
-        &'a self,
-        prepared: PreparedRequest,
-        feedback: &'a mut Self::Context,
-    ) -> BoxFuture<'a, Result<Response<sessions::Completion>, ProviderError<TurnError>>> {
+    fn invoke(
+        &self,
+        request: ProviderRequest,
+        context: ProviderContext,
+    ) -> BoxFuture<'_, Result<ProviderResponse, CoreError>> {
         Box::pin(async move {
             let backend = self.backend;
+            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
+            let selected = &selection.model.canonical_model;
+            let mut state = backend.state.lock().await;
             let session = backend
                 .sessions
-                .get(prepared.model.provider.clone())
+                .get(selected.provider.clone())
                 .await
-                .map_err(|error| ProviderError::Failed(error.into()))?;
+                .map_err(|error| CoreError::from(TurnError::Provider(error)))?;
             let output = OutputBridge(backend.output.as_ref());
             let activity = ActivityBridge(backend.activity.as_ref());
             let mut usage = UsageBridge {
                 recorder: &backend.usage,
-                selected: &prepared.model,
-                feedback,
-                estimate: prepared.estimate,
+                selected,
+                budget: state.context.budget_mut(),
+                estimate: context.estimated_input_tokens,
             };
             let mut call = ProviderCall {
                 history: &backend.history,
@@ -610,7 +688,7 @@ where
                 usage: &mut usage,
             };
             let event = match call
-                .stream(session.as_ref(), prepared.request, self.cancellation)
+                .stream(session.as_ref(), request.into(), self.cancellation)
                 .await
             {
                 Ok(event) => event,
@@ -625,28 +703,82 @@ where
                             },
                         ),
                     ),
-                ) => return Err(ProviderError::RequestTooLarge(error.into())),
-                Err(error) => return Err(ProviderError::Failed(error.into())),
+                ) => {
+                    let mut error = CoreError::from(TurnError::ProviderCall(error));
+                    error.kind = ErrorKind::RequestTooLarge;
+                    return Err(error);
+                }
+                Err(error) => return Err(CoreError::from(TurnError::ProviderCall(error))),
             };
-            let completed = match event.base_event() {
-                sessions::Event::Completed(completed) => completed.clone(),
+            match event.base_event() {
+                sessions::Event::Completed(completed) => Ok(completed.clone().into()),
                 _ => unreachable!("provider call returns completion"),
-            };
-            let kind = if completed.tool_calls.is_empty() {
-                ResponseKind::Final
-            } else if completed.finish_reason == "length" {
-                ResponseKind::TruncatedToolCalls
-            } else if completed.tool_calls.iter().any(|call| {
-                serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err()
-            }) {
-                ResponseKind::InvalidToolCalls
-            } else {
-                ResponseKind::ToolCalls
-            };
-            Ok(Response {
-                value: completed,
-                kind,
-            })
+            }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_errors_preserve_typed_cancellation_and_diagnostic_metadata() {
+        let errors = [
+            TurnError::Cancelled,
+            TurnError::Service("cancelled is only message text".into()),
+            TurnError::Provider(sessions::Error::Cancellation("typed cancellation".into())),
+            TurnError::Planning(crate::compaction::PlanningError::InputLimitExceeded),
+            TurnError::ProviderCall(provider_call::ProviderCallError::Output(
+                std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            )),
+            TurnError::Publication(OperationError::Cancelled),
+        ];
+        for error in errors {
+            let expected = (
+                error.is_cancelled(),
+                error.diagnostic_code(),
+                error.to_string(),
+                error.response_body().to_owned(),
+            );
+            let translated = TurnError::Core(error.into());
+            assert_eq!(translated.is_cancelled(), expected.0);
+            assert_eq!(translated.diagnostic_code(), expected.1);
+            assert_eq!(translated.to_string(), expected.2);
+            assert_eq!(translated.response_body(), expected.3);
+        }
+    }
+
+    #[test]
+    fn fixed_errors_preserve_only_the_top_level_provider_body() {
+        let body = "opaque-provider-response-body";
+        let provider_error = || {
+            sessions::Error::Http(parrot_provider::http_stream::HttpError::Response(
+                parrot_provider::http_stream::HttpFailure {
+                    status: 503,
+                    error_type: "busy".into(),
+                    error_code: "retry".into(),
+                    detail: "safe classification".into(),
+                    response_body: body.into(),
+                },
+            ))
+        };
+        for (error, expected_body) in [
+            (provider_error(), body),
+            (
+                sessions::Error::ProviderWithCause {
+                    message: "outer provider wrapper".into(),
+                    cause: Box::new(provider_error()),
+                },
+                "",
+            ),
+        ] {
+            let error = TurnError::Provider(error);
+            let expected_code = error.diagnostic_code();
+            let translated = TurnError::Core(error.into());
+            assert_eq!(translated.response_body(), expected_body);
+            assert_eq!(translated.diagnostic_code(), expected_code);
+            assert!(!translated.to_string().contains(body));
+        }
     }
 }

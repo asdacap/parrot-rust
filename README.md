@@ -28,32 +28,40 @@ ported from the .NET repository. Repository contributor guidance is in
 
 ## Core and runtime
 
-`parrot-core` is a dependency-free crate containing the agent turn loop and three
-traits:
+`parrot-core` owns the agent turn protocol and loop, with exactly three traits:
 
-- `State`: conversation and turn operations, prepared requests, and completion admission.
-- `Tools`: retained tool definitions, final-phase filtering, and pending tool execution.
-- `Provider`: model invocation with normalized response and error outcomes.
+- `States`: conversation and turn effects, prepared requests, and completion admission.
+- `Tools`: turn-bound catalogs and awaited durable settlement of accepted calls.
+- `Provider`: model invocation and awaited stream cleanup.
 
-The core owns request budgets, retry decisions, tool/model ordering, and turn
-termination. Request, response, selection, and tool-definition values are opaque
-associated types, so the core does not depend on runtime or provider implementations.
+Requests, responses, messages, tool definitions, errors, and contexts are concrete
+core-owned types. Adapters implement the same interface; they do not choose their
+own associated payload or context types. `ProviderContext` specifies the request
+attempt, input estimate, and request phase. `ToolContext` specifies normal or
+final-phase execution. Neither exposes state objects or adapter-specific callbacks.
 
-`parrot-runtime` implements those traits with private adapters. Persistence,
-prompt preparation, compaction, security policy, streaming, usage accounting,
-cancellation, event delivery, and session lifecycle remain outside the core.
-`Tools` and `Provider` have independent associated types and do not depend on the
-`State` trait. The loop passes each adapter its own context instead of the whole
-state. Runtime contexts are explicitly restricted by two smaller traits:
+The core specifies and implements:
 
-- `ToolTurn` exposes mutable conversation/context resources and the retained
-  request-status binding, but not lifecycle state or backend services.
-- `ProviderFeedback` permits synchronous token-estimate calibration for each
-  streamed completion, before durable usage recording.
+- Request admission/counting, interruption, final-phase catalog selection, and
+  bounded tool-settlement extensions.
+- Truncated tool-call detection and JSON-argument validation before recording or
+  executing calls.
+- The one-compaction retry guard for oversized requests, completion-policy retries,
+  and request-budget resets.
+- Readiness/scheduled-work decisions, recording assistant calls before execution,
+  and completion ordering before closing a turn.
 
-These runtime seams keep the existing in-drain tool settlement and streaming
-behavior available for later assessment without exposing the full state or
-introducing another state lock.
+`parrot-runtime` implements the three traits with private adapters. Persistence,
+prompt preparation, compaction, security, streaming, accounting, cancellation,
+events, and session lifecycle stay outside the core. Provider representations are
+translated losslessly at the interface, including raw provider extensions and
+multimodal content. Runtime bindings retain the actual selected model and executable
+tool snapshots; tools are never reconstructed from advertised definitions.
+
+The session drain serializes operations. Each adapter borrows the existing runtime
+state lock only for its operation, including live token calibration during streaming
+and borrowed-resource tool execution. The core depends on neither runtime, storage,
+nor provider implementations.
 
 ## Compiler cache
 

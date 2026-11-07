@@ -277,7 +277,7 @@ where
             )
             .await
     }
-    pub async fn compact_now(
+    async fn compact_now(
         &self,
         selection: &TurnSelection<S>,
         target: Option<&crate::compaction::ContextSize>,
@@ -343,20 +343,19 @@ where
     }
     async fn reconcile(
         &self,
-        context: &mut dyn core_loop::ToolTurn,
+        state: &mut State,
         cancellation: &dyn Cancellation,
     ) -> Result<TurnSelection<S>, TurnError> {
         let selection = self.selection.capture()?;
         let snapshot = self.snapshot(&selection)?;
         let status = self.status.bind(&selection);
         let events = ContextEmitter { backend: self };
-        let mutations = context.borrow_mutations();
         self.tools
             .reconcile(
                 TurnResources {
                     history: &self.history,
-                    conversation: mutations.conversation,
-                    context: mutations.context,
+                    conversation: &mut state.conversation,
+                    context: &mut state.context,
                     prompt: &self.prompt,
                     sessions: &self.sessions,
                     status: status.as_ref(),
@@ -1106,7 +1105,7 @@ where
     ) -> BoxFuture<'a, Result<Self::Selection, LifecycleError>> {
         Box::pin(async move {
             let mut state = self.state.lock().await;
-            self.reconcile(&mut *state, cancellation)
+            self.reconcile(&mut state, cancellation)
                 .await
                 .map_err(|e| e.lifecycle_error())
         })
@@ -1117,8 +1116,8 @@ where
         work: &'a dyn DrainWork,
     ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
+            let result = core_loop::run(self, cancellation, work).await;
             let mut state = self.state.lock().await;
-            let result = core_loop::run(self, &mut state, cancellation, work).await;
             let outcome = async {
                 match result {
                     Ok(execution) => {

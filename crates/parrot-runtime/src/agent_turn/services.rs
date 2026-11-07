@@ -203,6 +203,7 @@ pub trait ParentCompletion: Send + Sync {
 
 #[derive(Debug)]
 pub enum TurnError {
+    Core(parrot_core::Error),
     Storage(EventError),
     ProviderCall(ProviderCallError),
     Provider(sessions::Error),
@@ -216,6 +217,7 @@ pub enum TurnError {
 impl TurnError {
     pub fn response_body(&self) -> &str {
         match self {
+            Self::Core(error) => &error.response_body,
             Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) => {
                 error.response_body()
             }
@@ -238,6 +240,7 @@ impl TurnError {
             return "cancelled";
         }
         match self {
+            Self::Core(error) => error.code.code(),
             Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) => {
                 failure_kind(error).code()
             }
@@ -278,6 +281,9 @@ impl TurnError {
         }
     }
     pub fn is_cancelled(&self) -> bool {
+        if let Self::Core(error) = self {
+            return error.kind == parrot_core::ErrorKind::Cancelled;
+        }
         if let Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) = self
         {
             return provider_cancelled(error);
@@ -357,6 +363,7 @@ fn provider_cancelled(error: &sessions::Error) -> bool {
 impl fmt::Display for TurnError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Core(error) => error.fmt(f),
             Self::Storage(error) => error.fmt(f),
             Self::ProviderCall(error) => error.fmt(f),
             Self::Provider(error) => error.fmt(f),
