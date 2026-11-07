@@ -1415,6 +1415,9 @@ dependencies = [
 [[package]]
 name = "parrot-core"
 version = "0.0.0-dev"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "parrot-domain"

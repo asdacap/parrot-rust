@@ -1,6 +1,7 @@
 use parrot_core::{
-    BoxFuture, CompletionDecision, Error, Outcome, Provider, ProviderError, Response, ResponseKind,
-    RetryReason, State, Tools, budget::TurnRequestPhase, run,
+    BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, Outcome, PreparedRequest, Provider,
+    ProviderContext, ProviderRequest, ProviderResponse, RetryReason, States, ToolCall, ToolCatalog,
+    ToolContext, ToolDefinition, ToolPhase, Tools, TurnOptions, budget::TurnRequestPhase, run,
 };
 use std::{
     collections::VecDeque,
@@ -31,18 +32,56 @@ fn finish<F: Future>(future: F) -> F::Output {
     }
 }
 
+#[derive(Clone)]
 enum Reply {
-    Response(ResponseKind, &'static str),
+    Response(ProviderResponse),
     TooLarge(&'static str),
     Failed(&'static str),
+    Error(Error),
 }
+impl Reply {
+    fn final_response(text: &str) -> Self {
+        Self::Response(ProviderResponse {
+            assistant_text: text.into(),
+            finish_reason: "stop".into(),
+            ..ProviderResponse::default()
+        })
+    }
+    fn tools(text: &str) -> Self {
+        Self::Response(ProviderResponse {
+            assistant_text: text.into(),
+            finish_reason: "tool_calls".into(),
+            tool_calls: vec![ToolCall {
+                id: "call-1".into(),
+                name: "read".into(),
+                arguments_json: "{}".into(),
+            }],
+            ..ProviderResponse::default()
+        })
+    }
+    fn invalid(text: &str) -> Self {
+        let Self::Response(mut response) = Self::tools(text) else {
+            unreachable!()
+        };
+        response.tool_calls[0].arguments_json = "{".into();
+        Self::Response(response)
+    }
+    fn truncated(text: &str) -> Self {
+        let Self::Response(mut response) = Self::invalid(text) else {
+            unreachable!()
+        };
+        response.finish_reason = "length".into();
+        Self::Response(response)
+    }
+}
+
 #[derive(Clone, Default)]
 struct Trace(Arc<Mutex<Vec<String>>>);
 impl Trace {
-    fn step(&self, name: &'static str, fail_at: Option<&'static str>) -> Result<(), &'static str> {
+    fn step(&self, name: &'static str, fail_at: Option<&'static str>) -> Result<(), Error> {
         self.0.lock().unwrap().push(name.into());
         if fail_at == Some(name) {
-            Err(name)
+            Err(Error::failed(name))
         } else {
             Ok(())
         }
@@ -55,54 +94,92 @@ impl Trace {
     }
 }
 
-/// Provides only tool-effect instrumentation, never turn state.
-trait ToolEffects: Send {
-    fn reconcile(&mut self) -> Result<(), &'static str>;
-    fn execute(&mut self, snapshot: &[&'static str]) -> Result<(), &'static str>;
-}
-struct MemoryToolContext {
+#[derive(Clone)]
+struct MemoryTools {
     trace: Trace,
-    advertised: Vec<&'static str>,
-    fail_at: Option<&'static str>,
+    advertised: Arc<Mutex<Vec<String>>>,
+    availability_restored: Arc<AtomicBool>,
+    fail_at: Arc<Mutex<Option<&'static str>>>,
+    phases: Arc<Mutex<Vec<ToolPhase>>>,
 }
-impl ToolEffects for MemoryToolContext {
-    fn reconcile(&mut self) -> Result<(), &'static str> {
-        self.trace.step("reconcile", self.fail_at)
+impl Tools for MemoryTools {
+    fn reconcile_pending(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move { self.trace.step("reconcile", *self.fail_at.lock().unwrap()) })
     }
-    fn execute(&mut self, snapshot: &[&'static str]) -> Result<(), &'static str> {
-        assert_eq!(self.advertised, snapshot);
-        self.trace.step("execute", self.fail_at)
+    fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
+        Box::pin(async move {
+            assert!(!self.availability_restored.load(Ordering::SeqCst));
+            let read = ToolDefinition {
+                name: "read".into(),
+                description: "read a value".into(),
+                parameters_json: "{}".into(),
+            };
+            let write = ToolDefinition {
+                name: "write".into(),
+                description: "write a value".into(),
+                parameters_json: "{}".into(),
+            };
+            Ok(ToolCatalog {
+                normal: vec![read.clone(), write],
+                final_phase: vec![read],
+            })
+        })
+    }
+    fn execute_pending(&self, context: ToolContext) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            let expected: &[&str] = match context.phase {
+                ToolPhase::Normal => &["read", "write"],
+                ToolPhase::Final => &["read"],
+            };
+            assert_eq!(*self.advertised.lock().unwrap(), expected);
+            self.phases.lock().unwrap().push(context.phase);
+            self.trace.step("execute", *self.fail_at.lock().unwrap())
+        })
     }
 }
 
-/// Provides only scripted provider invocations, never turn state.
-trait ProviderReplies: Send {
-    fn begin_invocation(&mut self) -> Result<(), &'static str>;
-    fn take_reply(&mut self) -> Reply;
-}
-struct MemoryProviderContext {
+#[derive(Clone)]
+struct MemoryProvider {
     trace: Trace,
-    replies: VecDeque<Reply>,
-    fail_at: Option<&'static str>,
+    replies: Arc<Mutex<VecDeque<Reply>>>,
+    fail_at: Arc<Mutex<Option<&'static str>>>,
+    contexts: Arc<Mutex<Vec<ProviderContext>>>,
+    requests: Arc<Mutex<Vec<ProviderRequest>>>,
 }
-impl ProviderReplies for MemoryProviderContext {
-    fn begin_invocation(&mut self) -> Result<(), &'static str> {
-        self.trace.step("invoke", self.fail_at)
-    }
-    fn take_reply(&mut self) -> Reply {
-        self.replies
-            .pop_front()
-            .expect("unexpected provider request")
+impl Provider for MemoryProvider {
+    fn invoke(
+        &self,
+        request: ProviderRequest,
+        context: ProviderContext,
+    ) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+        Box::pin(async move {
+            self.trace.step("invoke", *self.fail_at.lock().unwrap())?;
+            self.requests.lock().unwrap().push(request);
+            self.contexts.lock().unwrap().push(context);
+            match self
+                .replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected provider request")
+            {
+                Reply::Response(response) => Ok(response),
+                Reply::TooLarge(message) => Err(Error::request_too_large(message)),
+                Reply::Failed(message) => Err(Error::failed(message)),
+                Reply::Error(error) => Err(error),
+            }
+        })
     }
 }
 
 struct MemoryState {
     trace: Trace,
-    tools: MemoryToolContext,
-    provider: MemoryProviderContext,
+    tools: MemoryTools,
+    provider: MemoryProvider,
     decisions: VecDeque<CompletionDecision>,
-    requests: Vec<(TurnRequestPhase, Vec<&'static str>)>,
+    requests: Vec<(TurnRequestPhase, Vec<String>)>,
     retries: Vec<(RetryReason, i32)>,
+    recorded_tools: Vec<ProviderResponse>,
     work: bool,
     turns: usize,
     open: bool,
@@ -114,26 +191,33 @@ struct MemoryState {
     reduced: bool,
     clear_work_on_retry: bool,
     availability_restored: Arc<AtomicBool>,
+    estimated_input_tokens: i64,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
     fn new(replies: impl IntoIterator<Item = Reply>) -> Self {
         let trace = Trace::default();
+        let availability_restored = Arc::new(AtomicBool::new(false));
         Self {
             trace: trace.clone(),
-            tools: MemoryToolContext {
+            tools: MemoryTools {
                 trace: trace.clone(),
-                advertised: Vec::new(),
-                fail_at: None,
+                advertised: Arc::default(),
+                availability_restored: availability_restored.clone(),
+                fail_at: Arc::default(),
+                phases: Arc::default(),
             },
-            provider: MemoryProviderContext {
+            provider: MemoryProvider {
                 trace,
-                replies: replies.into_iter().collect(),
-                fail_at: None,
+                replies: Arc::new(Mutex::new(replies.into_iter().collect())),
+                fail_at: Arc::default(),
+                contexts: Arc::default(),
+                requests: Arc::default(),
             },
             decisions: VecDeque::new(),
             requests: Vec::new(),
             retries: Vec::new(),
+            recorded_tools: Vec::new(),
             work: true,
             turns: 1,
             open: false,
@@ -144,100 +228,95 @@ impl MemoryState {
             maximum: 10,
             reduced: true,
             clear_work_on_retry: false,
-            availability_restored: Arc::new(AtomicBool::new(false)),
+            availability_restored,
+            estimated_input_tokens: 37,
             fail_at: None,
         }
     }
-    fn step(&mut self, name: &'static str) -> Result<(), &'static str> {
+    fn step(&mut self, name: &'static str) -> Result<(), Error> {
         self.trace.step(name, self.fail_at)
     }
-    fn run(&mut self) -> Result<Outcome, Error<&'static str>> {
-        self.tools.fail_at = self.fail_at;
-        self.provider.fail_at = self.fail_at;
-        let tools = MemoryTools {
-            availability_restored: self.availability_restored.clone(),
-        };
-        finish(run(self, &tools, &MemoryProvider))
+    fn run(&mut self) -> Result<Outcome, Error> {
+        *self.tools.fail_at.lock().unwrap() = self.fail_at;
+        *self.provider.fail_at.lock().unwrap() = self.fail_at;
+        let tools = self.tools.clone();
+        let provider = self.provider.clone();
+        finish(run(self, &tools, &provider))
     }
 }
-impl State for MemoryState {
-    type Selection = i32;
-    type Request = ();
-    type Response = &'static str;
-    type ToolDefinition = &'static str;
-    type Error = &'static str;
-    type ToolContext = dyn ToolEffects;
-    type ProviderContext = dyn ProviderReplies;
-
-    fn borrow_tool_context(&mut self) -> &mut Self::ToolContext {
-        &mut self.tools
-    }
-    fn borrow_provider_context(&mut self) -> &mut Self::ProviderContext {
-        &mut self.provider
-    }
+impl States for MemoryState {
     fn disables_request_limit(&self) -> bool {
         self.unlimited
-    }
-    fn is_turn_open(&self) -> bool {
-        self.open
     }
     fn has_scheduled_work(&self) -> bool {
         self.scheduled
     }
-    fn check_cancellation(&self) -> Result<(), Self::Error> {
+    fn check_cancellation(&self) -> Result<(), Error> {
         if self.cancelled {
-            Err("cancelled")
+            Err(Error::cancelled())
         } else {
             Ok(())
         }
     }
-    fn has_work(&self) -> BoxFuture<'_, Result<bool, Self::Error>> {
+    fn is_turn_open(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move { self.open })
+    }
+    fn has_work(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async move { Ok(self.work || self.turns > 0) })
     }
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<Self::Selection, Self::Error>> {
+    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>> {
         Box::pin(async move {
             self.step("begin")?;
             self.open = true;
             self.work = true;
             self.availability_restored.store(false, Ordering::SeqCst);
             self.turns = self.turns.saturating_sub(1);
-            Ok(self.maximum)
+            Ok(TurnOptions {
+                maximum_requests: self.maximum,
+            })
         })
     }
-    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), Self::Error>> {
+    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.step("restore")?;
             self.availability_restored.store(true, Ordering::SeqCst);
             Ok(())
         })
     }
-    fn promote_input(&mut self) -> BoxFuture<'_, Result<(), Self::Error>> {
+    fn promote_input(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move { self.step("promote") })
-    }
-    fn maximum_requests(&self, selection: &Self::Selection) -> i32 {
-        *selection
     }
     fn take_interruption(&mut self) -> bool {
         std::mem::take(&mut self.interrupted)
     }
     fn prepare_request<'a>(
         &'a mut self,
-        _selection: &'a Self::Selection,
-        definitions: &'a [Self::ToolDefinition],
+        definitions: &'a [ToolDefinition],
         phase: TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<Self::Request, Self::Error>> {
+    ) -> BoxFuture<'a, Result<PreparedRequest, Error>> {
         Box::pin(async move {
             self.step("prepare")?;
-            self.requests.push((phase, definitions.to_vec()));
-            self.tools.advertised = definitions.to_vec();
-            Ok(())
+            let names: Vec<_> = definitions
+                .iter()
+                .map(|definition| definition.name.clone())
+                .collect();
+            self.requests.push((phase, names.clone()));
+            *self.tools.advertised.lock().unwrap() = names;
+            Ok(PreparedRequest {
+                request: ProviderRequest {
+                    model: "memory/model".into(),
+                    instructions: "core request".into(),
+                    tools: definitions.to_vec(),
+                    ..ProviderRequest::default()
+                },
+                estimated_input_tokens: self.estimated_input_tokens,
+            })
         })
     }
     fn compact_request<'a>(
         &'a mut self,
-        _selection: &'a Self::Selection,
-        _definitions: &'a [Self::ToolDefinition],
-    ) -> BoxFuture<'a, Result<bool, Self::Error>> {
+        _definitions: &'a [ToolDefinition],
+    ) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async move {
             self.step("compact")?;
             Ok(self.reduced)
@@ -247,7 +326,7 @@ impl State for MemoryState {
         &mut self,
         reason: RetryReason,
         attempt: i32,
-    ) -> BoxFuture<'_, Result<(), Self::Error>> {
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.step("retry")?;
             self.retries.push((reason, attempt));
@@ -256,15 +335,18 @@ impl State for MemoryState {
     }
     fn record_tool_calls<'a>(
         &'a mut self,
-        _response: &'a Self::Response,
-    ) -> BoxFuture<'a, Result<(), Self::Error>> {
-        Box::pin(async move { self.step("record_tools") })
+        response: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("record_tools")?;
+            self.recorded_tools.push(response.clone());
+            Ok(())
+        })
     }
     fn evaluate_completion<'a>(
         &'a mut self,
-        _selection: &'a Self::Selection,
-        _response: &'a Self::Response,
-    ) -> BoxFuture<'a, Result<CompletionDecision, Self::Error>> {
+        _response: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<CompletionDecision, Error>> {
         Box::pin(async move {
             self.step("evaluate")?;
             let decision = self
@@ -279,86 +361,26 @@ impl State for MemoryState {
     }
     fn complete_turn<'a>(
         &'a mut self,
-        response: &'a Self::Response,
-    ) -> BoxFuture<'a, Result<String, Self::Error>> {
+        response: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<String, Error>> {
         Box::pin(async move {
             self.step("complete")?;
             self.open = false;
             self.work = false;
-            Ok((*response).into())
+            Ok(response.assistant_text.clone())
         })
     }
-    fn fail_runaway(&mut self) -> BoxFuture<'_, Result<String, Self::Error>> {
+    fn fail_runaway(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async move {
             self.step("runaway")?;
             Ok("runaway".into())
         })
     }
 }
-struct MemoryTools {
-    availability_restored: Arc<AtomicBool>,
-}
-impl Tools for MemoryTools {
-    type Context = dyn ToolEffects;
-    type Selection = i32;
-    type Definition = &'static str;
-    type Snapshot = Vec<&'static str>;
-    type Error = &'static str;
-
-    fn reconcile<'a>(
-        &'a self,
-        context: &'a mut Self::Context,
-    ) -> BoxFuture<'a, Result<(), &'static str>> {
-        Box::pin(async move { context.reconcile() })
-    }
-    fn snapshot(&self, _selection: &i32) -> Result<Self::Snapshot, &'static str> {
-        assert!(!self.availability_restored.load(Ordering::SeqCst));
-        Ok(vec!["read", "write"])
-    }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [&'static str] {
-        snapshot
-    }
-    fn restrict_for_final_phase(&self, _snapshot: &Self::Snapshot) -> Self::Snapshot {
-        vec!["read"]
-    }
-    fn execute_pending<'a>(
-        &'a self,
-        context: &'a mut Self::Context,
-        _selection: &'a i32,
-        snapshot: &'a Self::Snapshot,
-    ) -> BoxFuture<'a, Result<(), &'static str>> {
-        Box::pin(async move { context.execute(snapshot) })
-    }
-}
-struct MemoryProvider;
-impl Provider for MemoryProvider {
-    type Context = dyn ProviderReplies;
-    type Request = ();
-    type Response = &'static str;
-    type Error = &'static str;
-
-    fn invoke<'a>(
-        &'a self,
-        (): (),
-        context: &'a mut Self::Context,
-    ) -> BoxFuture<'a, Result<Response<&'static str>, ProviderError<&'static str>>> {
-        Box::pin(async move {
-            context.begin_invocation().map_err(ProviderError::Failed)?;
-            match context.take_reply() {
-                Reply::Response(kind, value) => Ok(Response { value, kind }),
-                Reply::TooLarge(error) => Err(ProviderError::RequestTooLarge(error)),
-                Reply::Failed(error) => Err(ProviderError::Failed(error)),
-            }
-        })
-    }
-}
 
 #[test]
 fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion() {
-    let mut state = MemoryState::new([
-        Reply::Response(ResponseKind::ToolCalls, "call"),
-        Reply::Response(ResponseKind::Final, "answer"),
-    ]);
+    let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(
         state.trace.values(),
@@ -385,9 +407,9 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
 #[test]
 fn invalid_and_truncated_tool_responses_retry_without_recording_or_executing_calls() {
     let mut state = MemoryState::new([
-        Reply::Response(ResponseKind::TruncatedToolCalls, "cut"),
-        Reply::Response(ResponseKind::InvalidToolCalls, "bad"),
-        Reply::Response(ResponseKind::Final, "answer"),
+        Reply::truncated("cut"),
+        Reply::invalid("bad"),
+        Reply::final_response("answer"),
     ]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(
@@ -408,8 +430,7 @@ fn invalid_and_truncated_tool_responses_retry_without_recording_or_executing_cal
 
 #[test]
 fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
-    let mut state =
-        MemoryState::new((0..5).map(|_| Reply::Response(ResponseKind::ToolCalls, "call")));
+    let mut state = MemoryState::new((0..5).map(|_| Reply::tools("call")));
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Failed("runaway".into())));
     assert_eq!(state.requests.len(), 5);
@@ -439,7 +460,7 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
 
 #[test]
 fn malformed_final_response_exhausts_the_request_limit_without_a_settlement_extension() {
-    let mut state = MemoryState::new([Reply::Response(ResponseKind::InvalidToolCalls, "bad")]);
+    let mut state = MemoryState::new([Reply::invalid("bad")]);
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Failed("runaway".into())));
     assert_eq!(state.requests.len(), 1);
@@ -447,7 +468,7 @@ fn malformed_final_response_exhausts_the_request_limit_without_a_settlement_exte
 
 #[test]
 fn interruption_enters_final_phase_even_when_request_limits_are_disabled() {
-    let mut state = MemoryState::new([Reply::Response(ResponseKind::Final, "answer")]);
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.unlimited = true;
     state.interrupted = true;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
@@ -459,9 +480,9 @@ fn interruption_enters_final_phase_even_when_request_limits_are_disabled() {
 #[test]
 fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
     let mut state = MemoryState::new([
-        Reply::Response(ResponseKind::Final, "candidate"),
-        Reply::Response(ResponseKind::InvalidToolCalls, "bad"),
-        Reply::Response(ResponseKind::Final, "answer"),
+        Reply::final_response("candidate"),
+        Reply::invalid("bad"),
+        Reply::final_response("answer"),
     ]);
     state.maximum = 2;
     state.clear_work_on_retry = true;
@@ -495,8 +516,8 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
 #[test]
 fn completion_retry_can_clear_pending_and_stop_without_closing_the_candidate() {
     let mut state = MemoryState::new([
-        Reply::Response(ResponseKind::Final, "candidate"),
-        Reply::Response(ResponseKind::Final, "candidate2"),
+        Reply::final_response("candidate"),
+        Reply::final_response("candidate2"),
     ]);
     state.clear_work_on_retry = true;
     state.decisions.extend([
@@ -515,9 +536,9 @@ fn completion_retry_can_clear_pending_and_stop_without_closing_the_candidate() {
 #[test]
 fn completion_retry_without_a_pending_override_retains_the_existing_pending_flag() {
     let mut state = MemoryState::new([
-        Reply::Response(ResponseKind::Final, "candidate"),
-        Reply::Response(ResponseKind::Final, "candidate2"),
-        Reply::Response(ResponseKind::Final, "answer"),
+        Reply::final_response("candidate"),
+        Reply::final_response("candidate2"),
+        Reply::final_response("answer"),
     ]);
     state.clear_work_on_retry = true;
     state.decisions.extend([
@@ -534,9 +555,9 @@ fn completion_retry_without_a_pending_override_retains_the_existing_pending_flag
 fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard() {
     let mut state = MemoryState::new([
         Reply::TooLarge("first"),
-        Reply::Response(ResponseKind::ToolCalls, "call"),
+        Reply::tools("call"),
         Reply::TooLarge("second"),
-        Reply::Response(ResponseKind::Final, "answer"),
+        Reply::final_response("answer"),
     ]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(
@@ -554,7 +575,7 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
 #[test]
 fn a_second_oversized_failure_propagates_without_repeating_compaction() {
     let mut state = MemoryState::new([Reply::TooLarge("first"), Reply::TooLarge("second")]);
-    assert_eq!(state.run(), Err(Error::Adapter("second")));
+    assert_eq!(state.run(), Err(Error::request_too_large("second")));
     assert_eq!(
         state
             .trace
@@ -571,7 +592,7 @@ fn a_second_oversized_failure_propagates_without_repeating_compaction() {
 fn compaction_that_does_not_reduce_context_returns_the_original_provider_error() {
     let mut state = MemoryState::new([Reply::TooLarge("original")]);
     state.reduced = false;
-    assert_eq!(state.run(), Err(Error::Adapter("original")));
+    assert_eq!(state.run(), Err(Error::request_too_large("original")));
     assert_eq!(state.requests.len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
 }
@@ -583,7 +604,7 @@ fn scheduled_work_yields_before_any_effect_but_not_during_an_open_turn() {
     assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
     assert!(state.trace.values().is_empty());
     state.open = true;
-    assert_eq!(state.run(), Err(Error::MissingTurn));
+    assert_eq!(state.run(), Err(Error::missing_turn()));
     assert_eq!(state.trace.values(), ["reconcile", "promote"]);
 }
 
@@ -596,57 +617,57 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     assert_eq!(state.trace.values(), ["reconcile"]);
     state.trace.clear();
     state.cancelled = true;
-    assert_eq!(state.run(), Err(Error::Adapter("cancelled")));
+    assert_eq!(state.run(), Err(Error::cancelled()));
     assert_eq!(state.trace.values(), ["reconcile"]);
 }
 
 #[test]
 fn provider_failure_propagates_without_recording_or_completing_a_response() {
     let mut state = MemoryState::new([Reply::Failed("provider")]);
-    assert_eq!(state.run(), Err(Error::Adapter("provider")));
+    assert_eq!(state.run(), Err(Error::failed("provider")));
     assert_eq!(state.trace.values().last().unwrap(), "invoke");
 }
 
 #[test]
 fn adapter_errors_stop_at_the_failing_effect() {
-    for (stage, kind) in [
-        ("reconcile", ResponseKind::Final),
-        ("begin", ResponseKind::Final),
-        ("restore", ResponseKind::Final),
-        ("promote", ResponseKind::Final),
-        ("prepare", ResponseKind::Final),
-        ("invoke", ResponseKind::Final),
-        ("retry", ResponseKind::InvalidToolCalls),
-        ("record_tools", ResponseKind::ToolCalls),
-        ("execute", ResponseKind::ToolCalls),
-        ("evaluate", ResponseKind::Final),
-        ("complete", ResponseKind::Final),
+    for (stage, reply) in [
+        ("reconcile", Reply::final_response("response")),
+        ("begin", Reply::final_response("response")),
+        ("restore", Reply::final_response("response")),
+        ("promote", Reply::final_response("response")),
+        ("prepare", Reply::final_response("response")),
+        ("invoke", Reply::final_response("response")),
+        ("retry", Reply::invalid("response")),
+        ("record_tools", Reply::tools("response")),
+        ("execute", Reply::tools("response")),
+        ("evaluate", Reply::final_response("response")),
+        ("complete", Reply::final_response("response")),
     ] {
-        let mut state = MemoryState::new([Reply::Response(kind, "response")]);
+        let mut state = MemoryState::new([reply]);
         state.fail_at = Some(stage);
-        assert_eq!(state.run(), Err(Error::Adapter(stage)), "{stage}");
+        assert_eq!(state.run(), Err(Error::failed(stage)), "{stage}");
         assert_eq!(state.trace.values().last().unwrap(), stage);
     }
     let mut state = MemoryState::new([Reply::TooLarge("original")]);
     state.fail_at = Some("compact");
-    assert_eq!(state.run(), Err(Error::Adapter("compact")));
+    assert_eq!(state.run(), Err(Error::failed("compact")));
     assert_eq!(state.trace.values().last().unwrap(), "compact");
     let mut state = MemoryState::new([]);
     state.maximum = 0;
     state.fail_at = Some("runaway");
-    assert_eq!(state.run(), Err(Error::Adapter("runaway")));
+    assert_eq!(state.run(), Err(Error::failed("runaway")));
     assert_eq!(state.trace.values().last().unwrap(), "runaway");
 }
 
 #[test]
 fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extensions() {
     let mut state = MemoryState::new([
-        Reply::Response(ResponseKind::ToolCalls, "call1"),
-        Reply::Response(ResponseKind::Final, "answer1"),
-        Reply::Response(ResponseKind::ToolCalls, "call2"),
-        Reply::Response(ResponseKind::ToolCalls, "call3"),
-        Reply::Response(ResponseKind::ToolCalls, "call4"),
-        Reply::Response(ResponseKind::ToolCalls, "call5"),
+        Reply::tools("call1"),
+        Reply::final_response("answer1"),
+        Reply::tools("call2"),
+        Reply::tools("call3"),
+        Reply::tools("call4"),
+        Reply::tools("call5"),
     ]);
     state.maximum = 1;
     state.turns = 2;
@@ -681,14 +702,14 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
 #[test]
 fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() {
     let mut state = MemoryState::new([
-        Reply::Response(ResponseKind::ToolCalls, "call1"),
-        Reply::Response(ResponseKind::Final, "candidate"),
-        Reply::Response(ResponseKind::ToolCalls, "call2"),
-        Reply::Response(ResponseKind::ToolCalls, "call3"),
-        Reply::Response(ResponseKind::ToolCalls, "call4"),
-        Reply::Response(ResponseKind::ToolCalls, "call5"),
-        Reply::Response(ResponseKind::ToolCalls, "call6"),
-        Reply::Response(ResponseKind::ToolCalls, "call7"),
+        Reply::tools("call1"),
+        Reply::final_response("candidate"),
+        Reply::tools("call2"),
+        Reply::tools("call3"),
+        Reply::tools("call4"),
+        Reply::tools("call5"),
+        Reply::tools("call6"),
+        Reply::tools("call7"),
     ]);
     state.maximum = 2;
     state.interrupted = true;
@@ -711,33 +732,205 @@ fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() 
 }
 
 #[test]
-fn tools_and_provider_operate_with_standalone_unsized_capabilities_without_state() {
-    let trace = Trace::default();
-    let tools = MemoryTools {
-        availability_restored: Arc::new(AtomicBool::new(false)),
-    };
-    let selection = 3;
-    let snapshot = tools.snapshot(&selection).unwrap();
-    let mut tool_context = MemoryToolContext {
-        trace: trace.clone(),
-        advertised: snapshot.clone(),
-        fail_at: None,
-    };
-    let capability: &mut dyn ToolEffects = &mut tool_context;
-    finish(tools.reconcile(capability)).unwrap();
-    finish(tools.execute_pending(capability, &selection, &snapshot)).unwrap();
-    assert_eq!(tools.definitions(&snapshot), &["read", "write"]);
-    assert_eq!(tools.restrict_for_final_phase(&snapshot), ["read"]);
+fn tools_and_provider_operate_with_standalone_core_contexts_without_states() {
+    let state = MemoryState::new([Reply::final_response("standalone")]);
+    let tools: &dyn Tools = &state.tools;
+    finish(tools.reconcile_pending()).unwrap();
+    let catalog = finish(tools.capture_catalog()).unwrap();
+    *state.tools.advertised.lock().unwrap() = catalog
+        .normal
+        .iter()
+        .map(|tool| tool.name.clone())
+        .collect();
+    finish(tools.execute_pending(ToolContext {
+        phase: ToolPhase::Normal,
+    }))
+    .unwrap();
+    assert_eq!(
+        catalog
+            .normal
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["read", "write"]
+    );
+    assert_eq!(
+        catalog
+            .final_phase
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["read"]
+    );
+    let provider: &dyn Provider = &state.provider;
+    let response = finish(provider.invoke(
+        ProviderRequest::default(),
+        ProviderContext {
+            attempt: 1,
+            estimated_input_tokens: 4,
+            phase: TurnRequestPhase {
+                final_phase: false,
+                enters_final_phase: false,
+                interrupted: false,
+            },
+        },
+    ))
+    .unwrap();
+    assert_eq!(response.assistant_text, "standalone");
+    assert!(response.tool_calls.is_empty());
+    assert!(state.provider.replies.lock().unwrap().is_empty());
+    assert_eq!(state.trace.values(), ["reconcile", "execute", "invoke"]);
+}
 
-    let mut provider_context = MemoryProviderContext {
-        trace: trace.clone(),
-        replies: VecDeque::from([Reply::Response(ResponseKind::Final, "standalone")]),
-        fail_at: None,
+struct EchoProvider;
+impl Provider for EchoProvider {
+    fn invoke(
+        &self,
+        request: ProviderRequest,
+        context: ProviderContext,
+    ) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+        Box::pin(async move {
+            assert_eq!(context.attempt, 1);
+            assert_eq!(context.estimated_input_tokens, 37);
+            assert_eq!(request.model, "memory/model");
+            assert_eq!(
+                request
+                    .tools
+                    .iter()
+                    .map(|tool| tool.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["read", "write"]
+            );
+            Ok(ProviderResponse {
+                assistant_text: request.instructions,
+                finish_reason: "stop".into(),
+                ..ProviderResponse::default()
+            })
+        })
+    }
+}
+
+#[test]
+fn different_provider_implementations_share_the_same_states_tools_and_protocol() {
+    let mut states = MemoryState::new([Reply::final_response("scripted answer")]);
+    let tools = states.tools.clone();
+    let provider = states.provider.clone();
+    assert_eq!(
+        finish(run(&mut states, &tools, &provider)),
+        Ok(Outcome::Completed("scripted answer".into()))
+    );
+    states.turns = 1;
+    states.work = true;
+    assert_eq!(
+        finish(run(&mut states, &tools, &EchoProvider)),
+        Ok(Outcome::Completed("core request".into()))
+    );
+    assert!(states.provider.replies.lock().unwrap().is_empty());
+    assert_eq!(states.requests.len(), 2);
+}
+
+#[test]
+fn provider_context_assigns_attempts_estimates_and_advertised_phase() {
+    let mut states = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
+    states.maximum = 2;
+    assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
+    let contexts = states.provider.contexts.lock().unwrap();
+    assert_eq!(contexts.len(), 2);
+    assert_eq!(contexts[0].attempt, 1);
+    assert_eq!(contexts[1].attempt, 2);
+    assert!(
+        contexts
+            .iter()
+            .all(|context| context.estimated_input_tokens == 37)
+    );
+    assert!(!contexts[0].phase.final_phase);
+    assert!(contexts[1].phase.final_phase && contexts[1].phase.enters_final_phase);
+    let requests = states.provider.requests.lock().unwrap();
+    assert_eq!(
+        requests[0]
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["read", "write"]
+    );
+    assert_eq!(
+        requests[1]
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["read"]
+    );
+    assert_eq!(*states.tools.phases.lock().unwrap(), [ToolPhase::Normal]);
+}
+
+#[test]
+fn core_validates_json_syntax_without_rewriting_arguments_or_provider_content() {
+    for arguments in [
+        "null",
+        "true",
+        "42",
+        "1.20",
+        "\"text\"",
+        "[]",
+        "{}",
+        " { \"unknown\" : [1.20, false] } ",
+    ] {
+        let response = ProviderResponse {
+            assistant_text: "call".into(),
+            finish_reason: "tool_calls".into(),
+            provider_id: "future-provider".into(),
+            provider_content: " { \"unknown\" : 1.20 } ".into(),
+            tool_calls: vec![ToolCall {
+                id: "opaque-call".into(),
+                name: "read".into(),
+                arguments_json: arguments.into(),
+            }],
+            ..ProviderResponse::default()
+        };
+        let mut states = MemoryState::new([
+            Reply::Response(response.clone()),
+            Reply::final_response("answer"),
+        ]);
+        assert_eq!(
+            states.run(),
+            Ok(Outcome::Completed("answer".into())),
+            "{arguments}"
+        );
+        assert!(states.retries.is_empty());
+        assert_eq!(states.recorded_tools, [response]);
+    }
+    let mut states = MemoryState::new([Reply::Response(ProviderResponse {
+        assistant_text: "partial answer".into(),
+        finish_reason: "length".into(),
+        ..ProviderResponse::default()
+    })]);
+    assert_eq!(
+        states.run(),
+        Ok(Outcome::Completed("partial answer".into()))
+    );
+    assert!(states.retries.is_empty());
+}
+
+#[test]
+fn fixed_error_metadata_and_original_oversized_error_survive_core_recovery() {
+    let error = Error {
+        kind: ErrorKind::RequestTooLarge,
+        code: ErrorCode::Http,
+        message: "request rejected".into(),
+        response_body: "unredacted top-level body".into(),
     };
-    let capability: &mut dyn ProviderReplies = &mut provider_context;
-    let response = finish(MemoryProvider.invoke((), capability)).unwrap();
-    assert_eq!(response.kind, ResponseKind::Final);
-    assert_eq!(response.value, "standalone");
-    assert!(provider_context.replies.is_empty());
-    assert_eq!(trace.values(), ["reconcile", "execute", "invoke"]);
+    let mut states = MemoryState::new([Reply::Error(error.clone())]);
+    states.reduced = false;
+    assert_eq!(states.run(), Err(error.clone()));
+    assert_eq!(error.to_string(), "request rejected");
+    assert_eq!(error.code.code(), "http");
+    assert!(!error.to_string().contains(&error.response_body));
+    let cancelled = Error::cancelled();
+    let mut states = MemoryState::new([Reply::Error(cancelled.clone())]);
+    assert_eq!(states.run(), Err(cancelled.clone()));
+    assert_eq!(cancelled.kind, ErrorKind::Cancelled);
+    assert_eq!(cancelled.code.code(), "cancelled");
+    assert_eq!(states.trace.values().last().unwrap(), "invoke");
 }
