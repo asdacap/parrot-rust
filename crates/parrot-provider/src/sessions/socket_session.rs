@@ -424,8 +424,8 @@ struct WebSocketTraceAttempt {
     original_error: Arc<StdMutex<Option<Error>>>,
 }
 impl responses_websocket::WebSocketAttemptObserver for WebSocketTraceAttempt {
-    fn dump_request(&mut self, body: &[u8]) {
-        self.request.dump_prepared_body(body);
+    fn dump_request(&mut self, body: &[u8], full_body: &[u8]) {
+        self.request.dump_prepared_request(body, full_body);
     }
     fn record_request_bytes(&mut self, bytes: u64) {
         self.request.record_request_bytes(bytes);

@@ -575,6 +575,86 @@ async fn websocket_trace_dumps_actual_incremental_body_and_counts_wire_bytes() {
     session.close().await.unwrap();
 }
 #[tokio::test]
+async fn websocket_archive_includes_full_tool_context_alongside_incremental_request() {
+    let tool_call = json!({
+        "type": "function_call",
+        "id": "fc1",
+        "call_id": "call1",
+        "name": "read",
+        "arguments": r#"{"path":"secret-canary.rs"}"#,
+        "status": "completed"
+    });
+    let first_completion = json!({
+        "type": "response.completed",
+        "response": {"id": "r1", "status": "completed", "output": [tool_call]}
+    })
+    .to_string();
+    let (session, wire, _) = setup(vec![Ok(vec![first_completion, completed("r2")])], false);
+    let sink = Arc::new(Sink::default());
+    let archive = SocketArchive::new();
+    let dumper = Arc::new(diagnostics::LastRequestDumper::new(
+        archive.0.join("last_requests.json"),
+        sink.clone(),
+    ));
+    let cancel = Cancel::default();
+    let mut next_request = request("read the source");
+    let mut first = session
+        .call_with_trace(
+            next_request.clone(),
+            trace(sink.clone(), Some(dumper.clone())),
+        )
+        .unwrap();
+    let Some(Event::Completed(completion)) = first.next(&cancel).await.unwrap() else {
+        panic!("expected tool-call completion");
+    };
+    assert_eq!(first.next(&cancel).await.unwrap(), None);
+    next_request.messages.push(completion.into_message());
+    next_request
+        .messages
+        .push(Message::tool_result("call1", "source contents"));
+    let prepared = responses::prepare(&next_request, "fake").unwrap();
+    let expected = prepared.encode_http();
+    let mut second = session
+        .call_with_trace(next_request, trace(sink.clone(), Some(dumper)))
+        .unwrap();
+    assert!(matches!(
+        second.next(&cancel).await.unwrap(),
+        Some(Event::Completed(_))
+    ));
+    let wire_request = wire.sent.lock().unwrap()[1].clone();
+    assert_eq!(wire_request["previous_response_id"], "r1");
+    assert_eq!(wire_request["input"].as_array().unwrap().len(), 1);
+    assert_eq!(wire_request["input"][0]["type"], "function_call_output");
+    let pending: Value =
+        serde_json::from_slice(&std::fs::read(archive.0.join("request_2.json")).unwrap()).unwrap();
+    assert_eq!(pending["outcome"], "in_progress");
+    let full_request: Value =
+        serde_json::from_str(pending["full_request"]["data"].as_str().unwrap()).unwrap();
+    assert_eq!(full_request["input"].as_array().unwrap().len(), 3);
+    assert_eq!(full_request["input"][1], tool_call);
+    assert_eq!(full_request["input"][2], wire_request["input"][0]);
+    assert!(full_request.get("previous_response_id").is_none());
+    assert_eq!(
+        pending["full_request"]["data"],
+        String::from_utf8(expected.clone()).unwrap()
+    );
+    assert_eq!(second.next(&cancel).await.unwrap(), None);
+    let record = archive.read(2);
+    assert_eq!(
+        record.request,
+        Some(ArchivedBody::Utf8(
+            String::from_utf8(wire.bodies.lock().unwrap()[1].clone()).unwrap()
+        ))
+    );
+    assert_eq!(
+        record.full_request,
+        Some(ArchivedBody::Utf8(String::from_utf8(expected).unwrap()))
+    );
+    assert!(!format!("{:?}", sink.0.lock().unwrap()).contains("secret-canary"));
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn suspended_websocket_request_trace_is_cancelled_once_via_shared_call_trace() {
     let response = delta("first");
     let (session, _, _) = setup(vec![Ok(vec![response.clone()])], false);
@@ -803,6 +883,7 @@ struct ArchivedAttempt {
     number: u64,
     transport: String,
     request: Option<ArchivedBody>,
+    full_request: Option<ArchivedBody>,
     response: Vec<ArchivedBody>,
     outcome: String,
     error_code: Option<String>,

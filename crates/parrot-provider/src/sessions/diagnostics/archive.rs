@@ -15,9 +15,13 @@ const RETAINED_REQUESTS: usize = 10;
 /// Retries, fallback, and compaction use the same archive. Existing legacy logs
 /// are neither migrated nor deleted.
 ///
-/// Records contain request and ordered response payloads before protocol parsing,
-/// plus outcome/error categories. Bodies use `{"encoding":"utf8","data":"..."}`
-/// or lossless `{"encoding":"bytes","data":[0,255]}` for non-UTF-8 payloads.
+/// Records contain wire `request` bytes, the complete prepared provider body in
+/// `full_request`, ordered response payloads before parsing, and outcome/error
+/// categories. The full body retains all input before WebSocket continuation
+/// trimming, without WebSocket envelope fields; HTTP stores the same body in both
+/// request fields. Both are null until the prepared-body hook runs. Bodies use
+/// `{"encoding":"utf8","data":"..."}` or lossless
+/// `{"encoding":"bytes","data":[0,255]}` for non-UTF-8 payloads.
 /// Responses include only bytes consumed by existing readers, including partial
 /// data on failure/cancellation. A process crash can leave an `in_progress` record.
 /// Bodies can contain sensitive content. Headers and payloads never enter the
@@ -55,6 +59,7 @@ struct RequestRecord {
     number: u64,
     transport: String,
     request: Option<RawBody>,
+    full_request: Option<RawBody>,
     response: Vec<RawBody>,
     outcome: &'static str,
     error_code: Option<&'static str>,
@@ -70,6 +75,7 @@ impl CapturedAttempt {
     fn discard(&mut self) {
         self.ended = true;
         self.record.request = None;
+        self.record.full_request = None;
         self.record.response.clear();
         self.response.clear();
         self.current_response = Vec::new();
@@ -88,9 +94,9 @@ impl AttemptCapture {
         }
     }
 
-    pub(super) fn dump_prepared_body(&self, body: &[u8]) {
+    pub(super) fn dump_prepared_body(&self, body: &[u8], full_body: &[u8]) {
         self.owner
-            .report(self.owner.write_request(&self.state, body));
+            .report(self.owner.write_request(&self.state, body, full_body));
     }
 
     pub(super) fn finish(self, outcome: TraceOutcome) {
@@ -196,6 +202,7 @@ impl LastRequestDumper {
                 number,
                 transport: transport.into(),
                 request: None,
+                full_request: None,
                 response: Vec::new(),
                 outcome: "in_progress",
                 error_code: None,
@@ -219,13 +226,19 @@ impl LastRequestDumper {
         })
     }
 
-    fn write_request(&self, state: &Mutex<CapturedAttempt>, body: &[u8]) -> io::Result<()> {
+    fn write_request(
+        &self,
+        state: &Mutex<CapturedAttempt>,
+        body: &[u8],
+        full_body: &[u8],
+    ) -> io::Result<()> {
         let archive = lock(&self.state);
         let mut state = lock(state);
         if state.ended {
             return Ok(());
         }
         state.record.request = Some(body.to_vec().into());
+        state.record.full_request = Some(full_body.to_vec().into());
         let latest_result = write_atomic(&self.path, body);
         let record_result = archive
             .records
