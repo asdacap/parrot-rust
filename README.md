@@ -65,10 +65,12 @@ Any historical call without a saved result receives a durable error saying that
 the process crashed before the tool completed; it is never automatically executed
 again. Existing results are restored without modification or republication.
 
-Only calls from a new model response enter execution. The core passes these explicit
-calls to tools, then asks state to record the returned results before executing
-another chunk. State owns conversation projection and synthetic image messages.
-Tools retain execution, parallel-safe grouping, tool-specific budgets, and
+Only calls from a new model response enter execution. The core passes the whole
+explicit batch to tools once, then asks state to record the complete returned
+results. State owns conversation projection and synthetic image messages. The native
+tools adapter coordinates execution chunks internally, recording each group's
+results through native conversation state before starting the next group. Tools
+retain parallel-safe grouping, tool-specific budgets, cancellation propagation, and
 execution-local state; they do not discover work by scanning conversation history.
 A crash error does not assert that the tool made no external changes.
 

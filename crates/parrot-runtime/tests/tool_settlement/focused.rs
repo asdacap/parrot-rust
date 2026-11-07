@@ -322,13 +322,16 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
     ));
     let mut harness = Harness::new(&fixture, vec![tool.clone().handle()]).await;
     let (sequence, calls) = fixture.fresh_batches.lock().unwrap().pop_front().unwrap();
-    harness.state.begin_execution(sequence, calls).unwrap();
-    let mut request = harness
+    harness
         .state
-        .prepare_execution(&mut harness.conversation)
-        .await
-        .unwrap()
+        .begin_execution(sequence, calls.clone())
         .unwrap();
+    let mut request = ToolExecutionChunk {
+        assistant_sequence: sequence,
+        starts_batch: true,
+        calls: calls.clone(),
+        cancel_remaining: false,
+    };
     assert_eq!(request.calls.len(), 2);
     request.calls.truncate(1);
     let results = harness
@@ -412,12 +415,12 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
             .count(),
         1
     );
-    let next = harness
-        .state
-        .prepare_execution(&mut harness.conversation)
-        .await
-        .unwrap()
-        .unwrap();
+    let next = ToolExecutionChunk {
+        assistant_sequence: sequence,
+        starts_batch: false,
+        calls: calls[results.len()..].to_vec(),
+        cancel_remaining: false,
+    };
     assert_eq!(
         next.calls
             .iter()
@@ -425,7 +428,38 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
             .collect::<Vec<_>>(),
         ["second"]
     );
-    harness.run(&fixture, &NeverCancelled).await.unwrap();
+    let remaining = harness
+        .tools
+        .execute(
+            next,
+            TurnResources {
+                history: &fixture.history,
+                conversation: &mut harness.conversation,
+                context: &mut harness.context,
+                prompt: &harness.prompt,
+                sessions: &harness.sessions,
+                status: &Status,
+                events: &harness.events,
+                usage: &harness.usage,
+            },
+            &harness.selection,
+            &harness.snapshot,
+            harness.capture.as_ref(),
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    harness
+        .state
+        .record_results(&mut harness.conversation, &remaining)
+        .await
+        .unwrap();
+    let completed: Vec<_> = results.into_iter().chain(remaining).collect();
+    harness
+        .state
+        .complete_execution(&mut harness.conversation, &completed)
+        .await
+        .unwrap();
     assert_eq!(
         tool.calls
             .lock()

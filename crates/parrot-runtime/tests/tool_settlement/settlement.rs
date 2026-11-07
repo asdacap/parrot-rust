@@ -1,6 +1,6 @@
 use super::*;
 
-fn terminal_ids(events: &[Event]) -> Vec<String> {
+pub(super) fn terminal_ids(events: &[Event]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| {

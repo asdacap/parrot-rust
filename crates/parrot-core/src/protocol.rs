@@ -33,13 +33,11 @@ pub trait Tools: Send + Sync {
     /// Captures permitted definitions backed by the original executable identities
     /// for this turn. The final catalog is their interruption-enabled subset.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
-    /// Executes a nonempty ordered prefix of the supplied calls using retained
-    /// executable identities, joining all admitted work before returning, including
-    /// on failure. Conversation recovery and result recording belong to [`States`].
-    fn execute(
-        &self,
-        request: ToolExecutionRequest,
-    ) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>>;
+    /// Executes the complete supplied batch using retained executable identities,
+    /// returning results in call order and joining all admitted work before returning,
+    /// including on failure. Scheduling and batch-local bookkeeping stay internal;
+    /// conversation recovery and result recording belong to [`States`].
+    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>>;
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
@@ -47,12 +45,7 @@ pub trait States: Send {
     /// Restores saved tool results and records crash errors for missing historical
     /// results without invoking tools, before cancellation or readiness is checked.
     fn restore_tool_results(&mut self) -> BoxFuture<'_, Result<(), Error>>;
-    /// Prepares explicitly queued calls from a newly recorded provider response.
-    /// Returning none means the fresh batch and result projection are complete.
-    fn prepare_tool_execution(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, Error>>;
-    /// Durably records and applies the returned prefix before any further execution.
+    /// Durably records and applies the complete returned batch before continuing.
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],
@@ -188,15 +181,6 @@ pub struct ProviderResponse {
     pub tool_calls: Vec<ToolCall>,
     pub provider_id: String,
     pub provider_content: String,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolExecutionRequest {
-    pub assistant_sequence: i64,
-    /// Starts a new tool-owned execution scope for this fresh batch.
-    pub starts_batch: bool,
-    pub calls: Vec<ToolCall>,
-    pub cancel_remaining: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

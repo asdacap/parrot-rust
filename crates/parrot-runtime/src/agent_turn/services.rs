@@ -77,6 +77,14 @@ pub struct TurnResources<'a> {
     pub usage: &'a super::usage::SessionUsageRecorder,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ToolExecutionChunk {
+    pub assistant_sequence: i64,
+    pub starts_batch: bool,
+    pub calls: Vec<parrot_core::ToolCall>,
+    pub cancel_remaining: bool,
+}
+
 /// The snapshot retains the concrete factory/tool identity in its owner-chosen
 /// type. Runtime cannot replace it with a names-only reconstructed catalog.
 pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
@@ -94,7 +102,7 @@ pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
     /// Conversation recovery and terminal persistence/publication belong to state.
     fn execute<'a>(
         &'a self,
-        request: parrot_core::ToolExecutionRequest,
+        request: ToolExecutionChunk,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<S>,
         snapshot: &'a Self::Snapshot,

@@ -73,7 +73,11 @@ pub async fn run(
         }
         if !response.tool_calls.is_empty() {
             states.record_tool_calls(&response).await?;
-            execute_tools(states, tools).await?;
+            let results = tools.execute(response.tool_calls.clone()).await?;
+            if results.is_empty() {
+                return Err(Error::failed("tool execution returned no results"));
+            }
+            states.record_tool_results(&results).await?;
             if phase.final_phase && !budget.try_extend_settlement() {
                 return Ok(Outcome::Failed(states.fail_runaway().await?));
             }
@@ -93,15 +97,4 @@ pub async fn run(
             }
         }
     }
-}
-
-async fn execute_tools(states: &mut dyn States, tools: &dyn Tools) -> Result<(), Error> {
-    while let Some(request) = states.prepare_tool_execution().await? {
-        let results = tools.execute(request).await?;
-        if results.is_empty() {
-            return Err(Error::failed("tool execution returned no results"));
-        }
-        states.record_tool_results(&results).await?;
-    }
-    Ok(())
 }

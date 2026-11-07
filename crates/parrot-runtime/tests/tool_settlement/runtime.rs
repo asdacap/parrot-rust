@@ -148,9 +148,25 @@ pub(super) async fn runtime(
     AgentSession<RuntimeBackend<Security, ToolSettlement<Security>>>,
     Arc<Factory>,
 ) {
+    runtime_with_publisher(
+        fixture,
+        provider,
+        handles,
+        Arc::new(Publisher::new(fixture.history.clone())),
+    )
+    .await
+}
+pub(super) async fn runtime_with_publisher(
+    fixture: &Fixture,
+    provider: &Scripted,
+    handles: Vec<ToolHandle<Security>>,
+    publisher: Arc<Publisher>,
+) -> (
+    AgentSession<RuntimeBackend<Security, ToolSettlement<Security>>>,
+    Arc<Factory>,
+) {
     let broker = Arc::new(EventBroker::new());
-    let publisher: Arc<parrot_runtime::agent_turn::engine::Publisher> =
-        Arc::new(Publisher::new(fixture.history.clone()));
+    let publisher: Arc<parrot_runtime::agent_turn::engine::Publisher> = publisher;
     let templates = templates();
     let reminders = Arc::new(
         ExitReminders::new(

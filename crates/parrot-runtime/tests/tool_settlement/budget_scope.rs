@@ -189,3 +189,39 @@ async fn retry_after_recording_failure_closes_unfinished_calls_without_spending_
         [("consume".into(), true), ("new-request".into(), true)]
     );
 }
+
+#[tokio::test]
+async fn actual_runtime_whole_batch_shares_image_budget_and_next_batch_resets_it() {
+    let fixture = Fixture::new();
+    let accepted = Arc::new(Mutex::new(Vec::new()));
+    let mut first = Step::complete("consume image budget");
+    first.completion.as_mut().unwrap().tool_calls =
+        vec![call("consume", "consume"), call("probe", "probe")];
+    let mut next = Step::complete("new batch");
+    next.completion.as_mut().unwrap().tool_calls = vec![call("new-probe", "probe")];
+    let provider = Scripted::new(vec![first, next, Step::complete("answer")]);
+    let (session, _) = runtime::runtime(
+        &fixture,
+        &provider,
+        vec![
+            BudgetTool::new("consume", 600_000, true, accepted.clone()).into_handle(),
+            BudgetTool::new("probe", 500_000, false, accepted.clone()).into_handle(),
+        ],
+    )
+    .await;
+    let sent = runtime::send(&session).await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        parrot_runtime::agent_turn::lifecycle::ExecutionStatus::Succeeded
+    );
+    assert_eq!(
+        *accepted.lock().unwrap(),
+        [
+            ("consume".into(), true),
+            ("probe".into(), false),
+            ("new-probe".into(), true),
+        ]
+    );
+    assert_eq!(provider.requests.lock().unwrap().len(), 3);
+    bounded(session.close()).await.unwrap();
+}

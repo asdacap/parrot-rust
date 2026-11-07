@@ -1,8 +1,7 @@
 use parrot_core::{
     BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, Outcome, Provider, ProviderRequest,
-    ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolDefinition,
-    ToolExecutionRequest, ToolImage, ToolProcess, ToolResult, ToolStatus, Tools, TurnOptions,
-    budget::TurnRequestPhase, run,
+    ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolDefinition, ToolImage,
+    ToolProcess, ToolResult, ToolStatus, Tools, TurnOptions, budget::TurnRequestPhase, run,
 };
 use std::{
     collections::VecDeque,
@@ -110,8 +109,7 @@ struct MemoryTools {
     trace: Trace,
     availability_restored: Arc<AtomicBool>,
     fail_at: Arc<Mutex<Option<&'static str>>>,
-    requests: Arc<Mutex<Vec<ToolExecutionRequest>>>,
-    output_count: usize,
+    requests: Arc<Mutex<Vec<Vec<ToolCall>>>>,
     replies: Arc<Mutex<VecDeque<Vec<ToolResult>>>>,
 }
 impl Tools for MemoryTools {
@@ -134,21 +132,16 @@ impl Tools for MemoryTools {
             })
         })
     }
-    fn execute(
-        &self,
-        request: ToolExecutionRequest,
-    ) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>> {
+    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
-            assert!(!request.calls.is_empty());
-            self.requests.lock().unwrap().push(request.clone());
+            assert!(!calls.is_empty());
+            self.requests.lock().unwrap().push(calls.clone());
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
                 return Ok(reply);
             }
-            Ok(request
-                .calls
+            Ok(calls
                 .into_iter()
-                .take(self.output_count)
                 .map(|call| ToolResult {
                     text: format!("result for {}", call.id),
                     call_id: call.id,
@@ -196,11 +189,10 @@ struct MemoryState {
     requests: Vec<(TurnRequestPhase, Vec<String>)>,
     retries: Vec<(RetryReason, i32)>,
     recorded_tools: Vec<ProviderResponse>,
-    pending_tools: VecDeque<ToolExecutionRequest>,
     historical_calls: Vec<ToolCall>,
     restored_results: Vec<ToolResult>,
     applied_results: Vec<ToolResult>,
-    prepared_catalogs: Vec<Vec<String>>,
+    recorded_catalogs: Vec<Vec<String>>,
     work: bool,
     turns: usize,
     open: bool,
@@ -225,7 +217,6 @@ impl MemoryState {
                 availability_restored: availability_restored.clone(),
                 fail_at: Arc::default(),
                 requests: Arc::default(),
-                output_count: usize::MAX,
                 replies: Arc::default(),
             },
             provider: MemoryProvider {
@@ -238,11 +229,10 @@ impl MemoryState {
             requests: Vec::new(),
             retries: Vec::new(),
             recorded_tools: Vec::new(),
-            pending_tools: VecDeque::new(),
             historical_calls: Vec::new(),
             restored_results: Vec::new(),
             applied_results: Vec::new(),
-            prepared_catalogs: Vec::new(),
+            recorded_catalogs: Vec::new(),
             work: true,
             turns: 1,
             open: false,
@@ -285,43 +275,21 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn prepare_tool_execution(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, Error>> {
-        Box::pin(async move {
-            self.step("prepare_tools")?;
-            let request = self.pending_tools.front().cloned();
-            if request.is_some() {
-                self.prepared_catalogs.push(
-                    self.requests
-                        .last()
-                        .expect("prepared provider request")
-                        .1
-                        .clone(),
-                );
-            }
-            Ok(request)
-        })
-    }
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             self.step("record_results")?;
-            let request = self
-                .pending_tools
-                .front_mut()
-                .expect("prepared tool execution");
-            assert!(results.len() <= request.calls.len());
-            for (result, call) in results.iter().zip(&request.calls) {
+            let calls = &self
+                .recorded_tools
+                .last()
+                .expect("recorded tool batch")
+                .tool_calls;
+            assert_eq!(results.len(), calls.len());
+            for (result, call) in results.iter().zip(calls) {
                 assert_eq!(result.call_id, call.id);
                 assert_eq!(result.tool_name, call.name);
-            }
-            request.calls.drain(..results.len());
-            request.starts_batch = false;
-            if request.calls.is_empty() {
-                self.pending_tools.pop_front();
             }
             self.applied_results.extend_from_slice(results);
             Ok(())
@@ -418,12 +386,13 @@ impl States for MemoryState {
         Box::pin(async move {
             self.step("record_tools")?;
             self.recorded_tools.push(response.clone());
-            self.pending_tools.push_back(ToolExecutionRequest {
-                assistant_sequence: self.recorded_tools.len() as i64,
-                starts_batch: true,
-                calls: response.tool_calls.clone(),
-                ..ToolExecutionRequest::default()
-            });
+            self.recorded_catalogs.push(
+                self.requests
+                    .last()
+                    .expect("prepared provider request")
+                    .1
+                    .clone(),
+            );
             Ok(())
         })
     }
@@ -476,10 +445,8 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "prepare",
             "invoke",
             "record_tools",
-            "prepare_tools",
             "execute",
             "record_results",
-            "prepare_tools",
             "reconcile",
             "promote",
             "prepare",
@@ -543,10 +510,10 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
         5
     );
     assert_eq!(state.trace.values().last().unwrap(), "runaway");
-    assert_eq!(state.prepared_catalogs.len(), 5);
+    assert_eq!(state.recorded_catalogs.len(), 5);
     assert!(
         state
-            .prepared_catalogs
+            .recorded_catalogs
             .iter()
             .all(|tools| tools == &["read"])
     );
@@ -733,7 +700,6 @@ fn adapter_errors_stop_at_the_failing_effect() {
         ("invoke", Reply::final_response("response")),
         ("retry", Reply::invalid("response")),
         ("record_tools", Reply::tools("response")),
-        ("prepare_tools", Reply::tools("response")),
         ("execute", Reply::tools("response")),
         ("record_results", Reply::tools("response")),
         ("evaluate", Reply::final_response("response")),
@@ -832,18 +798,13 @@ fn tools_and_provider_operate_without_states() {
     let state = MemoryState::new([Reply::final_response("standalone")]);
     let tools: &dyn Tools = &state.tools;
     let catalog = finish(tools.capture_catalog()).unwrap();
-    let request = ToolExecutionRequest {
-        assistant_sequence: 42,
-        starts_batch: true,
-        calls: vec![ToolCall {
-            id: "explicit-call".into(),
-            name: "read".into(),
-            arguments_json: " { \"a\" : 1 } ".into(),
-        }],
-        cancel_remaining: true,
-    };
-    let results = finish(tools.execute(request.clone())).unwrap();
-    assert_eq!(*state.tools.requests.lock().unwrap(), [request]);
+    let calls = vec![ToolCall {
+        id: "explicit-call".into(),
+        name: "read".into(),
+        arguments_json: " { \"a\" : 1 } ".into(),
+    }];
+    let results = finish(tools.execute(calls.clone())).unwrap();
+    assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(
         results,
         [ToolResult {
@@ -944,7 +905,7 @@ fn state_preparation_receives_phase_and_provider_receives_advertised_tools() {
         ["read"]
     );
     assert_eq!(
-        states.prepared_catalogs,
+        states.recorded_catalogs,
         [vec!["read".to_owned(), "write".to_owned()]]
     );
 }

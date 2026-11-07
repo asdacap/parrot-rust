@@ -1,5 +1,5 @@
 use super::{engine::Publisher, services::TurnError};
-use parrot_core::{ToolCall, ToolExecutionRequest, ToolResult, ToolStatus};
+use parrot_core::{ToolCall, ToolResult, ToolStatus};
 use parrot_domain::{
     contracts::storage::Committed,
     protocol::messages::parrot::{
@@ -30,8 +30,6 @@ struct ToolBatch {
     calls: Vec<ToolCall>,
     terminals: HashMap<String, ToolExecutionTerminal>,
     index: usize,
-    stopped: bool,
-    starts_execution: bool,
 }
 
 impl ToolConversation {
@@ -147,8 +145,6 @@ impl ToolConversation {
                 calls,
                 terminals: completed,
                 index: 0,
-                stopped: false,
-                starts_execution: false,
             };
             self.finish_batch(conversation, &batch).await?;
         }
@@ -171,33 +167,33 @@ impl ToolConversation {
             calls,
             terminals: HashMap::new(),
             index: 0,
-            stopped: false,
-            starts_execution: true,
         });
         Ok(())
     }
 
-    pub async fn prepare_execution(
+    pub async fn complete_execution(
         &mut self,
         conversation: &mut AgentConversation,
-    ) -> Result<Option<ToolExecutionRequest>, TurnError> {
-        let Some(mut batch) = self.pending.take() else {
-            return Ok(None);
-        };
-        if batch.index == batch.calls.len() {
-            self.finish_batch(conversation, &batch).await?;
-            self.watermark = self.watermark.max(batch.sequence);
-            return Ok(None);
+        results: &[ToolResult],
+    ) -> Result<(), TurnError> {
+        let batch = self
+            .pending
+            .take()
+            .ok_or_else(|| TurnError::Service("tool execution is not prepared".into()))?;
+        if batch.index != batch.calls.len()
+            || results.len() != batch.calls.len()
+            || results
+                .iter()
+                .zip(&batch.calls)
+                .any(|(result, call)| result.call_id != call.id || result.tool_name != call.name)
+        {
+            return Err(TurnError::Service(
+                "tool execution did not complete the recorded batch".into(),
+            ));
         }
-        let request = ToolExecutionRequest {
-            assistant_sequence: batch.sequence,
-            starts_batch: batch.starts_execution,
-            calls: batch.calls[batch.index..].to_vec(),
-            cancel_remaining: batch.stopped,
-        };
-        batch.starts_execution = false;
-        self.pending = Some(batch);
-        Ok(Some(request))
+        self.finish_batch(conversation, &batch).await?;
+        self.watermark = self.watermark.max(batch.sequence);
+        Ok(())
     }
 
     pub async fn record_results(
@@ -226,7 +222,6 @@ impl ToolConversation {
             let terminal = self
                 .record_result(conversation, batch.sequence, result)
                 .await?;
-            batch.stopped |= terminal.status == ToolExecutionStatus::Cancelled;
             batch
                 .terminals
                 .insert(terminal.tool_call_id.clone(), terminal);

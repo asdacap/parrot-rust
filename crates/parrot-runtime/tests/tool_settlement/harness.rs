@@ -8,7 +8,7 @@ pub use parrot_domain::{
     values::{activity::AgentSessionActivity, tools::ConfiguredToolDefinition},
 };
 pub use parrot_runtime::{
-    agent_turn::{lifecycle::Signal, usage::SessionUsageRecorder},
+    agent_turn::{lifecycle::Signal, services::ToolExecutionChunk, usage::SessionUsageRecorder},
     tool_settlement::*,
 };
 pub use parrot_storage::{
@@ -301,41 +301,50 @@ impl Harness {
     ) -> Result<(), TurnError> {
         let result = async {
             loop {
-                let request = match self.state.prepare_execution(&mut self.conversation).await? {
-                    Some(request) => request,
-                    None => {
-                        let fresh = fixture.fresh_batches.lock().unwrap().pop_front();
-                        match fresh {
-                            Some((sequence, calls)) => {
-                                self.state.begin_execution(sequence, calls)?;
-                                continue;
-                            }
-                            None => break,
-                        }
-                    }
+                let Some((sequence, calls)) = fixture.fresh_batches.lock().unwrap().pop_front()
+                else {
+                    break;
                 };
-                let results = self
-                    .tools
-                    .execute(
-                        request,
-                        TurnResources {
-                            history: &fixture.history,
-                            conversation: &mut self.conversation,
-                            context: &mut self.context,
-                            prompt: &self.prompt,
-                            sessions: &self.sessions,
-                            status: &Status,
-                            events: &self.events,
-                            usage: &self.usage,
-                        },
-                        &self.selection,
-                        &self.snapshot,
-                        capture,
-                        cancellation,
-                    )
-                    .await?;
+                self.state.begin_execution(sequence, calls.clone())?;
+                let mut completed = Vec::new();
+                let mut cancelled = false;
+                while completed.len() < calls.len() {
+                    let request = ToolExecutionChunk {
+                        assistant_sequence: sequence,
+                        starts_batch: completed.is_empty(),
+                        calls: calls[completed.len()..].to_vec(),
+                        cancel_remaining: cancelled,
+                    };
+                    let results = self
+                        .tools
+                        .execute(
+                            request,
+                            TurnResources {
+                                history: &fixture.history,
+                                conversation: &mut self.conversation,
+                                context: &mut self.context,
+                                prompt: &self.prompt,
+                                sessions: &self.sessions,
+                                status: &Status,
+                                events: &self.events,
+                                usage: &self.usage,
+                            },
+                            &self.selection,
+                            &self.snapshot,
+                            capture,
+                            cancellation,
+                        )
+                        .await?;
+                    self.state
+                        .record_results(&mut self.conversation, &results)
+                        .await?;
+                    cancelled |= results
+                        .iter()
+                        .any(|result| result.status == parrot_core::ToolStatus::Cancelled);
+                    completed.extend(results);
+                }
                 self.state
-                    .record_results(&mut self.conversation, &results)
+                    .complete_execution(&mut self.conversation, &completed)
                     .await?;
             }
             self.state.restore_results(&mut self.conversation).await

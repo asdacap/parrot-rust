@@ -50,7 +50,7 @@ impl TurnTools<Security> for BudgetTools {
     }
     fn execute<'a>(
         &'a self,
-        request: parrot_core::ToolExecutionRequest,
+        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<Security>,
         snapshot: &'a Self::Snapshot,

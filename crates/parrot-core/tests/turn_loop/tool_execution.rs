@@ -8,7 +8,6 @@ fn state_restores_results_and_closes_incomplete_calls_without_execution_before_r
         state.work = false;
         state.turns = 0;
         state.cancelled = cancelled;
-        state.fail_at = Some("prepare_tools");
         state.restored_results.push(ToolResult {
             call_id: "persisted".into(),
             tool_name: "read".into(),
@@ -55,65 +54,53 @@ fn state_restores_results_and_closes_incomplete_calls_without_execution_before_r
 }
 
 #[test]
-fn state_records_each_fresh_execution_prefix_before_preparing_the_next_chunk() {
+fn core_executes_the_complete_provider_batch_once_and_records_all_results_once() {
     let calls: Vec<_> = ["first", "second", "third"]
         .into_iter()
         .map(|id| ToolCall {
             id: id.into(),
             name: "read".into(),
-            arguments_json: format!("{{\"call\":\"{id}\"}}"),
+            arguments_json: format!(" {{ \"call\" : \"{id}\" }} "),
+        })
+        .collect();
+    let results: Vec<_> = calls
+        .iter()
+        .zip([
+            ToolStatus::Finished,
+            ToolStatus::Cancelled,
+            ToolStatus::Error,
+        ])
+        .map(|(call, status)| ToolResult {
+            call_id: call.id.clone(),
+            tool_name: call.name.clone(),
+            status,
+            text: format!("result for {}", call.id),
+            ..ToolResult::default()
         })
         .collect();
     let mut state = MemoryState::new([
-        Reply::with_tool_calls(calls),
+        Reply::with_tool_calls(calls.clone()),
         Reply::final_response("answer"),
     ]);
-    state.tools.output_count = 1;
+    state
+        .tools
+        .replies
+        .lock()
+        .unwrap()
+        .push_back(results.clone());
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(
         state
             .trace
             .values()
             .into_iter()
-            .filter(|step| matches!(
-                step.as_str(),
-                "prepare_tools" | "execute" | "record_results"
-            ))
+            .filter(|step| matches!(step.as_str(), "record_tools" | "execute" | "record_results"))
             .collect::<Vec<_>>(),
-        [
-            "prepare_tools",
-            "execute",
-            "record_results",
-            "prepare_tools",
-            "execute",
-            "record_results",
-            "prepare_tools",
-            "execute",
-            "record_results",
-            "prepare_tools",
-        ]
+        ["record_tools", "execute", "record_results"]
     );
-    let requests = state.tools.requests.lock().unwrap();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.calls.len())
-            .collect::<Vec<_>>(),
-        [3, 2, 1]
-    );
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.starts_batch)
-            .collect::<Vec<_>>(),
-        [true, false, false]
-    );
-    assert!(
-        requests
-            .iter()
-            .all(|request| request.assistant_sequence == 1 && !request.cancel_remaining)
-    );
+    assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(state.recorded_tools.len(), 1);
+    assert_eq!(state.applied_results, results);
     assert_eq!(
         state
             .applied_results
@@ -125,22 +112,20 @@ fn state_records_each_fresh_execution_prefix_before_preparing_the_next_chunk() {
 }
 
 #[test]
-fn failed_result_recording_stops_before_another_execution_chunk() {
-    let mut state = MemoryState::new([Reply::with_tool_calls(
-        ["first", "second"]
-            .into_iter()
-            .map(|id| ToolCall {
-                id: id.into(),
-                name: "read".into(),
-                arguments_json: "{}".into(),
-            })
-            .collect(),
-    )]);
-    state.tools.output_count = 1;
+fn failed_result_recording_stops_without_reexecuting_the_batch_or_requesting_more_work() {
+    let calls: Vec<_> = ["first", "second"]
+        .into_iter()
+        .map(|id| ToolCall {
+            id: id.into(),
+            name: "read".into(),
+            arguments_json: "{}".into(),
+        })
+        .collect();
+    let mut state = MemoryState::new([Reply::with_tool_calls(calls.clone())]);
     state.fail_at = Some("record_results");
     assert_eq!(state.run(), Err(Error::failed("record_results")));
-    assert_eq!(state.tools.requests.lock().unwrap().len(), 1);
-    assert_eq!(state.pending_tools.front().unwrap().calls.len(), 2);
+    assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
+    assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.recorded_tools.len(), 1);
     assert!(state.applied_results.is_empty());
     assert_eq!(state.trace.values().last().unwrap(), "record_results");
@@ -149,7 +134,7 @@ fn failed_result_recording_stops_before_another_execution_chunk() {
 #[test]
 fn empty_execution_output_errors_without_recording_or_repeating_work() {
     let mut state = MemoryState::new([Reply::tools("call")]);
-    state.tools.output_count = 0;
+    state.tools.replies.lock().unwrap().push_back(Vec::new());
     assert_eq!(
         state.run(),
         Err(Error::failed("tool execution returned no results"))
@@ -218,13 +203,9 @@ impl Tools for EchoTools {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
 
-    fn execute(
-        &self,
-        request: ToolExecutionRequest,
-    ) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>> {
+    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
-            Ok(request
-                .calls
+            Ok(calls
                 .into_iter()
                 .map(|call| ToolResult {
                     call_id: call.id,

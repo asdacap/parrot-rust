@@ -1,8 +1,8 @@
 use super::*;
 use parrot_core::{
     CompletionDecision as CoreCompletionDecision, Error as CoreError, ErrorCode, ErrorKind,
-    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCatalog,
-    ToolDefinition, ToolExecutionRequest, ToolResult, TurnOptions,
+    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCall, ToolCatalog,
+    ToolDefinition, ToolResult, ToolStatus, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -36,6 +36,7 @@ struct BoundTurn<S: AccessSnapshot, T: TurnTools<S>> {
 }
 
 struct ExecutionBinding<S: AccessSnapshot, T: TurnTools<S>> {
+    assistant_sequence: i64,
     selection: TurnSelection<S>,
     tools: T::Snapshot,
     status: Arc<dyn crate::compaction::ContextStatus>,
@@ -200,26 +201,6 @@ where
                 .await
         })
     }
-    fn prepare_tool_execution(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, CoreError>> {
-        adapt_operation(async move {
-            let mut guard = self.backend.state.lock().await;
-            let state = &mut *guard;
-            let request = state
-                .tool_conversation
-                .prepare_execution(&mut state.conversation)
-                .await?;
-            if request.is_none() {
-                self.binding
-                    .execution
-                    .lock()
-                    .expect("execution binding poisoned")
-                    .take();
-            }
-            Ok(request)
-        })
-    }
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],
@@ -229,8 +210,14 @@ where
             let state = &mut *guard;
             state
                 .tool_conversation
-                .record_results(&mut state.conversation, results)
-                .await
+                .complete_execution(&mut state.conversation, results)
+                .await?;
+            self.binding
+                .execution
+                .lock()
+                .expect("execution binding poisoned")
+                .take();
+            Ok(())
         })
     }
     fn disables_request_limit(&self) -> bool {
@@ -546,6 +533,7 @@ where
                 .execution
                 .lock()
                 .expect("execution binding poisoned") = Some(ExecutionBinding {
+                assistant_sequence: assistant.sequence,
                 selection,
                 tools,
                 status,
@@ -676,13 +664,10 @@ where
             Ok(catalog)
         })
     }
-    fn execute(
-        &self,
-        request: ToolExecutionRequest,
-    ) -> BoxFuture<'_, Result<Vec<ToolResult>, CoreError>> {
+    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
-            let (selection, snapshot, status) = {
+            let (assistant_sequence, selection, snapshot, status) = {
                 let guard = self
                     .binding
                     .execution
@@ -692,6 +677,7 @@ where
                     .as_ref()
                     .ok_or_else(|| TurnError::Service("execution tools are unavailable".into()))?;
                 (
+                    binding.assistant_sequence,
                     binding.selection.clone(),
                     binding.tools.clone(),
                     binding.status.clone(),
@@ -700,26 +686,44 @@ where
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
             let events = ContextEmitter { backend };
-            backend
-                .tools
-                .execute(
-                    request,
-                    TurnResources {
-                        history: &backend.history,
-                        conversation: &mut state.conversation,
-                        context: &mut state.context,
-                        prompt: &backend.prompt,
-                        sessions: &backend.sessions,
-                        status: status.as_ref(),
-                        events: &events,
-                        usage: &backend.usage,
-                    },
-                    &selection,
-                    &snapshot,
-                    backend.selection.as_ref(),
-                    self.cancellation,
-                )
-                .await
+            let mut results = Vec::with_capacity(calls.len());
+            let mut cancel_remaining = false;
+            while results.len() < calls.len() {
+                let chunk = backend
+                    .tools
+                    .execute(
+                        ToolExecutionChunk {
+                            assistant_sequence,
+                            starts_batch: results.is_empty(),
+                            calls: calls[results.len()..].to_vec(),
+                            cancel_remaining,
+                        },
+                        TurnResources {
+                            history: &backend.history,
+                            conversation: &mut state.conversation,
+                            context: &mut state.context,
+                            prompt: &backend.prompt,
+                            sessions: &backend.sessions,
+                            status: status.as_ref(),
+                            events: &events,
+                            usage: &backend.usage,
+                        },
+                        &selection,
+                        &snapshot,
+                        backend.selection.as_ref(),
+                        self.cancellation,
+                    )
+                    .await?;
+                state
+                    .tool_conversation
+                    .record_results(&mut state.conversation, &chunk)
+                    .await?;
+                cancel_remaining |= chunk
+                    .iter()
+                    .any(|result| result.status == ToolStatus::Cancelled);
+                results.extend(chunk);
+            }
+            Ok(results)
         })
     }
 }

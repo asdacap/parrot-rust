@@ -325,7 +325,7 @@ impl TurnTools<Security> for Tools {
     }
     fn execute<'a>(
         &'a self,
-        _: parrot_core::ToolExecutionRequest,
+        _: parrot_runtime::agent_turn::services::ToolExecutionChunk,
         _: TurnResources<'a>,
         _: &'a TurnSelection<Security>,
         _: &'a Self::Snapshot,

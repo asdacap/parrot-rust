@@ -5,11 +5,13 @@ pub use model::*;
 pub use snapshot::ToolSnapshot;
 
 use crate::agent_turn::{
-    services::{SelectionSource, TurnError, TurnResources, TurnSelection, TurnTools},
+    services::{
+        SelectionSource, ToolExecutionChunk, TurnError, TurnResources, TurnSelection, TurnTools,
+    },
     usage::SessionUsageRecorder,
 };
 use crate::event_broker::BrokerError;
-use parrot_core::{ToolCall, ToolExecutionRequest, ToolImage, ToolProcess, ToolResult, ToolStatus};
+use parrot_core::{ToolCall, ToolImage, ToolProcess, ToolResult, ToolStatus};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -109,7 +111,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
     }
     async fn execute_inner(
         &self,
-        request: ToolExecutionRequest,
+        request: ToolExecutionChunk,
         resources: TurnResources<'_>,
         selection: &TurnSelection<S>,
         snapshot: &ToolSnapshot<S>,
@@ -215,7 +217,7 @@ impl<S: AccessSnapshot + 'static> TurnTools<S> for ToolSettlement<S> {
     }
     fn execute<'a>(
         &'a self,
-        request: ToolExecutionRequest,
+        request: ToolExecutionChunk,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<S>,
         snapshot: &'a Self::Snapshot,
