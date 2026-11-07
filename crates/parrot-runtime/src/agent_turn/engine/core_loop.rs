@@ -16,7 +16,18 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S, T>,
-    cancellation: &'a dyn Cancellation,
+}
+
+struct RuntimeCancellation<'a>(parrot_core::CancellationToken<'a>);
+
+impl Cancellation for RuntimeCancellation<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        self.0.cancelled()
+    }
 }
 
 struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -137,6 +148,39 @@ impl From<TurnError> for CoreError {
     }
 }
 
+impl<'a, S, T> RuntimeStates<'a, S, T>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    async fn new(
+        backend: &'a RuntimeBackend<S, T>,
+        binding: &'a TurnBinding<S, T>,
+        cancellation: &'a dyn Cancellation,
+        work: &'a dyn DrainWork,
+    ) -> Result<Self, TurnError> {
+        {
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            state.request_status = None;
+            state.request_accounting = None;
+            state.tool_conversation.reset_pending();
+            state
+                .tool_conversation
+                .restore_results(&mut state.conversation)
+                .await?;
+        }
+        Ok(Self {
+            backend,
+            binding,
+            cancellation,
+            work,
+            request_tools: None,
+        })
+    }
+}
+
 pub(super) async fn run<S, T>(
     backend: &RuntimeBackend<S, T>,
     cancellation: &dyn Cancellation,
@@ -147,31 +191,21 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    {
-        let mut state = backend.state.lock().await;
-        state.request_status = None;
-        state.request_accounting = None;
-        state.tool_conversation.reset_pending();
-    }
     let binding = TurnBinding::new();
-    let mut states = RuntimeStates {
-        backend,
-        binding: &binding,
-        cancellation,
-        work,
-        request_tools: None,
-    };
+    let mut states = RuntimeStates::new(backend, &binding, cancellation, work).await?;
     let tools = RuntimeTools {
         backend,
         binding: &binding,
-        cancellation,
     };
     let provider = RuntimeProvider {
         backend,
         binding: &binding,
         cancellation,
     };
-    let outcome = parrot_core::run(&mut states, &tools, &provider).await;
+    let is_cancelled = || cancellation.is_cancelled();
+    let cancelled = || cancellation.cancelled();
+    let token = parrot_core::CancellationToken::new(&is_cancelled, &cancelled);
+    let outcome = parrot_core::run(&mut states, &tools, &provider, token).await;
     {
         let mut state = backend.state.lock().await;
         state.request_status = None;
@@ -191,16 +225,6 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    fn restore_tool_results(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let mut guard = self.backend.state.lock().await;
-            let state = &mut *guard;
-            state
-                .tool_conversation
-                .restore_results(&mut state.conversation)
-                .await
-        })
-    }
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],
@@ -225,11 +249,6 @@ where
     }
     fn has_scheduled_work(&self) -> bool {
         self.work.has_scheduled()
-    }
-    fn check_cancellation(&self) -> Result<(), CoreError> {
-        self.cancellation
-            .check()
-            .map_err(|_| CoreError::cancelled())
     }
     fn is_turn_open(&self) -> BoxFuture<'_, bool> {
         Box::pin(async move { self.backend.state.lock().await.turn.is_some() })
@@ -664,8 +683,13 @@ where
             Ok(catalog)
         })
     }
-    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, CoreError>> {
+    fn execute<'a>(
+        &'a self,
+        calls: Vec<ToolCall>,
+        cancellation: parrot_core::CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
+            let cancellation = RuntimeCancellation(cancellation);
             let backend = self.backend;
             let (assistant_sequence, selection, snapshot, status) = {
                 let guard = self
@@ -711,7 +735,7 @@ where
                         &selection,
                         &snapshot,
                         backend.selection.as_ref(),
-                        self.cancellation,
+                        &cancellation,
                     )
                     .await?;
                 state

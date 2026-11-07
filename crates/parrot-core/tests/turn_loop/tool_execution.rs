@@ -1,55 +1,32 @@
 use super::*;
 
 #[test]
-fn state_restores_results_and_closes_incomplete_calls_without_execution_before_readiness_or_cancellation()
- {
+fn initialized_results_remain_untouched_when_core_has_no_work_or_is_cancelled() {
     for cancelled in [false, true] {
         let mut state = MemoryState::new([]);
         state.work = false;
         state.turns = 0;
-        state.cancelled = cancelled;
-        state.restored_results.push(ToolResult {
-            call_id: "persisted".into(),
+        if cancelled {
+            state.cancellation.cancel();
+        }
+        let initialized = vec![ToolResult {
+            call_id: "existing-result".into(),
             tool_name: "read".into(),
-            text: "persisted result".into(),
+            text: "already initialized result".into(),
             ..ToolResult::default()
-        });
-        state.historical_calls.push(ToolCall {
-            id: "unresolved".into(),
-            name: "read".into(),
-            arguments_json: "{}".into(),
-        });
+        }];
+        state.applied_results = initialized.clone();
         let expected = if cancelled {
             Err(Error::cancelled())
         } else {
             Ok(Outcome::Completed(String::new()))
         };
         assert_eq!(state.run(), expected);
-        assert_eq!(
-            state
-                .applied_results
-                .iter()
-                .map(|result| result.call_id.as_str())
-                .collect::<Vec<_>>(),
-            ["persisted", "unresolved"]
-        );
-        assert_eq!(state.applied_results[0].text, "persisted result");
-        assert_eq!(state.applied_results[0].status, ToolStatus::Finished);
-        assert_eq!(state.applied_results[1].status, ToolStatus::Error);
-        assert_eq!(
-            state.applied_results[1].text,
-            "The process crashed before the tool completed."
-        );
-        assert_eq!(
-            state.applied_results[1].error_message,
-            "The process crashed before the tool completed."
-        );
+        assert_eq!(state.applied_results, initialized);
         assert!(state.tools.requests.lock().unwrap().is_empty());
-        assert_eq!(state.trace.values(), ["reconcile"]);
         assert!(state.provider.requests.lock().unwrap().is_empty());
-        assert_eq!(state.run(), expected);
-        assert_eq!(state.applied_results.len(), 2);
-        assert!(state.tools.requests.lock().unwrap().is_empty());
+        assert!(state.recorded_tools.is_empty());
+        assert!(state.trace.values().is_empty());
     }
 }
 
@@ -194,7 +171,11 @@ impl Tools for EchoTools {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
 
-    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>> {
+    fn execute<'a>(
+        &'a self,
+        calls: Vec<ToolCall>,
+        _cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             Ok(calls
                 .into_iter()
@@ -227,7 +208,7 @@ fn independent_tool_implementations_share_the_same_state_and_fresh_result_protoc
     state.turns = 1;
     let provider = state.provider.clone();
     assert_eq!(
-        finish(run(&mut state, &EchoTools, &provider)),
+        state.run_with(&EchoTools, &provider),
         Ok(Outcome::Completed("second answer".into()))
     );
     assert_eq!(state.recorded_tools.len(), 2);

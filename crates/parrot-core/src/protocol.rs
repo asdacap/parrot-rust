@@ -3,6 +3,33 @@ use std::{fmt, future::Future, pin::Pin};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// Borrows live cancellation observation without owning a signal or background work.
+#[derive(Clone, Copy)]
+pub struct CancellationToken<'a> {
+    is_cancelled: &'a (dyn Fn() -> bool + Send + Sync),
+    cancelled: &'a (dyn Fn() -> BoxFuture<'a, ()> + Send + Sync),
+}
+
+impl<'a> CancellationToken<'a> {
+    pub fn new(
+        is_cancelled: &'a (dyn Fn() -> bool + Send + Sync),
+        cancelled: &'a (dyn Fn() -> BoxFuture<'a, ()> + Send + Sync),
+    ) -> Self {
+        Self {
+            is_cancelled,
+            cancelled,
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        (self.is_cancelled)()
+    }
+
+    pub fn cancelled(&self) -> BoxFuture<'a, ()> {
+        (self.cancelled)()
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum Outcome {
     Completed(String),
@@ -36,15 +63,16 @@ pub trait Tools: Send + Sync {
     /// Executes the complete supplied batch using retained executable identities,
     /// returning results in call order and joining all admitted work before returning,
     /// including on failure. Scheduling and batch-local bookkeeping stay internal;
-    /// conversation recovery and result recording belong to [`States`].
-    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>>;
+    /// result recording belongs to [`States`].
+    fn execute<'a>(
+        &'a self,
+        calls: Vec<ToolCall>,
+        cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>>;
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
 pub trait States: Send {
-    /// Restores saved tool results and records crash errors for missing historical
-    /// results without invoking tools, before cancellation or readiness is checked.
-    fn restore_tool_results(&mut self) -> BoxFuture<'_, Result<(), Error>>;
     /// Durably records and applies the complete returned batch before continuing.
     fn record_tool_results<'a>(
         &'a mut self,
@@ -54,8 +82,6 @@ pub trait States: Send {
     fn disables_request_limit(&self) -> bool;
     /// Reports whether scheduled work should run before opening another turn.
     fn has_scheduled_work(&self) -> bool;
-    /// Fails with typed cancellation if the owning execution was cancelled.
-    fn check_cancellation(&self) -> Result<(), Error>;
     /// Reports whether a durable turn is already open.
     fn is_turn_open(&self) -> BoxFuture<'_, bool>;
     /// Reports whether the conversation or pending input requires a response.

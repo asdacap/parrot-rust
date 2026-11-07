@@ -234,6 +234,120 @@ async fn actual_runtime_tool_cancellation_skips_the_remaining_whole_batch() {
 }
 
 #[tokio::test]
+async fn actual_runtime_forwards_live_cancellation_to_running_tools_and_cancels_the_tail() {
+    let fixture = Fixture::new();
+    let gate = Gate::new();
+    let mut running = RecordingTool::new(&fixture, "running", ParallelSafety::Sequential);
+    running.gate = Some(gate.clone());
+    let running = Arc::new(running);
+    let tail = Arc::new(RecordingTool::new(
+        &fixture,
+        "tail",
+        ParallelSafety::ParallelSafe,
+    ));
+    let mut request = Step::complete("tool batch");
+    request.completion.as_mut().unwrap().tool_calls =
+        vec![call("running", "running"), call("tail", "tail")];
+    let provider = Scripted::new(vec![request]);
+    let (session, _) = runtime::runtime(
+        &fixture,
+        &provider,
+        vec![running.clone().handle(), tail.clone().handle()],
+    )
+    .await;
+    let sent = runtime::send(&session).await;
+    gate.entered().await;
+    bounded(session.interrupt(&NeverCancelled)).await.unwrap();
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Canceled
+    );
+    assert_eq!(running.calls.lock().unwrap().len(), 1);
+    assert!(running.completed.lock().unwrap().is_empty());
+    assert!(tail.calls.lock().unwrap().is_empty());
+    let terminals = fixture
+        .history
+        .tool_terminals_of_calls(vec!["running".into(), "tail".into()])
+        .await
+        .unwrap();
+    assert_eq!(terminals.len(), 2);
+    assert!(
+        terminals
+            .iter()
+            .all(|terminal| terminal.status == ToolExecutionStatus::Cancelled)
+    );
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    bounded(session.close()).await.unwrap();
+}
+
+#[tokio::test]
+async fn actual_runtime_state_initialization_repairs_a_failed_batch_before_the_next_run() {
+    let fixture = Fixture::new();
+    let first = Arc::new(RecordingTool::new(
+        &fixture,
+        "first",
+        ParallelSafety::Sequential,
+    ));
+    let tail = Arc::new(RecordingTool::new(
+        &fixture,
+        "tail",
+        ParallelSafety::Sequential,
+    ));
+    let mut request = Step::complete("tool batch");
+    request.completion.as_mut().unwrap().tool_calls =
+        vec![call("first", "first"), call("tail", "tail")];
+    let provider = Scripted::new(vec![request, Step::complete("answer after failed run")]);
+    let publisher = Arc::new(Publisher::new(fixture.history.clone()));
+    publisher.fail_terminal.store(1, Ordering::SeqCst);
+    let (session, _) = runtime::runtime_with_publisher(
+        &fixture,
+        &provider,
+        vec![first.clone().handle(), tail.clone().handle()],
+        publisher,
+    )
+    .await;
+    let failed = runtime::send(&session).await;
+    assert_eq!(
+        bounded(failed.execution.join()).await.unwrap().status,
+        ExecutionStatus::Failed
+    );
+    let saved = fixture
+        .history
+        .tool_terminals_of_calls(vec!["first".into(), "tail".into()])
+        .await
+        .unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].status, ToolExecutionStatus::Finished);
+    let resumed = runtime::send(&session).await;
+    assert_eq!(
+        bounded(resumed.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    assert_eq!(first.calls.lock().unwrap().len(), 1);
+    assert!(tail.calls.lock().unwrap().is_empty());
+    let restored = fixture
+        .history
+        .tool_terminals_of_calls(vec!["first".into(), "tail".into()])
+        .await
+        .unwrap();
+    assert_eq!(restored.len(), 2);
+    assert_eq!(restored[0], saved[0]);
+    assert_eq!(restored[1].status, ToolExecutionStatus::Error);
+    assert!(restored[1].message.contains(CRASH_MESSAGE));
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1].messages.iter().any(|message| {
+            message.tool_call_id == "first" && message.content() == "result:first"
+        })
+    );
+    assert!(requests[1].messages.iter().any(|message| {
+        message.tool_call_id == "tail" && message.content().contains(CRASH_MESSAGE)
+    }));
+    bounded(session.close()).await.unwrap();
+}
+
+#[tokio::test]
 async fn actual_runtime_terminal_publication_failure_stops_tail_and_restart_never_replays() {
     let fixture = Fixture::new();
     let first = Arc::new(RecordingTool::new(

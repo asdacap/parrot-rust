@@ -1,7 +1,8 @@
 use parrot_core::{
-    BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, FinishReason, Outcome, Provider,
-    ProviderRequest, ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolDefinition,
-    ToolImage, ToolResult, ToolStatus, Tools, TurnOptions, budget::TurnRequestPhase, run,
+    BoxFuture, CancellationToken, CompletionDecision, Error, ErrorCode, ErrorKind, FinishReason,
+    Outcome, Provider, ProviderRequest, ProviderResponse, RetryReason, States, ToolCall,
+    ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
+    budget::TurnRequestPhase, run,
 };
 use std::{
     collections::VecDeque,
@@ -14,8 +15,12 @@ use std::{
     thread,
 };
 
+#[path = "turn_loop/cancellation.rs"]
+mod cancellation;
 #[path = "turn_loop/tool_execution.rs"]
 mod tool_execution;
+
+use cancellation::CancellationSource;
 
 struct ThreadWake(thread::Thread);
 impl Wake for ThreadWake {
@@ -132,7 +137,11 @@ impl Tools for MemoryTools {
             })
         })
     }
-    fn execute(&self, calls: Vec<ToolCall>) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>> {
+    fn execute<'a>(
+        &'a self,
+        calls: Vec<ToolCall>,
+        _cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             assert!(!calls.is_empty());
             self.requests.lock().unwrap().push(calls.clone());
@@ -189,15 +198,13 @@ struct MemoryState {
     requests: Vec<(TurnRequestPhase, Vec<String>)>,
     retries: Vec<(RetryReason, i32)>,
     recorded_tools: Vec<ProviderResponse>,
-    historical_calls: Vec<ToolCall>,
-    restored_results: Vec<ToolResult>,
     applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
     work: bool,
     turns: usize,
     open: bool,
     scheduled: bool,
-    cancelled: bool,
+    cancellation: Arc<CancellationSource>,
     interrupted: bool,
     unlimited: bool,
     maximum: i32,
@@ -229,15 +236,13 @@ impl MemoryState {
             requests: Vec::new(),
             retries: Vec::new(),
             recorded_tools: Vec::new(),
-            historical_calls: Vec::new(),
-            restored_results: Vec::new(),
             applied_results: Vec::new(),
             recorded_catalogs: Vec::new(),
             work: true,
             turns: 1,
             open: false,
             scheduled: false,
-            cancelled: false,
+            cancellation: Arc::default(),
             interrupted: false,
             unlimited: false,
             maximum: 10,
@@ -255,26 +260,21 @@ impl MemoryState {
         *self.provider.fail_at.lock().unwrap() = self.fail_at;
         let tools = self.tools.clone();
         let provider = self.provider.clone();
-        finish(run(self, &tools, &provider))
+        self.run_with(&tools, &provider)
+    }
+    fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
+        let cancellation = self.cancellation.clone();
+        let is_cancelled = || cancellation.is_cancelled();
+        let cancelled = || cancellation.cancelled();
+        finish(run(
+            self,
+            tools,
+            provider,
+            CancellationToken::new(&is_cancelled, &cancelled),
+        ))
     }
 }
 impl States for MemoryState {
-    fn restore_tool_results(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.step("reconcile")?;
-            self.applied_results.append(&mut self.restored_results);
-            self.applied_results
-                .extend(self.historical_calls.drain(..).map(|call| ToolResult {
-                    call_id: call.id,
-                    tool_name: call.name,
-                    status: ToolStatus::Error,
-                    text: "The process crashed before the tool completed.".into(),
-                    error_message: "The process crashed before the tool completed.".into(),
-                    ..ToolResult::default()
-                }));
-            Ok(())
-        })
-    }
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],
@@ -300,13 +300,6 @@ impl States for MemoryState {
     }
     fn has_scheduled_work(&self) -> bool {
         self.scheduled
-    }
-    fn check_cancellation(&self) -> Result<(), Error> {
-        if self.cancelled {
-            Err(Error::cancelled())
-        } else {
-            Ok(())
-        }
     }
     fn is_turn_open(&self) -> BoxFuture<'_, bool> {
         Box::pin(async move { self.open })
@@ -438,7 +431,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
     assert_eq!(
         state.trace.values(),
         [
-            "reconcile",
             "begin",
             "restore",
             "promote",
@@ -447,13 +439,11 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "record_tools",
             "execute",
             "record_results",
-            "reconcile",
             "promote",
             "prepare",
             "invoke",
             "evaluate",
             "complete",
-            "reconcile",
         ]
     );
 }
@@ -664,9 +654,13 @@ fn scheduled_work_yields_before_any_effect_but_not_during_an_open_turn() {
     state.scheduled = true;
     assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
     assert!(state.trace.values().is_empty());
+    state.cancellation.cancel();
+    assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
+    assert!(state.trace.values().is_empty());
+    state.cancellation = Arc::default();
     state.open = true;
     assert_eq!(state.run(), Err(Error::missing_turn()));
-    assert_eq!(state.trace.values(), ["reconcile", "promote"]);
+    assert_eq!(state.trace.values(), ["promote"]);
 }
 
 #[test]
@@ -675,11 +669,11 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     state.turns = 0;
     state.work = false;
     assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
-    assert_eq!(state.trace.values(), ["reconcile"]);
+    assert!(state.trace.values().is_empty());
     state.trace.clear();
-    state.cancelled = true;
+    state.cancellation.cancel();
     assert_eq!(state.run(), Err(Error::cancelled()));
-    assert_eq!(state.trace.values(), ["reconcile"]);
+    assert!(state.trace.values().is_empty());
 }
 
 #[test]
@@ -692,7 +686,6 @@ fn provider_failure_propagates_without_recording_or_completing_a_response() {
 #[test]
 fn adapter_errors_stop_at_the_failing_effect() {
     for (stage, reply) in [
-        ("reconcile", Reply::final_response("response")),
         ("begin", Reply::final_response("response")),
         ("restore", Reply::final_response("response")),
         ("promote", Reply::final_response("response")),
@@ -803,7 +796,11 @@ fn tools_and_provider_operate_without_states() {
         name: "read".into(),
         arguments_json: " { \"a\" : 1 } ".into(),
     }];
-    let results = finish(tools.execute(calls.clone())).unwrap();
+    let source = CancellationSource::default();
+    let is_cancelled = || source.is_cancelled();
+    let cancelled = || source.cancelled();
+    let cancellation = CancellationToken::new(&is_cancelled, &cancelled);
+    let results = finish(tools.execute(calls.clone(), cancellation)).unwrap();
     assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(
         results,
@@ -866,13 +863,13 @@ fn different_provider_implementations_share_the_same_states_tools_and_protocol()
     let tools = states.tools.clone();
     let provider = states.provider.clone();
     assert_eq!(
-        finish(run(&mut states, &tools, &provider)),
+        states.run_with(&tools, &provider),
         Ok(Outcome::Completed("scripted answer".into()))
     );
     states.turns = 1;
     states.work = true;
     assert_eq!(
-        finish(run(&mut states, &tools, &EchoProvider)),
+        states.run_with(&tools, &EchoProvider),
         Ok(Outcome::Completed("core request".into()))
     );
     assert!(states.provider.replies.lock().unwrap().is_empty());

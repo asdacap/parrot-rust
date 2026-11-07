@@ -60,15 +60,18 @@ translated losslessly at the interface, including raw provider extensions and
 multimodal content. Runtime bindings retain the actual selected model and executable
 tool snapshots; tools are never reconstructed from advertised definitions.
 
-The core restores historical tool results through state without invoking tools.
-Any historical call without a saved result receives a durable error saying that
-the process crashed before the tool completed; it is never automatically executed
-again. Existing results are restored without modification or republication.
+Native state initialization reconciles historical tool results before entering the
+core, without invoking tools. Any historical call without a saved result receives
+a durable error saying that the process crashed before the tool completed; it is
+never automatically executed again. Existing results are restored without
+modification or republication. The core has no history-recovery hook.
 
 Only calls from a new model response enter execution. The core passes the whole
-explicit batch to tools once, then asks state to record the complete returned
-results. State owns conversation projection and synthetic image messages. The native
-tools adapter coordinates execution chunks internally, recording each group's
+explicit batch and the caller's live cancellation token to tools once, then asks
+state to record the complete returned results. Tools observe cancellation and join
+admitted work before returning results or an error; core does not race or drop the
+execution future. State owns conversation projection and synthetic image messages.
+The native tools adapter coordinates execution chunks internally, recording each group's
 results through native conversation state before starting the next group. Tools
 retain parallel-safe grouping, tool-specific budgets, cancellation propagation, and
 execution-local state; they do not discover work by scanning conversation history.

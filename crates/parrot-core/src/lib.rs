@@ -5,10 +5,11 @@ mod protocol;
 pub use protocol::*;
 
 /// Runs the core-owned admission, response validation, retry, and completion policy.
-pub async fn run(
+pub async fn run<'a>(
     states: &mut dyn States,
-    tools: &dyn Tools,
+    tools: &'a dyn Tools,
     provider: &dyn Provider,
+    cancellation: CancellationToken<'a>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
     let mut budget = budget::TurnBudget::new(states.disables_request_limit());
@@ -19,8 +20,9 @@ pub async fn run(
         if !states.is_turn_open().await && states.has_scheduled_work() {
             return Ok(Outcome::Completed(answer));
         }
-        states.restore_tool_results().await?;
-        states.check_cancellation()?;
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
         if !retry_pending && !states.has_work().await? {
             return Ok(Outcome::Completed(answer));
         }
@@ -73,7 +75,9 @@ pub async fn run(
         }
         if !response.tool_calls.is_empty() {
             states.record_tool_calls(&response).await?;
-            let results = tools.execute(response.tool_calls.clone()).await?;
+            let results = tools
+                .execute(response.tool_calls.clone(), cancellation)
+                .await?;
             if results.is_empty() {
                 return Err(Error::failed("tool execution returned no results"));
             }
