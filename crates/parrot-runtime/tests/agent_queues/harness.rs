@@ -93,9 +93,19 @@ impl QueuedFactory {
             format!("queue-inventory-{}", id()),
         )
         .unwrap();
+        let scratch = self
+            .resources
+            .agent_scratch(
+                &identity
+                    .name_path
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
         let queues = AgentQueues::new(
             identity,
-            self.resources.as_ref(),
+            &scratch,
             inventory.clone(),
             self.diagnostics.clone(),
         )

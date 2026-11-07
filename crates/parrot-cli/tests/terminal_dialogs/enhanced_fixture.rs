@@ -64,6 +64,7 @@ pub struct RpcState {
     pub permission_replies: Vec<wire::ReplyPermissionRequest>,
     pub skills: BTreeMap<String, Vec<wire::Skill>>,
     pub aliases: Vec<wire::ModelAlias>,
+    pub model_variants: Vec<wire::ModelVariant>,
     pub listens: Vec<wire::ListenRequest>,
     pub replay: BTreeMap<String, Vec<wire::Event>>,
     pub listen_failures: BTreeMap<String, Status>,
@@ -172,6 +173,7 @@ impl Endpoint {
                 models: vec![wire::Model {
                     id: "model".into(),
                     provider_id: "provider".into(),
+                    variants: state.model_variants.clone(),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -561,9 +563,15 @@ impl Fixture {
                 self.root.join("xdg/runtime").display().to_string(),
             ),
         ]);
-        let config =
-            Configuration::from_content("model: provider/model\n", &environment, |_| Ok(()))
-                .unwrap();
+        let config_path = self.root.join("config.yaml");
+        std::fs::write(&config_path, "model: provider/model\n").unwrap();
+        let config = Configuration::load(
+            &config_path,
+            &self.root.join("predefined.yaml"),
+            &environment,
+            |_| Ok(()),
+        )
+        .unwrap();
         let interrupts = Arc::new(Interrupts::new({
             let stop = self.stopping.clone();
             Arc::new(move || stop.cancel())

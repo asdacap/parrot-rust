@@ -184,7 +184,6 @@ impl SlashCommand for EffortCommand {
                     .await?;
                 return Ok(());
             };
-            context.activity.wait_until_idle(cancellation).await?;
             context
                 .session
                 .select_model(&replacement.selector(), cancellation)

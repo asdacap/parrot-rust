@@ -34,7 +34,7 @@ impl WebSocketObserver for Observer {
     }
 }
 impl WebSocketAttemptObserver for Observer {
-    fn dump_request(&mut self, body: &[u8]) {
+    fn dump_request(&mut self, body: &[u8], _full_body: &[u8]) {
         self.0.1.lock().unwrap().push(body.to_vec());
         self.0.push(format!("dump:{}", body.len()));
     }

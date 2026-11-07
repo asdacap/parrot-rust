@@ -80,7 +80,7 @@ sessions/graphs, joins owned work, and only then cancels shared resources.
 Suspension preserves unfinished execution intent; explicit interrupt, task
 cancellation and task reset retain their separate cancellation/replacement
 semantics. Child queues keep their existing files under
-`<selected-session>/queues/agents/<agent-session-id>` and reattach to the restored
+`<selected-session>/root-agents/<root-name>/<child-name>/.../queues` and reattach to the restored
 owner. Leftover files do not make an obsolete ID a retained child.
 
 An existing user session without a root snapshot uses root-only compatibility

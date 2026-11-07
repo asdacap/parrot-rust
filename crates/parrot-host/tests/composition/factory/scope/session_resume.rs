@@ -539,7 +539,13 @@ async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_with
     for scope in [&root, &child, &grandchild] {
         let queues = scope.get_service::<AgentQueues<Security>>().unwrap();
         let name = format!("retained-{}", scope.identity().session.name);
-        queues.create(&name, "metadata").unwrap();
+        let queue = queues.create(&name, "metadata").unwrap();
+        let agent_directory = scope.identity().name_path.iter().fold(
+            fixture.user().resources.agents_directory(),
+            |directory, name| directory.join(name),
+        );
+        assert_eq!(queue.path.parent().unwrap(), agent_directory.join("queues"));
+        assert!(!fixture.user().resources.root().join("queues").exists());
         queues
             .push(
                 &name,

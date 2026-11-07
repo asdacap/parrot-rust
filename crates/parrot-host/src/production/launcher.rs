@@ -25,25 +25,25 @@ use std::{io, path::PathBuf, sync::Arc};
 pub struct ProductionLauncher {
     runner: ConfiguredProcessRunner,
     launch_directory: PathBuf,
-    queue_directory: PathBuf,
+    session_root: PathBuf,
 }
 
 impl ProductionLauncher {
     pub fn new(
         gate: Arc<SandboxGate>,
         launch_directory: PathBuf,
-        queue_directory: PathBuf,
+        session_root: PathBuf,
     ) -> io::Result<Self> {
-        Self::with_device_paths(gate, launch_directory, queue_directory, Vec::new())
+        Self::with_device_paths(gate, launch_directory, session_root, Vec::new())
     }
 
     pub fn with_device_paths(
         gate: Arc<SandboxGate>,
         launch_directory: PathBuf,
-        queue_directory: PathBuf,
+        session_root: PathBuf,
         device_paths: Vec<PathBuf>,
     ) -> io::Result<Self> {
-        if !launch_directory.is_absolute() || !queue_directory.is_absolute() {
+        if !launch_directory.is_absolute() || !session_root.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "process resource paths must be absolute",
@@ -53,7 +53,7 @@ impl ProductionLauncher {
         Ok(Self {
             runner,
             launch_directory,
-            queue_directory,
+            session_root,
         })
     }
 
@@ -84,7 +84,7 @@ impl CapturedProcessLauncher for ProductionLauncher {
                 )
             })?;
             if policy.launch_directory() != self.launch_directory
-                || policy.queue_directory() != Some(self.queue_directory.as_path())
+                || !scratch.root().starts_with(&self.session_root)
             {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
@@ -99,11 +99,7 @@ impl CapturedProcessLauncher for ProductionLauncher {
                     ReadOrigin::Explicit,
                 ))
                 .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error))?;
-            let resources = ProcessResources::new(
-                self.launch_directory.clone(),
-                self.queue_directory.clone(),
-                scratch.clone(),
-            );
+            let resources = ProcessResources::new(self.launch_directory.clone(), scratch.clone());
             let mut start = ProcessStartRequest::new(request.command, resources);
             start.environment = request.environment;
             start.terminal_mode = request.terminal_mode;
@@ -124,10 +120,7 @@ impl CapturedProcessLauncher for ProductionLauncher {
                                 write: rule.write,
                             })
                             .collect(),
-                        owned_roots: vec![
-                            scratch.root().to_path_buf(),
-                            self.queue_directory.clone(),
-                        ],
+                        owned_roots: vec![scratch.root().to_path_buf()],
                         device_paths: Vec::new(),
                     };
                     #[cfg(target_os = "macos")]
@@ -265,7 +258,7 @@ mod tests {
             ProductionLauncher::new(
                 Arc::new(SandboxGate::new(enabled)),
                 self.work.clone(),
-                self.session.join("queues"),
+                self.session.clone(),
             )
             .unwrap()
         }
@@ -298,7 +291,8 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-        let foreign = Fixture::new();
+        let mut foreign = Fixture::new();
+        foreign.work = fixture.work.clone();
         let error = launcher
             .launch(
                 command("exit 0"),
@@ -362,7 +356,53 @@ mod tests {
             format!("{}|literal-value", fixture.work.display())
         );
         assert!(fixture.scratch.blob_directory().is_dir());
+        assert!(fixture.scratch.queue_directory().is_dir());
+        assert!(!fixture.session.join("queues").exists());
         assert!(execution.is_completed());
+    }
+
+    #[tokio::test]
+    async fn child_execution_provisions_queues_in_the_child_agent_directory() {
+        let fixture = Fixture::new();
+        let launcher = fixture.launcher(false);
+        let scratch =
+            AgentScratchDirectory::new(&fixture.scratch.root().join("child"), &fixture.root)
+                .unwrap();
+        let materializer = super::super::policy::ProductionPolicyMaterializer::new();
+        materializer
+            .register_session(
+                fixture.session.clone(),
+                ProjectWorkspace::from_resolved(
+                    fixture.work.clone(),
+                    fixture.work.clone(),
+                    None,
+                    None,
+                ),
+            )
+            .unwrap();
+        let policy = materializer
+            .for_agent(
+                &Arc::new(ProductionPolicy::compose(false, &[], &[], &[]).unwrap()),
+                &scratch,
+            )
+            .unwrap();
+        let execution = launcher
+            .launch(
+                command("exit 0"),
+                SharedSecurity(policy),
+                Arc::new(ProcessLifetime::default()),
+            )
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), execution.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        execution.settle().await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(scratch.queue_directory().is_dir());
+        assert!(!fixture.scratch.queue_directory().exists());
+        assert!(!fixture.session.join("queues").exists());
     }
 
     #[cfg(unix)]
@@ -491,7 +531,7 @@ mod tests {
                 Arc::new(SandboxGate::new(true)),
             ),
             launch_directory: fixture.work.clone(),
-            queue_directory: fixture.session.join("queues"),
+            session_root: fixture.session.clone(),
         };
         let request = command(&format!("printf bypass > '{}'", marker.display()));
         let error = launcher

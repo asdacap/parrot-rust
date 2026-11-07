@@ -1,8 +1,10 @@
+use std::{sync::Arc, time::Duration};
+
 use super::support::{
     Activity, Dialog, NEVER, RpcFixture, RpcState, Session, Stop, run, run_with_session,
 };
 use parrot_cli::{
-    slash_sessions::{SlashCommand, SlashFailure},
+    slash_sessions::{PollingSlashActivity, SlashCommand, SlashFailure},
     slash_settings::{
         EffortCommand, ModelCommand, ModelPresetSelectCommand, ModelPresetSetCommand, ModelWizard,
         ModelsCommand, SetContextLimitCommand,
@@ -138,7 +140,35 @@ async fn effort_resolves_alias_uses_metadata_and_dismissal_keeps_model() {
         .unwrap();
     assert_eq!(session.current.model, "provider/current/high");
     assert!(session.selected_models.is_empty());
-    assert_eq!(activity.waits(), 1);
+    assert_eq!(activity.waits(), 0);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn effort_selection_completes_while_turn_is_running() {
+    let fixture = RpcFixture::new(models()).await;
+    let command = EffortCommand::new(fixture.client.clone());
+    let activity = PollingSlashActivity(Arc::new(|| true));
+    for arguments in ["", "high"] {
+        let mut session = Session::new("provider/current/low");
+        let mut dialog = Dialog::default().selects([Some("high")]);
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            run_with_session(
+                &command,
+                arguments,
+                &mut session,
+                &mut dialog,
+                &activity,
+                &NEVER,
+            ),
+        )
+        .await
+        .expect("changing effort must not wait for the running turn to finish")
+        .unwrap();
+        assert_eq!(session.current.model, "provider/current/high");
+        assert_eq!(dialog.shown, ["Model effort selected: high"]);
+    }
     fixture.close().await;
 }
 
@@ -147,7 +177,7 @@ async fn effort_arguments_validate_without_picker_or_unintended_mutation() {
     let fixture = RpcFixture::new(models()).await;
     let command = EffortCommand::new(fixture.client.clone());
     for (argument, expected, error, waits) in [
-        (" high ", "provider/current/high", "", 1),
+        (" high ", "provider/current/high", "", 0),
         (
             "missing",
             "provider/current/low",

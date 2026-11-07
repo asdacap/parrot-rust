@@ -42,7 +42,7 @@ impl Fixture {
         ProcessStartRequest {
             command: command.into(),
             environment: vec![("T38_LITERAL".into(), "$(printf injected); literal".into())],
-            resources: ProcessResources::new(self.0.clone(), self.0.join("queue"), scratch),
+            resources: ProcessResources::new(self.0.clone(), scratch),
             terminal_mode,
             pty_helper: Some(self.0.join("missing-helper")),
             cancellation: None,

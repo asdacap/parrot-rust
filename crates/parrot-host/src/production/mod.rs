@@ -444,7 +444,7 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
             ProductionLauncher::with_device_paths(
                 self.gate.clone(),
                 services.resources.workspace().launch_directory().to_owned(),
-                services.resources.queue_directory(),
+                services.resources.root().to_owned(),
                 self.configuration
                     .runtime
                     .sandbox_dev_bind

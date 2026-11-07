@@ -153,7 +153,14 @@ async fn long_history_listener_reconnect_image_identity_and_closed_queue_survive
     assert_eq!(selected, resumed_selected);
     assert!(selected.starts_with(fixture.root.join("new/sessions")));
     assert_eq!(queue_before_drain.path, old_queue_path);
-    assert!(old_queue_path.starts_with(selected.join("queues")));
+    assert_eq!(
+        old_queue_path.parent().unwrap(),
+        selected
+            .join("root-agents")
+            .join(&root.identity().session.name)
+            .join("queues")
+    );
+    assert!(!selected.join("queues").exists());
     assert_eq!(
         (queue_before_drain.size, queue_before_drain.closed),
         (2, true)

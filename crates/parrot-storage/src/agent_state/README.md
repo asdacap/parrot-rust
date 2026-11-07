@@ -27,7 +27,8 @@ shared descendant snapshot.
 SQLite conversation/event history remains authoritative for admitted inputs,
 responses and tool settlements. `history.jsonl` remains a projection; it is not
 loaded to rebuild a graph. Existing queue files remain in
-`<selected-session>/queues/agents/<agent-session-id>`, not in the snapshot.
+the owning agent's `root-agents/<root-name>/<child-name>/.../queues` directory
+beneath the selected session, not in the snapshot.
 Descriptors retain profile/model selectors, local scope and completion mode,
 not credentials or security grants. Runtime resolves selectors and rebuilds
 parent-linked restrictions from current configuration.

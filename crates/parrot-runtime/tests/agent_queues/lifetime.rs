@@ -15,13 +15,17 @@ async fn root_initialization_preserves_child_tree_and_reattaches_persisted_root_
     bounded(async {
         let h = Harness::new();
         let paths = &h.factory.resources;
-        let persisted = QueueStore::new(paths.queue_directory()).unwrap();
+        let scratch = paths.agent_scratch(&["root"]).unwrap();
+        let persisted = QueueStore::new(scratch.queue_directory()).unwrap();
         persisted.create("root-work", "persistent").unwrap();
         persisted
             .push("root-work", &["retained".into()], Direction::Back, false)
             .unwrap();
         persisted.dispose().unwrap();
-        let stale = paths.agent_queue_root_directory().join("stale/nested");
+        let stale = paths
+            .agent_scratch(&["root", "stale", "nested"])
+            .unwrap()
+            .queue_directory();
         std::fs::create_dir_all(&stale).unwrap();
         std::fs::write(stale.join("orphaned.jsonl"), "orphaned").unwrap();
         let root = h.root().await;
@@ -34,7 +38,8 @@ async fn root_initialization_preserves_child_tree_and_reattaches_persisted_root_
         assert_eq!(queues.capture_inventory().queues.len(), 1);
         h.close().await;
         assert!(queues.local().directory().join("root-work.jsonl").exists());
-        let reopened = QueueStore::new(paths.queue_directory()).unwrap();
+        assert!(!paths.root().join("queues").exists());
+        let reopened = QueueStore::new(scratch.queue_directory()).unwrap();
         assert_eq!(reopened.get("root-work").unwrap().size, 1);
         reopened.dispose().unwrap();
     })

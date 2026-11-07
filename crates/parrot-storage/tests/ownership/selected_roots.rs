@@ -262,7 +262,14 @@ async fn selected_legacy_resources_and_writes_remain_in_place_after_duplicate_an
     index.publish(&meta).unwrap();
     let scratch = resources.agent_scratch(&["main"]).unwrap();
     fs::write(scratch.blob_directory().join("owned.txt"), b"legacy-only").unwrap();
-    let queues = parrot_storage::queue_files::QueueStore::for_session(&selected, "queues").unwrap();
+    let queues = parrot_storage::queue_files::QueueStore::for_session(
+        &selected,
+        scratch
+            .queue_directory()
+            .strip_prefix(selected.path())
+            .unwrap(),
+    )
+    .unwrap();
     queues.create("in-place", "selected legacy queue").unwrap();
     queues
         .push(
@@ -272,7 +279,8 @@ async fn selected_legacy_resources_and_writes_remain_in_place_after_duplicate_an
             false,
         )
         .unwrap();
-    assert_eq!(queues.directory(), resources.queue_directory());
+    assert_eq!(queues.directory(), scratch.queue_directory());
+    assert!(!resources.root().join("queues").exists());
     assert!(
         fs::read_to_string(queues.directory().join("in-place.jsonl"))
             .unwrap()

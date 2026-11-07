@@ -181,9 +181,12 @@ the local production-creation limitations noted above.
   Explicit task cancellation or user interruption is still terminal, not a
   request to suspend. A crash can resume unfinished work too, but does not imply
   that the last uncommitted write survived.
-- Existing child queue files under `queues/agents/<agent-session-id>` survive
-  close/reopen and reattach to restored owners. Leftover queue files alone do not
-  authorize or restore an obsolete agent.
+- Each agent stores queues in its own directory:
+  `root-agents/<root-name>/<child-name>/.../queues/`. The root uses
+  `root-agents/<root-name>/queues/`. Queue files survive close/reopen and reattach
+  to restored owners. Leftover queue files alone do not authorize or restore an
+  obsolete agent. Older session-level `queues/` files are not automatically moved
+  or used as a fallback.
 
 An existing session **without a root snapshot** uses root-only legacy recovery
 and emits a visible `legacy_root_only_resume` notice (text configured by

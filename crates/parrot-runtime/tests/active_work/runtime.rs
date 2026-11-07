@@ -388,13 +388,19 @@ impl ScopeFactory<Security> for Factory {
                 id(),
             )
             .unwrap();
-            let queues = AgentQueues::new(
-                identity.clone(),
-                &self.resources,
-                inventory,
-                Arc::new(QueueLog),
-            )
-            .unwrap();
+            let scratch = self
+                .resources
+                .agent_scratch(
+                    &identity
+                        .name_path
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+            let queues =
+                AgentQueues::new(identity.clone(), &scratch, inventory, Arc::new(QueueLog))
+                    .unwrap();
             queues.initialize().unwrap();
             let delivery = Arc::new(AskDelivery::default());
             let asks = Arc::new(
