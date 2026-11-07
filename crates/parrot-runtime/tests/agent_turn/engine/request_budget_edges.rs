@@ -141,7 +141,7 @@ impl EdgeRuntime {
             skills: Arc::new(Skills(trace.clone())),
             context: fixture.controller(),
             status: Arc::new(Status(trace.clone())),
-            completions: vec![],
+            completion_sources: vec![],
             templates,
             reminders,
             output: Arc::new(Output::default()),

@@ -2,6 +2,7 @@
 //! The synthetic process observer is a domain port, not production OS-adapter proof.
 use super::support;
 
+use parrot_core::{CompletionFeedback, CompletionFeedbackKind, ProviderResponse};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -235,21 +236,65 @@ impl AgentAskTemplates for AskTemplates {
     }
 }
 #[derive(Default)]
-struct CallbackBinding(Mutex<Option<Arc<SessionCompletion<Publisher>>>>);
-impl TurnCompletion<Security> for CallbackBinding {
-    fn complete<'a>(
+struct CallbackBinding(Mutex<Option<Arc<dyn CompletionStateSource>>>);
+impl CompletionStateSource for CallbackBinding {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        candidate: &'a CompletionCandidate<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
-            let callback = self
+            let source = self
                 .0
                 .lock()
                 .unwrap()
                 .clone()
-                .expect("fixture callback must bind before admission");
-            callback.complete(candidate, cancellation).await
+                .expect("fixture completion source must bind before admission");
+            source.get_pending_ask_reminder(cancellation).await
+        })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            let source = self
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("fixture completion source must bind before admission");
+            source.get_active_work_reminder(cancellation).await
+        })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            let source = self
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("fixture completion source must bind before admission");
+            source.get_exit_reminder(cancellation).await
+        })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            let source = self
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("fixture completion source must bind before admission");
+            source
+                .record_completion_feedback(feedback, cancellation)
+                .await
         })
     }
 }
@@ -457,7 +502,7 @@ impl ScopeFactory<Security> for Factory {
                 skills: Arc::new(Skills),
                 context: self.histories.controller(history.clone()),
                 status: Arc::new(Status),
-                completions: vec![callback.clone()],
+                completion_sources: vec![callback.clone()],
                 templates: templates(),
                 reminders,
                 output: Arc::new(support::Output::default()),
@@ -1507,14 +1552,6 @@ async fn duplicate_input_does_not_wake_wait_but_new_input_wakes_and_promotes_onc
     h.close().await;
 }
 
-fn candidate(root: &Built) -> CompletionCandidate<Security> {
-    CompletionCandidate {
-        session_id: root.history.agent_session_id().into(),
-        message_id: id(),
-        assistant: sessions::Message::assistant("candidate assistant", vec![]),
-        selection: support::selection(&root.provider, "first", "build", 0xff),
-    }
-}
 struct RejectPublication {
     history: AgentHistoryView,
     cancel: bool,
@@ -1556,7 +1593,7 @@ impl EventPublisher for RejectPublication {
 }
 
 #[tokio::test]
-async fn retained_callback_publication_failure_or_cancellation_preserves_committed_notice_candidate_and_prompt()
+async fn retained_feedback_publication_failure_or_cancellation_preserves_committed_notice_candidate_and_prompt()
  {
     for cancel in [false, true] {
         let h = Harness::new();
@@ -1581,7 +1618,21 @@ async fn retained_callback_publication_failure_or_cancellation_preserves_committ
             broker: root.broker.clone(),
             publisher: publisher.clone() as Arc<Publisher>,
         };
-        let result = callback.complete(&candidate(&root), &NeverCancelled).await;
+        let feedback = CompletionFeedback {
+            kind: CompletionFeedbackKind::ExitReminders,
+            message: callback
+                .get_exit_reminder(&NeverCancelled)
+                .await
+                .unwrap()
+                .unwrap(),
+            candidate: Some(ProviderResponse {
+                assistant_text: "candidate assistant".into(),
+                ..Default::default()
+            }),
+        };
+        let result = callback
+            .record_completion_feedback(&feedback, &NeverCancelled)
+            .await;
         assert!(match result {
             Err(TurnError::Publication(OperationError::Cancelled)) => cancel,
             Err(TurnError::Publication(OperationError::Failed(BrokerError::InvalidCapacity))) =>
@@ -1617,7 +1668,7 @@ async fn retained_callback_publication_failure_or_cancellation_preserves_committ
 }
 
 #[tokio::test]
-async fn real_append_failure_prevents_active_and_retained_callback_publication() {
+async fn real_append_failure_prevents_active_and_retained_feedback_publication() {
     for retained in [false, true] {
         let h = Harness::new();
         let _scope = h.scope(None, "root").await;
@@ -1641,8 +1692,28 @@ async fn real_append_failure_prevents_active_and_retained_callback_publication()
             .await
             .unwrap();
         let callback = root.callback.0.lock().unwrap().clone().unwrap();
+        let feedback = CompletionFeedback {
+            kind: if retained {
+                CompletionFeedbackKind::ExitReminders
+            } else {
+                CompletionFeedbackKind::ActiveWork
+            },
+            message: if retained {
+                callback.get_exit_reminder(&NeverCancelled).await
+            } else {
+                callback.get_active_work_reminder(&NeverCancelled).await
+            }
+            .unwrap()
+            .unwrap(),
+            candidate: retained.then(|| ProviderResponse {
+                assistant_text: "candidate assistant".into(),
+                ..Default::default()
+            }),
+        };
         assert!(matches!(
-            callback.complete(&candidate(&root), &NeverCancelled).await,
+            callback
+                .record_completion_feedback(&feedback, &NeverCancelled)
+                .await,
             Err(TurnError::Storage(_))
         ));
         assert!(subscription.try_next().is_none());
@@ -1658,7 +1729,8 @@ async fn real_append_failure_prevents_active_and_retained_callback_publication()
 }
 
 #[tokio::test]
-async fn callback_pre_cancel_precedes_blocker_observation_and_reminder_render_count() {
+async fn pending_ask_observation_pre_cancel_precedes_blocker_observation_and_reminder_render_count()
+{
     let h = Harness::new();
     let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
@@ -1672,7 +1744,7 @@ async fn callback_pre_cancel_precedes_blocker_observation_and_reminder_render_co
     cancel.cancel();
     let callback = root.callback.0.lock().unwrap().clone().unwrap();
     assert!(matches!(
-        callback.complete(&candidate(&root), &cancel).await,
+        callback.get_pending_ask_reminder(&cancel).await,
         Err(TurnError::Cancelled)
     ));
     assert_eq!(root.tasks.observations.load(Ordering::SeqCst), 0);

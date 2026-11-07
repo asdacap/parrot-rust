@@ -1,9 +1,8 @@
 use super::*;
 use parrot_core::{
-    CompletionDecision as CoreCompletionDecision, ContextSnapshot as CoreContextSnapshot,
-    Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse, RetryReason,
-    States as CoreStates, ToolCall, ToolCatalog, ToolDefinition, ToolResult, ToolStatus,
-    TurnOptions,
+    CompletionFeedback, ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorCode,
+    ErrorKind, ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCall,
+    ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -12,6 +11,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
     request_tools: Option<T::Snapshot>,
+    completion_source: Option<Arc<dyn CompletionStateSource>>,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -179,6 +179,7 @@ where
             cancellation,
             work,
             request_tools: None,
+            completion_source: None,
         })
     }
 }
@@ -615,59 +616,75 @@ where
             Ok(())
         })
     }
-    fn evaluate_completion<'a>(
-        &'a mut self,
-        completed: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<CoreCompletionDecision, CoreError>> {
+    fn get_pending_ask_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
         adapt_operation(async move {
-            let completed: sessions::Completion = completed.clone().into();
-            let completed = &completed;
+            let _guard = self.backend.state.lock().await;
+            self.completion_source = None;
+            self.work
+                .join_mutations()
+                .await
+                .map_err(|error| TurnError::Service(error.to_string()))?;
+            for source in &self.backend.completion_sources {
+                if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
+                    self.completion_source = Some(source.clone());
+                    return Ok(Some(reminder));
+                }
+            }
+            Ok(None)
+        })
+    }
+    fn get_active_work_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
+        adapt_operation(async move {
+            let _guard = self.backend.state.lock().await;
+            self.completion_source = None;
+            for source in &self.backend.completion_sources {
+                if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
+                    self.completion_source = Some(source.clone());
+                    return Ok(Some(reminder));
+                }
+            }
+            Ok(None)
+        })
+    }
+    fn get_exit_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
+        adapt_operation(async move {
+            let _guard = self.backend.state.lock().await;
+            self.completion_source = None;
+            for source in &self.backend.completion_sources {
+                if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
+                    self.completion_source = Some(source.clone());
+                    return Ok(Some(reminder));
+                }
+            }
+            Ok(None)
+        })
+    }
+    fn record_completion_feedback(
+        &mut self,
+        feedback: CompletionFeedback,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let source = self
+                .completion_source
+                .take()
+                .ok_or_else(|| TurnError::Service("completion source is unavailable".into()))?;
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
-            let selection = self.binding.capture_selection()?;
-            let cancellation = self.cancellation;
-            let work = self.work;
-            work.join_mutations()
-                .await
-                .map_err(|e| TurnError::Service(e.to_string()))?;
-            let candidate = CompletionCandidate {
-                session_id: backend.identity.session_id.clone(),
-                message_id: parrot_domain::values::identifiers::Identifier::message_id()
-                    .map_err(|error| TurnError::Service(error.to_string()))?,
-                assistant: completed.clone().into_message(),
-                selection: selection.clone(),
-            };
-            let mut retry = None;
-            for callback in &backend.completions {
-                match callback.complete(&candidate, cancellation).await? {
-                    CompletionDecision::Complete => {}
-                    decision @ CompletionDecision::Retry { .. } => {
-                        retry = Some(decision);
-                        break;
-                    }
-                }
+            source
+                .record_completion_feedback(&feedback, self.cancellation)
+                .await?;
+            if let Some(candidate) = feedback.candidate {
+                let completed: sessions::Completion = candidate.into();
+                state.conversation.add(model_assistant(&completed));
+                backend
+                    .activity
+                    .assistant_message(&completed.assistant_text);
             }
-            if let Some(CompletionDecision::Retry {
-                system_message,
-                retain_candidate_assistant,
-                completion_retry_pending,
-            }) = retry
-            {
-                if retain_candidate_assistant {
-                    state.conversation.add(model_assistant(completed));
-                    backend
-                        .activity
-                        .assistant_message(&completed.assistant_text);
-                }
-                state
-                    .conversation
-                    .add(text_message(MessageRole::System, system_message));
-                return Ok(CoreCompletionDecision::Retry {
-                    pending: completion_retry_pending,
-                });
-            }
-            Ok(CoreCompletionDecision::Complete)
+            state
+                .conversation
+                .add(text_message(MessageRole::System, feedback.message));
+            Ok(())
         })
     }
     fn complete_turn<'a>(

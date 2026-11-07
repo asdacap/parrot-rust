@@ -1,4 +1,5 @@
 //! T46 integration: the actual session drain, SQLite/JSONL history, context and provider pool.
+use parrot_core::{CompletionFeedback, CompletionFeedbackKind};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -210,7 +211,7 @@ impl Fixture {
         &self,
         provider: Scripted,
         tools: Arc<Tools>,
-        callbacks: Vec<Arc<dyn TurnCompletion<Security>>>,
+        callbacks: Vec<Arc<dyn CompletionStateSource>>,
         lifetime: Arc<dyn Cancellation>,
         terminal_failure: usize,
     ) -> Runtime {
@@ -228,7 +229,7 @@ impl Fixture {
         &self,
         provider: Scripted,
         tools: Arc<Tools>,
-        callbacks: Vec<Arc<dyn TurnCompletion<Security>>>,
+        callbacks: Vec<Arc<dyn CompletionStateSource>>,
         lifetime: Arc<dyn Cancellation>,
         terminal_failure: usize,
         overrides: RuntimeOverrides,
@@ -292,7 +293,7 @@ impl Fixture {
             status: overrides
                 .status
                 .unwrap_or_else(|| Arc::new(Status(trace.clone()))),
-            completions: callbacks,
+            completion_sources: callbacks,
             templates,
             reminders,
             output: output.clone(),

@@ -14,31 +14,48 @@ struct ReminderCompletion {
     bindings: Mutex<Option<ReminderBindings>>,
     calls: AtomicUsize,
 }
-impl TurnCompletion<Security> for ReminderCompletion {
-    fn complete<'a>(
+impl CompletionStateSource for ReminderCompletion {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            let ReminderBindings {
-                reminders,
-                publisher,
-            } = self.bindings.lock().unwrap().clone().unwrap();
-            let Some(notice) = reminders
+            let bindings = self.bindings.lock().unwrap().clone().unwrap();
+            bindings
+                .reminders
                 .build()
                 .await
-                .map_err(|error| TurnError::Service(error.to_string()))?
-            else {
-                return Ok(CompletionDecision::Complete);
-            };
+                .map_err(|error| TurnError::Service(error.to_string()))
+        })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            assert_eq!(feedback.kind, CompletionFeedbackKind::ExitReminders);
+            assert!(feedback.candidate.is_some());
+            let publisher = self.bindings.lock().unwrap().clone().unwrap().publisher;
             let mut event = Event::new();
             event.id = id();
             event.agent_session_id = "agent".into();
             event.set_agent_notice(protocol::AgentNotice {
                 kind: "exit_reminder".into(),
-                notice: notice.clone(),
+                notice: feedback.message.clone(),
                 ..Default::default()
             });
             self.history.append(event.clone(), None, None).await?;
@@ -46,11 +63,7 @@ impl TurnCompletion<Security> for ReminderCompletion {
                 .publish_committed(&Committed::after_commit(event), cancellation)
                 .await
                 .map_err(TurnError::Publication)?;
-            Ok(CompletionDecision::Retry {
-                system_message: notice,
-                retain_candidate_assistant: false,
-                completion_retry_pending: Some(true),
-            })
+            Ok(())
         })
     }
 }
@@ -108,15 +121,16 @@ async fn a003_completion_observes_shared_reminder_changed_after_construction_wit
             .count(),
         1
     );
-    assert!(
-        provider.requests.lock().unwrap()[1]
-            .messages
-            .iter()
-            .any(|message| {
-                message.role == sessions::Role::System
-                    && message.content().contains("changed after construction")
-            })
-    );
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert!(requests[1].messages.iter().any(|message| {
+            message.role == sessions::Role::System
+                && message.content().contains("changed after construction")
+        }));
+        assert!(requests[1].messages.iter().any(|message| {
+            message.role == sessions::Role::Assistant && message.content() == "premature"
+        }));
+    }
     runtime
         .session
         .clear_exit_reminder("goal".into(), Arc::new(NeverCancelled))
@@ -365,7 +379,7 @@ async fn usage_runtime(
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
         status: Arc::new(Status(trace.clone())),
-        completions: vec![],
+        completion_sources: vec![],
         templates,
         reminders,
         output: Arc::new(Output::default()),

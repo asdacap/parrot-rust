@@ -1,9 +1,9 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionDecision, Content, ContextSnapshot, ConversationTurn,
-    Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message, Outcome,
-    PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role,
-    States, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools,
-    TurnOptions,
+    BoxFuture, CancellationToken, CompletionFeedback, CompletionFeedbackKind, Content,
+    ContextSnapshot, ConversationTurn, Delivery, Error, ErrorCode, ErrorKind, FinishReason,
+    InputAdmission, Message, Outcome, PendingMessage, Provider, ProviderRequest, ProviderResponse,
+    Reasoning, RetryReason, Role, States, ToolCall, ToolCatalog, ToolDefinition, ToolImage,
+    ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnRequestPhase},
     run, run_turn,
 };
@@ -20,6 +20,8 @@ use std::{
 
 #[path = "turn_loop/cancellation.rs"]
 mod cancellation;
+#[path = "turn_loop/completion_policy.rs"]
+mod completion_policy;
 #[path = "turn_loop/request_assembly.rs"]
 mod request_assembly;
 #[path = "turn_loop/tool_execution.rs"]
@@ -200,7 +202,10 @@ struct MemoryState {
     trace: Trace,
     tools: MemoryTools,
     provider: MemoryProvider,
-    decisions: VecDeque<CompletionDecision>,
+    pending_ask_reminders: VecDeque<Option<String>>,
+    active_work_reminders: VecDeque<Option<String>>,
+    exit_reminders: VecDeque<Option<String>>,
+    completion_feedback: Vec<CompletionFeedback>,
     requests: Vec<(TurnRequestPhase, Vec<String>)>,
     prepared_definitions: Vec<Vec<ToolDefinition>>,
     retries: Vec<(RetryReason, i32)>,
@@ -225,7 +230,6 @@ struct MemoryState {
     unlimited: bool,
     maximum: i32,
     reduced: bool,
-    retain_completion_candidate: bool,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
@@ -245,7 +249,10 @@ impl MemoryState {
                 fail_at: Arc::default(),
                 requests: Arc::default(),
             },
-            decisions: VecDeque::new(),
+            pending_ask_reminders: VecDeque::new(),
+            active_work_reminders: VecDeque::new(),
+            exit_reminders: VecDeque::new(),
+            completion_feedback: Vec::new(),
             requests: Vec::new(),
             prepared_definitions: Vec::new(),
             retries: Vec::new(),
@@ -273,7 +280,6 @@ impl MemoryState {
             unlimited: false,
             maximum: 10,
             reduced: true,
-            retain_completion_candidate: false,
             fail_at: None,
         };
         state.enqueue_message(Delivery::Queue, "question");
@@ -507,27 +513,40 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn evaluate_completion<'a>(
-        &'a mut self,
-        response: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<CompletionDecision, Error>> {
+    fn get_pending_ask_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>> {
         Box::pin(async move {
-            self.step("evaluate")?;
-            let decision = self
-                .decisions
-                .pop_front()
-                .unwrap_or(CompletionDecision::Complete);
-            if matches!(decision, CompletionDecision::Retry { .. })
-                && self.retain_completion_candidate
-            {
-                self.append_response(response);
-                self.append_turn_message(Message {
-                    role: Role::System,
-                    contents: vec![Content::Text("completion retry".into())],
-                    ..Message::default()
-                });
+            self.step("pending_asks")?;
+            Ok(self.pending_ask_reminders.pop_front().flatten())
+        })
+    }
+    fn get_active_work_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async move {
+            self.step("active_work")?;
+            Ok(self.active_work_reminders.pop_front().flatten())
+        })
+    }
+    fn get_exit_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async move {
+            self.step("exit_reminders")?;
+            Ok(self.exit_reminders.pop_front().flatten())
+        })
+    }
+    fn record_completion_feedback(
+        &mut self,
+        feedback: CompletionFeedback,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("completion_feedback")?;
+            if let Some(candidate) = &feedback.candidate {
+                self.append_response(candidate);
             }
-            Ok(decision)
+            self.append_turn_message(Message {
+                role: Role::System,
+                contents: vec![Content::Text(feedback.message.clone())],
+                ..Message::default()
+            });
+            self.completion_feedback.push(feedback);
+            Ok(())
         })
     }
     fn complete_turn<'a>(
@@ -563,7 +582,9 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "prepare",
             "messages",
             "invoke",
-            "evaluate",
+            "pending_asks",
+            "active_work",
+            "exit_reminders",
             "complete",
         ]
     );
@@ -724,10 +745,9 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
         Reply::final_response("answer"),
     ]);
     state.maximum = 2;
-    state.retain_completion_candidate = true;
-    state.decisions.push_back(CompletionDecision::Retry {
-        pending: Some(true),
-    });
+    state
+        .exit_reminders
+        .push_back(Some("unfinished goal".into()));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
     assert_eq!(
@@ -753,41 +773,60 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
 }
 
 #[test]
-fn completion_retry_can_clear_pending_and_stop_without_closing_the_candidate() {
+fn cleared_completion_blockers_close_only_the_final_candidate() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("candidate2"),
     ]);
-    state.retain_completion_candidate = true;
-    state.decisions.extend([
-        CompletionDecision::Retry {
-            pending: Some(true),
-        },
-        CompletionDecision::Retry {
-            pending: Some(false),
-        },
-    ]);
-    assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
+    state
+        .pending_ask_reminders
+        .push_back(Some("answer the ask".into()));
+    assert_eq!(state.run(), Ok(Outcome::Completed("candidate2".into())));
     assert_eq!(state.requests.len(), 2);
-    assert!(!state.trace.values().iter().any(|entry| entry == "complete"));
+    assert_eq!(state.completion_feedback.len(), 1);
+    assert_eq!(
+        state.completion_feedback[0]
+            .candidate
+            .as_ref()
+            .unwrap()
+            .assistant_text,
+        "candidate"
+    );
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|entry| *entry == "complete")
+            .count(),
+        1
+    );
+    assert_eq!(state.trace.values().last().unwrap(), "complete");
+    assert!(!state.open);
 }
 
 #[test]
-fn completion_retry_without_a_pending_override_retains_the_existing_pending_flag() {
+fn active_work_preserves_continuation_after_a_retained_ask_candidate() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("candidate2"),
         Reply::final_response("answer"),
     ]);
-    state.retain_completion_candidate = true;
-    state.decisions.extend([
-        CompletionDecision::Retry {
-            pending: Some(true),
-        },
-        CompletionDecision::Retry { pending: None },
-    ]);
+    state
+        .pending_ask_reminders
+        .push_back(Some("answer the ask".into()));
+    state
+        .active_work_reminders
+        .push_back(Some("work remains".into()));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.requests.len(), 3);
+    assert_eq!(state.completion_feedback.len(), 2);
+    assert!(state.completion_feedback[0].candidate.is_some());
+    assert_eq!(
+        state.completion_feedback[1].kind,
+        CompletionFeedbackKind::ActiveWork
+    );
+    assert!(state.completion_feedback[1].candidate.is_none());
 }
 
 #[test]
@@ -877,11 +916,19 @@ fn adapter_errors_stop_at_the_failing_effect() {
         ("record_tools", Reply::tools("response")),
         ("execute", Reply::tools("response")),
         ("record_results", Reply::tools("response")),
-        ("evaluate", Reply::final_response("response")),
+        ("pending_asks", Reply::final_response("response")),
+        ("active_work", Reply::final_response("response")),
+        ("exit_reminders", Reply::final_response("response")),
+        ("completion_feedback", Reply::final_response("response")),
         ("complete", Reply::final_response("response")),
     ] {
         let mut state = MemoryState::new([reply]);
         state.fail_at = Some(stage);
+        if stage == "completion_feedback" {
+            state
+                .pending_ask_reminders
+                .push_back(Some("answer the ask".into()));
+        }
         assert_eq!(state.run(), Err(Error::failed(stage)), "{stage}");
         assert_eq!(state.trace.values().last().unwrap(), stage);
     }
@@ -946,8 +993,8 @@ fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() 
     state.maximum = 2;
     state.interrupted = true;
     state
-        .decisions
-        .push_back(CompletionDecision::Retry { pending: None });
+        .active_work_reminders
+        .push_back(Some("work remains".into()));
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert!(!state.requests[2].0.final_phase);
     assert!(!state.requests[2].0.interrupted);

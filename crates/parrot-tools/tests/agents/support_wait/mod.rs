@@ -697,7 +697,7 @@ impl Harness {
             skills: Arc::new(Skills),
             context,
             status: Arc::new(Status),
-            completions: vec![],
+            completion_sources: vec![],
             templates: templates.clone(),
             reminders,
             output: Arc::new(Output),

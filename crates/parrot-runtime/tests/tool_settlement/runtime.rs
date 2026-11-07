@@ -221,7 +221,7 @@ pub(super) async fn runtime_with_publisher(
         skills: Arc::new(Skills),
         context: fixture.controller(),
         status: Arc::new(Status),
-        completions: vec![],
+        completion_sources: vec![],
         templates,
         reminders,
         output: Arc::new(Output),

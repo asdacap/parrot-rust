@@ -179,7 +179,7 @@ impl BudgetRuntime {
             skills: Arc::new(Skills(trace.clone())),
             context,
             status: Arc::new(Status(trace.clone())),
-            completions: vec![],
+            completion_sources: vec![],
             templates,
             reminders,
             output: Arc::new(Output::default()),

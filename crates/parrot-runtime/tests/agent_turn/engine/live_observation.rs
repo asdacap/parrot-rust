@@ -132,22 +132,41 @@ async fn live_context_does_not_wait_for_held_tool_execution() {
 }
 
 struct RetryOnce(AtomicBool);
-impl TurnCompletion<Security> for RetryOnce {
-    fn complete<'a>(
+impl CompletionStateSource for RetryOnce {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
-            Ok(if self.0.swap(false, Ordering::SeqCst) {
-                CompletionDecision::Retry {
-                    system_message: "in-memory-only retry instructions".into(),
-                    retain_candidate_assistant: true,
-                    completion_retry_pending: Some(true),
-                }
-            } else {
-                CompletionDecision::Complete
-            })
+            Ok(self
+                .0
+                .load(Ordering::SeqCst)
+                .then(|| "in-memory-only retry instructions".into()))
+        })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            assert_eq!(feedback.kind, CompletionFeedbackKind::ExitReminders);
+            assert_eq!(feedback.message, "in-memory-only retry instructions");
+            assert!(feedback.candidate.is_some());
+            assert!(self.0.swap(false, Ordering::SeqCst));
+            Ok(())
         })
     }
 }

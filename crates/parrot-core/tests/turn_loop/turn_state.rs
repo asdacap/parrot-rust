@@ -258,14 +258,14 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
 }
 
 #[test]
-fn non_retained_candidate_with_pending_false_continues_from_the_actual_user_tail() {
+fn active_work_without_a_retained_candidate_continues_from_the_actual_user_tail() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("answer"),
     ]);
-    state.decisions.push_back(CompletionDecision::Retry {
-        pending: Some(false),
-    });
+    state
+        .active_work_reminders
+        .push_back(Some("work remains".into()));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert_eq!(

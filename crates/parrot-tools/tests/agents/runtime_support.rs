@@ -364,7 +364,7 @@ impl ScopeFactory<Security> for Factory {
                 skills: Arc::new(Skills),
                 context: self.histories.controller(prepared.history),
                 status: Arc::new(Status),
-                completions: vec![],
+                completion_sources: vec![],
                 templates,
                 reminders,
                 output,

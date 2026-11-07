@@ -21,7 +21,7 @@ fn prompts(request: &Request) -> String {
 async fn root_runtime(
     fixture: &Fixture,
     provider: Scripted,
-    callbacks: Vec<Arc<dyn TurnCompletion<Security>>>,
+    callbacks: Vec<Arc<dyn CompletionStateSource>>,
 ) -> Runtime {
     let tools = Arc::new(Tools::default());
     let trace = tools.trace.clone();
@@ -80,7 +80,7 @@ async fn root_runtime(
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
         status: Arc::new(Status(trace.clone())),
-        completions: callbacks,
+        completion_sources: callbacks,
         templates,
         reminders,
         output: output.clone(),
@@ -208,26 +208,45 @@ struct GatedRetryCompletion {
     gate: Arc<Gate>,
     calls: AtomicUsize,
 }
-impl TurnCompletion<Security> for GatedRetryCompletion {
-    fn complete<'a>(
+impl CompletionStateSource for GatedRetryCompletion {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
                 self.gate
                     .wait(cancellation)
                     .await
                     .map_err(TurnError::Provider)?;
-                Ok(CompletionDecision::Retry {
-                    system_message: "retry first turn".into(),
-                    retain_candidate_assistant: false,
-                    completion_retry_pending: None,
-                })
+                Ok(Some("retry first turn".into()))
             } else {
-                Ok(CompletionDecision::Complete)
+                Ok(None)
             }
+        })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            assert_eq!(feedback.kind, CompletionFeedbackKind::ActiveWork);
+            assert_eq!(feedback.message, "retry first turn");
+            assert!(feedback.candidate.is_none());
+            Ok(())
         })
     }
 }

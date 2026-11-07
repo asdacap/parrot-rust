@@ -28,20 +28,38 @@ struct ArmAfterCallback {
     gate: Arc<Gate>,
     watch: Arc<AdmissionWatch>,
 }
-impl TurnCompletion<Security> for ArmAfterCallback {
-    fn complete<'a>(
+impl CompletionStateSource for ArmAfterCallback {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             self.gate
                 .wait(cancellation)
                 .await
                 .map_err(TurnError::Provider)?;
             self.watch.armed.store(true, Ordering::SeqCst);
-            Ok(CompletionDecision::Complete)
+            Ok(None)
         })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
     }
 }
 #[tokio::test]

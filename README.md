@@ -32,7 +32,7 @@ ported from the .NET repository. Repository contributor guidance is in
 
 - `States`: factual conversation turns and pending-message headers, turn effects,
   frozen model settings, prepared context, explicit messages, result recording,
-  and completion admission.
+  observed completion context, and explicit feedback effects.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
@@ -53,8 +53,8 @@ The core specifies and implements:
   catalog selection, and bounded tool-settlement extensions.
 - Truncated tool-call detection and JSON-argument validation before recording or
   executing calls.
-- The one-compaction retry guard for oversized requests, completion-policy retries,
-  and request-budget resets.
+- The one-compaction retry guard for oversized requests, completion-blocker
+  selection, candidate retention, retry continuation, and request-budget resets.
 - Conversation readiness and input-admission decisions from actual turn/message
   state, recording assistant calls before execution, and completion ordering before
   closing a turn.
@@ -65,6 +65,15 @@ turn closure is still pending. Pending-message peeks return stable identities an
 delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch.
+
+After a no-tool response, core observes pending asks, active work, then exit
+reminders, stopping at the first present context. State supplies that category's
+rendered context, not an accept/retry decision. Core retains ask/exit candidates
+and forces continuation; active-work feedback omits the candidate and preserves
+continuation state. Each feedback retry restarts the request budget. Native
+sources render the configured prompts and record exactly the feedback chosen by
+core, preserving their distinct persistence/publication paths. The native state
+adapter joins accepted mutations before the first observation and final closure.
 
 `run_turn` handles at most one conversation turn; `run` is the multi-turn
 convenience entry point. Both accept a caller-owned core `TurnBudget`, initialized

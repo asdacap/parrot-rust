@@ -173,7 +173,7 @@ async fn skill_session(
         skills,
         context: fixture.controller(),
         status: Arc::new(Status(trace.clone())),
-        completions: vec![],
+        completion_sources: vec![],
         templates,
         reminders,
         output: Arc::new(Output::default()),

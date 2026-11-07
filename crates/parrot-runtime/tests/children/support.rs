@@ -569,7 +569,7 @@ impl Factory {
             skills: Arc::new(Skills),
             context: histories.controller(history.clone()),
             status: Arc::new(Status),
-            completions: vec![],
+            completion_sources: vec![],
             templates,
             reminders,
             output: output.clone(),
