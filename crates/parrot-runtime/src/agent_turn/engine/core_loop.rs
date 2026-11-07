@@ -206,7 +206,22 @@ where
     let is_cancelled = || cancellation.is_cancelled();
     let cancelled = || cancellation.cancelled();
     let token = parrot_core::CancellationToken::new(&is_cancelled, &cancelled);
-    let outcome = parrot_core::run(&mut states, &tools, &provider, token).await;
+    let mut budget = parrot_core::budget::TurnBudget::new(states.disables_request_limit());
+    let outcome: Result<parrot_core::Outcome, CoreError> = async {
+        let mut answer = String::new();
+        loop {
+            let turn_open = backend.state.lock().await.turn.is_some();
+            if !turn_open && work.has_scheduled() {
+                return Ok(parrot_core::Outcome::Completed(answer));
+            }
+            match parrot_core::run_turn(&mut states, &tools, &provider, &mut budget, token).await? {
+                Some(parrot_core::Outcome::Completed(completed)) => answer = completed,
+                Some(failed @ parrot_core::Outcome::Failed(_)) => return Ok(failed),
+                None => return Ok(parrot_core::Outcome::Completed(answer)),
+            }
+        }
+    }
+    .await;
     {
         let mut state = backend.state.lock().await;
         state.request_status = None;
@@ -248,17 +263,51 @@ where
     fn disables_request_limit(&self) -> bool {
         self.backend.agent_limits.disable_max_turns
     }
-    fn has_scheduled_work(&self) -> bool {
-        self.work.has_scheduled()
-    }
     fn is_turn_open(&self) -> BoxFuture<'_, bool> {
         Box::pin(async move { self.backend.state.lock().await.turn.is_some() })
     }
-    fn has_work(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
+    fn get_last_turn(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationTurn>, CoreError>> {
         adapt_operation(async move {
             let state = self.backend.state.lock().await;
-            Ok(state.conversation.is_answerable()
-                || self.backend.history.has_pending_inputs().await?)
+            let Some(turn) = state.conversation.read_last_turn_messages() else {
+                return Ok(None);
+            };
+            let messages: Vec<parrot_core::Message> =
+                turn.iter().map(provider_message).map(Into::into).collect();
+            let result = messages
+                .iter()
+                .rev()
+                .find(|message| message.role != parrot_core::Role::System)
+                .filter(|message| {
+                    message.role == parrot_core::Role::Assistant && message.tool_calls.is_empty()
+                })
+                .cloned();
+            Ok(Some(parrot_core::ConversationTurn { messages, result }))
+        })
+    }
+    fn get_pending_message(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<parrot_core::PendingMessage>, CoreError>> {
+        adapt_operation(async move {
+            let Some(input) = self.backend.history.peek_pending_input().await? else {
+                return Ok(None);
+            };
+            let delivery = match input.delivery {
+                protocol::Delivery::DELIVERY_STEER => parrot_core::Delivery::Steer,
+                protocol::Delivery::DELIVERY_QUEUE => parrot_core::Delivery::Queue,
+                protocol::Delivery::DELIVERY_UNSPECIFIED => {
+                    return Err(TurnError::Service(
+                        "pending input delivery is unspecified".into(),
+                    ));
+                }
+            };
+            Ok(Some(parrot_core::PendingMessage {
+                input_id: input.id,
+                message_id: input.message_id,
+                delivery,
+            }))
         })
     }
     fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, CoreError>> {
@@ -358,10 +407,15 @@ where
             Ok(())
         })
     }
-    fn promote_input(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn promote_input(
+        &mut self,
+        admission: parrot_core::InputAdmission,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             let mut state = self.backend.state.lock().await;
-            self.backend.promote(&mut state, self.cancellation).await
+            self.backend
+                .promote(&mut state, admission, self.cancellation)
+                .await
         })
     }
     fn take_interruption(&mut self) -> bool {

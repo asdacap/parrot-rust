@@ -93,6 +93,14 @@ impl EventRepository {
         self.transaction(move |tx| inputs::has_pending(tx, &agent))
             .await
     }
+    /// Reads the first pending steer, otherwise the first queued input, without promotion.
+    pub async fn peek_pending_input(
+        &self,
+        agent: String,
+    ) -> Result<Option<AdmittedInput>, EventError> {
+        self.transaction(move |tx| inputs::peek_pending_input(tx, &agent))
+            .await
+    }
     pub async fn inputs_for_next_promotion(
         &self,
         agent: String,

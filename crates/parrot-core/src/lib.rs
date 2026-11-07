@@ -13,18 +13,36 @@ pub async fn run<'a>(
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
     let mut budget = budget::TurnBudget::new(states.disables_request_limit());
+    loop {
+        match run_turn(states, tools, provider, &mut budget, cancellation).await? {
+            Some(Outcome::Completed(completed)) => answer = completed,
+            Some(failed @ Outcome::Failed(_)) => return Ok(failed),
+            None => return Ok(Outcome::Completed(answer)),
+        }
+    }
+}
+
+/// Runs at most one completed turn using the caller-owned run-scope budget.
+/// Returns none when the factual conversation and pending input need no response.
+pub async fn run_turn<'a>(
+    states: &mut dyn States,
+    tools: &'a dyn Tools,
+    provider: &dyn Provider,
+    budget: &mut budget::TurnBudget,
+    cancellation: CancellationToken<'a>,
+) -> Result<Option<Outcome>, Error> {
     let mut retry_pending = false;
     let mut compacted_oversized = false;
     let mut selected = None;
     loop {
-        if !states.is_turn_open().await && states.has_scheduled_work() {
-            return Ok(Outcome::Completed(answer));
-        }
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        if !retry_pending && !states.has_work().await? {
-            return Ok(Outcome::Completed(answer));
+        if !retry_pending {
+            let turn = states.get_last_turn().await?;
+            if !needs_response(turn.as_ref()) && states.get_pending_message().await?.is_none() {
+                return Ok(None);
+            }
         }
         if !states.is_turn_open().await {
             budget.begin_turn();
@@ -33,10 +51,16 @@ pub async fn run<'a>(
             states.restore_tool_availability().await?;
             selected = Some((options, catalog));
         }
-        states.promote_input().await?;
+        let turn = states.get_last_turn().await?;
+        let admission = if needs_response(turn.as_ref()) {
+            InputAdmission::SteersOnly
+        } else {
+            InputAdmission::SteersOrNextQueued
+        };
+        states.promote_input(admission).await?;
         let (options, catalog) = selected.as_ref().ok_or_else(Error::missing_turn)?;
         let Some(phase) = budget.admit(options.maximum_requests, states.take_interruption()) else {
-            return Ok(Outcome::Failed(states.fail_runaway().await?));
+            return Ok(Some(Outcome::Failed(states.fail_runaway().await?)));
         };
         let definitions = if phase.final_phase {
             &catalog.final_phase
@@ -94,7 +118,7 @@ pub async fn run<'a>(
             }
             states.record_tool_results(&results).await?;
             if phase.final_phase && !budget.try_extend_settlement() {
-                return Ok(Outcome::Failed(states.fail_runaway().await?));
+                return Ok(Some(Outcome::Failed(states.fail_runaway().await?)));
             }
             continue;
         }
@@ -106,10 +130,24 @@ pub async fn run<'a>(
                 budget.restart();
             }
             CompletionDecision::Complete => {
-                answer = states.complete_turn(&response).await?;
-                retry_pending = false;
-                selected = None;
+                return Ok(Some(Outcome::Completed(
+                    states.complete_turn(&response).await?,
+                )));
             }
         }
     }
+}
+
+fn needs_response(turn: Option<&ConversationTurn>) -> bool {
+    turn.is_some_and(|turn| {
+        turn.result.is_none()
+            && matches!(
+                turn.messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.role != Role::System)
+                    .map(|message| message.role),
+                Some(Role::User | Role::Tool)
+            )
+    })
 }

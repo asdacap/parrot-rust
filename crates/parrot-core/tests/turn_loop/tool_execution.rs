@@ -4,8 +4,7 @@ use super::*;
 fn initialized_results_remain_untouched_when_core_has_no_work_or_is_cancelled() {
     for cancelled in [false, true] {
         let mut state = MemoryState::new([]);
-        state.work = false;
-        state.turns = 0;
+        state.pending_messages.clear();
         if cancelled {
             state.cancellation.cancel();
         }
@@ -204,8 +203,7 @@ fn independent_tool_implementations_share_the_same_state_and_fresh_result_protoc
         Reply::final_response("second answer"),
     ]);
     assert_eq!(state.run(), Ok(Outcome::Completed("first answer".into())));
-    state.work = true;
-    state.turns = 1;
+    state.enqueue_message(Delivery::Queue, "next question");
     let provider = state.provider.clone();
     assert_eq!(
         state.run_with(&EchoTools, &provider),

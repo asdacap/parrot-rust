@@ -1,7 +1,9 @@
 use super::Fixture;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::storage::AdmissionError;
-use parrot_domain::protocol::messages::parrot::{Delivery, Event, InputAdmitted, InputPromoted};
+use parrot_domain::protocol::messages::parrot::{
+    Delivery, Event, InputAdmitted, InputCanceled, InputPromoted,
+};
 use parrot_storage::events::{
     AdmittedInput, ConversationPart, EventError, EventRepository, NeverCancelled,
 };
@@ -55,6 +57,132 @@ async fn admit(
         .into_value()
         .into_output()
 }
+#[tokio::test]
+async fn pending_peek_is_read_only_prioritizes_steers_and_retains_queue_sequence() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    assert_eq!(
+        repository.peek_pending_input("agent".into()).await.unwrap(),
+        None
+    );
+    let first_queue = admit(
+        &repository,
+        "agent",
+        "queue-one",
+        "queue-one",
+        Delivery::DELIVERY_QUEUE,
+    )
+    .await;
+    let second_queue = admit(
+        &repository,
+        "agent",
+        "queue-two",
+        "queue-two",
+        Delivery::DELIVERY_QUEUE,
+    )
+    .await;
+    let first_steer = admit(
+        &repository,
+        "agent",
+        "steer-one",
+        "steer-one",
+        Delivery::DELIVERY_STEER,
+    )
+    .await;
+    let second_steer = admit(
+        &repository,
+        "agent",
+        "steer-two",
+        "steer-two",
+        Delivery::DELIVERY_STEER,
+    )
+    .await;
+    let other = admit(
+        &repository,
+        "other",
+        "other-steer",
+        "other-steer",
+        Delivery::DELIVERY_STEER,
+    )
+    .await;
+    let before = repository.replay().await.unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            repository.peek_pending_input("agent".into()).await.unwrap(),
+            Some(first_steer.input.clone())
+        );
+    }
+    assert_eq!(repository.replay().await.unwrap(), before);
+    assert_eq!(
+        repository
+            .inputs_for_next_promotion("agent".into())
+            .await
+            .unwrap(),
+        vec![first_steer.input.clone(), second_steer.input.clone()]
+    );
+    assert_eq!(
+        repository.peek_pending_input("other".into()).await.unwrap(),
+        Some(other.input)
+    );
+    let canceled = first_steer.input.id.clone();
+    repository
+        .cancel_pending_input("agent".into(), first_steer.input.id, move || {
+            let mut event = Event::new();
+            event.id = "cancel-steer".into();
+            event.agent_session_id = "agent".into();
+            event.set_input_canceled(InputCanceled {
+                input_id: canceled,
+                ..Default::default()
+            });
+            Ok(event)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        repository.peek_pending_input("agent".into()).await.unwrap(),
+        Some(second_steer.input.clone())
+    );
+    let promoted = repository
+        .promote_steers("agent".into(), |input| {
+            let mut event = Event::new();
+            event.id = "promote-steer".into();
+            event.agent_session_id = "agent".into();
+            event.set_input_promoted(InputPromoted {
+                input_id: input.id.clone(),
+                message_id: input.message_id.clone(),
+                ..Default::default()
+            });
+            Ok(event)
+        })
+        .await
+        .unwrap();
+    assert_eq!(promoted.len(), 1);
+    assert_eq!(promoted[0].input, second_steer.input);
+    assert_eq!(
+        repository.peek_pending_input("agent".into()).await.unwrap(),
+        Some(first_queue.input.clone())
+    );
+    let canceled = first_queue.input.id.clone();
+    repository
+        .cancel_pending_input("agent".into(), first_queue.input.id, move || {
+            let mut event = Event::new();
+            event.id = "cancel-queue".into();
+            event.agent_session_id = "agent".into();
+            event.set_input_canceled(InputCanceled {
+                input_id: canceled,
+                ..Default::default()
+            });
+            Ok(event)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        repository.peek_pending_input("agent".into()).await.unwrap(),
+        Some(second_queue.input)
+    );
+    repository.database().close().await.unwrap();
+}
+
 #[tokio::test]
 async fn actual_input_admission_survives_dropped_completion_and_retry_keeps_compound_key() {
     let fixture = Fixture::new();

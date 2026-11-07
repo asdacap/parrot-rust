@@ -1,6 +1,6 @@
 use super::Fixture;
 use parrot_domain::contracts::async_ops::BoxFuture;
-use parrot_domain::protocol::messages::parrot::Event;
+use parrot_domain::protocol::messages::parrot::{Delivery, Event, InputAdmitted};
 use parrot_storage::conversation::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -70,6 +70,192 @@ fn model(role: MessageRole, text: &str) -> ModelMessage {
         tool_call_id: String::new(),
         provider_content: ProviderContent::default(),
     }
+}
+
+#[tokio::test]
+async fn last_visible_turn_is_absent_for_empty_or_system_only_conversations() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let history = repo
+        .bind_agent_history(
+            "agent".into(),
+            Arc::new(Projection::new(
+                "agent",
+                repo.events().database().selected_root().clone(),
+            )),
+        )
+        .unwrap();
+    let mut conversation = AgentConversation::new(history).await.unwrap();
+    assert_eq!(conversation.read_last_turn_messages(), None);
+    conversation.add(model(MessageRole::System, "summary"));
+    conversation.add(model(MessageRole::System, "status"));
+    repo.events().database().close().await.unwrap();
+    assert_eq!(conversation.read_last_turn_messages(), None);
+    assert!(!conversation.is_answerable());
+}
+
+#[tokio::test]
+async fn last_visible_turn_retains_tools_candidates_and_trailing_notices_after_latest_user() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let history = repo
+        .bind_agent_history(
+            "agent".into(),
+            Arc::new(Projection::new(
+                "agent",
+                repo.events().database().selected_root().clone(),
+            )),
+        )
+        .unwrap();
+    let mut conversation = AgentConversation::new(history).await.unwrap();
+    conversation.add(model(MessageRole::User, "older question"));
+    conversation.add(model(MessageRole::Assistant, "older answer"));
+    conversation.add(model(MessageRole::System, "between turns"));
+    let mut tool_request = model(MessageRole::Assistant, "tool request");
+    tool_request.tool_calls.push(ToolCall {
+        id: "call".into(),
+        name: "read".into(),
+        arguments_json: " { \"raw\" : 1.2300 } ".into(),
+    });
+    let mut tool_result = model(MessageRole::Tool, "tool result");
+    tool_result.tool_call_id = "call".into();
+    let expected = vec![
+        model(MessageRole::User, "latest question"),
+        tool_request,
+        tool_result,
+        model(MessageRole::Assistant, "retained candidate one"),
+        model(MessageRole::System, "retry notice"),
+        model(MessageRole::Assistant, "retained candidate two"),
+        model(MessageRole::System, "trailing notice"),
+    ];
+    for message in &expected {
+        conversation.add(message.clone());
+    }
+    repo.events().database().close().await.unwrap();
+    assert_eq!(conversation.read_last_turn_messages(), Some(expected));
+    assert_eq!(conversation.len(), 10);
+    assert!(!conversation.is_answerable());
+    let latest = model(MessageRole::User, "newer question");
+    conversation.add(latest.clone());
+    assert_eq!(conversation.read_last_turn_messages(), Some(vec![latest]));
+    assert!(conversation.is_answerable());
+}
+
+#[tokio::test]
+async fn last_visible_turn_keeps_compacted_context_when_no_user_remains_visible() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let history = repo
+        .bind_agent_history(
+            "agent".into(),
+            Arc::new(Projection::new(
+                "agent",
+                repo.events().database().selected_root().clone(),
+            )),
+        )
+        .unwrap();
+    let before = history
+        .append_conversation(
+            event("before", "agent"),
+            ConversationMessage::text(MessageRole::User, "compacted question"),
+        )
+        .await
+        .unwrap();
+    history
+        .append_compaction_status(
+            event("compacted", "agent"),
+            CompactionSnapshot {
+                summary: "visible summary".into(),
+                watermark: before.sequence,
+            },
+            "visible status".into(),
+        )
+        .await
+        .unwrap();
+    let mut request = ConversationMessage::text(MessageRole::Assistant, "continued tool call");
+    request.tool_calls.push(ToolCall {
+        id: "call".into(),
+        name: "read".into(),
+        arguments_json: "{}".into(),
+    });
+    history
+        .append_conversation(event("request", "agent"), request)
+        .await
+        .unwrap();
+    let mut result = ConversationMessage::text(MessageRole::Tool, "restored result");
+    result.tool_call_id = "call".into();
+    history
+        .append_conversation(event("result", "agent"), result)
+        .await
+        .unwrap();
+    let mut conversation = AgentConversation::new(history).await.unwrap();
+    let mut expected = conversation.messages();
+    assert!(
+        expected
+            .iter()
+            .all(|message| message.role != MessageRole::User)
+    );
+    assert!(
+        expected
+            .iter()
+            .any(|message| message.role == MessageRole::Tool)
+    );
+    let notice = model(MessageRole::System, "notice after restored result");
+    conversation.add(notice.clone());
+    expected.push(notice);
+    repo.events().database().close().await.unwrap();
+    assert_eq!(conversation.read_last_turn_messages(), Some(expected));
+    assert!(conversation.is_answerable());
+}
+
+#[tokio::test]
+async fn bound_pending_peek_preserves_raw_image_parts_without_materializing_or_promoting() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let history = repo
+        .bind_agent_history(
+            "agent".into(),
+            Arc::new(Projection::new(
+                "agent",
+                repo.events().database().selected_root().clone(),
+            )),
+        )
+        .unwrap();
+    let parts = vec![
+        ConversationPart::text("prefix"),
+        ConversationPart::image("absent-image-artifact", "image/png", "not materialized"),
+        ConversationPart::text("suffix"),
+    ];
+    let admitted = history
+        .admit_parts(
+            "message".into(),
+            parts.clone(),
+            Delivery::DELIVERY_QUEUE,
+            |input| {
+                let mut published = event("admitted", "agent");
+                published.set_input_admitted(InputAdmitted {
+                    input_id: input.id.clone(),
+                    message_id: input.message_id.clone(),
+                    content: input.content(),
+                    delivery: input.delivery.into(),
+                    ..Default::default()
+                });
+                Ok(published)
+            },
+        )
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            history.peek_pending_input().await.unwrap(),
+            Some(admitted.input.clone())
+        );
+    }
+    assert_eq!(admitted.input.parts, parts);
+    assert!(history.conversation().await.unwrap().is_empty());
+    assert_eq!(repo.events().replay().await.unwrap().len(), 1);
+    assert!(history.has_pending_inputs().await.unwrap());
+    repo.events().database().close().await.unwrap();
 }
 
 #[tokio::test]

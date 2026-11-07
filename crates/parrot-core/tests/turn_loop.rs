@@ -1,8 +1,11 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionDecision, Content, ContextSnapshot, Error, ErrorCode,
-    ErrorKind, FinishReason, Message, Outcome, Provider, ProviderRequest, ProviderResponse,
-    Reasoning, RetryReason, Role, States, ToolCall, ToolCatalog, ToolDefinition, ToolImage,
-    ToolResult, ToolStatus, Tools, TurnOptions, budget::TurnRequestPhase, run,
+    BoxFuture, CancellationToken, CompletionDecision, Content, ContextSnapshot, ConversationTurn,
+    Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message, Outcome,
+    PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role,
+    States, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools,
+    TurnOptions,
+    budget::{TurnBudget, TurnRequestPhase},
+    run, run_turn,
 };
 use std::{
     collections::VecDeque,
@@ -21,6 +24,8 @@ mod cancellation;
 mod request_assembly;
 #[path = "turn_loop/tool_execution.rs"]
 mod tool_execution;
+#[path = "turn_loop/turn_state.rs"]
+mod turn_state;
 
 use cancellation::CancellationSource;
 
@@ -210,16 +215,18 @@ struct MemoryState {
     context: ContextSnapshot,
     messages: Vec<Message>,
     preparations: VecDeque<(ContextSnapshot, Vec<Message>)>,
-    work: bool,
-    turns: usize,
+    last_turn: Option<ConversationTurn>,
+    pending_messages: VecDeque<(PendingMessage, Message)>,
+    next_input: usize,
     open: bool,
-    scheduled: bool,
+    admissions: Vec<InputAdmission>,
+    begin_message: Option<Message>,
     cancellation: Arc<CancellationSource>,
     interrupted: bool,
     unlimited: bool,
     maximum: i32,
     reduced: bool,
-    clear_work_on_retry: bool,
+    retain_completion_candidate: bool,
     availability_restored: Arc<AtomicBool>,
     fail_at: Option<&'static str>,
 }
@@ -227,7 +234,7 @@ impl MemoryState {
     fn new(replies: impl IntoIterator<Item = Reply>) -> Self {
         let trace = Trace::default();
         let availability_restored = Arc::new(AtomicBool::new(false));
-        Self {
+        let mut state = Self {
             trace: trace.clone(),
             tools: MemoryTools {
                 trace: trace.clone(),
@@ -259,19 +266,66 @@ impl MemoryState {
             },
             messages: Vec::new(),
             preparations: VecDeque::new(),
-            work: true,
-            turns: 1,
+            last_turn: None,
+            pending_messages: VecDeque::new(),
+            next_input: 0,
             open: false,
-            scheduled: false,
+            admissions: Vec::new(),
+            begin_message: None,
             cancellation: Arc::default(),
             interrupted: false,
             unlimited: false,
             maximum: 10,
             reduced: true,
-            clear_work_on_retry: false,
+            retain_completion_candidate: false,
             availability_restored,
             fail_at: None,
+        };
+        state.enqueue_message(Delivery::Queue, "question");
+        state
+    }
+    fn enqueue_message(&mut self, delivery: Delivery, content: &str) {
+        let input = self.next_input;
+        self.next_input += 1;
+        self.pending_messages.push_back((
+            PendingMessage {
+                input_id: format!("input-{input}"),
+                message_id: format!("message-{input}"),
+                delivery,
+            },
+            Message {
+                role: Role::User,
+                contents: vec![Content::Text(content.into())],
+                ..Message::default()
+            },
+        ));
+    }
+    fn append_turn_message(&mut self, message: Message) {
+        if message.role == Role::User {
+            self.last_turn = None;
         }
+        let turn = self.last_turn.get_or_insert_with(|| ConversationTurn {
+            messages: Vec::new(),
+            result: None,
+        });
+        turn.messages.push(message);
+        turn.result = turn
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role != Role::System)
+            .filter(|message| message.role == Role::Assistant && message.tool_calls.is_empty())
+            .cloned();
+    }
+    fn append_response(&mut self, response: &ProviderResponse) {
+        self.append_turn_message(Message {
+            role: Role::Assistant,
+            contents: vec![Content::Text(response.assistant_text.clone())],
+            tool_calls: response.tool_calls.clone(),
+            provider_id: response.provider_id.clone(),
+            provider_content: response.provider_content.clone(),
+            ..Message::default()
+        });
     }
     fn step(&mut self, name: &'static str) -> Result<(), Error> {
         self.trace.step(name, self.fail_at)
@@ -313,28 +367,52 @@ impl States for MemoryState {
                 assert_eq!(result.tool_name, call.name);
             }
             self.applied_results.extend_from_slice(results);
+            for result in results {
+                self.append_turn_message(Message {
+                    role: Role::Tool,
+                    contents: vec![Content::Text(result.text.clone())],
+                    tool_call_id: result.call_id.clone(),
+                    ..Message::default()
+                });
+            }
             Ok(())
         })
     }
     fn disables_request_limit(&self) -> bool {
         self.unlimited
     }
-    fn has_scheduled_work(&self) -> bool {
-        self.scheduled
+    fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
+        Box::pin(async move {
+            if self.fail_at == Some("last_turn") {
+                self.trace.step("last_turn", self.fail_at)?;
+            }
+            Ok(self.last_turn.clone())
+        })
+    }
+    fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
+        Box::pin(async move {
+            if self.fail_at == Some("pending_message") {
+                self.trace.step("pending_message", self.fail_at)?;
+            }
+            Ok(self
+                .pending_messages
+                .iter()
+                .find(|(message, _)| message.delivery == Delivery::Steer)
+                .or_else(|| self.pending_messages.front())
+                .map(|(message, _)| message.clone()))
+        })
     }
     fn is_turn_open(&self) -> BoxFuture<'_, bool> {
         Box::pin(async move { self.open })
-    }
-    fn has_work(&self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async move { Ok(self.work || self.turns > 0) })
     }
     fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>> {
         Box::pin(async move {
             self.step("begin")?;
             self.open = true;
-            self.work = true;
             self.availability_restored.store(false, Ordering::SeqCst);
-            self.turns = self.turns.saturating_sub(1);
+            if let Some(message) = self.begin_message.take() {
+                self.append_turn_message(message);
+            }
             Ok(TurnOptions {
                 maximum_requests: self.maximum,
                 model: self.model.clone(),
@@ -351,8 +429,30 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn promote_input(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move { self.step("promote") })
+    fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("promote")?;
+            self.admissions.push(admission);
+            let mut promoted = Vec::new();
+            while let Some(index) = self
+                .pending_messages
+                .iter()
+                .position(|(message, _)| message.delivery == Delivery::Steer)
+            {
+                promoted.push(self.pending_messages.remove(index).unwrap().1);
+            }
+            if promoted.is_empty() && admission == InputAdmission::SteersOrNextQueued {
+                promoted.extend(
+                    self.pending_messages
+                        .pop_front()
+                        .map(|(_, message)| message),
+                );
+            }
+            for message in promoted {
+                self.append_turn_message(message);
+            }
+            Ok(())
+        })
     }
     fn take_interruption(&mut self) -> bool {
         std::mem::take(&mut self.interrupted)
@@ -410,6 +510,7 @@ impl States for MemoryState {
         Box::pin(async move {
             self.step("record_tools")?;
             self.recorded_tools.push(response.clone());
+            self.append_response(response);
             self.recorded_catalogs.push(
                 self.requests
                     .last()
@@ -422,7 +523,7 @@ impl States for MemoryState {
     }
     fn evaluate_completion<'a>(
         &'a mut self,
-        _response: &'a ProviderResponse,
+        response: &'a ProviderResponse,
     ) -> BoxFuture<'a, Result<CompletionDecision, Error>> {
         Box::pin(async move {
             self.step("evaluate")?;
@@ -430,8 +531,15 @@ impl States for MemoryState {
                 .decisions
                 .pop_front()
                 .unwrap_or(CompletionDecision::Complete);
-            if matches!(decision, CompletionDecision::Retry { .. }) && self.clear_work_on_retry {
-                self.work = false;
+            if matches!(decision, CompletionDecision::Retry { .. })
+                && self.retain_completion_candidate
+            {
+                self.append_response(response);
+                self.append_turn_message(Message {
+                    role: Role::System,
+                    contents: vec![Content::Text("completion retry".into())],
+                    ..Message::default()
+                });
             }
             Ok(decision)
         })
@@ -443,7 +551,7 @@ impl States for MemoryState {
         Box::pin(async move {
             self.step("complete")?;
             self.open = false;
-            self.work = false;
+            self.append_response(response);
             Ok(response.assistant_text.clone())
         })
     }
@@ -569,7 +677,7 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
         Reply::final_response("answer"),
     ]);
     state.maximum = 2;
-    state.clear_work_on_retry = true;
+    state.retain_completion_candidate = true;
     state.decisions.push_back(CompletionDecision::Retry {
         pending: Some(true),
     });
@@ -603,7 +711,7 @@ fn completion_retry_can_clear_pending_and_stop_without_closing_the_candidate() {
         Reply::final_response("candidate"),
         Reply::final_response("candidate2"),
     ]);
-    state.clear_work_on_retry = true;
+    state.retain_completion_candidate = true;
     state.decisions.extend([
         CompletionDecision::Retry {
             pending: Some(true),
@@ -624,7 +732,7 @@ fn completion_retry_without_a_pending_override_retains_the_existing_pending_flag
         Reply::final_response("candidate2"),
         Reply::final_response("answer"),
     ]);
-    state.clear_work_on_retry = true;
+    state.retain_completion_candidate = true;
     state.decisions.extend([
         CompletionDecision::Retry {
             pending: Some(true),
@@ -682,25 +790,18 @@ fn compaction_that_does_not_reduce_context_returns_the_original_provider_error()
 }
 
 #[test]
-fn scheduled_work_yields_before_any_effect_but_not_during_an_open_turn() {
+fn open_turn_without_captured_settings_fails_before_provider_invocation() {
     let mut state = MemoryState::new([]);
-    state.scheduled = true;
-    assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
-    assert!(state.trace.values().is_empty());
-    state.cancellation.cancel();
-    assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
-    assert!(state.trace.values().is_empty());
-    state.cancellation = Arc::default();
     state.open = true;
     assert_eq!(state.run(), Err(Error::missing_turn()));
     assert_eq!(state.trace.values(), ["promote"]);
+    assert!(state.provider.requests.lock().unwrap().is_empty());
 }
 
 #[test]
 fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     let mut state = MemoryState::new([]);
-    state.turns = 0;
-    state.work = false;
+    state.pending_messages.clear();
     assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
     assert!(state.trace.values().is_empty());
     state.trace.clear();
@@ -759,7 +860,7 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
         Reply::tools("call5"),
     ]);
     state.maximum = 1;
-    state.turns = 2;
+    state.enqueue_message(Delivery::Queue, "second question");
     assert_eq!(state.run(), Ok(Outcome::Failed("runaway".into())));
     assert_eq!(state.requests.len(), 6);
     assert!(state.requests[0].0.enters_final_phase);
@@ -900,8 +1001,7 @@ fn different_provider_implementations_share_the_same_states_tools_and_protocol()
         states.run_with(&tools, &provider),
         Ok(Outcome::Completed("scripted answer".into()))
     );
-    states.turns = 1;
-    states.work = true;
+    states.enqueue_message(Delivery::Queue, "next question");
     assert_eq!(
         states.run_with(&tools, &EchoProvider),
         Ok(Outcome::Completed("core request".into()))

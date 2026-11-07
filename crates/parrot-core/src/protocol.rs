@@ -80,18 +80,20 @@ pub trait States: Send {
     ) -> BoxFuture<'a, Result<(), Error>>;
     /// Reports whether provider-request limits are disabled for this run.
     fn disables_request_limit(&self) -> bool;
-    /// Reports whether scheduled work should run before opening another turn.
-    fn has_scheduled_work(&self) -> bool;
+    /// Reads the latest visible logical turn, including retained completion candidates.
+    fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>>;
+    /// Peeks at the next durable pending input header without reserving, promoting,
+    /// or materializing its content.
+    fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>>;
     /// Reports whether a durable turn is already open.
     fn is_turn_open(&self) -> BoxFuture<'_, bool>;
-    /// Reports whether the conversation or pending input requires a response.
-    fn has_work(&self) -> BoxFuture<'_, Result<bool, Error>>;
     /// Opens a turn and freezes its model, profile, and authority privately.
     fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>>;
     /// Restores tool availability after the core captures the turn's tool catalog.
     fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), Error>>;
-    /// Promotes eligible input into the current conversation.
-    fn promote_input(&mut self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Promotes all currently pending steers, or one queued input when permitted,
+    /// preserving atomic native admission and batching its content effects.
+    fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>>;
     /// Consumes a request to enter the interrupted final phase.
     fn take_interruption(&mut self) -> bool;
     /// Prepares context using exactly the supplied definitions and core-selected phase.
@@ -182,6 +184,34 @@ pub struct Message {
     pub tool_call_id: String,
     pub provider_id: String,
     pub provider_content: String,
+}
+
+/// The latest visible logical segment, not a durable turn-event interval.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationTurn {
+    pub messages: Vec<Message>,
+    /// Present only when the non-system tail is a no-tool assistant response,
+    /// including a retained candidate; it does not prove durable turn closure.
+    pub result: Option<Message>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingMessage {
+    pub input_id: String,
+    pub message_id: String,
+    pub delivery: Delivery,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Delivery {
+    Steer,
+    Queue,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InputAdmission {
+    SteersOnly,
+    SteersOrNextQueued,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

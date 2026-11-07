@@ -390,6 +390,7 @@ where
     async fn promote(
         &self,
         state: &mut State,
+        admission: parrot_core::InputAdmission,
         cancellation: &dyn Cancellation,
     ) -> Result<(), TurnError> {
         let agent = self.identity.session_id.clone();
@@ -410,7 +411,7 @@ where
                 Ok(event)
             })
             .await?;
-        if promotions.is_empty() && !state.conversation.is_answerable() {
+        if promotions.is_empty() && admission == parrot_core::InputAdmission::SteersOrNextQueued {
             let agent = self.identity.session_id.clone();
             let ids = self.event_id.clone();
             promotions = self

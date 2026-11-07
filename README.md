@@ -30,8 +30,9 @@ ported from the .NET repository. Repository contributor guidance is in
 
 `parrot-core` owns the agent turn protocol and loop, with exactly three traits:
 
-- `States`: conversation and turn effects, frozen model settings, prepared context
-  information, explicit messages, result recording, and completion admission.
+- `States`: factual conversation turns and pending-message headers, turn effects,
+  frozen model settings, prepared context, explicit messages, result recording,
+  and completion admission.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
@@ -54,8 +55,23 @@ The core specifies and implements:
   executing calls.
 - The one-compaction retry guard for oversized requests, completion-policy retries,
   and request-budget resets.
-- Readiness/scheduled-work decisions, recording assistant calls before execution,
-  and completion ordering before closing a turn.
+- Conversation readiness and input-admission decisions from actual turn/message
+  state, recording assistant calls before execution, and completion ordering before
+  closing a turn.
+
+`States` exposes the latest visible conversation segment and its result, not a
+precomputed work flag. A no-tool assistant candidate can be present while durable
+turn closure is still pending. Pending-message peeks return stable identities and
+delivery mode without reserving, promoting, or materializing their bodies. Core
+chooses whether admission allows only steers or also the next queued message;
+native promotion rechecks the queue and keeps all steers in one batch.
+
+`run_turn` handles at most one conversation turn using a caller-retained core
+`TurnBudget`; `run` is the multi-turn convenience entry point. Native orchestration checks its
+scheduled-operation queue between `run_turn` calls. Unscheduled turns share the
+existing budget scope; a native scheduled-work boundary ends that scope before
+processing queued operations. Scheduler priority never changes what the state
+getters report, and core has no scheduler-query method.
 
 `parrot-runtime` implements the three traits with private adapters. Persistence,
 prompt preparation, compaction, security, streaming, accounting, cancellation,

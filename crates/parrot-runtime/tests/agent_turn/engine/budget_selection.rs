@@ -537,6 +537,108 @@ async fn actual_profile_allowed_and_disabled_tools_filter_every_request() {
 }
 
 #[tokio::test]
+async fn scheduled_work_precedes_queued_input_and_starts_a_fresh_core_budget_scope() {
+    let fixture = Fixture::new();
+    let first_gate = Gate::new();
+    let second_gate = Gate::new();
+    let scheduled_gate = Gate::new();
+    let mut first = Step::complete("first answer");
+    first.gate = Some(first_gate.clone());
+    let mut second = Step::complete("queued answer");
+    second.gate = Some(second_gate.clone());
+    let provider = Scripted::new(vec![first, second]);
+    let mut selected_profile = profile();
+    selected_profile.maximum_requests = 1;
+    let runtime = BudgetRuntime::new(
+        &fixture,
+        &provider,
+        100_000,
+        0,
+        0,
+        selected_profile,
+        BudgetTools::new(&[]),
+    )
+    .await;
+    let sent = runtime
+        .send("first prompt", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    first_gate.entered().await;
+    let queued = runtime
+        .send("queued prompt", protocol::Delivery::DELIVERY_QUEUE)
+        .await;
+    let scheduled = Arc::new(AtomicBool::new(false));
+    let observed = scheduled.clone();
+    let gate = scheduled_gate.clone();
+    let work = runtime
+        .session
+        .schedule_work(
+            move |_, cancellation| {
+                Box::pin(async move {
+                    observed.store(true, Ordering::SeqCst);
+                    gate.wait(cancellation.as_ref()).await.map_err(|_| {
+                        parrot_runtime::agent_turn::lifecycle::LifecycleError::Cancelled
+                    })
+                })
+            },
+            Arc::new(NeverCancelled),
+        )
+        .unwrap();
+    assert!(!scheduled.load(Ordering::SeqCst));
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    first_gate.open();
+    scheduled_gate.entered().await;
+    assert!(scheduled.load(Ordering::SeqCst));
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    let pending = fixture.history.peek_pending_input().await.unwrap().unwrap();
+    assert_eq!(pending.id, queued.admission.input.id);
+    assert_eq!(pending.message_id, queued.admission.input.message_id);
+    assert_eq!(pending.delivery, protocol::Delivery::DELIVERY_QUEUE);
+    scheduled_gate.open();
+    bounded(work.join()).await.unwrap();
+    second_gate.entered().await;
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert!(
+            requests[1]
+                .messages
+                .iter()
+                .any(|message| message.role == sessions::Role::User
+                    && message.content().contains("queued prompt"))
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request
+                    .messages
+                    .iter()
+                    .filter(|message| message.role == sessions::Role::System
+                        && message.content().contains("final provider request"))
+                    .count())
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+    let events = fixture.events().await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_turn_started())
+            .count(),
+        2
+    );
+    second_gate.open();
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    assert_eq!(
+        bounded(queued.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    runtime.close().await;
+}
+
+#[tokio::test]
 async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_turn_restores_current_selection()
  {
     let fixture = Fixture::new();

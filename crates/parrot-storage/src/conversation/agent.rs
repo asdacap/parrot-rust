@@ -241,6 +241,13 @@ impl AgentHistoryView {
         }
         Ok(promoted)
     }
+    /// Reads one pending input without promoting it or materializing its parts.
+    pub async fn peek_pending_input(&self) -> Result<Option<AdmittedInput>, EventError> {
+        self.repository
+            .events
+            .peek_pending_input(self.agent.clone())
+            .await
+    }
     pub async fn inputs_for_next_promotion(&self) -> Result<Vec<AdmittedInput>, EventError> {
         self.repository
             .events
@@ -457,6 +464,21 @@ impl AgentConversation {
     }
     pub fn messages(&self) -> Vec<ModelMessage> {
         self.read_view().messages()
+    }
+    /// Reads the latest visible segment from its most recent user message, retaining
+    /// candidates and trailing notices. Without a visible user, keeps the available
+    /// context; system-only context has no turn. This does not imply durable acceptance.
+    pub fn read_last_turn_messages(&self) -> Option<Vec<ModelMessage>> {
+        let messages = self.messages.lock().expect("conversation poisoned");
+        messages
+            .iter()
+            .rev()
+            .find(|message| message.role != MessageRole::System)?;
+        let start = messages
+            .iter()
+            .rposition(|message| message.role == MessageRole::User)
+            .unwrap_or(0);
+        Some(messages[start..].to_vec())
     }
     pub fn len(&self) -> usize {
         self.messages.lock().expect("conversation poisoned").len()
