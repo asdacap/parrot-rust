@@ -7,7 +7,9 @@ pub trait WebSocketObserver: Send + Sync {
 
 /// Observes one transport attempt without changing its request or response.
 pub trait WebSocketAttemptObserver: Send {
-    fn dump_request(&mut self, _body: &[u8]) {}
+    /// Captures wire bytes alongside the complete prepared provider body before
+    /// continuation trimming. The full body excludes WebSocket envelope fields.
+    fn dump_request(&mut self, _body: &[u8], _full_body: &[u8]) {}
     fn record_request_bytes(&mut self, _bytes: u64) {}
     fn record_response_bytes(&mut self, _bytes: u64) {}
     /// Captures each received non-close payload fragment before parsing or

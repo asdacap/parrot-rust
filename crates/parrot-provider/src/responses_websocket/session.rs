@@ -372,17 +372,14 @@ impl<'a> SessionCall<'a> {
                 self.session.capture_turn_state(state);
                 self.session.connection = Some(connection);
             }
-            let request = self
-                .request
-                .as_ref()
-                .expect("prepared WebSocket request")
-                .encode(
-                    &self.previous_id,
-                    self.skip,
-                    self.session.turn_state.as_deref().unwrap_or_default(),
-                );
+            let prepared = self.request.as_ref().expect("prepared WebSocket request");
+            let request = prepared.encode(
+                &self.previous_id,
+                self.skip,
+                self.session.turn_state.as_deref().unwrap_or_default(),
+            );
             if let Some(observer) = &mut self.attempt_observer {
-                observer.dump_request(&request);
+                observer.dump_request(&request, prepared.http_body());
             }
             self.exchange = Some(
                 self.session

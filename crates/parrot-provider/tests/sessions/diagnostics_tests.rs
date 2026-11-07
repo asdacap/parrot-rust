@@ -450,6 +450,7 @@ struct ArchivedRequest {
     number: u64,
     transport: String,
     request: Option<ArchivedBody>,
+    full_request: Option<ArchivedBody>,
     response: Vec<ArchivedBody>,
     outcome: String,
     error_code: Option<String>,
@@ -483,6 +484,7 @@ fn archive_preserves_exact_request_and_response_bytes_before_parsing() {
     let initial = archived_request(&root, 1);
     assert_eq!(initial.outcome, "in_progress");
     assert_eq!(initial.request, None);
+    assert_eq!(initial.full_request, None);
     let body = b"{\"x\":1e999,\"x\":2}";
     request.dump_prepared_body(body);
     let capture = request.response_capture().unwrap();
@@ -495,6 +497,7 @@ fn archive_preserves_exact_request_and_response_bytes_before_parsing() {
     let record = archived_request(&root, 1);
     assert_eq!(record.number, 1);
     assert_eq!(record.transport, "http_sse");
+    assert_eq!(record.full_request, record.request);
     assert_eq!(
         record.request,
         Some(ArchivedBody::Utf8(
@@ -532,6 +535,7 @@ fn archive_preserves_websocket_boundaries_binary_bytes_and_partial_messages() {
     capture.append(&[0x01]);
     assert!(request.finish(TraceOutcome::Failed(FailureKind::WireProtocol)));
     let record = archived_request(&root, 1);
+    assert_eq!(record.full_request, record.request);
     assert_eq!(record.request, Some(ArchivedBody::Bytes(vec![0xff, 0x01])));
     assert_eq!(
         record.response,
@@ -661,6 +665,7 @@ fn archive_records_null_requests_and_disposal_without_replacing_latest_body() {
     drop(call.begin_request("websocket", "disposed"));
     let record = archived_request(&root, 2);
     assert_eq!(record.request, None);
+    assert_eq!(record.full_request, None);
     assert!(record.response.is_empty());
     assert_eq!(record.outcome, "failed");
     assert_eq!(record.error_code.as_deref(), Some("websocket_upgrade"));

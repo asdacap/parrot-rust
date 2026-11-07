@@ -384,9 +384,15 @@ impl RequestTrace {
     /// Associates the adapter's exact prepared bytes with this attempt and the
     /// latest-request file. Payloads never enter operational diagnostics.
     pub fn dump_prepared_body(&self, body: &[u8]) {
+        self.dump_prepared_request(body, body);
+    }
+
+    /// Captures transport bytes alongside the complete pre-continuation provider
+    /// body. The latest-request file retains only the transport bytes.
+    pub fn dump_prepared_request(&self, body: &[u8], full_body: &[u8]) {
         let capture = lock(&self.trace.state).capture.clone();
         if let Some(capture) = capture {
-            capture.dump_prepared_body(body);
+            capture.dump_prepared_body(body, full_body);
         }
     }
 
