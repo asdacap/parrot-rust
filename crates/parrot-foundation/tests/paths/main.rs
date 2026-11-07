@@ -264,12 +264,7 @@ fn selected_legacy_resources_never_mix_even_after_flag_changes_or_duplicate_crea
     assert!(!current.join("meta.json").exists());
     let scratch = resources.agent_scratch(&["main", "child"]).unwrap();
     assert!(scratch.root().starts_with(&legacy));
-    assert!(
-        resources
-            .agent_queue_directory("child")
-            .unwrap()
-            .starts_with(&legacy)
-    );
+    assert!(scratch.queue_directory().starts_with(&legacy));
 }
 
 #[test]
@@ -468,7 +463,6 @@ fn resource_names_are_contained_and_reserved_names_are_only_for_children() {
         "line\nname",
         "a\0b",
     ] {
-        assert!(resources.agent_queue_directory(invalid).is_err());
         assert!(resources.agent_scratch(&["main", invalid]).is_err());
     }
     for valid in [
@@ -478,8 +472,15 @@ fn resource_names_are_contained_and_reserved_names_are_only_for_children() {
         "punctuation:!",
     ] {
         assert_eq!(
-            resources.agent_queue_directory(valid).unwrap().parent(),
-            Some(resources.agent_queue_root_directory().as_path())
+            resources
+                .agent_scratch(&["main", valid])
+                .unwrap()
+                .queue_directory(),
+            resources
+                .agents_directory()
+                .join("main")
+                .join(valid)
+                .join("queues")
         );
     }
     assert!(resources.agent_scratch(&[]).is_err());

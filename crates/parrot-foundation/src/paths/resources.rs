@@ -71,12 +71,6 @@ impl<W> UserSessionResources<W> {
     pub fn artifact_directory(&self) -> PathBuf {
         self.root().join("artifacts")
     }
-    pub fn queue_directory(&self) -> PathBuf {
-        self.root().join("queues")
-    }
-    pub fn agent_queue_root_directory(&self) -> PathBuf {
-        self.queue_directory().join("agents")
-    }
     pub fn scratch_directory(&self) -> PathBuf {
         self.root().join("scratch")
     }
@@ -86,11 +80,6 @@ impl<W> UserSessionResources<W> {
 
     pub fn owns(&self, path: &Path, current_directory: &Path) -> io::Result<bool> {
         Ok(normalize(path, current_directory, native_platform())?.starts_with(self.root()))
-    }
-
-    pub fn agent_queue_directory(&self, session_id: &str) -> io::Result<PathBuf> {
-        validate_segment(session_id)?;
-        Ok(self.agent_queue_root_directory().join(session_id))
     }
 
     pub fn agent_scratch(&self, name_path: &[&str]) -> io::Result<AgentScratchDirectory> {
@@ -131,6 +120,7 @@ pub struct AgentScratchDirectory {
 impl AgentScratchDirectory {
     pub const RESERVED_NAMES: &'static [&'static str] = &[
         "scratch",
+        "queues",
         "history.jsonl",
         "blobs",
         "plan",
@@ -159,6 +149,9 @@ impl AgentScratchDirectory {
     }
     pub fn blob_directory(&self) -> PathBuf {
         self.root.join("blobs")
+    }
+    pub fn queue_directory(&self) -> PathBuf {
+        self.root.join("queues")
     }
     pub fn plan_directory(&self) -> PathBuf {
         self.root.join("plan")

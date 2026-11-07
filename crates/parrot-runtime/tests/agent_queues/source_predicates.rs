@@ -48,8 +48,9 @@ async fn closed_child_replacement_with_same_id_reattaches_retained_child_queue()
         let directory = h
             .factory
             .resources
-            .agent_queue_directory(&child.identity().session.session_id)
-            .unwrap();
+            .agent_scratch(&["root", "child"])
+            .unwrap()
+            .queue_directory();
         c.create("temporary-work", "").unwrap();
         push(&c, "temporary-work", &["retained"], false);
         r.create("root-work", "").unwrap();

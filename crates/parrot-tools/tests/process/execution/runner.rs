@@ -25,7 +25,7 @@ impl Directory {
 
     fn request(&self, command: &str) -> ProcessStartRequest {
         let scratch = AgentScratchDirectory::new(&self.0.join("agent"), &self.0).unwrap();
-        let resources = ProcessResources::new(&self.0, self.0.join("queue"), scratch);
+        let resources = ProcessResources::new(&self.0, scratch);
         ProcessStartRequest::new(command, resources)
     }
 }
@@ -86,7 +86,8 @@ async fn explicit_gate_off_run_forces_pipe_and_forwards_environment_and_cwd() {
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.stdout, format!("π-value|{}", directory.0.display()));
     assert!(result.stderr.is_empty());
-    assert!(request.resources.queue_directory.is_dir());
+    assert!(directory.0.join("agent/queues").is_dir());
+    assert!(!directory.0.join("queue").exists());
     // Availability remains about the configured sandbox, not the escape hatch.
     assert!(!runner.sandbox_available());
     gate.set_enabled(true);

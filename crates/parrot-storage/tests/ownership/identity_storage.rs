@@ -154,34 +154,24 @@ fn agent_scratch_immediately_provisions_its_root_and_blob_directory() {
 }
 
 #[test]
-fn agent_queue_directories_are_contained_beneath_the_agents_queue_root() {
+fn agent_queue_directories_are_contained_beneath_their_owning_agent() {
     let fixture = Fixture::new();
     let resources = fixture.resources("session-one");
-    let queue = resources
-        .agent_queue_directory("agent-session-child")
-        .unwrap();
-    assert_eq!(
-        resources.agent_queue_root_directory(),
-        resources.queue_directory().join("agents")
-    );
-    assert_eq!(
-        queue.parent().unwrap(),
-        resources.agent_queue_root_directory()
-    );
-    assert_eq!(
-        queue.strip_prefix(resources.queue_directory()).unwrap(),
-        PathBuf::from("agents/agent-session-child")
-    );
-    assert!(
-        resources
-            .owns(&resources.agent_queue_root_directory(), &fixture.workspace)
-            .unwrap()
-    );
-    assert!(resources.owns(&queue, &fixture.workspace).unwrap());
+    for names in [
+        vec!["main"],
+        vec!["main", "child"],
+        vec!["main", "child", "nested"],
+    ] {
+        let scratch = resources.agent_scratch(&names).unwrap();
+        let queue = scratch.queue_directory();
+        assert_eq!(queue, scratch.root().join("queues"));
+        assert!(resources.owns(&queue, &fixture.workspace).unwrap());
+    }
+    assert!(!resources.root().join("queues").exists());
 }
 
 #[test]
-fn agent_queue_directories_reject_all_ten_exact_unsafe_source_arguments() {
+fn agent_queue_owners_reject_all_ten_exact_unsafe_source_arguments() {
     let fixture = Fixture::new();
     let resources = fixture.resources("session-one");
     for value in [
@@ -197,9 +187,12 @@ fn agent_queue_directories_reject_all_ten_exact_unsafe_source_arguments() {
         "\\rooted",
     ] {
         assert_eq!(
-            resources.agent_queue_directory(value).unwrap_err().kind(),
+            resources
+                .agent_scratch(&["main", value])
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidInput,
-            "queue argument {value:?}"
+            "queue owner argument {value:?}"
         );
     }
 }
@@ -210,6 +203,7 @@ fn agent_scratch_rejects_reserved_child_names_but_not_root_names() {
     let resources = fixture.resources("session-one");
     for reserved in [
         "blobs",
+        "queues",
         "plan",
         "history.jsonl",
         "last_request.json",

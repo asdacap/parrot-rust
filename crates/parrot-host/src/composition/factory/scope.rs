@@ -1453,13 +1453,8 @@ where
                 ),
             )
             .map_err(child)?;
-            let queues = AgentQueues::new(
-                identity.clone(),
-                &self.user.resources,
-                inventory,
-                log.clone(),
-            )
-            .map_err(ChildError::from)?;
+            let queues = AgentQueues::new(identity.clone(), &scratch, inventory, log.clone())
+                .map_err(ChildError::from)?;
             let agents = Arc::new(ScopedAgentRuntime::new(
                 Arc::downgrade(&registry),
                 self.config.router.clone(),

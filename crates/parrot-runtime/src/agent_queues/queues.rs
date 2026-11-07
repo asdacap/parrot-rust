@@ -6,7 +6,7 @@ use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation, ScopeLifetime},
     security::RestrictableAccessSnapshot,
 };
-use parrot_foundation::paths::UserSessionResources;
+use parrot_foundation::paths::AgentScratchDirectory;
 use parrot_storage::queue_files::{
     self, Direction, ErrorKind, Owner, QueueInfo, QueueStore, TryTakeResult,
 };
@@ -68,18 +68,6 @@ impl From<QueueError> for ChildError {
 fn disposed() -> QueueError {
     queue_files::Error::new(ErrorKind::Disposed, "Cannot access a disposed object.").into()
 }
-fn io(error: std::io::Error) -> QueueError {
-    queue_files::Error::new(
-        match error.kind() {
-            std::io::ErrorKind::InvalidInput => ErrorKind::Argument,
-            std::io::ErrorKind::PermissionDenied => ErrorKind::UnauthorizedAccess,
-            _ => ErrorKind::Io,
-        },
-        error.to_string(),
-    )
-    .into()
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueDiagnostic {
     pub event: &'static str,
@@ -107,9 +95,9 @@ pub struct AgentQueues<S: RestrictableAccessSnapshot + 'static> {
     disposed: AtomicBool,
 }
 impl<S: RestrictableAccessSnapshot + 'static> AgentQueues<S> {
-    pub fn new<W>(
+    pub fn new(
         identity: Arc<AgentIdentity>,
-        resources: &UserSessionResources<W>,
+        scratch: &AgentScratchDirectory,
         inventory: Arc<QueueInventory>,
         diagnostics: Arc<dyn QueueDiagnostics>,
     ) -> QueueResult<Arc<Self>> {
@@ -124,16 +112,9 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentQueues<S> {
                 ChildError::registry("queue inventory does not match owner identity").into(),
             );
         }
-        let directory = if identity.session.depth == 0 {
-            resources.queue_directory()
-        } else {
-            resources
-                .agent_queue_directory(&identity.session.session_id)
-                .map_err(io)?
-        };
         Ok(Arc::new(Self {
             identity,
-            local: QueueStore::new(directory)?,
+            local: QueueStore::new(scratch.queue_directory())?,
             inventory,
             diagnostics,
             binding: OnceLock::new(),
