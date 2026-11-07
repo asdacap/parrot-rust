@@ -102,6 +102,71 @@ async fn busy_input_and_escape_or_control_c_preserve_draft_and_interrupt_once() 
 }
 
 #[tokio::test]
+async fn regular_prompt_is_committed_once_when_the_agent_promotes_it() {
+    let mut rpc = Fixture::start().await;
+    let mut terminal = TerminalFixture::new();
+    let cli = rpc.cli(terminal.take(), "", None);
+    let stop = rpc.stopping.clone();
+    let result = fixture::run_flow(cli, stop, terminal.end_input(), async {
+        terminal.output_contains("❯ ").await;
+        terminal.input.type_text("regular prompt\r");
+        rpc.wait(|state| state.sent.len() == 1).await;
+        assert_eq!(
+            rpc.state.lock().unwrap().sent[0]
+                .delivery
+                .enum_value()
+                .unwrap(),
+            wire::Delivery::DELIVERY_QUEUE
+        );
+        rpc.publish(
+            "session-1",
+            event(
+                "admitted",
+                wire::event::Payload::InputAdmitted(wire::InputAdmitted {
+                    input_id: "prompt-1".into(),
+                    content: "regular prompt".into(),
+                    delivery: wire::Delivery::DELIVERY_STEER.into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        terminal.output_contains("◇ regular prompt").await;
+        rpc.publish(
+            "session-1",
+            event(
+                "promoted",
+                wire::event::Payload::InputPromoted(wire::InputPromoted {
+                    input_id: "prompt-1".into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        rpc.publish(
+            "session-1",
+            event(
+                "response",
+                wire::event::Payload::TextChunk(wire::TextChunk {
+                    fragment: "response after promotion".into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        terminal.output_contains("response after promotion").await;
+        assert_eq!(
+            terminal.output.text().matches("◆ regular prompt").count(),
+            1
+        );
+        terminal.input.end();
+    })
+    .await;
+    assert_eq!(result.unwrap(), 0);
+    rpc.close().await;
+}
+
+#[tokio::test]
 async fn steer_stays_live_until_the_agent_promotes_it() {
     let mut rpc = Fixture::start().await;
     let mut terminal = TerminalFixture::new();

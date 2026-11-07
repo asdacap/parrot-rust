@@ -27,10 +27,7 @@ use crate::{
         interrupts::{CliInterruptListener, Interrupts},
         prepared_stream::PreparedSessionStream,
     },
-    presenters::{
-        EnhancedSessionPresenter, ImmediateScrollbackValue, PresentationUpdate,
-        ToolPresenterRegistry,
-    },
+    presenters::{EnhancedSessionPresenter, PresentationUpdate, ToolPresenterRegistry},
     slash_sessions::{
         CallbackApplicationExit, CallbackSessionBinding, CommandContext, NavigationFailure,
         PollingSlashActivity, RpcSlashSession, SkillCompletion, SkillRefresh,
@@ -826,11 +823,6 @@ impl EnhancedInput {
             return Err(Status::cancelled("session binding changed").into());
         }
         editor.remember(entered);
-        if message.delivery != wire::Delivery::DELIVERY_STEER.into() {
-            shared
-                .frame
-                .commit(Arc::new(ImmediateScrollbackValue::user(entered)))?;
-        }
         shared.busy.store(true, Ordering::Release);
         shared.apply_presenter(|presenter| presenter.begin_turn())?;
         crate::slash_sessions::native_call(snapshot.client.clone().send_message(message), c)
