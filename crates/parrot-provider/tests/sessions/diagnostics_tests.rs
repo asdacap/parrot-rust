@@ -7,7 +7,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 #[derive(Default)]
@@ -446,6 +446,18 @@ enum ArchivedBody {
 }
 
 #[derive(serde::Deserialize)]
+struct TimestampedResponse {
+    received_at: String,
+    #[serde(flatten)]
+    body: ArchivedBody,
+}
+
+#[derive(serde::Deserialize)]
+struct TimestampedResponses {
+    response: Vec<TimestampedResponse>,
+}
+
+#[derive(serde::Deserialize)]
 struct ArchivedRequest {
     number: u64,
     transport: String,
@@ -547,6 +559,68 @@ fn archive_preserves_websocket_boundaries_binary_bytes_and_partial_messages() {
     );
     assert_eq!(record.outcome, "failed");
     assert_eq!(record.error_code.as_deref(), Some("wire_protocol"));
+}
+
+#[test]
+fn archive_timestamps_each_response_at_its_last_received_fragment() {
+    for outcome in [
+        TraceOutcome::Completed,
+        TraceOutcome::Failed(FailureKind::WireProtocol),
+        TraceOutcome::Cancelled,
+    ] {
+        let root = TestRoot::new("archive-timestamps");
+        let sink = Arc::new(RecordingSink::default());
+        let call = archive_call(&root, &sink);
+        let request = call.begin_request("websocket", "one");
+        let capture = request.response_capture().unwrap();
+
+        capture.append(b"fir");
+        let first_start = SystemTime::now();
+        capture.append(b"st");
+        let first_end = SystemTime::now();
+        capture.finish_message();
+
+        let empty_start = SystemTime::now();
+        capture.finish_message();
+        let empty_end = SystemTime::now();
+
+        capture.append(&[0xff]);
+        let partial_start = SystemTime::now();
+        capture.append(&[0x01]);
+        let partial_end = SystemTime::now();
+        assert!(request.finish(outcome));
+
+        let record: TimestampedResponses =
+            serde_json::from_slice(&fs::read(root.0.join("requests/request_1.json")).unwrap())
+                .unwrap();
+        assert_eq!(record.response.len(), 3);
+        let windows = [
+            (first_start, first_end),
+            (empty_start, empty_end),
+            (partial_start, partial_end),
+        ];
+        for (response, (start, end)) in record.response.iter().zip(windows) {
+            assert!(response.received_at.ends_with('Z'));
+            let received_at: SystemTime =
+                chrono::DateTime::parse_from_rfc3339(&response.received_at)
+                    .unwrap()
+                    .into();
+            assert!(received_at >= start);
+            assert!(received_at <= end);
+        }
+        assert_eq!(
+            record
+                .response
+                .into_iter()
+                .map(|response| response.body)
+                .collect::<Vec<_>>(),
+            vec![
+                ArchivedBody::Utf8("first".into()),
+                ArchivedBody::Utf8(String::new()),
+                ArchivedBody::Bytes(vec![0xff, 0x01]),
+            ]
+        );
+    }
 }
 
 #[test]

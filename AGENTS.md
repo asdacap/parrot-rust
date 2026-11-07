@@ -75,6 +75,10 @@ component.run(cancellation).await?;
 
 ## Environment
 
+Use `~/repo/parrot-rust/.tmp` in the main worktree root for temporary files,
+shared across all worktrees. Do not use `/tmp` or `.tmp` inside individual linked
+worktrees.
+
 Everything runs inside the flake's dev shell, which supplies the pinned Rust
 toolchain, Clippy, rustfmt, C toolchain, Node/npm and protobuf tooling.
 

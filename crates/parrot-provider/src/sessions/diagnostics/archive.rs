@@ -1,10 +1,12 @@
 use super::{DiagnosticEvent, DiagnosticSeverity, DiagnosticSink, FailureKind, TraceOutcome, lock};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use std::{
     collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
+    time::SystemTime,
 };
 
 const RETAINED_REQUESTS: usize = 10;
@@ -23,7 +25,9 @@ const RETAINED_REQUESTS: usize = 10;
 /// `{"encoding":"utf8","data":"..."}` or lossless
 /// `{"encoding":"bytes","data":[0,255]}` for non-UTF-8 payloads.
 /// Responses include only bytes consumed by existing readers, including partial
-/// data on failure/cancellation. A process crash can leave an `in_progress` record.
+/// data on failure/cancellation. Each response adds `received_at`, the UTC RFC 3339
+/// timestamp of its last captured fragment (or completion for an empty message).
+/// A process crash can leave an `in_progress` record.
 /// Bodies can contain sensitive content. Headers and payloads never enter the
 /// metadata-only diagnostic sink; retention limits record count, not disk bytes.
 pub struct LastRequestDumper {
@@ -55,20 +59,28 @@ impl From<Vec<u8>> for RawBody {
 }
 
 #[derive(Serialize)]
+struct ResponseBody {
+    received_at: String,
+    #[serde(flatten)]
+    body: RawBody,
+}
+
+#[derive(Serialize)]
 struct RequestRecord {
     number: u64,
     transport: String,
     request: Option<RawBody>,
     full_request: Option<RawBody>,
-    response: Vec<RawBody>,
+    response: Vec<ResponseBody>,
     outcome: &'static str,
     error_code: Option<&'static str>,
 }
 
 struct CapturedAttempt {
     record: RequestRecord,
-    response: Vec<Vec<u8>>,
+    response: Vec<ResponseBody>,
     current_response: Vec<u8>,
+    current_response_received_at: Option<SystemTime>,
     ended: bool,
 }
 impl CapturedAttempt {
@@ -79,6 +91,19 @@ impl CapturedAttempt {
         self.record.response.clear();
         self.response.clear();
         self.current_response = Vec::new();
+        self.current_response_received_at = None;
+    }
+
+    fn finish_response(&mut self) {
+        let received_at = self
+            .current_response_received_at
+            .take()
+            .unwrap_or_else(SystemTime::now);
+        self.response.push(ResponseBody {
+            received_at: DateTime::<Utc>::from(received_at)
+                .to_rfc3339_opts(SecondsFormat::Nanos, true),
+            body: std::mem::take(&mut self.current_response).into(),
+        });
     }
 }
 
@@ -117,6 +142,7 @@ impl ResponseCapture {
         if let Some(state) = self.state.upgrade() {
             let mut state = lock(&state);
             if !state.ended {
+                state.current_response_received_at = Some(SystemTime::now());
                 state.current_response.extend_from_slice(bytes);
             }
         }
@@ -128,8 +154,7 @@ impl ResponseCapture {
         if let Some(state) = self.state.upgrade() {
             let mut state = lock(&state);
             if !state.ended {
-                let message = std::mem::take(&mut state.current_response);
-                state.response.push(message);
+                state.finish_response();
             }
         }
     }
@@ -209,6 +234,7 @@ impl LastRequestDumper {
             },
             response: Vec::new(),
             current_response: Vec::new(),
+            current_response_received_at: None,
             ended: false,
         }));
         let path = directory.join(format!("request_{number}.json"));
@@ -256,13 +282,9 @@ impl LastRequestDumper {
         state.ended = true;
         archive.active.remove(&state.record.number);
         if !state.current_response.is_empty() {
-            let partial = std::mem::take(&mut state.current_response);
-            state.response.push(partial);
+            state.finish_response();
         }
-        state.record.response = std::mem::take(&mut state.response)
-            .into_iter()
-            .map(RawBody::from)
-            .collect();
+        state.record.response = std::mem::take(&mut state.response);
         let (outcome, _, failure) = outcome.fields();
         state.record.outcome = outcome;
         state.record.error_code = failure.map(FailureKind::code);
