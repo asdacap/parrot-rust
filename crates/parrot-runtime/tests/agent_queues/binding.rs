@@ -25,7 +25,7 @@ async fn binding_requires_exact_registered_queue_instance_and_identity_not_just_
         assert!(Arc::ptr_eq(&q, &h.factory.queues("root")));
         let alternate = AgentQueues::<Security>::new(
             root.identity().clone(),
-            h.factory.resources.as_ref(),
+            &h.factory.resources.agent_scratch(&["root"]).unwrap(),
             inventory_for(root.identity()),
             h.factory.diagnostics.clone(),
         )
@@ -41,7 +41,7 @@ async fn binding_requires_exact_registered_queue_instance_and_identity_not_just_
         );
         let other = AgentQueues::<Security>::new(
             spoof.clone(),
-            h.factory.resources.as_ref(),
+            &h.factory.resources.agent_scratch(&["root"]).unwrap(),
             inventory_for(&spoof),
             h.factory.diagnostics.clone(),
         )
@@ -64,51 +64,34 @@ async fn binding_requires_exact_registered_queue_instance_and_identity_not_just_
 }
 
 #[tokio::test]
-async fn actual_selected_resource_factory_keeps_child_directories_canonical_and_rejects_escape_ids()
-{
+async fn actual_selected_resource_factory_keeps_queues_with_their_owning_agents() {
     bounded(async {
         let h = Harness::new();
         let root = h.root().await;
         let child = h.spawn(&root, "child").await;
+        let nested = h.spawn(&child, "nested").await;
         let resources = &h.factory.resources;
-        let expected = resources
-            .agent_queue_root_directory()
-            .join(&child.identity().session.session_id);
-        assert_eq!(h.q(&child).local().directory(), expected);
-        assert!(
-            resources
-                .owns(&expected, &std::env::current_dir().unwrap())
-                .unwrap()
-        );
-        for id in ["../escaped", "..", "/"] {
+        for (owner, names) in [
+            (&root, vec!["root"]),
+            (&child, vec!["root", "child"]),
+            (&nested, vec!["root", "child", "nested"]),
+        ] {
+            let scratch = resources.agent_scratch(&names).unwrap();
+            let expected = scratch.queue_directory();
+            assert_eq!(h.q(owner).local().directory(), expected);
+            assert_eq!(expected.parent(), Some(scratch.root()));
+            assert!(
+                resources
+                    .owns(&expected, &std::env::current_dir().unwrap())
+                    .unwrap()
+            );
+        }
+        assert!(!resources.root().join("queues").exists());
+        for name in ["../escaped", "..", "/", "queues"] {
             assert_eq!(
-                resources.agent_queue_directory(id).unwrap_err().kind(),
+                resources.agent_scratch(&["root", name]).unwrap_err().kind(),
                 std::io::ErrorKind::InvalidInput
             );
-            let identity = Arc::new(AgentIdentity {
-                session: parrot_runtime::agent_turn::services::SessionIdentity {
-                    session_id: id.into(),
-                    name: "invalid".into(),
-                    parent_session_id: root.identity().session.session_id.clone(),
-                    depth: 1,
-                },
-                parent_name: "root".into(),
-                name_path: vec!["root".into(), "invalid".into()],
-                prompt_scope: root
-                    .identity()
-                    .prompt_scope
-                    .derive_child("invalid", 1, "test"),
-                templates: templates(),
-            });
-            assert!(matches!(
-                AgentQueues::<Security>::new(
-                    identity.clone(),
-                    resources.as_ref(),
-                    inventory_for(&identity),
-                    h.factory.diagnostics.clone()
-                ),
-                Err(QueueError::Storage(error)) if error.kind == ErrorKind::Argument
-            ));
         }
         h.close().await;
     })

@@ -1229,9 +1229,19 @@ impl parrot_runtime::children::ScopeFactory<support::Security> for RealFactory {
                 support::id(),
             )
             .unwrap();
+            let scratch = self
+                .resources
+                .agent_scratch(
+                    &identity
+                        .name_path
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
             let queues = AgentQueues::<support::Security>::new(
                 identity.clone(),
-                &self.resources,
+                &scratch,
                 inventory,
                 Arc::new(QueueDiagnostics),
             )

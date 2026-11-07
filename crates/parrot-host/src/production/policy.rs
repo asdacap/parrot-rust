@@ -158,7 +158,6 @@ struct Rule {
 struct AgentContext {
     scratch: AgentScratchDirectory,
     launch_directory: PathBuf,
-    queue_directory: PathBuf,
 }
 
 #[derive(Clone)]
@@ -235,12 +234,6 @@ impl ProductionPolicy {
             .map_or(Path::new("/"), |context| context.launch_directory.as_path())
     }
 
-    pub fn queue_directory(&self) -> Option<&Path> {
-        self.context
-            .as_ref()
-            .map(|context| context.queue_directory.as_path())
-    }
-
     pub fn materialized_rules(&self) -> Vec<ProductionAccessRule> {
         let mut paths = BTreeSet::from([PathBuf::from("/")]);
         self.paths(&mut paths);
@@ -295,7 +288,6 @@ impl ProductionPolicy {
             context: Some(AgentContext {
                 scratch: scratch.clone(),
                 launch_directory: normalize(workspace.launch_directory())?,
-                queue_directory: session_root.join("queues"),
             }),
         })
     }
@@ -765,10 +757,6 @@ mod tests {
         assert_eq!(
             policy.launch_directory(),
             fixture.workspace.launch_directory()
-        );
-        assert_eq!(
-            policy.queue_directory(),
-            Some(fixture.session.join("queues").as_path())
         );
     }
 

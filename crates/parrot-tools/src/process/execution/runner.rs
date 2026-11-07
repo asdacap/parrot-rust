@@ -35,14 +35,10 @@ pub struct ProcessResources {
 impl ProcessResources {
     /// Consume the actual selected scratch resource. This does not select or
     /// resolve another session root, authorize paths, or provision anything.
-    pub fn new(
-        launch_directory: impl Into<PathBuf>,
-        queue_directory: impl Into<PathBuf>,
-        scratch: AgentScratchDirectory,
-    ) -> Self {
+    pub fn new(launch_directory: impl Into<PathBuf>, scratch: AgentScratchDirectory) -> Self {
         Self {
             launch_directory: launch_directory.into(),
-            queue_directory: queue_directory.into(),
+            queue_directory: scratch.queue_directory(),
             blob_directory: scratch.blob_directory(),
             scratch,
         }
