@@ -558,6 +558,72 @@ fn progress(owner: &str, revision: u64, nodes: Vec<wire::AgentTaskProgressNode>)
 }
 
 #[test]
+fn task_rows_do_not_inherit_the_headings_marker_indent() {
+    let mut view = view();
+    view.observe(&turn("root")).unwrap();
+    let mut parent = task(
+        "parent task",
+        "",
+        false,
+        wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
+    );
+    parent.children.push(task(
+        "child task",
+        "",
+        false,
+        wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_PENDING,
+    ));
+    view.observe(&progress("root", 1, vec![parent])).unwrap();
+    let expected = "• Agent tasks:|◐ parent task|└── ○ child task";
+    assert_eq!(live(&view), expected);
+    assert_eq!(commits(&view.finish().unwrap()), [expected]);
+}
+
+#[test]
+fn task_rows_use_the_width_freed_by_removing_the_marker_indent() {
+    let mut view = view();
+    view.observe(&turn("root")).unwrap();
+    view.observe(&progress(
+        "root",
+        1,
+        vec![task(
+            "twelve chars",
+            "",
+            false,
+            wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
+        )],
+    ))
+    .unwrap();
+    let rendered = view.snapshot().unwrap()[0]
+        .render(LiveBufferRenderContext {
+            columns: 14,
+            color: false,
+        })
+        .unwrap();
+    let expected = ["• Agent tasks:", "◐ twelve chars"];
+    assert_eq!(
+        rendered
+            .lines
+            .iter()
+            .map(|line| line.text())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let finished = view.finish().unwrap();
+    assert_eq!(
+        finished.commits[0]
+            .render(ScrollbackRenderContext {
+                columns: 14,
+                color: false,
+                inline_diff: false,
+                previous_packing: None,
+            })
+            .unwrap(),
+        expected
+    );
+}
+
+#[test]
 fn hidden_tasks_follow_worker_activity_without_new_progress_revisions() {
     for status in [
         wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
