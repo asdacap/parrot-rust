@@ -81,11 +81,9 @@ pub struct ProviderResponse {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ToolExecutionRequest {
     pub assistant_sequence: i64,
-    /// Starts a tool-owned execution scope seeded from the persisted image facts.
+    /// Starts a new tool-owned execution scope for this fresh batch.
     pub starts_batch: bool,
     pub calls: Vec<ToolCall>,
-    pub prior_image_bytes: Vec<i64>,
-    pub image_budget_exceeded: bool,
     pub cancel_remaining: bool,
 }
 
@@ -132,19 +130,6 @@ pub struct ToolProcess {
     pub stdout_path: Option<String>,
     pub stderr_path: Option<String>,
     pub activity_kind: i32,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ToolPhase {
-    Recovery,
-    Normal,
-    Final,
-}
-
-/// Chooses recovery execution or the retained executable catalog for the current turn.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ToolContext {
-    pub phase: ToolPhase,
 }
 
 /// Provider-visible definitions backed by retained executable identities in the adapter.

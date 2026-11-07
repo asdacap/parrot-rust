@@ -30,17 +30,17 @@ ported from the .NET repository. Repository contributor guidance is in
 
 `parrot-core` owns the agent turn protocol and loop, with exactly three traits:
 
-- `States`: conversation and turn effects, pending-call recovery, result recording,
-  prepared requests, and completion admission.
+- `States`: conversation and turn effects, stored-result restoration, crash errors
+  for unfinished calls, result recording, prepared requests, and completion admission.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
-Requests, responses, messages, tool definitions, errors, and tool contexts are concrete
-core-owned types. Adapters implement the same interface; they do not choose their
-own associated payload or context types. `Provider` accepts only the request;
-attempts and request phases stay in the core loop, and input estimates stay in
-runtime state. `ToolContext` selects recovery, normal, or final-phase execution
-without exposing state objects or adapter-specific callbacks.
+Requests, responses, tool execution results, messages, tool definitions, and errors
+are concrete core-owned types. Adapters implement the same interface; they do not
+choose their own associated payload types. `Provider` and `Tools` accept only their
+requests. Runtime state privately binds the executable selection during preparation;
+execution receives no workflow phase or adapter-specific callbacks. Attempts and
+request phases stay in the core loop, and input estimates stay in runtime state.
 
 The core specifies and implements:
 
@@ -60,12 +60,17 @@ translated losslessly at the interface, including raw provider extensions and
 multimodal content. Runtime bindings retain the actual selected model and executable
 tool snapshots; tools are never reconstructed from advertised definitions.
 
-The core asks state for outstanding calls, passes explicit calls to tools, then
-asks state to record the returned results before executing another chunk. State
-restores completed calls without reinvocation or republication and owns conversation
-projection, recovery progress, and synthetic image messages. Tools retain execution,
-parallel-safe grouping, tool-specific budgets, and execution-local state; they do
-not discover work by scanning conversation history.
+The core restores historical tool results through state without invoking tools.
+Any historical call without a saved result receives a durable error saying that
+the process crashed before the tool completed; it is never automatically executed
+again. Existing results are restored without modification or republication.
+
+Only calls from a new model response enter execution. The core passes these explicit
+calls to tools, then asks state to record the returned results before executing
+another chunk. State owns conversation projection and synthetic image messages.
+Tools retain execution, parallel-safe grouping, tool-specific budgets, and
+execution-local state; they do not discover work by scanning conversation history.
+A crash error does not assert that the tool made no external changes.
 
 The session drain serializes operations. Each adapter borrows the existing runtime
 state lock only for its operation, including borrowed-resource tool execution.

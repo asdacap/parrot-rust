@@ -46,6 +46,8 @@ pub use std::{
 };
 pub use tokio::sync::Semaphore;
 
+pub const CRASH_MESSAGE: &str = "The process crashed before the tool completed.";
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub fn id() -> String {
     format!("t47-{}", NEXT.fetch_add(1, Ordering::Relaxed))
@@ -85,6 +87,7 @@ pub struct Fixture {
     pub path: PathBuf,
     pub repository: ConversationRepository,
     pub history: AgentHistoryView,
+    pub fresh_batches: Mutex<VecDeque<(i64, Vec<parrot_core::ToolCall>)>>,
 }
 impl Fixture {
     pub fn new() -> Self {
@@ -100,6 +103,7 @@ impl Fixture {
             path,
             repository,
             history,
+            fresh_batches: Mutex::new(VecDeque::new()),
         }
     }
     pub fn open(path: &Path) -> ConversationRepository {
@@ -128,6 +132,7 @@ impl Fixture {
             .unwrap()
     }
     pub async fn batch(&self, calls: Vec<sessions::ToolCall>) -> i64 {
+        let fresh_calls = calls.iter().cloned().map(Into::into).collect();
         let mut event = Event::new();
         event.id = id();
         event.agent_session_id = "agent".into();
@@ -140,17 +145,16 @@ impl Fixture {
                 arguments_json: call.arguments_json,
             })
             .collect();
-        self.history
+        let item = self
+            .history
             .append_conversation(event, message)
             .await
             .unwrap();
-        self.history
-            .conversation()
-            .await
+        self.fresh_batches
+            .lock()
             .unwrap()
-            .last()
-            .unwrap()
-            .sequence
+            .push_back((item.sequence, fresh_calls));
+        item.sequence
     }
     pub async fn seed(&self) {
         for index in 0..6 {

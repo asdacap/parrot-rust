@@ -1,8 +1,8 @@
 use parrot_core::{
     BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, Outcome, Provider, ProviderRequest,
-    ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolContext, ToolDefinition,
-    ToolExecutionRequest, ToolImage, ToolPhase, ToolProcess, ToolResult, ToolStatus, Tools,
-    TurnOptions, budget::TurnRequestPhase, run,
+    ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolDefinition,
+    ToolExecutionRequest, ToolImage, ToolProcess, ToolResult, ToolStatus, Tools, TurnOptions,
+    budget::TurnRequestPhase, run,
 };
 use std::{
     collections::VecDeque,
@@ -63,6 +63,13 @@ impl Reply {
             ..ProviderResponse::default()
         })
     }
+    fn with_tool_calls(calls: Vec<ToolCall>) -> Self {
+        Self::Response(ProviderResponse {
+            finish_reason: "tool_calls".into(),
+            tool_calls: calls,
+            ..ProviderResponse::default()
+        })
+    }
     fn invalid(text: &str) -> Self {
         let Self::Response(mut response) = Self::tools(text) else {
             unreachable!()
@@ -101,10 +108,8 @@ impl Trace {
 #[derive(Clone)]
 struct MemoryTools {
     trace: Trace,
-    advertised: Arc<Mutex<Vec<String>>>,
     availability_restored: Arc<AtomicBool>,
     fail_at: Arc<Mutex<Option<&'static str>>>,
-    phases: Arc<Mutex<Vec<ToolPhase>>>,
     requests: Arc<Mutex<Vec<ToolExecutionRequest>>>,
     output_count: usize,
     replies: Arc<Mutex<VecDeque<Vec<ToolResult>>>>,
@@ -132,20 +137,9 @@ impl Tools for MemoryTools {
     fn execute(
         &self,
         request: ToolExecutionRequest,
-        context: ToolContext,
     ) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
-            match context.phase {
-                ToolPhase::Recovery => {}
-                ToolPhase::Normal => {
-                    assert_eq!(*self.advertised.lock().unwrap(), &["read", "write"]);
-                }
-                ToolPhase::Final => {
-                    assert_eq!(*self.advertised.lock().unwrap(), &["read"]);
-                }
-            }
             assert!(!request.calls.is_empty());
-            self.phases.lock().unwrap().push(context.phase);
             self.requests.lock().unwrap().push(request.clone());
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
@@ -203,9 +197,10 @@ struct MemoryState {
     retries: Vec<(RetryReason, i32)>,
     recorded_tools: Vec<ProviderResponse>,
     pending_tools: VecDeque<ToolExecutionRequest>,
+    historical_calls: Vec<ToolCall>,
     restored_results: Vec<ToolResult>,
     applied_results: Vec<ToolResult>,
-    prepared_phases: Vec<ToolPhase>,
+    prepared_catalogs: Vec<Vec<String>>,
     work: bool,
     turns: usize,
     open: bool,
@@ -227,10 +222,8 @@ impl MemoryState {
             trace: trace.clone(),
             tools: MemoryTools {
                 trace: trace.clone(),
-                advertised: Arc::default(),
                 availability_restored: availability_restored.clone(),
                 fail_at: Arc::default(),
-                phases: Arc::default(),
                 requests: Arc::default(),
                 output_count: usize::MAX,
                 replies: Arc::default(),
@@ -246,9 +239,10 @@ impl MemoryState {
             retries: Vec::new(),
             recorded_tools: Vec::new(),
             pending_tools: VecDeque::new(),
+            historical_calls: Vec::new(),
             restored_results: Vec::new(),
             applied_results: Vec::new(),
-            prepared_phases: Vec::new(),
+            prepared_catalogs: Vec::new(),
             work: true,
             turns: 1,
             open: false,
@@ -275,19 +269,38 @@ impl MemoryState {
     }
 }
 impl States for MemoryState {
+    fn restore_tool_results(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("reconcile")?;
+            self.applied_results.append(&mut self.restored_results);
+            self.applied_results
+                .extend(self.historical_calls.drain(..).map(|call| ToolResult {
+                    call_id: call.id,
+                    tool_name: call.name,
+                    status: ToolStatus::Error,
+                    text: "The process crashed before the tool completed.".into(),
+                    error_message: "The process crashed before the tool completed.".into(),
+                    ..ToolResult::default()
+                }));
+            Ok(())
+        })
+    }
     fn prepare_tool_execution(
         &mut self,
-        context: ToolContext,
     ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, Error>> {
         Box::pin(async move {
-            self.step(if context.phase == ToolPhase::Recovery {
-                "reconcile"
-            } else {
-                "prepare_tools"
-            })?;
-            self.prepared_phases.push(context.phase);
-            self.applied_results.append(&mut self.restored_results);
-            Ok(self.pending_tools.front().cloned())
+            self.step("prepare_tools")?;
+            let request = self.pending_tools.front().cloned();
+            if request.is_some() {
+                self.prepared_catalogs.push(
+                    self.requests
+                        .last()
+                        .expect("prepared provider request")
+                        .1
+                        .clone(),
+                );
+            }
+            Ok(request)
         })
     }
     fn record_tool_results<'a>(
@@ -370,7 +383,6 @@ impl States for MemoryState {
                 .map(|definition| definition.name.clone())
                 .collect();
             self.requests.push((phase, names.clone()));
-            *self.tools.advertised.lock().unwrap() = names;
             Ok(ProviderRequest {
                 model: "memory/model".into(),
                 instructions: "core request".into(),
@@ -531,12 +543,12 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
         5
     );
     assert_eq!(state.trace.values().last().unwrap(), "runaway");
+    assert_eq!(state.prepared_catalogs.len(), 5);
     assert!(
         state
-            .prepared_phases
+            .prepared_catalogs
             .iter()
-            .filter(|phase| **phase != ToolPhase::Recovery)
-            .all(|phase| *phase == ToolPhase::Final)
+            .all(|tools| tools == &["read"])
     );
 }
 
@@ -820,11 +832,6 @@ fn tools_and_provider_operate_without_states() {
     let state = MemoryState::new([Reply::final_response("standalone")]);
     let tools: &dyn Tools = &state.tools;
     let catalog = finish(tools.capture_catalog()).unwrap();
-    *state.tools.advertised.lock().unwrap() = catalog
-        .normal
-        .iter()
-        .map(|tool| tool.name.clone())
-        .collect();
     let request = ToolExecutionRequest {
         assistant_sequence: 42,
         starts_batch: true,
@@ -833,17 +840,9 @@ fn tools_and_provider_operate_without_states() {
             name: "read".into(),
             arguments_json: " { \"a\" : 1 } ".into(),
         }],
-        prior_image_bytes: vec![7, 11],
-        image_budget_exceeded: true,
         cancel_remaining: true,
     };
-    let results = finish(tools.execute(
-        request.clone(),
-        ToolContext {
-            phase: ToolPhase::Normal,
-        },
-    ))
-    .unwrap();
+    let results = finish(tools.execute(request.clone())).unwrap();
     assert_eq!(*state.tools.requests.lock().unwrap(), [request]);
     assert_eq!(
         results,
@@ -944,7 +943,10 @@ fn state_preparation_receives_phase_and_provider_receives_advertised_tools() {
             .collect::<Vec<_>>(),
         ["read"]
     );
-    assert_eq!(*states.tools.phases.lock().unwrap(), [ToolPhase::Normal]);
+    assert_eq!(
+        states.prepared_catalogs,
+        [vec!["read".to_owned(), "write".to_owned()]]
+    );
 }
 
 #[test]

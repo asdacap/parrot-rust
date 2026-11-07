@@ -44,17 +44,18 @@ pub trait Tools: Send + Sync {
     fn execute(
         &self,
         request: ToolExecutionRequest,
-        context: ToolContext,
     ) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>>;
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
 pub trait States: Send {
-    /// Restores persisted results and prepares explicit unresolved calls in order.
-    /// Returning none means recovery and result projection are complete for this pass.
+    /// Restores saved tool results and records crash errors for missing historical
+    /// results without invoking tools, before cancellation or readiness is checked.
+    fn restore_tool_results(&mut self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Prepares explicitly queued calls from a newly recorded provider response.
+    /// Returning none means the fresh batch and result projection are complete.
     fn prepare_tool_execution(
         &mut self,
-        context: ToolContext,
     ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, Error>>;
     /// Durably records and applies the returned prefix before any further execution.
     fn record_tool_results<'a>(
@@ -131,14 +132,7 @@ pub async fn run(
         if !states.is_turn_open().await && states.has_scheduled_work() {
             return Ok(Outcome::Completed(answer));
         }
-        execute_tools(
-            states,
-            tools,
-            ToolContext {
-                phase: ToolPhase::Recovery,
-            },
-        )
-        .await?;
+        states.restore_tool_results().await?;
         states.check_cancellation()?;
         if !retry_pending && !states.has_work().await? {
             return Ok(Outcome::Completed(answer));
@@ -192,18 +186,7 @@ pub async fn run(
         }
         if !response.tool_calls.is_empty() {
             states.record_tool_calls(&response).await?;
-            execute_tools(
-                states,
-                tools,
-                ToolContext {
-                    phase: if phase.final_phase {
-                        ToolPhase::Final
-                    } else {
-                        ToolPhase::Normal
-                    },
-                },
-            )
-            .await?;
+            execute_tools(states, tools).await?;
             if phase.final_phase && !budget.try_extend_settlement() {
                 return Ok(Outcome::Failed(states.fail_runaway().await?));
             }
@@ -225,13 +208,9 @@ pub async fn run(
     }
 }
 
-async fn execute_tools(
-    states: &mut dyn States,
-    tools: &dyn Tools,
-    context: ToolContext,
-) -> Result<(), Error> {
-    while let Some(request) = states.prepare_tool_execution(context).await? {
-        let results = tools.execute(request, context).await?;
+async fn execute_tools(states: &mut dyn States, tools: &dyn Tools) -> Result<(), Error> {
+    while let Some(request) = states.prepare_tool_execution().await? {
+        let results = tools.execute(request).await?;
         if results.is_empty() {
             return Err(Error::failed("tool execution returned no results"));
         }

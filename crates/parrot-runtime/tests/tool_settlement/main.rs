@@ -5,6 +5,7 @@ mod harness;
 use harness::*;
 mod admission;
 mod budget_scope;
+mod crash_process;
 mod focused;
 mod images;
 mod owned_recovery;

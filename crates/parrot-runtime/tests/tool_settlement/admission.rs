@@ -51,7 +51,9 @@ fn install_publisher(fixture: &Fixture, harness: &mut Harness, publisher: Arc<To
         fixture.history.clone(),
         publisher.clone(),
         Arc::new(id),
-    );
+        templates().as_ref(),
+    )
+    .unwrap();
     harness.tools = Arc::new(
         ToolSettlement::new(ToolSettlementConfig {
             factory: harness.factory.clone(),

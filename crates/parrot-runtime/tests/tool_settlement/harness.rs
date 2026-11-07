@@ -235,7 +235,7 @@ impl Harness {
         let tools = Arc::new(
             ToolSettlement::new(ToolSettlementConfig {
                 factory: factory.clone(),
-                templates,
+                templates: templates.clone(),
                 output_blobs: blobs,
                 publisher: publisher.clone(),
                 activity: activity.clone(),
@@ -251,7 +251,9 @@ impl Harness {
             fixture.history.clone(),
             publisher.clone(),
             Arc::new(id),
-        );
+            templates.as_ref(),
+        )
+        .unwrap();
         Self {
             tools,
             snapshot,
@@ -277,6 +279,11 @@ impl Harness {
             events: ContextPublisher(fixture.history.clone()),
         }
     }
+    pub async fn restore(&mut self, fixture: &Fixture) -> Result<(), TurnError> {
+        fixture.fresh_batches.lock().unwrap().clear();
+        self.state.reset_pending();
+        self.state.restore_results(&mut self.conversation).await
+    }
     pub async fn run(
         &mut self,
         fixture: &Fixture,
@@ -293,7 +300,20 @@ impl Harness {
         cancellation: &dyn Cancellation,
     ) -> Result<(), TurnError> {
         let result = async {
-            while let Some(request) = self.state.prepare_execution(&mut self.conversation).await? {
+            loop {
+                let request = match self.state.prepare_execution(&mut self.conversation).await? {
+                    Some(request) => request,
+                    None => {
+                        let fresh = fixture.fresh_batches.lock().unwrap().pop_front();
+                        match fresh {
+                            Some((sequence, calls)) => {
+                                self.state.begin_execution(sequence, calls)?;
+                                continue;
+                            }
+                            None => break,
+                        }
+                    }
+                };
                 let results = self
                     .tools
                     .execute(
@@ -318,7 +338,7 @@ impl Harness {
                     .record_results(&mut self.conversation, &results)
                     .await?;
             }
-            Ok(())
+            self.state.restore_results(&mut self.conversation).await
         }
         .await;
         if result.is_err() {

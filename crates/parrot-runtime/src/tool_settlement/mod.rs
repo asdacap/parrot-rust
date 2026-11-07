@@ -124,14 +124,6 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
         if request.starts_batch || execution.is_none() {
             let image_budget =
                 Arc::new(ToolCycleImageBudget::new(self.config.image_bytes_per_cycle));
-            if request.image_budget_exceeded {
-                image_budget.restore_exceeded();
-            }
-            for bytes in request.prior_image_bytes {
-                image_budget
-                    .restore_accepted(bytes)
-                    .map_err(|error| TurnError::Service(error.to_string()))?;
-            }
             *execution = Some(image_budget);
         }
         let image_budget = execution

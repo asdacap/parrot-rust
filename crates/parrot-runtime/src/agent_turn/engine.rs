@@ -191,7 +191,8 @@ where
             config.history.clone(),
             config.publisher.clone(),
             config.event_id.clone(),
-        );
+            &config.templates,
+        )?;
         let reminders = config.reminders;
         let render = |key: &str| {
             config
@@ -385,54 +386,6 @@ where
             materialized.as_ref().expect("materialized above"),
             selection,
         )
-    }
-    async fn reconcile(
-        &self,
-        state: &mut State,
-        cancellation: &dyn Cancellation,
-    ) -> Result<TurnSelection<S>, TurnError> {
-        let selection = self.selection.capture()?;
-        let snapshot = self.snapshot(&selection)?;
-        let status = self.status.bind(&selection);
-        let events = ContextEmitter { backend: self };
-        let result = async {
-            while let Some(request) = state
-                .tool_conversation
-                .prepare_execution(&mut state.conversation)
-                .await?
-            {
-                let results = self
-                    .tools
-                    .execute(
-                        request,
-                        TurnResources {
-                            history: &self.history,
-                            conversation: &mut state.conversation,
-                            context: &mut state.context,
-                            prompt: &self.prompt,
-                            sessions: &self.sessions,
-                            status: status.as_ref(),
-                            events: &events,
-                            usage: &self.usage,
-                        },
-                        &selection,
-                        &snapshot,
-                        self.selection.as_ref(),
-                        cancellation,
-                    )
-                    .await?;
-                state
-                    .tool_conversation
-                    .record_results(&mut state.conversation, &results)
-                    .await?;
-            }
-            Ok(selection)
-        }
-        .await;
-        if result.is_err() {
-            state.tool_conversation.reset_pending();
-        }
-        result
     }
     async fn promote(
         &self,
@@ -1165,13 +1118,19 @@ where
     }
     fn prepare_scheduled<'a>(
         &'a self,
-        cancellation: &'a dyn Cancellation,
+        _cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Self::Selection, LifecycleError>> {
         Box::pin(async move {
-            let mut state = self.state.lock().await;
-            self.reconcile(&mut state, cancellation)
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
+            state
+                .tool_conversation
+                .restore_results(&mut state.conversation)
                 .await
-                .map_err(|e| e.lifecycle_error())
+                .map_err(|error| error.lifecycle_error())?;
+            self.selection
+                .capture()
+                .map_err(|error| error.lifecycle_error())
         })
     }
     fn pass<'a>(
@@ -1285,7 +1244,13 @@ where
     ) -> BoxFuture<'_, Result<i64, LifecycleError>> {
         let message_id = message_id.to_owned();
         Box::pin(async move {
-            let _state = self.state.lock().await;
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
+            state
+                .tool_conversation
+                .restore_results(&mut state.conversation)
+                .await
+                .map_err(|error| error.lifecycle_error())?;
             if let Some(input) = self
                 .history
                 .repository()

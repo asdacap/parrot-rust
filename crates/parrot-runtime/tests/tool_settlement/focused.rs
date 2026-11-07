@@ -186,7 +186,7 @@ async fn selection_capture_reads_tool_started_from_committed_sqlite_before_usage
 }
 
 #[tokio::test]
-async fn restored_cancelled_terminal_stops_pending_tail_without_reinvocation_or_start() {
+async fn restored_cancelled_terminal_is_preserved_and_unfinished_tail_gets_crash_error() {
     let fixture = Fixture::new();
     let sequence = fixture
         .batch(vec![call("cancelled", "safe"), call("tail", "safe")])
@@ -213,7 +213,7 @@ async fn restored_cancelled_terminal_stops_pending_tail_without_reinvocation_or_
         ParallelSafety::ParallelSafe,
     ));
     let mut harness = Harness::new(&fixture, vec![tool.clone().handle()]).await;
-    harness.run(&fixture, &NeverCancelled).await.unwrap();
+    harness.restore(&fixture).await.unwrap();
     assert!(tool.calls.lock().unwrap().is_empty());
     assert!(
         !fixture
@@ -227,10 +227,19 @@ async fn restored_cancelled_terminal_stops_pending_tail_without_reinvocation_or_
         .tool_terminals_of_calls(vec!["cancelled".into(), "tail".into()])
         .await
         .unwrap();
+    assert_eq!(terminals[0].status, ToolExecutionStatus::Cancelled);
+    assert_eq!(terminals[0].message, "old interrupted");
+    assert_eq!(terminals[1].status, ToolExecutionStatus::Error);
+    assert!(terminals[1].message.contains(CRASH_MESSAGE));
+    let events = fixture.events().await;
     assert!(
-        terminals
+        !events
             .iter()
-            .all(|terminal| terminal.status == ToolExecutionStatus::Cancelled)
+            .any(|event| event.has_tool_execution_started())
+    );
+    assert_eq!(
+        events.iter().filter(|event| event.has_tool_error()).count(),
+        1
     );
     assert_eq!(
         fixture
@@ -312,6 +321,8 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
         ParallelSafety::ParallelSafe,
     ));
     let mut harness = Harness::new(&fixture, vec![tool.clone().handle()]).await;
+    let (sequence, calls) = fixture.fresh_batches.lock().unwrap().pop_front().unwrap();
+    harness.state.begin_execution(sequence, calls).unwrap();
     let mut request = harness
         .state
         .prepare_execution(&mut harness.conversation)
@@ -435,5 +446,90 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
             .map(|item| item.message.tool_call_id.as_str())
             .collect::<Vec<_>>(),
         ["first", "second"]
+    );
+}
+
+#[tokio::test]
+async fn restoration_closes_every_unfinished_call_with_configured_durable_errors_once() {
+    let fixture = Fixture::new();
+    fixture
+        .batch(vec![
+            call("first-missing", "read"),
+            call("second-missing", "read"),
+        ])
+        .await;
+    let tool = Arc::new(RecordingTool::new(
+        &fixture,
+        "read",
+        ParallelSafety::Sequential,
+    ));
+    let environment = BTreeMap::from([
+        ("HOME".into(), "/tmp/t47/home".into()),
+        ("WORKDIR".into(), "/tmp/t47/work".into()),
+    ]);
+    let (_, catalog) = PromptTemplateCatalog::from_content(
+        "prompt_templates:\n  agent-session.crashed-tool-result:\n    template: 'The process crashed before the tool completed. Configured recovery notice.'\n  tool-result.error:\n    template: 'ERROR [{message}]'\n", &environment,
+    ).unwrap();
+    let message = "The process crashed before the tool completed. Configured recovery notice.";
+    let mut harness = Harness::configured(
+        &fixture,
+        vec![tool.clone().handle()],
+        1024,
+        Arc::new(catalog),
+    )
+    .await;
+    harness.restore(&fixture).await.unwrap();
+    harness.restore(&fixture).await.unwrap();
+    assert!(tool.calls.lock().unwrap().is_empty());
+    let terminals = fixture
+        .history
+        .tool_terminals_of_calls(vec!["first-missing".into(), "second-missing".into()])
+        .await
+        .unwrap();
+    assert_eq!(terminals.len(), 2);
+    assert!(
+        terminals
+            .iter()
+            .all(|terminal| terminal.status == ToolExecutionStatus::Error
+                && terminal.message == format!("ERROR [{message}]"))
+    );
+    let events = fixture.events().await;
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.has_tool_started() || event.has_tool_execution_started())
+    );
+    let errors: Vec<_> = events
+        .iter()
+        .filter(|event| event.has_tool_error())
+        .map(|event| event.tool_error())
+        .collect();
+    assert_eq!(errors.len(), 2);
+    assert!(errors.iter().all(|error| error.message == message));
+    assert_eq!(
+        harness
+            .publisher
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.has_tool_error())
+            .count(),
+        2
+    );
+    let results: Vec<_> = fixture
+        .history
+        .conversation()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|item| item.message.role == MessageRole::Tool)
+        .collect();
+    assert_eq!(
+        results
+            .iter()
+            .map(|item| item.message.tool_call_id.as_str())
+            .collect::<Vec<_>>(),
+        ["first-missing", "second-missing"]
     );
 }

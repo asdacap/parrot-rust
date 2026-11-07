@@ -418,6 +418,10 @@ prompt_templates:
     template: 'A new turn has started and its provider-request budget has reset. Tool access is restored to the tools permitted for this turn.'
     allowed_arguments: []
     required_arguments: []
+  agent-session.crashed-tool-result:
+    template: 'The process crashed before the tool completed.'
+    allowed_arguments: []
+    required_arguments: []
   agent-session.interrupted-result:
     template: 'Error: tool execution interrupted'
     allowed_arguments: []

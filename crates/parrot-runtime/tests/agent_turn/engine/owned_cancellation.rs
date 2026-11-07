@@ -1,6 +1,9 @@
 use super::*;
 use parrot_runtime::agent_turn::lifecycle::DrainBackend;
 
+#[path = "cold_cancel_tool_results.rs"]
+mod tool_results;
+
 impl Fixture {
     async fn save_cancelable_execution(
         &self,

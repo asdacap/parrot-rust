@@ -365,6 +365,31 @@ async fn failed_started_publication_is_outside_tool_catch_but_joins_all_admitted
     assert!(terminal_ids(&fixture.events().await).is_empty());
     assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert!(harness.activity.capture().current_tool.is_none());
+    harness.run(&fixture, &NeverCancelled).await.unwrap();
+    assert!(a.calls.lock().unwrap().is_empty());
+    assert_eq!(peer.calls.lock().unwrap().len(), 1);
+    let restored = terminals(&fixture, &["start-fails", "peer"]).await;
+    assert!(
+        restored
+            .iter()
+            .all(|terminal| terminal.status == ToolExecutionStatus::Error
+                && terminal.message.contains(CRASH_MESSAGE))
+    );
+    let events = fixture.events().await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_tool_started())
+            .count(),
+        2
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_tool_execution_started())
+            .count(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -440,7 +465,7 @@ async fn utf8_output_spills_only_above_64kib_and_preserves_actual_blob_bytes() {
 }
 
 #[tokio::test]
-async fn close_reopen_partial_batch_skips_settled_call_and_idempotently_projects_pending_call() {
+async fn close_reopen_partial_batch_preserves_saved_result_and_closes_pending_as_crash_error() {
     let mut fixture = Fixture::new();
     let sequence = fixture
         .batch(vec![call("settled", "read"), call("pending", "read")])
@@ -476,6 +501,7 @@ async fn close_reopen_partial_batch_skips_settled_call_and_idempotently_projects
         path,
         repository: reopened,
         history,
+        fresh_batches: Mutex::new(VecDeque::new()),
     };
     let tool = Arc::new(RecordingTool::new(
         &reopened_fixture,
@@ -491,14 +517,16 @@ async fn close_reopen_partial_batch_skips_settled_call_and_idempotently_projects
         .run(&reopened_fixture, &NeverCancelled)
         .await
         .unwrap();
-    assert_eq!(
-        tool.calls
-            .lock()
-            .unwrap()
+    assert!(tool.calls.lock().unwrap().is_empty());
+    let restored = terminals(&reopened_fixture, &["settled", "pending"]).await;
+    assert_eq!(restored[0], terminal);
+    assert_eq!(restored[1].status, ToolExecutionStatus::Error);
+    assert!(restored[1].message.contains(CRASH_MESSAGE));
+    let events = reopened_fixture.events().await;
+    assert!(
+        !events
             .iter()
-            .map(|call| call.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["pending"]
+            .any(|event| event.has_tool_started() || event.has_tool_execution_started())
     );
     assert_eq!(
         terminal_ids(&harness.publisher.events.lock().unwrap()),

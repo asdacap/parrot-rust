@@ -57,12 +57,13 @@ impl ConversationRepository {
         &self,
         event: Event,
         message: ConversationMessage,
-    ) -> Result<(), EventError> {
+    ) -> Result<ConversationItem, EventError> {
         self.validate(&event.agent_session_id)?;
         let agent = event.agent_session_id.clone();
         let context = self.events.context().clone();
         let projected_agent = agent.clone();
-        self.events
+        let item = self
+            .events
             .transaction(move |tx| {
                 crate::events::record(tx, &event, None, &(context.timestamp)())?;
                 crate::events::projection::project(
@@ -70,11 +71,11 @@ impl ConversationRepository {
                     &projected_agent,
                     &message,
                     &(context.timestamp)(),
-                )?;
-                Ok(())
+                )
             })
             .await?;
-        self.refresh_agent_history(&agent).await
+        self.refresh_agent_history(&agent).await?;
+        Ok(item)
     }
 }
 
@@ -114,7 +115,7 @@ impl AgentHistoryView {
         &self,
         event: Event,
         message: ConversationMessage,
-    ) -> Result<(), EventError> {
+    ) -> Result<ConversationItem, EventError> {
         self.repository.append_conversation(event, message).await
     }
     pub async fn has_tool_synthetic(&self, assistant: i64) -> Result<bool, EventError> {

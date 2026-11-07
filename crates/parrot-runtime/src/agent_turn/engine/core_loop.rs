@@ -1,8 +1,8 @@
 use super::*;
 use parrot_core::{
     CompletionDecision as CoreCompletionDecision, Error as CoreError, ErrorCode, ErrorKind,
-    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCatalog, ToolContext,
-    ToolDefinition, ToolExecutionRequest, ToolPhase, ToolResult, TurnOptions,
+    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCatalog,
+    ToolDefinition, ToolExecutionRequest, ToolResult, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -10,6 +10,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     binding: &'a TurnBinding<S, T>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
+    request_tools: Option<T::Snapshot>,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -34,7 +35,7 @@ struct BoundTurn<S: AccessSnapshot, T: TurnTools<S>> {
     tools: Option<CapturedTools<T::Snapshot>>,
 }
 
-struct RecoveryBinding<S: AccessSnapshot, T: TurnTools<S>> {
+struct ExecutionBinding<S: AccessSnapshot, T: TurnTools<S>> {
     selection: TurnSelection<S>,
     tools: T::Snapshot,
     status: Arc<dyn crate::compaction::ContextStatus>,
@@ -42,14 +43,14 @@ struct RecoveryBinding<S: AccessSnapshot, T: TurnTools<S>> {
 
 struct TurnBinding<S: AccessSnapshot, T: TurnTools<S>> {
     turn: std::sync::Mutex<Option<BoundTurn<S, T>>>,
-    recovery: std::sync::Mutex<Option<RecoveryBinding<S, T>>>,
+    execution: std::sync::Mutex<Option<ExecutionBinding<S, T>>>,
 }
 
 impl<S: AccessSnapshot, T: TurnTools<S>> TurnBinding<S, T> {
     fn new() -> Self {
         Self {
             turn: std::sync::Mutex::new(None),
-            recovery: std::sync::Mutex::new(None),
+            execution: std::sync::Mutex::new(None),
         }
     }
     fn bind(&self, selection: TurnSelection<S>) {
@@ -77,19 +78,17 @@ impl<S: AccessSnapshot, T: TurnTools<S>> TurnBinding<S, T> {
         });
         Ok(())
     }
-    fn capture_tools(&self, phase: ToolPhase) -> Result<T::Snapshot, TurnError> {
+    fn capture_tools(&self, final_phase: bool) -> Result<T::Snapshot, TurnError> {
         let guard = self.turn.lock().expect("turn binding poisoned");
         let tools = guard
             .as_ref()
             .and_then(|turn| turn.tools.as_ref())
             .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
-        match phase {
-            ToolPhase::Normal => Ok(tools.normal.clone()),
-            ToolPhase::Final => Ok(tools.final_phase.clone()),
-            ToolPhase::Recovery => Err(TurnError::Service(
-                "recovery requires its own tool capture".into(),
-            )),
-        }
+        Ok(if final_phase {
+            tools.final_phase.clone()
+        } else {
+            tools.normal.clone()
+        })
     }
 }
 
@@ -159,6 +158,7 @@ where
         binding: &binding,
         cancellation,
         work,
+        request_tools: None,
     };
     let tools = RuntimeTools {
         backend,
@@ -190,39 +190,31 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn restore_tool_results(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let mut guard = self.backend.state.lock().await;
+            let state = &mut *guard;
+            state
+                .tool_conversation
+                .restore_results(&mut state.conversation)
+                .await
+        })
+    }
     fn prepare_tool_execution(
         &mut self,
-        context: ToolContext,
     ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, CoreError>> {
         adapt_operation(async move {
-            if context.phase == ToolPhase::Recovery {
-                let mut recovery = self
-                    .binding
-                    .recovery
-                    .lock()
-                    .expect("recovery binding poisoned");
-                if recovery.is_none() {
-                    let selection = self.backend.selection.capture()?;
-                    let tools = self.backend.snapshot(&selection)?;
-                    let status = self.backend.status.bind(&selection);
-                    *recovery = Some(RecoveryBinding {
-                        selection,
-                        tools,
-                        status,
-                    });
-                }
-            }
             let mut guard = self.backend.state.lock().await;
             let state = &mut *guard;
             let request = state
                 .tool_conversation
                 .prepare_execution(&mut state.conversation)
                 .await?;
-            if request.is_none() && context.phase == ToolPhase::Recovery {
+            if request.is_none() {
                 self.binding
-                    .recovery
+                    .execution
                     .lock()
-                    .expect("recovery binding poisoned")
+                    .expect("execution binding poisoned")
                     .take();
             }
             Ok(request)
@@ -446,6 +438,7 @@ where
                 selected: selection.model.canonical_model.clone(),
                 estimated_input_tokens: estimate,
             });
+            self.request_tools = Some(self.binding.capture_tools(phase.final_phase)?);
             Ok(request.into())
         })
     }
@@ -515,7 +508,7 @@ where
             let state = &mut *guard;
             let cancellation = self.cancellation;
             let published = backend.event();
-            backend
+            let assistant = backend
                 .history
                 .append_conversation(published.clone(), conversation_message(completed))
                 .await?;
@@ -530,6 +523,33 @@ where
                 ..Default::default()
             });
             backend.emit(received, cancellation).await?;
+            state.tool_conversation.begin_execution(
+                assistant.sequence,
+                completed
+                    .tool_calls
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect(),
+            )?;
+            let tools = self
+                .request_tools
+                .take()
+                .ok_or_else(|| TurnError::Service("request tools are unavailable".into()))?;
+            let selection = self.binding.capture_selection()?;
+            let status = state
+                .request_status
+                .clone()
+                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
+            *self
+                .binding
+                .execution
+                .lock()
+                .expect("execution binding poisoned") = Some(ExecutionBinding {
+                selection,
+                tools,
+                status,
+            });
             Ok(())
         })
     }
@@ -659,39 +679,26 @@ where
     fn execute(
         &self,
         request: ToolExecutionRequest,
-        context: ToolContext,
     ) -> BoxFuture<'_, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
-            let recovery = if context.phase == ToolPhase::Recovery {
+            let (selection, snapshot, status) = {
                 let guard = self
                     .binding
-                    .recovery
+                    .execution
                     .lock()
-                    .expect("recovery binding poisoned");
+                    .expect("execution binding poisoned");
                 let binding = guard
                     .as_ref()
-                    .ok_or_else(|| TurnError::Service("recovery tools are unavailable".into()))?;
-                Some((
+                    .ok_or_else(|| TurnError::Service("execution tools are unavailable".into()))?;
+                (
                     binding.selection.clone(),
                     binding.tools.clone(),
                     binding.status.clone(),
-                ))
-            } else {
-                None
+                )
             };
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
-            let (selection, snapshot, status) = match recovery {
-                Some(binding) => binding,
-                None => (
-                    self.binding.capture_selection()?,
-                    self.binding.capture_tools(context.phase)?,
-                    state.request_status.clone().ok_or_else(|| {
-                        TurnError::Service("request status is unavailable".into())
-                    })?,
-                ),
-            };
             let events = ContextEmitter { backend };
             backend
                 .tools

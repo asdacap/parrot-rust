@@ -121,7 +121,7 @@ async fn live_image_budget_survives_failed_chunks_and_resets_for_the_next_batch(
 }
 
 #[tokio::test]
-async fn retry_after_recording_failure_rebuilds_the_budget_from_only_durable_results() {
+async fn retry_after_recording_failure_closes_unfinished_calls_without_spending_their_budget() {
     let fixture = Fixture::new();
     fixture
         .batch(vec![call("consume", "consume"), call("probe", "probe")])
@@ -141,9 +141,34 @@ async fn retry_after_recording_failure_rebuilds_the_budget_from_only_durable_res
     assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert_eq!(*accepted.lock().unwrap(), [("consume".into(), true)]);
     harness.run(&fixture, &NeverCancelled).await.unwrap();
+    assert_eq!(*accepted.lock().unwrap(), [("consume".into(), true)]);
+    let terminals = fixture
+        .history
+        .tool_terminals_of_calls(vec!["consume".into(), "probe".into()])
+        .await
+        .unwrap();
+    assert_eq!(terminals[0].status, ToolExecutionStatus::Error);
+    assert!(
+        terminals[0]
+            .message
+            .contains("failure after consuming image bytes")
+    );
+    assert_eq!(terminals[1].status, ToolExecutionStatus::Error);
+    assert!(terminals[1].message.contains(CRASH_MESSAGE));
+    let events = fixture.events().await;
     assert_eq!(
-        *accepted.lock().unwrap(),
-        [("consume".into(), true), ("probe".into(), true)]
+        events
+            .iter()
+            .filter(|event| event.has_tool_started())
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_tool_execution_started())
+            .count(),
+        1
     );
     assert!(harness.state.settled_conversation_sequence() > 0);
     assert_eq!(
@@ -155,6 +180,12 @@ async fn retry_after_recording_failure_rebuilds_the_budget_from_only_durable_res
             .iter()
             .filter(|event| event.has_tool_error())
             .count(),
-        1
+        2
+    );
+    fixture.batch(vec![call("new-request", "probe")]).await;
+    harness.run(&fixture, &NeverCancelled).await.unwrap();
+    assert_eq!(
+        *accepted.lock().unwrap(),
+        [("consume".into(), true), ("new-request".into(), true)]
     );
 }

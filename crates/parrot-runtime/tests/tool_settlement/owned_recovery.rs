@@ -37,7 +37,7 @@ impl Tool for CounterTool {
 }
 
 #[tokio::test]
-async fn uncommitted_tool_effect_can_repeat_but_committed_terminal_survives_reopening() {
+async fn uncommitted_tool_effect_is_not_repeated_and_crash_error_survives_reopening() {
     let fixture = Arc::new(Fixture::new());
     fixture.batch(vec![call("effect", "counter")]).await;
     let effects = Arc::new(AtomicUsize::new(0));
@@ -95,6 +95,7 @@ async fn uncommitted_tool_effect_can_repeat_but_committed_terminal_survives_reop
         path: fixture.path.clone(),
         history: Fixture::history_for(&fixture.path, &repository),
         repository,
+        fresh_batches: Mutex::new(VecDeque::new()),
     };
     let tool = Arc::new(CounterTool {
         recording: RecordingTool::new(&restarted, "counter", ParallelSafety::Sequential),
@@ -104,16 +105,44 @@ async fn uncommitted_tool_effect_can_repeat_but_committed_terminal_survives_reop
     bounded(harness.run(&restarted, &NeverCancelled))
         .await
         .unwrap();
-    assert_eq!(effects.load(Ordering::SeqCst), 2);
-    assert_eq!(*tool.recording.completed.lock().unwrap(), ["effect"]);
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    assert!(tool.recording.completed.lock().unwrap().is_empty());
     let terminals = restarted
         .history
         .tool_terminals_of_calls(vec!["effect".into()])
         .await
         .unwrap();
     assert_eq!(terminals.len(), 1);
-    assert_eq!(terminals[0].status, ToolExecutionStatus::Finished);
-    assert_eq!(terminals[0].message, "result:counter");
+    assert_eq!(terminals[0].status, ToolExecutionStatus::Error);
+    assert!(terminals[0].message.contains(CRASH_MESSAGE));
+    let events = restarted.events().await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_tool_started())
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_tool_execution_started())
+            .count(),
+        1
+    );
+    assert_eq!(
+        events.iter().filter(|event| event.has_tool_error()).count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.has_tool_error())
+            .unwrap()
+            .tool_error()
+            .message,
+        CRASH_MESSAGE
+    );
     drop(harness);
     drop(tool);
     restarted
@@ -129,6 +158,7 @@ async fn uncommitted_tool_effect_can_repeat_but_committed_terminal_survives_reop
         path: fixture.path.clone(),
         history: Fixture::history_for(&fixture.path, &repository),
         repository,
+        fresh_batches: Mutex::new(VecDeque::new()),
     };
     let tool = Arc::new(CounterTool {
         recording: RecordingTool::new(&recovered, "counter", ParallelSafety::Sequential),
@@ -138,8 +168,17 @@ async fn uncommitted_tool_effect_can_repeat_but_committed_terminal_survives_reop
     bounded(harness.run(&recovered, &NeverCancelled))
         .await
         .unwrap();
-    assert_eq!(effects.load(Ordering::SeqCst), 2);
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
     assert!(tool.recording.calls.lock().unwrap().is_empty());
+    assert!(harness.publisher.events.lock().unwrap().is_empty());
+    assert_eq!(
+        recovered
+            .history
+            .tool_terminals_of_calls(vec!["effect".into()])
+            .await
+            .unwrap(),
+        terminals
+    );
     assert_eq!(
         recovered
             .history
@@ -154,7 +193,7 @@ async fn uncommitted_tool_effect_can_repeat_but_committed_terminal_survives_reop
 }
 
 #[tokio::test]
-async fn owned_recovery_restores_settled_tool_and_invokes_only_unresolved_call() {
+async fn owned_recovery_preserves_settled_result_and_closes_unfinished_without_invocation() {
     let fixture = Fixture::new();
     let (seed, _) = runtime::runtime(&fixture, &Scripted::default(), vec![]).await;
     seed.record(
@@ -265,13 +304,14 @@ async fn owned_recovery_restores_settled_tool_and_invokes_only_unresolved_call()
         path: fixture.path.clone(),
         repository,
         history,
+        fresh_batches: Mutex::new(VecDeque::new()),
     };
     let tool = Arc::new(RecordingTool::new(
         &restarted,
         "read",
         ParallelSafety::Sequential,
     ));
-    let provider = Scripted::new(vec![Step::complete("answer using recovered tools")]);
+    let provider = Scripted::new(vec![Step::complete("answer after tool crash")]);
     let (legacy, _) = runtime::runtime(&restarted, &provider, vec![tool.clone().handle()]).await;
     let session =
         AgentSession::with_state(legacy.backend().clone(), Arc::new(Signal::new()), store);
@@ -279,24 +319,52 @@ async fn owned_recovery_restores_settled_tool_and_invokes_only_unresolved_call()
         bounded(session.recover_owned().unwrap().join())
             .await
             .unwrap(),
-        Execution::succeeded("answer using recovered tools")
+        Execution::succeeded("answer after tool crash")
     );
     assert_eq!(
         bounded(session.recover_owned().unwrap().join())
             .await
             .unwrap(),
-        Execution::succeeded("answer using recovered tools")
+        Execution::succeeded("answer after tool crash")
+    );
+    assert!(tool.calls.lock().unwrap().is_empty());
+    let events = restarted.events().await;
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.has_tool_started() || event.has_tool_execution_started())
     );
     assert_eq!(
-        tool.calls
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|call| call.id.as_str())
-            .collect::<Vec<_>>(),
-        ["pending-owned"]
+        events.iter().filter(|event| event.has_tool_error()).count(),
+        1
     );
-    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0]
+                .messages
+                .iter()
+                .any(|message| message.tool_call_id == "settled-owned"
+                    && message.content() == "saved first result")
+        );
+        assert!(
+            requests[0]
+                .messages
+                .iter()
+                .any(|message| message.tool_call_id == "pending-owned"
+                    && message.content().contains(CRASH_MESSAGE))
+        );
+    }
+    let restored = restarted
+        .history
+        .tool_terminals_of_calls(vec!["settled-owned".into(), "pending-owned".into()])
+        .await
+        .unwrap();
+    assert_eq!(restored[0].status, ToolExecutionStatus::Finished);
+    assert_eq!(restored[0].message, "saved first result");
+    assert_eq!(restored[1].status, ToolExecutionStatus::Error);
+    assert!(restored[1].message.contains(CRASH_MESSAGE));
     let messages = restarted.history.conversation().await.unwrap();
     assert_eq!(
         messages

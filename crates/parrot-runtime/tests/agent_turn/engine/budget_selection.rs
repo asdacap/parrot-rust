@@ -6,6 +6,7 @@ struct BudgetTools {
     inner: Tools,
     definitions: Vec<sessions::Tool>,
     materializations: AtomicUsize,
+    executions: Mutex<Vec<(String, Vec<String>)>>,
 }
 impl BudgetTools {
     fn new(names: &[&str]) -> Arc<Self> {
@@ -20,6 +21,7 @@ impl BudgetTools {
                 })
                 .collect(),
             materializations: AtomicUsize::new(0),
+            executions: Mutex::new(Vec::new()),
         })
     }
 }
@@ -55,6 +57,10 @@ impl TurnTools<Security> for BudgetTools {
         capture: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
+        self.executions.lock().unwrap().push((
+            selection.profile.id.clone(),
+            snapshot.iter().map(|tool| tool.name.clone()).collect(),
+        ));
         self.inner.execute(
             request,
             resources,
@@ -536,11 +542,17 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     let next_gate = Gate::new();
     let mut first = tool_step("worker");
     first.gate = Some(first_gate.clone());
-    let mut final_step = Step::complete("first answer");
+    let mut final_step = tool_step("survivor");
     final_step.gate = Some(final_gate.clone());
-    let mut next = Step::complete("queued answer");
+    let mut next = tool_step("new-tool");
     next.gate = Some(next_gate.clone());
-    let provider = Scripted::new(vec![first, final_step, next]);
+    let provider = Scripted::new(vec![
+        first,
+        final_step,
+        Step::complete("first answer"),
+        next,
+        Step::complete("queued answer"),
+    ]);
     let mut original = profile();
     original.maximum_requests = 2;
     original.allowed_tools = Some(vec!["worker".into(), "survivor".into()]);
@@ -585,10 +597,10 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     next_gate.entered().await;
     {
         let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(tool_names(&requests[2]), ["new-tool"]);
+        assert_eq!(requests.len(), 4);
+        assert_eq!(tool_names(&requests[3]), ["new-tool"]);
         assert!(
-            requests[2]
+            requests[3]
                 .messages
                 .iter()
                 .any(|message| message.role == sessions::Role::System
@@ -618,5 +630,13 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
         ["stop", "stop"]
     );
     assert!(!events.iter().any(|event| event.has_turn_failed()));
+    assert_eq!(
+        *tools.executions.lock().unwrap(),
+        [
+            ("original".into(), vec!["worker".into(), "survivor".into()]),
+            ("original".into(), vec!["survivor".into()]),
+            ("updated".into(), vec!["new-tool".into()]),
+        ]
+    );
     runtime.close().await;
 }
