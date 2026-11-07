@@ -17,6 +17,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S, T>,
+    cancellation: &'a dyn Cancellation,
 }
 
 struct RuntimeCancellation<'a>(parrot_core::CancellationToken<'a>);
@@ -197,6 +198,7 @@ where
     let tools = RuntimeTools {
         backend,
         binding: &binding,
+        cancellation,
     };
     let provider = RuntimeProvider {
         backend,
@@ -206,7 +208,7 @@ where
     let is_cancelled = || cancellation.is_cancelled();
     let cancelled = || cancellation.cancelled();
     let token = parrot_core::CancellationToken::new(&is_cancelled, &cancelled);
-    let mut budget = parrot_core::budget::TurnBudget::new(states.disables_request_limit());
+    let mut budget = parrot_core::budget::TurnBudget::new(backend.agent_limits.disable_max_turns);
     let outcome: Result<parrot_core::Outcome, CoreError> = async {
         let mut answer = String::new();
         loop {
@@ -216,7 +218,12 @@ where
             }
             match parrot_core::run_turn(&mut states, &tools, &provider, &mut budget, token).await? {
                 Some(parrot_core::Outcome::Completed(completed)) => answer = completed,
-                Some(failed @ parrot_core::Outcome::Failed(_)) => return Ok(failed),
+                Some(parrot_core::Outcome::BudgetExhausted) => {
+                    backend
+                        .fail(backend.notices.runaway.clone(), String::new())
+                        .await?;
+                    return Ok(parrot_core::Outcome::BudgetExhausted);
+                }
                 None => return Ok(parrot_core::Outcome::Completed(answer)),
             }
         }
@@ -230,7 +237,9 @@ where
     }
     match outcome {
         Ok(parrot_core::Outcome::Completed(answer)) => Ok(Execution::succeeded(answer)),
-        Ok(parrot_core::Outcome::Failed(message)) => Ok(Execution::failed(&message)),
+        Ok(parrot_core::Outcome::BudgetExhausted) => {
+            Ok(Execution::failed(&backend.notices.runaway))
+        }
         Err(error) => Err(TurnError::Core(error)),
     }
 }
@@ -259,9 +268,6 @@ where
                 .take();
             Ok(())
         })
-    }
-    fn disables_request_limit(&self) -> bool {
-        self.backend.agent_limits.disable_max_turns
     }
     fn is_turn_open(&self) -> BoxFuture<'_, bool> {
         Box::pin(async move { self.backend.state.lock().await.turn.is_some() })
@@ -387,24 +393,6 @@ where
             };
             self.binding.bind(selection);
             Ok(options)
-        })
-    }
-    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let events = ContextEmitter { backend };
-            state
-                .context
-                .restore_tool_availability(
-                    &mut state.conversation,
-                    &backend.notices.restored,
-                    &events,
-                    self.cancellation,
-                )
-                .await?;
-            Ok(())
         })
     }
     fn promote_input(
@@ -707,14 +695,6 @@ where
             Ok(completed.assistant_text.clone())
         })
     }
-    fn fail_runaway(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .fail(self.backend.notices.runaway.clone(), String::new())
-                .await?;
-            Ok(self.backend.notices.runaway.clone())
-        })
-    }
 }
 
 impl<S, T> parrot_core::Tools for RuntimeTools<'_, S, T>
@@ -747,6 +727,19 @@ where
                     .collect(),
             };
             self.binding.retain_tools(normal, final_phase)?;
+            let backend = self.backend;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let events = ContextEmitter { backend };
+            state
+                .context
+                .restore_tool_availability(
+                    &mut state.conversation,
+                    &backend.notices.restored,
+                    &events,
+                    self.cancellation,
+                )
+                .await?;
             Ok(catalog)
         })
     }

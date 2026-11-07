@@ -33,7 +33,7 @@ impl<'a> CancellationToken<'a> {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Outcome {
     Completed(String),
-    Failed(String),
+    BudgetExhausted,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -78,8 +78,6 @@ pub trait States: Send {
         &'a mut self,
         results: &'a [ToolResult],
     ) -> BoxFuture<'a, Result<(), Error>>;
-    /// Reports whether provider-request limits are disabled for this run.
-    fn disables_request_limit(&self) -> bool;
     /// Reads the latest visible logical turn, including retained completion candidates.
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>>;
     /// Peeks at the next durable pending input header without reserving, promoting,
@@ -89,8 +87,6 @@ pub trait States: Send {
     fn is_turn_open(&self) -> BoxFuture<'_, bool>;
     /// Opens a turn and freezes its model, profile, and authority privately.
     fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>>;
-    /// Restores tool availability after the core captures the turn's tool catalog.
-    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), Error>>;
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and batching its content effects.
     fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>>;
@@ -132,8 +128,6 @@ pub trait States: Send {
         &'a mut self,
         response: &'a ProviderResponse,
     ) -> BoxFuture<'a, Result<String, Error>>;
-    /// Records request-budget exhaustion and returns its failure message.
-    fn fail_runaway(&mut self) -> BoxFuture<'_, Result<String, Error>>;
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

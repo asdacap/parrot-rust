@@ -66,12 +66,19 @@ delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch.
 
-`run_turn` handles at most one conversation turn using a caller-retained core
-`TurnBudget`; `run` is the multi-turn convenience entry point. Native orchestration checks its
-scheduled-operation queue between `run_turn` calls. Unscheduled turns share the
-existing budget scope; a native scheduled-work boundary ends that scope before
-processing queued operations. Scheduler priority never changes what the state
-getters report, and core has no scheduler-query method.
+`run_turn` handles at most one conversation turn; `run` is the multi-turn
+convenience entry point. Both accept a caller-owned core `TurnBudget`, initialized
+from run configuration rather than queried through `States`. Native orchestration
+checks its scheduled-operation queue between `run_turn` calls. Unscheduled turns
+share the existing budget scope; a native scheduled-work boundary ends that scope
+before processing queued operations. Scheduler priority never changes what the
+state getters report, and core has no scheduler-query method.
+
+Core returns a typed `BudgetExhausted` outcome when request or settlement limits
+are reached. Native orchestration renders, records, and publishes the configured
+failure before pass cleanup. Tool-restoration prompts also stay native: turn
+catalog preparation restores that context after capturing executable snapshots
+and before input promotion, without a separate core state operation.
 
 `parrot-runtime` implements the three traits with private adapters. Persistence,
 prompt preparation, compaction, security, streaming, accounting, cancellation,

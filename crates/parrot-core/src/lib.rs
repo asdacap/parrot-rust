@@ -4,19 +4,19 @@ pub mod budget;
 mod protocol;
 pub use protocol::*;
 
-/// Runs the core-owned admission, response validation, retry, and completion policy.
+/// Runs admission, response validation, retry, and completion using the caller-owned budget.
 pub async fn run<'a>(
     states: &mut dyn States,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
+    budget: &mut budget::TurnBudget,
     cancellation: CancellationToken<'a>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
-    let mut budget = budget::TurnBudget::new(states.disables_request_limit());
     loop {
-        match run_turn(states, tools, provider, &mut budget, cancellation).await? {
+        match run_turn(states, tools, provider, budget, cancellation).await? {
             Some(Outcome::Completed(completed)) => answer = completed,
-            Some(failed @ Outcome::Failed(_)) => return Ok(failed),
+            Some(Outcome::BudgetExhausted) => return Ok(Outcome::BudgetExhausted),
             None => return Ok(Outcome::Completed(answer)),
         }
     }
@@ -48,7 +48,6 @@ pub async fn run_turn<'a>(
             budget.begin_turn();
             let options = states.begin_turn().await?;
             let catalog = tools.capture_catalog().await?;
-            states.restore_tool_availability().await?;
             selected = Some((options, catalog));
         }
         let turn = states.get_last_turn().await?;
@@ -60,7 +59,7 @@ pub async fn run_turn<'a>(
         states.promote_input(admission).await?;
         let (options, catalog) = selected.as_ref().ok_or_else(Error::missing_turn)?;
         let Some(phase) = budget.admit(options.maximum_requests, states.take_interruption()) else {
-            return Ok(Some(Outcome::Failed(states.fail_runaway().await?)));
+            return Ok(Some(Outcome::BudgetExhausted));
         };
         let definitions = if phase.final_phase {
             &catalog.final_phase
@@ -118,7 +117,7 @@ pub async fn run_turn<'a>(
             }
             states.record_tool_results(&results).await?;
             if phase.final_phase && !budget.try_extend_settlement() {
-                return Ok(Some(Outcome::Failed(states.fail_runaway().await?)));
+                return Ok(Some(Outcome::BudgetExhausted));
             }
             continue;
         }

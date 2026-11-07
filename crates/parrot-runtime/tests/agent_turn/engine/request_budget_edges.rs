@@ -231,6 +231,7 @@ async fn global_default_disables_profile_request_budget_but_explicit_false_resto
                 assert!(events.iter().any(|event| event.has_turn_ended()));
             } else {
                 assert_eq!(execution.status, ExecutionStatus::Failed);
+                assert_eq!(execution.error, RUNAWAY);
                 assert_eq!(requests.len(), 2);
                 assert!(requests[1].tools.is_empty());
                 assert_runaway(&events);
@@ -238,6 +239,35 @@ async fn global_default_disables_profile_request_budget_but_explicit_false_resto
         }
         runtime.close().await;
     }
+}
+
+#[tokio::test]
+async fn exhausted_budget_reports_native_failure_after_promotion_without_a_provider_request() {
+    let fixture = Fixture::new();
+    let provider = Scripted::default();
+    let runtime = EdgeRuntime::new(&fixture, &provider, 0, "settled").await;
+    let execution = runtime.execute().await;
+    assert_eq!(execution.status, ExecutionStatus::Failed);
+    assert_eq!(execution.error, RUNAWAY);
+    assert!(provider.requests.lock().unwrap().is_empty());
+    assert_eq!(provider.stream_closes.load(Ordering::SeqCst), 0);
+    let events = fixture.events().await;
+    assert_runaway(&events);
+    let started = events
+        .iter()
+        .position(|event| event.has_turn_started())
+        .unwrap();
+    let promoted = events
+        .iter()
+        .position(|event| event.has_input_promoted())
+        .unwrap();
+    let failed = events
+        .iter()
+        .position(|event| event.has_turn_failed())
+        .unwrap();
+    assert!(started < promoted && promoted < failed);
+    assert!(!fixture.history.has_pending_inputs().await.unwrap());
+    runtime.close().await;
 }
 
 #[tokio::test]
@@ -251,6 +281,7 @@ async fn repeated_truncated_tool_responses_consume_exact_two_requests_without_to
     let runtime = EdgeRuntime::new(&fixture, &provider, 2, "settled").await;
     let execution = runtime.execute().await;
     assert_eq!(execution.status, ExecutionStatus::Failed);
+    assert_eq!(execution.error, RUNAWAY);
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(provider.stream_closes.load(Ordering::SeqCst), 2);
     let events = fixture.events().await;
@@ -387,6 +418,7 @@ async fn four_settlement_extensions_allow_exact_six_provider_requests_then_fail_
     let runtime = EdgeRuntime::new(&fixture, &provider, 2, "survivor").await;
     let execution = runtime.execute().await;
     assert_eq!(execution.status, ExecutionStatus::Failed);
+    assert_eq!(execution.error, RUNAWAY);
     {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 6);

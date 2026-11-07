@@ -704,13 +704,25 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 4);
         assert_eq!(tool_names(&requests[3]), ["new-tool"]);
-        assert!(
-            requests[3]
-                .messages
-                .iter()
-                .any(|message| message.role == sessions::Role::System
-                    && message.content().contains("Tool access is restored"))
-        );
+        let restored: Vec<_> = requests[3]
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                message.role == sessions::Role::System
+                    && message.content().contains("Tool access is restored")
+            })
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(restored.len(), 1);
+        let queued = requests[3]
+            .messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::User && message.content().contains("queued prompt")
+            })
+            .unwrap();
+        assert!(restored[0] < queued);
     }
     next_gate.open();
     assert_eq!(

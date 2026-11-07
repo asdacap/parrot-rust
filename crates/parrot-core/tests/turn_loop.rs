@@ -119,7 +119,6 @@ impl Trace {
 #[derive(Clone)]
 struct MemoryTools {
     trace: Trace,
-    availability_restored: Arc<AtomicBool>,
     fail_at: Arc<Mutex<Option<&'static str>>>,
     requests: Arc<Mutex<Vec<Vec<ToolCall>>>>,
     replies: Arc<Mutex<VecDeque<Vec<ToolResult>>>>,
@@ -127,7 +126,7 @@ struct MemoryTools {
 impl Tools for MemoryTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async move {
-            assert!(!self.availability_restored.load(Ordering::SeqCst));
+            self.trace.step("catalog", *self.fail_at.lock().unwrap())?;
             let read = ToolDefinition {
                 name: "read".into(),
                 description: "read a value".into(),
@@ -227,18 +226,15 @@ struct MemoryState {
     maximum: i32,
     reduced: bool,
     retain_completion_candidate: bool,
-    availability_restored: Arc<AtomicBool>,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
     fn new(replies: impl IntoIterator<Item = Reply>) -> Self {
         let trace = Trace::default();
-        let availability_restored = Arc::new(AtomicBool::new(false));
         let mut state = Self {
             trace: trace.clone(),
             tools: MemoryTools {
                 trace: trace.clone(),
-                availability_restored: availability_restored.clone(),
                 fail_at: Arc::default(),
                 requests: Arc::default(),
                 replies: Arc::default(),
@@ -278,7 +274,6 @@ impl MemoryState {
             maximum: 10,
             reduced: true,
             retain_completion_candidate: false,
-            availability_restored,
             fail_at: None,
         };
         state.enqueue_message(Delivery::Queue, "question");
@@ -341,10 +336,12 @@ impl MemoryState {
         let cancellation = self.cancellation.clone();
         let is_cancelled = || cancellation.is_cancelled();
         let cancelled = || cancellation.cancelled();
+        let mut budget = TurnBudget::new(self.unlimited);
         finish(run(
             self,
             tools,
             provider,
+            &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),
         ))
     }
@@ -378,9 +375,6 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn disables_request_limit(&self) -> bool {
-        self.unlimited
-    }
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
         Box::pin(async move {
             if self.fail_at == Some("last_turn") {
@@ -409,7 +403,6 @@ impl States for MemoryState {
         Box::pin(async move {
             self.step("begin")?;
             self.open = true;
-            self.availability_restored.store(false, Ordering::SeqCst);
             if let Some(message) = self.begin_message.take() {
                 self.append_turn_message(message);
             }
@@ -420,13 +413,6 @@ impl States for MemoryState {
                 provider_preferences: self.provider_preferences.clone(),
                 include_router_metadata: self.include_router_metadata,
             })
-        })
-    }
-    fn restore_tool_availability(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.step("restore")?;
-            self.availability_restored.store(true, Ordering::SeqCst);
-            Ok(())
         })
     }
     fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>> {
@@ -555,12 +541,6 @@ impl States for MemoryState {
             Ok(response.assistant_text.clone())
         })
     }
-    fn fail_runaway(&mut self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async move {
-            self.step("runaway")?;
-            Ok("runaway".into())
-        })
-    }
 }
 
 #[test]
@@ -571,7 +551,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
         state.trace.values(),
         [
             "begin",
-            "restore",
+            "catalog",
             "promote",
             "prepare",
             "messages",
@@ -617,7 +597,7 @@ fn invalid_and_truncated_tool_responses_retry_without_recording_or_executing_cal
 fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
     let mut state = MemoryState::new((0..5).map(|_| Reply::tools("call")));
     state.maximum = 1;
-    assert_eq!(state.run(), Ok(Outcome::Failed("runaway".into())));
+    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.requests.len(), 5);
     assert!(
         state
@@ -640,7 +620,9 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
             .count(),
         5
     );
-    assert_eq!(state.trace.values().last().unwrap(), "runaway");
+    assert_eq!(state.trace.values().last().unwrap(), "record_results");
+    assert_eq!(state.applied_results.len(), 5);
+    assert!(!state.trace.values().iter().any(|entry| entry == "complete"));
     assert_eq!(state.recorded_catalogs.len(), 5);
     assert!(
         state
@@ -654,8 +636,73 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
 fn malformed_final_response_exhausts_the_request_limit_without_a_settlement_extension() {
     let mut state = MemoryState::new([Reply::invalid("bad")]);
     state.maximum = 1;
-    assert_eq!(state.run(), Ok(Outcome::Failed("runaway".into())));
+    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.requests.len(), 1);
+}
+
+#[test]
+fn caller_budget_configuration_controls_request_limits_and_final_phase() {
+    for disable_limits in [false, true] {
+        let mut state = MemoryState::new([Reply::invalid("bad"), Reply::final_response("answer")]);
+        state.maximum = 1;
+        let tools = state.tools.clone();
+        let provider = state.provider.clone();
+        let source = state.cancellation.clone();
+        let is_cancelled = || source.is_cancelled();
+        let cancelled = || source.cancelled();
+        let mut budget = TurnBudget::new(disable_limits);
+        assert_eq!(
+            finish(run(
+                &mut state,
+                &tools,
+                &provider,
+                &mut budget,
+                CancellationToken::new(&is_cancelled, &cancelled),
+            )),
+            if disable_limits {
+                Ok(Outcome::Completed("answer".into()))
+            } else {
+                Ok(Outcome::BudgetExhausted)
+            }
+        );
+        assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+        assert_eq!(state.requests.len(), if disable_limits { 2 } else { 1 });
+        assert!(state.requests.iter().all(|(phase, tools)| {
+            phase.final_phase != disable_limits
+                && if disable_limits {
+                    tools == &["read", "write"]
+                } else {
+                    tools == &["read"]
+                }
+        }));
+        assert!(state.recorded_tools.is_empty());
+        assert!(state.tools.requests.lock().unwrap().is_empty());
+        assert_eq!(
+            state.trace.values().last().unwrap(),
+            if disable_limits {
+                "complete"
+            } else {
+                "promote"
+            }
+        );
+    }
+}
+
+#[test]
+fn exhausted_budget_returns_without_provider_or_terminal_state_effects() {
+    let mut state = MemoryState::new([]);
+    state.maximum = 0;
+    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
+    assert_eq!(state.trace.values(), ["begin", "catalog", "promote"]);
+    assert!(state.provider.requests.lock().unwrap().is_empty());
+    assert!(state.tools.requests.lock().unwrap().is_empty());
+    assert!(state.pending_messages.is_empty());
+    assert_eq!(state.admissions, [InputAdmission::SteersOrNextQueued]);
+    assert!(state.open);
+    assert_eq!(
+        state.last_turn.as_ref().unwrap().messages[0].role,
+        Role::User
+    );
 }
 
 #[test]
@@ -821,7 +868,7 @@ fn provider_failure_propagates_without_recording_or_completing_a_response() {
 fn adapter_errors_stop_at_the_failing_effect() {
     for (stage, reply) in [
         ("begin", Reply::final_response("response")),
-        ("restore", Reply::final_response("response")),
+        ("catalog", Reply::final_response("response")),
         ("promote", Reply::final_response("response")),
         ("prepare", Reply::final_response("response")),
         ("messages", Reply::final_response("response")),
@@ -842,11 +889,6 @@ fn adapter_errors_stop_at_the_failing_effect() {
     state.fail_at = Some("compact");
     assert_eq!(state.run(), Err(Error::failed("compact")));
     assert_eq!(state.trace.values().last().unwrap(), "compact");
-    let mut state = MemoryState::new([]);
-    state.maximum = 0;
-    state.fail_at = Some("runaway");
-    assert_eq!(state.run(), Err(Error::failed("runaway")));
-    assert_eq!(state.trace.values().last().unwrap(), "runaway");
 }
 
 #[test]
@@ -861,7 +903,7 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
     ]);
     state.maximum = 1;
     state.enqueue_message(Delivery::Queue, "second question");
-    assert_eq!(state.run(), Ok(Outcome::Failed("runaway".into())));
+    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.requests.len(), 6);
     assert!(state.requests[0].0.enters_final_phase);
     assert!(
@@ -906,7 +948,7 @@ fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() 
     state
         .decisions
         .push_back(CompletionDecision::Retry { pending: None });
-    assert_eq!(state.run(), Ok(Outcome::Failed("runaway".into())));
+    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert!(!state.requests[2].0.final_phase);
     assert!(!state.requests[2].0.interrupted);
     assert!(state.requests[3].0.enters_final_phase);
@@ -967,7 +1009,7 @@ fn tools_and_provider_operate_without_states() {
     assert_eq!(response.assistant_text, "standalone");
     assert!(response.tool_calls.is_empty());
     assert!(state.provider.replies.lock().unwrap().is_empty());
-    assert_eq!(state.trace.values(), ["execute", "invoke"]);
+    assert_eq!(state.trace.values(), ["catalog", "execute", "invoke"]);
 }
 
 struct EchoProvider;

@@ -125,8 +125,9 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
     let mut context = Context::from_waker(&waker);
+    let mut budget = TurnBudget::new(state.unlimited);
     let result = {
-        let mut running = std::pin::pin!(run(&mut state, &tools, &provider, token));
+        let mut running = std::pin::pin!(run(&mut state, &tools, &provider, &mut budget, token));
         assert!(running.as_mut().poll(&mut context).is_pending());
         assert!(tools.admitted.load(Ordering::SeqCst));
         assert!(!joined.load(Ordering::SeqCst));
