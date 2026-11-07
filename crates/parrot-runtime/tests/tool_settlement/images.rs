@@ -228,7 +228,7 @@ async fn restored_missing_image_metadata_is_visible_error_and_does_not_advance_w
         result.err().unwrap().to_string(),
         "A settled tool image artifact is missing."
     );
-    assert_eq!(harness.tools.settled_conversation_sequence(), 0);
+    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert!(tool.calls.lock().unwrap().is_empty());
 }
 

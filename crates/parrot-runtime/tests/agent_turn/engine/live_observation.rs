@@ -90,16 +90,27 @@ async fn live_context_observes_current_selection_and_retained_catalog_during_pro
 }
 
 #[tokio::test]
-async fn live_context_does_not_wait_for_held_tool_reconciliation() {
+async fn live_context_does_not_wait_for_held_tool_execution() {
     let fixture = Fixture::new();
     let gate = Gate::new();
     let tools = Arc::new(Tools {
-        reconcile_gate: Mutex::new(Some(gate.clone())),
+        execution_gate: Mutex::new(Some(gate.clone())),
         ..Tools::default()
     });
+    let mut first = Step::complete("");
+    first
+        .completion
+        .as_mut()
+        .unwrap()
+        .tool_calls
+        .push(sessions::ToolCall {
+            id: "held-tool".into(),
+            name: "held-tool".into(),
+            arguments_json: "{}".into(),
+        });
     let runtime = fixture
         .runtime(
-            Scripted::new(vec![Step::complete("done")]),
+            Scripted::new(vec![first, Step::complete("done")]),
             tools,
             vec![],
             Arc::new(Signal::new()),

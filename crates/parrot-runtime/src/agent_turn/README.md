@@ -141,6 +141,7 @@ provider implementation or settlement engine.
 | --- | --- |
 | `lifecycle.rs` | One owned drain, admission/wake, FIFO executions, incoming-input wait, scheduled work, retained mutation lifetimes, interrupt/resume and joined shutdown; domain execution/status/drain-state types. |
 | `engine.rs` | Actual durable conversation and provider-session orchestration, awaited T44 prompt/skills and T45 controller, supplied completion callbacks. |
+| `tool_conversation.rs` | State-owned pending-call discovery, restoration, ordered result projection/publication, synthetic image messages and recovery progress. |
 | `provider_call.rs` | Consume the genuine injected stream to EOF, batch fragments, record completions, phases/retries and awaited close. |
 | `budget.rs` | Request/final-phase budget and four settlement extensions, separate from T45 token budgeting. |
 | `usage.rs` | Actual repository request/tool facts, replay-seeded live statistics and retained notifications. |
@@ -181,7 +182,10 @@ turn substitution. All six external scenarios PASS; the existing queued-shutdown
 assertion is now tightened to `unwrap_err().is_cancelled()` and passes focused
 verification; no additional shutdown scenario was needed (R13).
 
-Inside `TurnTools::reconcile`, `TurnResources<'_>` borrows the already-owned
+`TurnTools::execute` receives explicit calls and returns an ordered execution
+chunk; it does not discover pending calls or project their conversation results.
+State records each returned chunk before the next starts, so borrowed tools see
+earlier settled results. `TurnResources<'_>` lends inline tools the already-owned
 conversation, controller, prompt, provider sessions, history, status, events and
 usage recorder. Inline tools must use those borrows: **never self-queue and wait,
 call the external wrapper, or relock backend state**. The passing real-controller

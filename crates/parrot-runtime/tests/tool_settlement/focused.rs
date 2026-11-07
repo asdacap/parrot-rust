@@ -176,23 +176,7 @@ async fn selection_capture_reads_tool_started_from_committed_sqlite_before_usage
         captures: AtomicUsize::new(0),
     };
     harness
-        .tools
-        .reconcile(
-            TurnResources {
-                history: &fixture.history,
-                conversation: &mut harness.conversation,
-                context: &mut harness.context,
-                prompt: &harness.prompt,
-                sessions: &harness.sessions,
-                status: &Status,
-                events: &harness.events,
-                usage: &harness.usage,
-            },
-            &harness.selection,
-            &harness.snapshot,
-            &capture,
-            &NeverCancelled,
-        )
+        .run_with_capture(&fixture, &capture, &NeverCancelled)
         .await
         .unwrap();
     assert_eq!(capture.captures.load(Ordering::SeqCst), 1);
@@ -259,7 +243,7 @@ async fn restored_cancelled_terminal_stops_pending_tail_without_reinvocation_or_
             .count(),
         2
     );
-    assert!(harness.tools.settled_conversation_sequence() >= sequence);
+    assert!(harness.state.settled_conversation_sequence() >= sequence);
 }
 
 #[tokio::test]
@@ -313,5 +297,143 @@ async fn configured_actual_catalog_renders_success_error_and_interrupted_result(
             "ERROR [RAW_SECRET_TOOL_FAILURE]",
             "INTERRUPTED configured"
         ]
+    );
+}
+
+#[tokio::test]
+async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_next_request() {
+    let fixture = Fixture::new();
+    fixture
+        .batch(vec![call("first", "known"), call("second", "known")])
+        .await;
+    let tool = Arc::new(RecordingTool::new(
+        &fixture,
+        "known",
+        ParallelSafety::ParallelSafe,
+    ));
+    let mut harness = Harness::new(&fixture, vec![tool.clone().handle()]).await;
+    let mut request = harness
+        .state
+        .prepare_execution(&mut harness.conversation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(request.calls.len(), 2);
+    request.calls.truncate(1);
+    let results = harness
+        .tools
+        .execute(
+            request,
+            TurnResources {
+                history: &fixture.history,
+                conversation: &mut harness.conversation,
+                context: &mut harness.context,
+                prompt: &harness.prompt,
+                sessions: &harness.sessions,
+                status: &Status,
+                events: &harness.events,
+                usage: &harness.usage,
+            },
+            &harness.selection,
+            &harness.snapshot,
+            harness.capture.as_ref(),
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].call_id, "first");
+    assert_eq!(
+        tool.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.id.as_str())
+            .collect::<Vec<_>>(),
+        ["first"]
+    );
+    assert!(
+        fixture
+            .history
+            .tool_terminals_of_calls(vec!["first".into(), "second".into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !fixture
+            .history
+            .conversation()
+            .await
+            .unwrap()
+            .iter()
+            .any(|item| item.message.role == MessageRole::Tool)
+    );
+    assert!(
+        !fixture
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_tool_finished())
+    );
+    harness
+        .state
+        .record_results(&mut harness.conversation, &results)
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .history
+            .tool_terminals_of_calls(vec!["first".into()])
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        fixture
+            .history
+            .conversation()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|item| item.message.role == MessageRole::Tool)
+            .count(),
+        1
+    );
+    let next = harness
+        .state
+        .prepare_execution(&mut harness.conversation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        next.calls
+            .iter()
+            .map(|call| call.id.as_str())
+            .collect::<Vec<_>>(),
+        ["second"]
+    );
+    harness.run(&fixture, &NeverCancelled).await.unwrap();
+    assert_eq!(
+        tool.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.id.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    assert_eq!(
+        fixture
+            .history
+            .conversation()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|item| item.message.role == MessageRole::Tool)
+            .map(|item| item.message.tool_call_id.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second"]
     );
 }

@@ -33,22 +33,34 @@ pub trait Provider: Send + Sync {
     fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>>;
 }
 
-/// Retains executable tools and settles calls recorded through [`States`].
+/// Retains executable tools and executes explicitly supplied calls.
 pub trait Tools: Send + Sync {
-    /// Reconciles accepted pending calls and applies their durable settlements to
-    /// the conversation before the core checks cancellation or response readiness.
-    fn reconcile_pending(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Captures permitted definitions backed by the original executable identities
     /// for this turn. The final catalog is their interruption-enabled subset.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
-    /// Settles the recorded calls using the retained catalog for the advertised
-    /// phase. Success means durable terminals are applied and accepted work joined;
-    /// definitions must never be used to reconstruct executable tool identities.
-    fn execute_pending(&self, context: ToolContext) -> BoxFuture<'_, Result<(), Error>>;
+    /// Executes a nonempty ordered prefix of the supplied calls using retained
+    /// executable identities, joining all admitted work before returning, including
+    /// on failure. Conversation recovery and result recording belong to [`States`].
+    fn execute(
+        &self,
+        request: ToolExecutionRequest,
+        context: ToolContext,
+    ) -> BoxFuture<'_, Result<Vec<ToolResult>, Error>>;
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
 pub trait States: Send {
+    /// Restores persisted results and prepares explicit unresolved calls in order.
+    /// Returning none means recovery and result projection are complete for this pass.
+    fn prepare_tool_execution(
+        &mut self,
+        context: ToolContext,
+    ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, Error>>;
+    /// Durably records and applies the returned prefix before any further execution.
+    fn record_tool_results<'a>(
+        &'a mut self,
+        results: &'a [ToolResult],
+    ) -> BoxFuture<'a, Result<(), Error>>;
     /// Reports whether provider-request limits are disabled for this run.
     fn disables_request_limit(&self) -> bool;
     /// Reports whether scheduled work should run before opening another turn.
@@ -119,7 +131,14 @@ pub async fn run(
         if !states.is_turn_open().await && states.has_scheduled_work() {
             return Ok(Outcome::Completed(answer));
         }
-        tools.reconcile_pending().await?;
+        execute_tools(
+            states,
+            tools,
+            ToolContext {
+                phase: ToolPhase::Recovery,
+            },
+        )
+        .await?;
         states.check_cancellation()?;
         if !retry_pending && !states.has_work().await? {
             return Ok(Outcome::Completed(answer));
@@ -173,15 +192,18 @@ pub async fn run(
         }
         if !response.tool_calls.is_empty() {
             states.record_tool_calls(&response).await?;
-            tools
-                .execute_pending(ToolContext {
+            execute_tools(
+                states,
+                tools,
+                ToolContext {
                     phase: if phase.final_phase {
                         ToolPhase::Final
                     } else {
                         ToolPhase::Normal
                     },
-                })
-                .await?;
+                },
+            )
+            .await?;
             if phase.final_phase && !budget.try_extend_settlement() {
                 return Ok(Outcome::Failed(states.fail_runaway().await?));
             }
@@ -201,4 +223,19 @@ pub async fn run(
             }
         }
     }
+}
+
+async fn execute_tools(
+    states: &mut dyn States,
+    tools: &dyn Tools,
+    context: ToolContext,
+) -> Result<(), Error> {
+    while let Some(request) = states.prepare_tool_execution(context).await? {
+        let results = tools.execute(request, context).await?;
+        if results.is_empty() {
+            return Err(Error::failed("tool execution returned no results"));
+        }
+        states.record_tool_results(&results).await?;
+    }
+    Ok(())
 }

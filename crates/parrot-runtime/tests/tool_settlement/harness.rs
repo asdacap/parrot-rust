@@ -187,7 +187,8 @@ pub struct Harness {
     pub tools: Arc<ToolSettlement<Security>>,
     pub snapshot: ToolSnapshot<Security>,
     pub selection: TurnSelection<Security>,
-    pub capture: Selection,
+    pub capture: Arc<Selection>,
+    pub state: parrot_runtime::agent_turn::tool_conversation::ToolConversation,
     pub publisher: Arc<Publisher>,
     pub activity: Arc<AgentSessionActivity>,
     pub diagnostics: Arc<Diagnostics>,
@@ -245,12 +246,18 @@ impl Harness {
         );
         let snapshot = tools.materialize().unwrap();
         let selection = selection(&Scripted::default());
-        let capture = Selection(Mutex::new(selection.clone()));
+        let capture = Arc::new(Selection(Mutex::new(selection.clone())));
+        let state = parrot_runtime::agent_turn::tool_conversation::ToolConversation::new(
+            fixture.history.clone(),
+            publisher.clone(),
+            Arc::new(id),
+        );
         Self {
             tools,
             snapshot,
             selection,
             capture,
+            state,
             publisher,
             activity,
             diagnostics,
@@ -275,24 +282,49 @@ impl Harness {
         fixture: &Fixture,
         cancellation: &dyn Cancellation,
     ) -> Result<(), TurnError> {
-        self.tools
-            .reconcile(
-                TurnResources {
-                    history: &fixture.history,
-                    conversation: &mut self.conversation,
-                    context: &mut self.context,
-                    prompt: &self.prompt,
-                    sessions: &self.sessions,
-                    status: &Status,
-                    events: &self.events,
-                    usage: &self.usage,
-                },
-                &self.selection,
-                &self.snapshot,
-                &self.capture,
-                cancellation,
-            )
+        let capture = self.capture.clone();
+        self.run_with_capture(fixture, capture.as_ref(), cancellation)
             .await
+    }
+    pub async fn run_with_capture(
+        &mut self,
+        fixture: &Fixture,
+        capture: &dyn SelectionSource<Security>,
+        cancellation: &dyn Cancellation,
+    ) -> Result<(), TurnError> {
+        let result = async {
+            while let Some(request) = self.state.prepare_execution(&mut self.conversation).await? {
+                let results = self
+                    .tools
+                    .execute(
+                        request,
+                        TurnResources {
+                            history: &fixture.history,
+                            conversation: &mut self.conversation,
+                            context: &mut self.context,
+                            prompt: &self.prompt,
+                            sessions: &self.sessions,
+                            status: &Status,
+                            events: &self.events,
+                            usage: &self.usage,
+                        },
+                        &self.selection,
+                        &self.snapshot,
+                        capture,
+                        cancellation,
+                    )
+                    .await?;
+                self.state
+                    .record_results(&mut self.conversation, &results)
+                    .await?;
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            self.state.reset_pending();
+        }
+        result
     }
 }
 

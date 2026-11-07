@@ -46,16 +46,23 @@ impl TurnTools<Security> for BudgetTools {
             .cloned()
             .collect()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        request: parrot_core::ToolExecutionRequest,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<Security>,
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        self.inner
-            .reconcile(resources, selection, snapshot, capture, cancellation)
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
+        self.inner.execute(
+            request,
+            resources,
+            selection,
+            snapshot,
+            capture,
+            cancellation,
+        )
     }
 }
 struct BudgetRuntime {

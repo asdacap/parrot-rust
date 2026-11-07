@@ -6,6 +6,7 @@ use super::{
     },
     provider_call::{self, OutputWriter, ProviderActivity, ProviderCall, ProviderUsage},
     services::*,
+    tool_conversation::ToolConversation,
     usage::SessionUsageRecorder,
 };
 use crate::{
@@ -80,6 +81,7 @@ pub struct RuntimeConfig<S: AccessSnapshot, T: TurnTools<S>> {
 
 struct State {
     conversation: AgentConversation,
+    tool_conversation: ToolConversation,
     context: ContextController,
     turn: Option<TurnKey>,
     diagnostic_turn: Option<String>,
@@ -185,6 +187,11 @@ where
             )
             .await?,
         );
+        let tool_conversation = ToolConversation::new(
+            config.history.clone(),
+            config.publisher.clone(),
+            config.event_id.clone(),
+        );
         let reminders = config.reminders;
         let render = |key: &str| {
             config
@@ -227,6 +234,7 @@ where
             planner: config.context.compactor().planner_handle(),
             state: Mutex::new(State {
                 conversation,
+                tool_conversation,
                 context: config.context,
                 turn: None,
                 diagnostic_turn: None,
@@ -387,25 +395,44 @@ where
         let snapshot = self.snapshot(&selection)?;
         let status = self.status.bind(&selection);
         let events = ContextEmitter { backend: self };
-        self.tools
-            .reconcile(
-                TurnResources {
-                    history: &self.history,
-                    conversation: &mut state.conversation,
-                    context: &mut state.context,
-                    prompt: &self.prompt,
-                    sessions: &self.sessions,
-                    status: status.as_ref(),
-                    events: &events,
-                    usage: &self.usage,
-                },
-                &selection,
-                &snapshot,
-                self.selection.as_ref(),
-                cancellation,
-            )
-            .await?;
-        Ok(selection)
+        let result = async {
+            while let Some(request) = state
+                .tool_conversation
+                .prepare_execution(&mut state.conversation)
+                .await?
+            {
+                let results = self
+                    .tools
+                    .execute(
+                        request,
+                        TurnResources {
+                            history: &self.history,
+                            conversation: &mut state.conversation,
+                            context: &mut state.context,
+                            prompt: &self.prompt,
+                            sessions: &self.sessions,
+                            status: status.as_ref(),
+                            events: &events,
+                            usage: &self.usage,
+                        },
+                        &selection,
+                        &snapshot,
+                        self.selection.as_ref(),
+                        cancellation,
+                    )
+                    .await?;
+                state
+                    .tool_conversation
+                    .record_results(&mut state.conversation, &results)
+                    .await?;
+            }
+            Ok(selection)
+        }
+        .await;
+        if result.is_err() {
+            state.tool_conversation.reset_pending();
+        }
+        result
     }
     async fn promote(
         &self,

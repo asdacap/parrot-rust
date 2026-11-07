@@ -4,6 +4,7 @@ use fixture::*;
 mod harness;
 use harness::*;
 mod admission;
+mod budget_scope;
 mod focused;
 mod images;
 mod owned_recovery;

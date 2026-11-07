@@ -89,14 +89,18 @@ pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
     ) -> Result<Self::Snapshot, TurnError>;
     fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool];
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot;
-    fn reconcile<'a>(
+    /// Executes the first sequential call or parallel-safe run from the supplied
+    /// calls, joining admitted work before returning an ordered result prefix.
+    /// Conversation recovery and terminal persistence/publication belong to state.
+    fn execute<'a>(
         &'a self,
+        request: parrot_core::ToolExecutionRequest,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<S>,
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<S>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>>;
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>>;
 }
 
 pub struct CompletionCandidate<S: AccessSnapshot> {

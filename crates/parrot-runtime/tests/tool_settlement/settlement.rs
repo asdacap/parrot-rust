@@ -233,36 +233,17 @@ async fn immutable_per_start_authority_refresh_preserves_original_turn_model_and
         vec![first.clone().handle(), second.clone().handle()],
     )
     .await;
+    let capture = harness.capture.clone();
     let control = async {
         gate.entered().await;
-        let mut newer = harness.capture.capture().unwrap();
+        let mut newer = capture.capture().unwrap();
         newer.profile.id = "new-profile".into();
         newer.model.requested_selector.value = "new-model".into();
         newer.security = Arc::new(Security { version: 2 });
-        harness.capture.update(newer).unwrap();
+        capture.update(newer).unwrap();
         gate.open();
     };
-    // Borrow disjoint fields explicitly: the actual TurnTools adapter receives the live capture source.
-    let resources = TurnResources {
-        history: &fixture.history,
-        conversation: &mut harness.conversation,
-        context: &mut harness.context,
-        prompt: &harness.prompt,
-        sessions: &harness.sessions,
-        status: &Status,
-        events: &harness.events,
-        usage: &harness.usage,
-    };
-    let (result, ()) = tokio::join!(
-        harness.tools.reconcile(
-            resources,
-            &harness.selection,
-            &harness.snapshot,
-            &harness.capture,
-            &NeverCancelled
-        ),
-        control
-    );
+    let (result, ()) = tokio::join!(harness.run(&fixture, &NeverCancelled), control);
     result.unwrap();
     assert_eq!(first.calls.lock().unwrap()[0].security, 1);
     assert_eq!(second.calls.lock().unwrap()[0].security, 2);
@@ -288,23 +269,7 @@ async fn unknown_tool_has_durable_start_and_error_without_capture_usage_or_activ
     fixture.batch(vec![call("missing", "not_registered")]).await;
     let mut harness = Harness::new(&fixture, vec![]).await;
     harness
-        .tools
-        .reconcile(
-            TurnResources {
-                history: &fixture.history,
-                conversation: &mut harness.conversation,
-                context: &mut harness.context,
-                prompt: &harness.prompt,
-                sessions: &harness.sessions,
-                status: &Status,
-                events: &harness.events,
-                usage: &harness.usage,
-            },
-            &harness.selection,
-            &harness.snapshot,
-            &NoCapture,
-            &NeverCancelled,
-        )
+        .run_with_capture(&fixture, &NoCapture, &NeverCancelled)
         .await
         .unwrap();
     let events = fixture.events().await;
@@ -349,7 +314,7 @@ async fn durable_terminal_survives_publisher_failure_retry_without_reinvoke_or_r
     let mut harness = Harness::new(&fixture, vec![tool.clone().handle()]).await;
     harness.publisher.fail_terminal.store(1, Ordering::SeqCst);
     assert!(harness.run(&fixture, &NeverCancelled).await.is_err());
-    assert_eq!(harness.tools.settled_conversation_sequence(), 0);
+    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert_eq!(terminals(&fixture, &["once"]).await.len(), 1);
     harness.run(&fixture, &NeverCancelled).await.unwrap();
     harness.run(&fixture, &NeverCancelled).await.unwrap();
@@ -359,7 +324,7 @@ async fn durable_terminal_survives_publisher_failure_retry_without_reinvoke_or_r
         terminal_ids(&harness.publisher.events.lock().unwrap()),
         vec!["once"]
     );
-    assert!(harness.tools.settled_conversation_sequence() > 0);
+    assert!(harness.state.settled_conversation_sequence() > 0);
     assert_eq!(
         fixture
             .history
@@ -398,7 +363,7 @@ async fn failed_started_publication_is_outside_tool_catch_but_joins_all_admitted
     assert!(a.calls.lock().unwrap().is_empty());
     assert_eq!(peer.calls.lock().unwrap().len(), 1);
     assert!(terminal_ids(&fixture.events().await).is_empty());
-    assert_eq!(harness.tools.settled_conversation_sequence(), 0);
+    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert!(harness.activity.capture().current_tool.is_none());
 }
 

@@ -1,8 +1,4 @@
-//! Retained tool materialization and call-ordered durable batch settlement.
-//!
-//! A persisted terminal is never invoked again. An invocation interrupted by
-//! process death before its terminal commit may run again: this is not an
-//! exactly-once guarantee for external effects or an unpersisted policy capture.
+//! Retained tool materialization and explicit, call-ordered execution chunks.
 mod model;
 mod snapshot;
 pub use model::*;
@@ -13,6 +9,7 @@ use crate::agent_turn::{
     usage::SessionUsageRecorder,
 };
 use crate::event_broker::BrokerError;
+use parrot_core::{ToolCall, ToolExecutionRequest, ToolImage, ToolProcess, ToolResult, ToolStatus};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -32,17 +29,11 @@ use parrot_storage::{
     artifacts::output_blobs::ToolOutputBlobStore,
     conversation::AgentHistoryView,
     diagnostics::{DiagnosticEvent, FileDiagnosticLog},
-    events::{
-        ConversationPart, MessageRole, NeverCancelled, ToolCall, ToolExecutionStatus,
-        ToolExecutionTerminal,
-    },
+    events::NeverCancelled,
 };
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicI64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 pub trait ToolDiagnostics: Send + Sync {
@@ -66,12 +57,17 @@ pub struct ToolSettlementConfig<S: AccessSnapshot + 'static> {
 pub struct ToolSettlement<S: AccessSnapshot + 'static> {
     config: ToolSettlementConfig<S>,
     interrupted_result: String,
-    watermark: AtomicI64,
-    reconciliation: tokio::sync::Mutex<()>,
+    execution: tokio::sync::Mutex<Option<Arc<ToolCycleImageBudget>>>,
 }
-struct Settlement {
-    published: Event,
-    terminal: ToolExecutionTerminal,
+struct InvocationResources<'a, S: AccessSnapshot + 'static> {
+    history: &'a AgentHistoryView,
+    usage: &'a SessionUsageRecorder,
+    selection: &'a TurnSelection<S>,
+    snapshot: &'a ToolSnapshot<S>,
+    capture: &'a dyn SelectionSource<S>,
+    assistant_sequence: i64,
+    image_budget: Arc<ToolCycleImageBudget>,
+    cancellation: &'a dyn Cancellation,
 }
 impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
     pub fn new(config: ToolSettlementConfig<S>) -> Result<Self, TurnError> {
@@ -82,12 +78,8 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
         Ok(Self {
             config,
             interrupted_result,
-            watermark: AtomicI64::new(0),
-            reconciliation: tokio::sync::Mutex::new(()),
+            execution: tokio::sync::Mutex::new(None),
         })
-    }
-    pub fn settled_conversation_sequence(&self) -> i64 {
-        self.watermark.load(Ordering::Acquire)
     }
     fn event(&self, history: &AgentHistoryView) -> Result<Event, TurnError> {
         Ok(Event {
@@ -103,58 +95,6 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
             .await
             .map_err(TurnError::Publication)
     }
-    async fn restore(
-        &self,
-        resources: &mut TurnResources<'_>,
-        sequence: i64,
-        terminal: ToolExecutionTerminal,
-    ) -> Result<(), TurnError> {
-        if let Some(item) = resources
-            .history
-            .append_tool_settlement(self.event(resources.history)?, sequence, terminal)
-            .await
-            .map_err(TurnError::Storage)?
-        {
-            let message = resources
-                .conversation
-                .materialize(item)
-                .await
-                .map_err(TurnError::Storage)?;
-            resources.conversation.add(message);
-        }
-        Ok(())
-    }
-    async fn settle(
-        &self,
-        resources: &mut TurnResources<'_>,
-        sequence: i64,
-        settlement: Settlement,
-        terminals: &mut HashMap<String, ToolExecutionTerminal>,
-    ) -> Result<(), TurnError> {
-        if let Some(item) = resources
-            .history
-            .append_tool_settlement(
-                settlement.published.clone(),
-                sequence,
-                settlement.terminal.clone(),
-            )
-            .await
-            .map_err(TurnError::Storage)?
-        {
-            let message = resources
-                .conversation
-                .materialize(item)
-                .await
-                .map_err(TurnError::Storage)?;
-            resources.conversation.add(message);
-        }
-        self.publish(settlement.published).await?;
-        terminals.insert(
-            settlement.terminal.tool_call_id.clone(),
-            settlement.terminal,
-        );
-        Ok(())
-    }
     fn parallel_safe(snapshot: &ToolSnapshot<S>, sequence: i64, call: &ToolCall) -> bool {
         match snapshot.find(&call.name) {
             Some(ToolHandle::Ordinary(tool)) => {
@@ -167,214 +107,100 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
             Some(ToolHandle::Borrowed(_)) | None => false,
         }
     }
-    async fn reconcile_inner(
+    async fn execute_inner(
         &self,
-        mut resources: TurnResources<'_>,
+        request: ToolExecutionRequest,
+        resources: TurnResources<'_>,
         selection: &TurnSelection<S>,
         snapshot: &ToolSnapshot<S>,
         capture: &dyn SelectionSource<S>,
         cancellation: &dyn Cancellation,
-    ) -> Result<(), TurnError> {
-        let _guard = self.reconciliation.lock().await;
-        let conversation = resources
-            .history
-            .conversation_after(self.watermark.load(Ordering::Acquire))
-            .await
-            .map_err(TurnError::Storage)?;
-        let batches: Vec<_> = conversation
-            .iter()
-            .filter(|item| {
-                item.message.role == MessageRole::Assistant && !item.message.tool_calls.is_empty()
-            })
-            .collect();
-        let mut terminals: HashMap<_, _> = resources
-            .history
-            .tool_terminals_of_calls(
-                batches
-                    .iter()
-                    .flat_map(|batch| batch.message.tool_calls.iter().map(|call| call.id.clone()))
-                    .collect(),
-            )
-            .await
-            .map_err(TurnError::Storage)?
-            .into_iter()
-            .map(|terminal| (terminal.tool_call_id.clone(), terminal))
-            .collect();
-        for batch in batches {
+    ) -> Result<Vec<ToolResult>, TurnError> {
+        let mut execution = self.execution.lock().await;
+        let first = request
+            .calls
+            .first()
+            .ok_or_else(|| TurnError::Service("tool execution requires explicit calls".into()))?;
+        if request.starts_batch || execution.is_none() {
             let image_budget =
                 Arc::new(ToolCycleImageBudget::new(self.config.image_bytes_per_cycle));
-            let calls = &batch.message.tool_calls;
-            if calls.iter().any(|call| !terminals.contains_key(&call.id)) {
-                for call in calls {
-                    if let Some(terminal) = terminals.get(&call.id) {
-                        if terminal.status == ToolExecutionStatus::ImageBudgetExceeded {
-                            image_budget.restore_exceeded();
-                        }
-                        for part in &terminal.result_parts {
-                            if let ConversationPart::ImageArtifact { artifact_id, .. } = part {
-                                let artifact = resources
-                                    .history
-                                    .resolve_image_artifact(artifact_id.clone())
-                                    .await
-                                    .map_err(TurnError::Storage)?
-                                    .ok_or_else(|| {
-                                        TurnError::Service(
-                                            "A settled tool image artifact is missing.".into(),
-                                        )
-                                    })?;
-                                image_budget
-                                    .restore_accepted(artifact.byte_length)
-                                    .map_err(|error| TurnError::Service(error.to_string()))?;
-                            }
-                        }
-                    }
-                }
+            if request.image_budget_exceeded {
+                image_budget.restore_exceeded();
             }
-            let mut stopped = false;
-            let mut index = 0;
-            while index < calls.len() {
-                let call = &calls[index];
-                if let Some(terminal) = terminals.get(&call.id).cloned() {
-                    stopped |= terminal.status == ToolExecutionStatus::Cancelled;
-                    self.restore(&mut resources, batch.sequence, terminal)
-                        .await?;
-                    index += 1;
-                    continue;
-                }
-                if stopped || cancellation.is_cancelled() {
-                    let settlement = self.cancel(resources.history, call)?;
-                    self.settle(&mut resources, batch.sequence, settlement, &mut terminals)
-                        .await?;
-                    stopped = true;
-                    index += 1;
-                    continue;
-                }
-                if !Self::parallel_safe(snapshot, batch.sequence, call) {
-                    let history = resources.history;
-                    let usage = resources.usage;
-                    let settlement = self
-                        .invoke(
-                            history,
-                            usage,
-                            Some(reborrow(&mut resources)),
-                            selection,
-                            snapshot,
-                            capture,
-                            batch.sequence,
-                            call,
-                            image_budget.clone(),
-                            cancellation,
-                            None,
-                        )
-                        .await?;
-                    stopped |= settlement.terminal.status == ToolExecutionStatus::Cancelled;
-                    self.settle(&mut resources, batch.sequence, settlement, &mut terminals)
-                        .await?;
-                    index += 1;
-                    continue;
-                }
-                let mut end = index;
-                let mut executions = InvocationBatch::new();
-                while end < calls.len() {
-                    let candidate = &calls[end];
-                    if !Self::parallel_safe(snapshot, batch.sequence, candidate) {
-                        break;
-                    }
-                    if let Some(terminal) = terminals.get(&candidate.id) {
-                        if terminal.status == ToolExecutionStatus::Cancelled {
-                            break;
-                        }
-                        end += 1;
-                        continue;
-                    }
-                    if cancellation.is_cancelled() {
-                        break;
-                    }
-                    let launched = Arc::new(AtomicBool::new(false));
-                    executions.push(self.invoke(
-                        resources.history,
-                        resources.usage,
-                        None,
-                        selection,
-                        snapshot,
-                        capture,
-                        batch.sequence,
-                        candidate,
-                        image_budget.clone(),
-                        cancellation,
-                        Some(launched.clone()),
-                    ));
-                    // Match hot source invocation: observe Started publication,
-                    // capture, usage and actual tool launch before admitting a
-                    // later call. Already admitted peers keep being polled while
-                    // this invocation's asynchronous prelude is pending.
-                    executions.wait_for_launch(&launched).await;
-                    end += 1;
-                }
-                // Admission can stop between the outer check and the run scan.
-                if end == index {
-                    continue;
-                }
-                // Join every admitted invocation, even when a peer fails outside
-                // its tool catch boundary. No detached invocation tasks exist.
-                let results = executions.join().await;
-                let mut completed = HashMap::new();
-                for result in results {
-                    let settlement = result?;
-                    completed.insert(settlement.terminal.tool_call_id.clone(), settlement);
-                }
-                while index < end {
-                    let call = &calls[index];
-                    if let Some(terminal) = terminals.get(&call.id).cloned() {
-                        self.restore(&mut resources, batch.sequence, terminal)
-                            .await?;
-                    } else {
-                        let settlement = completed
-                            .remove(&call.id)
-                            .expect("joined invocation has a settlement");
-                        stopped |= settlement.terminal.status == ToolExecutionStatus::Cancelled;
-                        self.settle(&mut resources, batch.sequence, settlement, &mut terminals)
-                            .await?;
-                    }
-                    index += 1;
-                }
+            for bytes in request.prior_image_bytes {
+                image_budget
+                    .restore_accepted(bytes)
+                    .map_err(|error| TurnError::Service(error.to_string()))?;
             }
-            let images: Vec<_> = calls
-                .iter()
-                .filter_map(|call| terminals.get(&call.id))
-                .filter(|terminal| terminal.status == ToolExecutionStatus::Finished)
-                .flat_map(|terminal| terminal.result_parts.iter())
-                .filter(|part| matches!(part, ConversationPart::ImageArtifact { .. }))
-                .cloned()
-                .collect();
-            if !images.is_empty()
-                && !resources
-                    .history
-                    .has_tool_synthetic(batch.sequence)
-                    .await
-                    .map_err(TurnError::Storage)?
+            *execution = Some(image_budget);
+        }
+        let image_budget = execution
+            .as_ref()
+            .expect("execution budget was initialized")
+            .clone();
+        if request.cancel_remaining || cancellation.is_cancelled() {
+            return Ok(request.calls.iter().map(|call| self.cancel(call)).collect());
+        }
+        if !Self::parallel_safe(snapshot, request.assistant_sequence, first) {
+            let invocation = InvocationResources {
+                history: resources.history,
+                usage: resources.usage,
+                selection,
+                snapshot,
+                capture,
+                assistant_sequence: request.assistant_sequence,
+                image_budget,
+                cancellation,
+            };
+            return self
+                .invoke(invocation, Some(resources), first, None)
+                .await
+                .map(|result| vec![result]);
+        }
+        let mut executions = InvocationBatch::new();
+        let mut admitted = 0;
+        for (index, call) in request.calls.iter().enumerate() {
+            if cancellation.is_cancelled()
+                || (index > 0 && !Self::parallel_safe(snapshot, request.assistant_sequence, call))
             {
-                let published = self.event(resources.history)?;
-                if let Some(item) = resources
-                    .history
-                    .append_tool_synthetic(published.clone(), batch.sequence, images)
-                    .await
-                    .map_err(TurnError::Storage)?
-                {
-                    let message = resources
-                        .conversation
-                        .materialize(item)
-                        .await
-                        .map_err(TurnError::Storage)?;
-                    resources.conversation.add(message);
-                }
-                self.publish(published).await?;
+                break;
             }
+            let launched = Arc::new(AtomicBool::new(false));
+            executions.push(self.invoke(
+                InvocationResources {
+                    history: resources.history,
+                    usage: resources.usage,
+                    selection,
+                    snapshot,
+                    capture,
+                    assistant_sequence: request.assistant_sequence,
+                    image_budget: image_budget.clone(),
+                    cancellation,
+                },
+                None,
+                call,
+                Some(launched.clone()),
+            ));
+            executions.wait_for_launch(&launched).await;
+            admitted += 1;
         }
-        if let Some(last) = conversation.last() {
-            self.watermark.store(last.sequence, Ordering::Release);
+        let mut results: Vec<_> = executions
+            .join()
+            .await
+            .into_iter()
+            .collect::<Result<_, _>>()?;
+        if cancellation.is_cancelled()
+            || results
+                .iter()
+                .any(|result| result.status == ToolStatus::Cancelled)
+        {
+            results.extend(
+                request.calls[admitted..]
+                    .iter()
+                    .map(|call| self.cancel(call)),
+            );
         }
-        Ok(())
+        Ok(results)
     }
 }
 impl<S: AccessSnapshot + 'static> TurnTools<S> for ToolSettlement<S> {
@@ -395,15 +221,23 @@ impl<S: AccessSnapshot + 'static> TurnTools<S> for ToolSettlement<S> {
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
         snapshot.enabled_after_interruption()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        request: ToolExecutionRequest,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<S>,
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<S>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(self.reconcile_inner(resources, selection, snapshot, capture, cancellation))
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, TurnError>> {
+        Box::pin(self.execute_inner(
+            request,
+            resources,
+            selection,
+            snapshot,
+            capture,
+            cancellation,
+        ))
     }
 }
 fn reborrow<'a>(resources: &'a mut TurnResources<'_>) -> TurnResources<'a> {

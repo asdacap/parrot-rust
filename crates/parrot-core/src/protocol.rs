@@ -78,13 +78,70 @@ pub struct ProviderResponse {
     pub provider_content: String,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ToolExecutionRequest {
+    pub assistant_sequence: i64,
+    /// Starts a tool-owned execution scope seeded from the persisted image facts.
+    pub starts_batch: bool,
+    pub calls: Vec<ToolCall>,
+    pub prior_image_bytes: Vec<i64>,
+    pub image_budget_exceeded: bool,
+    pub cancel_remaining: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ToolStatus {
+    #[default]
+    Finished,
+    Cancelled,
+    Error,
+    ImageBudgetExceeded,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ToolResult {
+    pub call_id: String,
+    pub tool_name: String,
+    pub status: ToolStatus,
+    pub text: String,
+    pub error_message: String,
+    pub images: Vec<ToolImage>,
+    pub yielded_process: Option<ToolProcess>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ToolImage {
+    pub artifact_id: String,
+    pub sha256: String,
+    pub media_type: String,
+    pub byte_length: i64,
+    pub width: u32,
+    pub height: u32,
+    pub frame_count: u32,
+    pub aggregate_pixels: i64,
+    pub display_name: String,
+    pub origin: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ToolProcess {
+    pub process_id: String,
+    pub name: String,
+    pub inventory_instance_id: String,
+    pub visible_revision: u64,
+    pub stdout_path: Option<String>,
+    pub stderr_path: Option<String>,
+    pub activity_kind: i32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolPhase {
+    Recovery,
     Normal,
     Final,
 }
 
-/// Chooses the retained executable catalog advertised for the current request.
+/// Chooses recovery execution or the retained executable catalog for the current turn.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolContext {
     pub phase: ToolPhase,

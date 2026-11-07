@@ -2,7 +2,7 @@ use super::*;
 use parrot_core::{
     CompletionDecision as CoreCompletionDecision, Error as CoreError, ErrorCode, ErrorKind,
     ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCatalog, ToolContext,
-    ToolDefinition, ToolPhase, TurnOptions,
+    ToolDefinition, ToolExecutionRequest, ToolPhase, ToolResult, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -34,14 +34,22 @@ struct BoundTurn<S: AccessSnapshot, T: TurnTools<S>> {
     tools: Option<CapturedTools<T::Snapshot>>,
 }
 
+struct RecoveryBinding<S: AccessSnapshot, T: TurnTools<S>> {
+    selection: TurnSelection<S>,
+    tools: T::Snapshot,
+    status: Arc<dyn crate::compaction::ContextStatus>,
+}
+
 struct TurnBinding<S: AccessSnapshot, T: TurnTools<S>> {
     turn: std::sync::Mutex<Option<BoundTurn<S, T>>>,
+    recovery: std::sync::Mutex<Option<RecoveryBinding<S, T>>>,
 }
 
 impl<S: AccessSnapshot, T: TurnTools<S>> TurnBinding<S, T> {
     fn new() -> Self {
         Self {
             turn: std::sync::Mutex::new(None),
+            recovery: std::sync::Mutex::new(None),
         }
     }
     fn bind(&self, selection: TurnSelection<S>) {
@@ -75,10 +83,13 @@ impl<S: AccessSnapshot, T: TurnTools<S>> TurnBinding<S, T> {
             .as_ref()
             .and_then(|turn| turn.tools.as_ref())
             .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
-        Ok(match phase {
-            ToolPhase::Normal => tools.normal.clone(),
-            ToolPhase::Final => tools.final_phase.clone(),
-        })
+        match phase {
+            ToolPhase::Normal => Ok(tools.normal.clone()),
+            ToolPhase::Final => Ok(tools.final_phase.clone()),
+            ToolPhase::Recovery => Err(TurnError::Service(
+                "recovery requires its own tool capture".into(),
+            )),
+        }
     }
 }
 
@@ -140,6 +151,7 @@ where
         let mut state = backend.state.lock().await;
         state.request_status = None;
         state.request_accounting = None;
+        state.tool_conversation.reset_pending();
     }
     let binding = TurnBinding::new();
     let mut states = RuntimeStates {
@@ -163,6 +175,7 @@ where
         let mut state = backend.state.lock().await;
         state.request_status = None;
         state.request_accounting = None;
+        state.tool_conversation.reset_pending();
     }
     match outcome {
         Ok(parrot_core::Outcome::Completed(answer)) => Ok(Execution::succeeded(answer)),
@@ -177,6 +190,57 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn prepare_tool_execution(
+        &mut self,
+        context: ToolContext,
+    ) -> BoxFuture<'_, Result<Option<ToolExecutionRequest>, CoreError>> {
+        adapt_operation(async move {
+            if context.phase == ToolPhase::Recovery {
+                let mut recovery = self
+                    .binding
+                    .recovery
+                    .lock()
+                    .expect("recovery binding poisoned");
+                if recovery.is_none() {
+                    let selection = self.backend.selection.capture()?;
+                    let tools = self.backend.snapshot(&selection)?;
+                    let status = self.backend.status.bind(&selection);
+                    *recovery = Some(RecoveryBinding {
+                        selection,
+                        tools,
+                        status,
+                    });
+                }
+            }
+            let mut guard = self.backend.state.lock().await;
+            let state = &mut *guard;
+            let request = state
+                .tool_conversation
+                .prepare_execution(&mut state.conversation)
+                .await?;
+            if request.is_none() && context.phase == ToolPhase::Recovery {
+                self.binding
+                    .recovery
+                    .lock()
+                    .expect("recovery binding poisoned")
+                    .take();
+            }
+            Ok(request)
+        })
+    }
+    fn record_tool_results<'a>(
+        &'a mut self,
+        results: &'a [ToolResult],
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let mut guard = self.backend.state.lock().await;
+            let state = &mut *guard;
+            state
+                .tool_conversation
+                .record_results(&mut state.conversation, results)
+                .await
+        })
+    }
     fn disables_request_limit(&self) -> bool {
         self.backend.agent_limits.disable_max_turns
     }
@@ -565,15 +629,6 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    fn reconcile_pending(&self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let mut state = self.backend.state.lock().await;
-            self.backend
-                .reconcile(&mut state, self.cancellation)
-                .await?;
-            Ok(())
-        })
-    }
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
@@ -601,21 +656,47 @@ where
             Ok(catalog)
         })
     }
-    fn execute_pending(&self, context: ToolContext) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn execute(
+        &self,
+        request: ToolExecutionRequest,
+        context: ToolContext,
+    ) -> BoxFuture<'_, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
-            let selection = self.binding.capture_selection()?;
-            let snapshot = self.binding.capture_tools(context.phase)?;
+            let recovery = if context.phase == ToolPhase::Recovery {
+                let guard = self
+                    .binding
+                    .recovery
+                    .lock()
+                    .expect("recovery binding poisoned");
+                let binding = guard
+                    .as_ref()
+                    .ok_or_else(|| TurnError::Service("recovery tools are unavailable".into()))?;
+                Some((
+                    binding.selection.clone(),
+                    binding.tools.clone(),
+                    binding.status.clone(),
+                ))
+            } else {
+                None
+            };
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
-            let status = state
-                .request_status
-                .as_ref()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
+            let (selection, snapshot, status) = match recovery {
+                Some(binding) => binding,
+                None => (
+                    self.binding.capture_selection()?,
+                    self.binding.capture_tools(context.phase)?,
+                    state.request_status.clone().ok_or_else(|| {
+                        TurnError::Service("request status is unavailable".into())
+                    })?,
+                ),
+            };
             let events = ContextEmitter { backend };
             backend
                 .tools
-                .reconcile(
+                .execute(
+                    request,
                     TurnResources {
                         history: &backend.history,
                         conversation: &mut state.conversation,

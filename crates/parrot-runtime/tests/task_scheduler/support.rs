@@ -323,15 +323,16 @@ impl TurnTools<Security> for Tools {
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
         snapshot.clone()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        _: parrot_core::ToolExecutionRequest,
         _: TurnResources<'a>,
         _: &'a TurnSelection<Security>,
         _: &'a Self::Snapshot,
         _: &'a dyn SelectionSource<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async { Ok(()) })
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
+        panic!("task fixture has no executable tools")
     }
 }
 struct Prompt(String);

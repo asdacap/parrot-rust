@@ -215,8 +215,7 @@ async fn a003_queued_prompt_gets_its_own_turn_with_two_starts_and_two_endings() 
     );
 }
 
-/// Records the real usage fact before the injected tool service's actual durable
-/// settlement. The production tool settlement adapter remains T47-owned.
+/// Records the real usage fact before the injected executor returns its result.
 #[derive(Default)]
 struct UsageTools(Tools);
 impl TurnTools<Security> for UsageTools {
@@ -237,48 +236,47 @@ impl TurnTools<Security> for UsageTools {
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
         snapshot.clone()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        request: parrot_core::ToolExecutionRequest,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<Security>,
         snapshot: &'a Self::Snapshot,
         source: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
         Box::pin(async move {
-            for assistant in resources.history.conversation().await? {
-                for call in &assistant.message.tool_calls {
-                    if resources
-                        .history
-                        .tool_terminals_of_calls(vec![call.id.clone()])
-                        .await?
-                        .is_empty()
-                    {
-                        resources
-                            .usage
-                            .record_tool(
-                                assistant.sequence,
-                                &sessions::ToolCall {
-                                    id: call.id.clone(),
-                                    name: call.name.clone(),
-                                    arguments_json: call.arguments_json.clone(),
-                                },
-                            )
-                            .await?;
-                        let mut started = Event::new();
-                        started.id = id();
-                        started.agent_session_id = "agent".into();
-                        started.set_tool_started(protocol::ToolStarted {
-                            tool_call_id: call.id.clone(),
-                            tool_name: call.name.clone(),
-                            ..Default::default()
-                        });
-                        resources.events.emit(started, cancellation).await?;
-                    }
-                }
+            for call in &request.calls {
+                resources
+                    .usage
+                    .record_tool(
+                        request.assistant_sequence,
+                        &sessions::ToolCall {
+                            id: call.id.clone(),
+                            name: call.name.clone(),
+                            arguments_json: call.arguments_json.clone(),
+                        },
+                    )
+                    .await?;
+                let mut started = Event::new();
+                started.id = id();
+                started.agent_session_id = "agent".into();
+                started.set_tool_started(protocol::ToolStarted {
+                    tool_call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    ..Default::default()
+                });
+                resources.events.emit(started, cancellation).await?;
             }
             self.0
-                .reconcile(resources, selection, snapshot, source, cancellation)
+                .execute(
+                    request,
+                    resources,
+                    selection,
+                    snapshot,
+                    source,
+                    cancellation,
+                )
                 .await
         })
     }

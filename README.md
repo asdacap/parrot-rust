@@ -30,16 +30,17 @@ ported from the .NET repository. Repository contributor guidance is in
 
 `parrot-core` owns the agent turn protocol and loop, with exactly three traits:
 
-- `States`: conversation and turn effects, prepared requests, and completion admission.
-- `Tools`: turn-bound catalogs and awaited durable settlement of accepted calls.
+- `States`: conversation and turn effects, pending-call recovery, result recording,
+  prepared requests, and completion admission.
+- `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
 Requests, responses, messages, tool definitions, errors, and tool contexts are concrete
 core-owned types. Adapters implement the same interface; they do not choose their
 own associated payload or context types. `Provider` accepts only the request;
 attempts and request phases stay in the core loop, and input estimates stay in
-runtime state. `ToolContext` specifies normal or final-phase execution without
-exposing state objects or adapter-specific callbacks.
+runtime state. `ToolContext` selects recovery, normal, or final-phase execution
+without exposing state objects or adapter-specific callbacks.
 
 The core specifies and implements:
 
@@ -58,6 +59,13 @@ events, and session lifecycle stay outside the core. Provider representations ar
 translated losslessly at the interface, including raw provider extensions and
 multimodal content. Runtime bindings retain the actual selected model and executable
 tool snapshots; tools are never reconstructed from advertised definitions.
+
+The core asks state for outstanding calls, passes explicit calls to tools, then
+asks state to record the returned results before executing another chunk. State
+restores completed calls without reinvocation or republication and owns conversation
+projection, recovery progress, and synthetic image messages. Tools retain execution,
+parallel-safe grouping, tool-specific budgets, and execution-local state; they do
+not discover work by scanning conversation history.
 
 The session drain serializes operations. Each adapter borrows the existing runtime
 state lock only for its operation, including borrowed-resource tool execution.
