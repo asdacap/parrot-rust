@@ -720,8 +720,8 @@ where
                     .await?;
                 cancel_remaining |= chunk
                     .iter()
-                    .any(|result| result.status == ToolStatus::Cancelled);
-                results.extend(chunk);
+                    .any(|result| result.result.status == ToolStatus::Cancelled);
+                results.extend(chunk.into_iter().map(|result| result.result));
             }
             Ok(results)
         })

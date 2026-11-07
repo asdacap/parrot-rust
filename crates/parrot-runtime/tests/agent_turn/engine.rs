@@ -494,7 +494,10 @@ impl TurnTools<Security> for Tools {
         _: &'a Self::Snapshot,
         _: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
+    > {
         Box::pin(async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             let gate = self.execution_gate.lock().unwrap().take();
@@ -542,15 +545,19 @@ impl TurnTools<Security> for Tools {
             Ok(request
                 .calls
                 .into_iter()
-                .map(|call| parrot_core::ToolResult {
-                    call_id: call.id,
-                    tool_name: call.name,
-                    status: parrot_core::ToolStatus::Finished,
-                    text: "fake tool result".into(),
-                    error_message: String::new(),
-                    images: Vec::new(),
-                    yielded_process: None,
-                })
+                .map(
+                    |call| parrot_runtime::agent_turn::services::ToolExecutionResult {
+                        result: parrot_core::ToolResult {
+                            call_id: call.id,
+                            tool_name: call.name,
+                            status: parrot_core::ToolStatus::Finished,
+                            text: "fake tool result".into(),
+                            error_message: String::new(),
+                            images: Vec::new(),
+                        },
+                        yielded_process: None,
+                    },
+                )
                 .collect())
         })
     }

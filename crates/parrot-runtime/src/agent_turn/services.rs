@@ -85,6 +85,11 @@ pub struct ToolExecutionChunk {
     pub cancel_remaining: bool,
 }
 
+pub struct ToolExecutionResult {
+    pub result: parrot_core::ToolResult,
+    pub yielded_process: Option<parrot_domain::protocol::messages::parrot::YieldedShellProcess>,
+}
+
 /// The snapshot retains the concrete factory/tool identity in its owner-chosen
 /// type. Runtime cannot replace it with a names-only reconstructed catalog.
 pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
@@ -108,7 +113,7 @@ pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<S>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>>;
+    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, TurnError>>;
 }
 
 pub struct CompletionCandidate<S: AccessSnapshot> {

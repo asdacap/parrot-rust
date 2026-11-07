@@ -2,6 +2,49 @@ use super::*;
 use parrot_runtime::agent_turn::lifecycle::ExecutionStatus;
 
 #[tokio::test]
+async fn actual_runtime_preserves_native_yielded_process_metadata_and_records_core_result() {
+    let fixture = Fixture::new();
+    let mut tool = RecordingTool::new(&fixture, "process", ParallelSafety::Sequential);
+    let yielded = protocol::YieldedShellProcess {
+        process_id: "owned-process".into(),
+        name: "named process".into(),
+        inventory_instance_id: "inventory-instance".into(),
+        visible_revision: u64::MAX,
+        stdout_path: Some("scratch/process.stdout".into()),
+        stderr_path: Some("scratch/process.stderr".into()),
+        activity_kind: protobuf::EnumOrUnknown::from_i32(-37),
+        ..protocol::YieldedShellProcess::new()
+    };
+    tool.output.yielded_process = Some(yielded.clone());
+    let tool = Arc::new(tool);
+    let mut first = Step::complete("tool request");
+    first.completion.as_mut().unwrap().tool_calls = vec![call("yielded", "process")];
+    let provider = Scripted::new(vec![first, Step::complete("answer using result")]);
+    let (session, _) = runtime::runtime(&fixture, &provider, vec![tool.clone().handle()]).await;
+    let sent = runtime::send(&session).await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    assert_eq!(tool.calls.lock().unwrap().len(), 1);
+    let events = fixture.events().await;
+    let finished: Vec<_> = events
+        .iter()
+        .filter(|event| event.has_tool_finished())
+        .map(|event| event.tool_finished())
+        .collect();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0].tool_call_id, "yielded");
+    assert_eq!(finished[0].yielded_process.as_ref(), Some(&yielded));
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].messages.iter().any(|message| {
+        message.tool_call_id == "yielded" && message.content() == "result:process"
+    }));
+    bounded(session.close()).await.unwrap();
+}
+
+#[tokio::test]
 async fn actual_runtime_invokes_retained_domain_tool_alias_and_next_provider_sees_settled_result() {
     let fixture = Fixture::new();
     let mut tool = RecordingTool::new(&fixture, "canonical", ParallelSafety::Sequential);

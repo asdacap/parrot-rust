@@ -254,6 +254,12 @@ async fn yielded_process_metadata_is_preserved_on_finished_event_and_result_proj
     let mut tool = RecordingTool::new(&fixture, "process", ParallelSafety::Sequential);
     let mut yielded = protocol::YieldedShellProcess::new();
     yielded.process_id = "owned-process".into();
+    yielded.name = "named process".into();
+    yielded.inventory_instance_id = "inventory-instance".into();
+    yielded.visible_revision = u64::MAX;
+    yielded.stdout_path = Some("scratch/process.stdout".into());
+    yielded.stderr_path = Some("scratch/process.stderr".into());
+    yielded.activity_kind = protobuf::EnumOrUnknown::from_i32(-37);
     tool.output.yielded_process = Some(yielded.clone());
     let tool = Arc::new(tool);
     fixture.batch(vec![call("yielded", "process")]).await;

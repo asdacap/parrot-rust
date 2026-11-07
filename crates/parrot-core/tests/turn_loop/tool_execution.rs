@@ -175,15 +175,6 @@ fn complete_fresh_tool_results_reach_state_without_rewriting_metadata() {
             display_name: "display".into(),
             origin: "origin".into(),
         }],
-        yielded_process: Some(ToolProcess {
-            process_id: "process".into(),
-            name: "name".into(),
-            inventory_instance_id: "inventory".into(),
-            visible_revision: u64::MAX,
-            stdout_path: Some("stdout".into()),
-            stderr_path: None,
-            activity_kind: -37,
-        }),
     };
     state
         .tools

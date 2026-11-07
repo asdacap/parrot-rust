@@ -169,11 +169,28 @@ pub struct ToolCall {
     pub arguments_json: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    Incomplete,
+    Interrupted,
+    Other(String),
+}
+
+impl Default for FinishReason {
+    fn default() -> Self {
+        Self::Other(String::new())
+    }
+}
+
 /// A complete provider response. Raw provider content and argument strings stay lossless.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProviderResponse {
     pub response_id: String,
-    pub finish_reason: String,
+    pub finish_reason: FinishReason,
     pub input_tokens: i32,
     pub cached_input_tokens: i32,
     pub output_tokens: i32,
@@ -200,7 +217,6 @@ pub struct ToolResult {
     pub text: String,
     pub error_message: String,
     pub images: Vec<ToolImage>,
-    pub yielded_process: Option<ToolProcess>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -215,17 +231,6 @@ pub struct ToolImage {
     pub aggregate_pixels: i64,
     pub display_name: String,
     pub origin: String,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolProcess {
-    pub process_id: String,
-    pub name: String,
-    pub inventory_instance_id: String,
-    pub visible_revision: u64,
-    pub stdout_path: Option<String>,
-    pub stderr_path: Option<String>,
-    pub activity_kind: i32,
 }
 
 /// Provider-visible definitions backed by retained executable identities in the adapter.

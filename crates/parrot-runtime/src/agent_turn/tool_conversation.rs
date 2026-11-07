@@ -1,9 +1,12 @@
-use super::{engine::Publisher, services::TurnError};
+use super::{
+    engine::Publisher,
+    services::{ToolExecutionResult, TurnError},
+};
 use parrot_core::{ToolCall, ToolResult, ToolStatus};
 use parrot_domain::{
     contracts::storage::Committed,
     protocol::messages::parrot::{
-        ArtifactReference, Event, ToolCancelled, ToolError, ToolFinished, YieldedShellProcess,
+        ArtifactReference, Event, ToolCancelled, ToolError, ToolFinished,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -123,13 +126,15 @@ impl ToolConversation {
                     .await?;
                     terminal
                 } else {
-                    let result = ToolResult {
-                        call_id: call.id.clone(),
-                        tool_name: call.name.clone(),
-                        status: ToolStatus::Error,
-                        text: self.crash_result.clone(),
-                        error_message: self.crash_message.clone(),
-                        images: Vec::new(),
+                    let result = ToolExecutionResult {
+                        result: ToolResult {
+                            call_id: call.id.clone(),
+                            tool_name: call.name.clone(),
+                            status: ToolStatus::Error,
+                            text: self.crash_result.clone(),
+                            error_message: self.crash_message.clone(),
+                            images: Vec::new(),
+                        },
                         yielded_process: None,
                     };
                     let terminal = self
@@ -199,7 +204,7 @@ impl ToolConversation {
     pub async fn record_results(
         &mut self,
         conversation: &mut AgentConversation,
-        results: &[ToolResult],
+        results: &[ToolExecutionResult],
     ) -> Result<(), TurnError> {
         let mut batch = self
             .pending
@@ -210,7 +215,8 @@ impl ToolConversation {
                 "tool execution returned no results".into(),
             ));
         }
-        for result in results {
+        for execution in results {
+            let result = &execution.result;
             let call = batch.calls.get(batch.index).ok_or_else(|| {
                 TurnError::Service("tool execution returned too many results".into())
             })?;
@@ -220,7 +226,7 @@ impl ToolConversation {
                 ));
             }
             let terminal = self
-                .record_result(conversation, batch.sequence, result)
+                .record_result(conversation, batch.sequence, execution)
                 .await?;
             batch
                 .terminals
@@ -235,8 +241,9 @@ impl ToolConversation {
         &self,
         conversation: &mut AgentConversation,
         sequence: i64,
-        result: &ToolResult,
+        execution: &ToolExecutionResult,
     ) -> Result<ToolExecutionTerminal, TurnError> {
+        let result = &execution.result;
         let terminal = ToolExecutionTerminal {
             tool_call_id: result.call_id.clone(),
             tool_name: result.tool_name.clone(),
@@ -280,20 +287,7 @@ impl ToolConversation {
                         ..ArtifactReference::new()
                     })
                     .collect(),
-                yielded_process: result
-                    .yielded_process
-                    .as_ref()
-                    .map(|process| YieldedShellProcess {
-                        process_id: process.process_id.clone(),
-                        name: process.name.clone(),
-                        inventory_instance_id: process.inventory_instance_id.clone(),
-                        visible_revision: process.visible_revision,
-                        stdout_path: process.stdout_path.clone(),
-                        stderr_path: process.stderr_path.clone(),
-                        activity_kind: protobuf::EnumOrUnknown::from_i32(process.activity_kind),
-                        ..YieldedShellProcess::new()
-                    })
-                    .into(),
+                yielded_process: execution.yielded_process.clone().into(),
                 ..ToolFinished::new()
             }),
             ToolStatus::Cancelled => event.set_tool_cancelled(ToolCancelled {

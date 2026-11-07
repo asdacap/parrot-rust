@@ -16,7 +16,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
         borrowed: Option<TurnResources<'a>>,
         call: &'a ToolCall,
         launched: Option<Arc<AtomicBool>>,
-    ) -> BoxFuture<'a, Result<ToolResult, TurnError>> {
+    ) -> BoxFuture<'a, Result<ToolExecutionResult, TurnError>> {
         let InvocationResources {
             history,
             usage,
@@ -133,7 +133,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                 let result = result?;
                 if result.outcome == ToolOutcome::ImageBudgetExceeded {
                     let mut settlement = self.fail(call, result.text).map_err(turn_failure)?;
-                    settlement.status = ToolStatus::ImageBudgetExceeded;
+                    settlement.result.status = ToolStatus::ImageBudgetExceeded;
                     return Ok(settlement);
                 }
                 let mut text = self
@@ -185,15 +185,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                         origin: image.origin,
                     })
                     .collect();
-                let yielded_process = result.yielded_process.map(|process| ToolProcess {
-                    process_id: process.process_id,
-                    name: process.name,
-                    inventory_instance_id: process.inventory_instance_id,
-                    visible_revision: process.visible_revision,
-                    stdout_path: process.stdout_path,
-                    stderr_path: process.stderr_path,
-                    activity_kind: process.activity_kind.value(),
-                });
+                let yielded_process = result.yielded_process;
                 self.diagnostic(
                     history,
                     call,
@@ -204,13 +196,15 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                     None,
                     Some(began),
                 );
-                Ok(ToolResult {
-                    call_id: call.id.clone(),
-                    tool_name: call.name.clone(),
-                    status: ToolStatus::Finished,
-                    text,
-                    error_message: String::new(),
-                    images,
+                Ok(ToolExecutionResult {
+                    result: ToolResult {
+                        call_id: call.id.clone(),
+                        tool_name: call.name.clone(),
+                        status: ToolStatus::Finished,
+                        text,
+                        error_message: String::new(),
+                        images,
+                    },
                     yielded_process,
                 })
             }
@@ -251,18 +245,20 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
             }
         })
     }
-    pub(super) fn cancel(&self, call: &ToolCall) -> ToolResult {
-        ToolResult {
-            call_id: call.id.clone(),
-            tool_name: call.name.clone(),
-            status: ToolStatus::Cancelled,
-            text: self.interrupted_result.clone(),
-            error_message: String::new(),
-            images: Vec::new(),
+    pub(super) fn cancel(&self, call: &ToolCall) -> ToolExecutionResult {
+        ToolExecutionResult {
+            result: ToolResult {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                status: ToolStatus::Cancelled,
+                text: self.interrupted_result.clone(),
+                error_message: String::new(),
+                images: Vec::new(),
+            },
             yielded_process: None,
         }
     }
-    fn fail(&self, call: &ToolCall, message: String) -> Result<ToolResult, TurnError> {
+    fn fail(&self, call: &ToolCall, message: String) -> Result<ToolExecutionResult, TurnError> {
         let text = self
             .config
             .templates
@@ -272,13 +268,15 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                 &NeverCancelled,
             )
             .map_err(|error| TurnError::Service(error.to_string()))?;
-        Ok(ToolResult {
-            call_id: call.id.clone(),
-            tool_name: call.name.clone(),
-            status: ToolStatus::Error,
-            text,
-            error_message: message,
-            images: Vec::new(),
+        Ok(ToolExecutionResult {
+            result: ToolResult {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                status: ToolStatus::Error,
+                text,
+                error_message: message,
+                images: Vec::new(),
+            },
             yielded_process: None,
         })
     }

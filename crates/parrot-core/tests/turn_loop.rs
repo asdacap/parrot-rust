@@ -1,7 +1,7 @@
 use parrot_core::{
-    BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, Outcome, Provider, ProviderRequest,
-    ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolDefinition, ToolImage,
-    ToolProcess, ToolResult, ToolStatus, Tools, TurnOptions, budget::TurnRequestPhase, run,
+    BoxFuture, CompletionDecision, Error, ErrorCode, ErrorKind, FinishReason, Outcome, Provider,
+    ProviderRequest, ProviderResponse, RetryReason, States, ToolCall, ToolCatalog, ToolDefinition,
+    ToolImage, ToolResult, ToolStatus, Tools, TurnOptions, budget::TurnRequestPhase, run,
 };
 use std::{
     collections::VecDeque,
@@ -46,14 +46,14 @@ impl Reply {
     fn final_response(text: &str) -> Self {
         Self::Response(ProviderResponse {
             assistant_text: text.into(),
-            finish_reason: "stop".into(),
+            finish_reason: FinishReason::Stop,
             ..ProviderResponse::default()
         })
     }
     fn tools(text: &str) -> Self {
         Self::Response(ProviderResponse {
             assistant_text: text.into(),
-            finish_reason: "tool_calls".into(),
+            finish_reason: FinishReason::ToolCalls,
             tool_calls: vec![ToolCall {
                 id: "call-1".into(),
                 name: "read".into(),
@@ -64,7 +64,7 @@ impl Reply {
     }
     fn with_tool_calls(calls: Vec<ToolCall>) -> Self {
         Self::Response(ProviderResponse {
-            finish_reason: "tool_calls".into(),
+            finish_reason: FinishReason::ToolCalls,
             tool_calls: calls,
             ..ProviderResponse::default()
         })
@@ -80,7 +80,7 @@ impl Reply {
         let Self::Response(mut response) = Self::invalid(text) else {
             unreachable!()
         };
-        response.finish_reason = "length".into();
+        response.finish_reason = FinishReason::Length;
         Self::Response(response)
     }
 }
@@ -853,7 +853,7 @@ impl Provider for EchoProvider {
             );
             Ok(ProviderResponse {
                 assistant_text: request.instructions,
-                finish_reason: "stop".into(),
+                finish_reason: FinishReason::Stop,
                 ..ProviderResponse::default()
             })
         })
@@ -924,7 +924,7 @@ fn core_validates_json_syntax_without_rewriting_arguments_or_provider_content() 
     ] {
         let response = ProviderResponse {
             assistant_text: "call".into(),
-            finish_reason: "tool_calls".into(),
+            finish_reason: FinishReason::ToolCalls,
             provider_id: "future-provider".into(),
             provider_content: " { \"unknown\" : 1.20 } ".into(),
             tool_calls: vec![ToolCall {
@@ -948,7 +948,7 @@ fn core_validates_json_syntax_without_rewriting_arguments_or_provider_content() 
     }
     let mut states = MemoryState::new([Reply::Response(ProviderResponse {
         assistant_text: "partial answer".into(),
-        finish_reason: "length".into(),
+        finish_reason: FinishReason::Length,
         ..ProviderResponse::default()
     })]);
     assert_eq!(
@@ -956,6 +956,23 @@ fn core_validates_json_syntax_without_rewriting_arguments_or_provider_content() 
         Ok(Outcome::Completed("partial answer".into()))
     );
     assert!(states.retries.is_empty());
+}
+
+#[test]
+fn unknown_finish_reasons_remain_lossless_without_triggering_truncation_retries() {
+    let Reply::Response(mut response) = Reply::tools("call") else {
+        unreachable!()
+    };
+    response.finish_reason = FinishReason::Other("future finish reason".into());
+    let mut states = MemoryState::new([
+        Reply::Response(response.clone()),
+        Reply::final_response("answer"),
+    ]);
+    assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
+    assert!(states.retries.is_empty());
+    assert_eq!(states.recorded_tools, [response]);
+    assert_eq!(states.tools.requests.lock().unwrap().len(), 1);
+    assert_eq!(states.applied_results.len(), 1);
 }
 
 #[test]

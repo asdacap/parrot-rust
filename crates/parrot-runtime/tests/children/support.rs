@@ -329,7 +329,10 @@ impl TurnTools<Security> for Tools {
         _: &'a Self::Snapshot,
         _: &'a dyn SelectionSource<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
+    > {
         panic!("child fixture has no executable tools")
     }
 }

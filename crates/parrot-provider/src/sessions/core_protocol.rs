@@ -1,4 +1,5 @@
 use super::{Completion, Content, Message, Reasoning, Request, Role, Tool, ToolCall};
+use parrot_core::FinishReason;
 
 impl From<Request> for parrot_core::ProviderRequest {
     fn from(request: Request) -> Self {
@@ -34,7 +35,15 @@ impl From<Completion> for parrot_core::ProviderResponse {
     fn from(completion: Completion) -> Self {
         Self {
             response_id: completion.response_id,
-            finish_reason: completion.finish_reason,
+            finish_reason: match completion.finish_reason.as_str() {
+                "stop" => FinishReason::Stop,
+                "length" => FinishReason::Length,
+                "tool_calls" => FinishReason::ToolCalls,
+                "content_filter" => FinishReason::ContentFilter,
+                "incomplete" => FinishReason::Incomplete,
+                "interrupted" => FinishReason::Interrupted,
+                _ => FinishReason::Other(completion.finish_reason),
+            },
             input_tokens: completion.input_tokens,
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
@@ -50,7 +59,15 @@ impl From<parrot_core::ProviderResponse> for Completion {
     fn from(response: parrot_core::ProviderResponse) -> Self {
         Self {
             response_id: response.response_id,
-            finish_reason: response.finish_reason,
+            finish_reason: match response.finish_reason {
+                FinishReason::Stop => "stop".into(),
+                FinishReason::Length => "length".into(),
+                FinishReason::ToolCalls => "tool_calls".into(),
+                FinishReason::ContentFilter => "content_filter".into(),
+                FinishReason::Incomplete => "incomplete".into(),
+                FinishReason::Interrupted => "interrupted".into(),
+                FinishReason::Other(reason) => reason,
+            },
             input_tokens: response.input_tokens,
             cached_input_tokens: response.cached_input_tokens,
             output_tokens: response.output_tokens,
@@ -291,6 +308,32 @@ mod tests {
             Request::from(parrot_core::ProviderRequest::from(no_reasoning.clone())),
             no_reasoning
         );
+    }
+
+    #[test]
+    fn completion_finish_reasons_are_typed_without_losing_native_values() {
+        for (reason, expected) in [
+            ("stop", FinishReason::Stop),
+            ("length", FinishReason::Length),
+            ("tool_calls", FinishReason::ToolCalls),
+            ("content_filter", FinishReason::ContentFilter),
+            ("incomplete", FinishReason::Incomplete),
+            ("interrupted", FinishReason::Interrupted),
+            ("", FinishReason::Other(String::new())),
+            ("STOP", FinishReason::Other("STOP".into())),
+            (
+                "future reason\n\u{0000}",
+                FinishReason::Other("future reason\n\u{0000}".into()),
+            ),
+        ] {
+            let completion = Completion {
+                finish_reason: reason.into(),
+                ..Completion::default()
+            };
+            let core = parrot_core::ProviderResponse::from(completion.clone());
+            assert_eq!(core.finish_reason, expected);
+            assert_eq!(Completion::from(core), completion);
+        }
     }
 
     #[test]

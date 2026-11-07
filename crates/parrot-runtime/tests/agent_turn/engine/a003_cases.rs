@@ -244,7 +244,10 @@ impl TurnTools<Security> for UsageTools {
         snapshot: &'a Self::Snapshot,
         source: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
+    > {
         Box::pin(async move {
             for call in &request.calls {
                 resources

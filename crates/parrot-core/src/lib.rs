@@ -55,7 +55,7 @@ pub async fn run(
             Err(error) => return Err(error),
         };
         compacted_oversized = false;
-        if response.finish_reason == "length" && !response.tool_calls.is_empty() {
+        if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
             states
                 .record_retry(RetryReason::TruncatedToolCalls, attempt)
                 .await?;
