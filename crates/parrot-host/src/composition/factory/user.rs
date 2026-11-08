@@ -1476,7 +1476,10 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                         vec![ConversationPart::Text(notice)],
                         Identifier::message_id().map_err(internal)?,
                         wire::Delivery::DELIVERY_STEER,
-                        IncomingActivity::default(),
+                        IncomingActivity {
+                            source: wire::InputSource::INPUT_SOURCE_NOTIFICATION,
+                            ..IncomingActivity::default()
+                        },
                         cancellation,
                     )
                     .await

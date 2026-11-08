@@ -407,15 +407,39 @@ impl EnhancedSessionPresenter {
             } else {
                 "◇"
             };
-            items.push(Arc::new(Presentation::Lines {
-                lines: TerminalText::layout_words_hanging(
+            let lines = if pending.source == wire::InputSource::INPUT_SOURCE_UNSPECIFIED.into() {
+                TerminalText::layout_words_hanging(
                     &format!(
                         "{icon} {} (pending)",
                         TerminalText::sanitize(&pending.content)
                     ),
                     self.columns,
                     "  ",
-                ),
+                )
+            } else {
+                let summary = pending
+                    .content
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                    .unwrap_or("Notification received");
+                let summary = TerminalText::sanitize(summary);
+                let suffix = " (pending)";
+                let width = self
+                    .columns
+                    .saturating_sub(TerminalText::width(icon) + 1 + suffix.len());
+                let mut preview = TerminalText::clip(&summary, width);
+                if preview.len() < summary.len() && width > 0 {
+                    preview = TerminalText::clip(&preview, width - 1);
+                    preview.push('…');
+                }
+                vec![TerminalText::clip(
+                    &format!("{icon} {preview}{suffix}"),
+                    self.columns,
+                )]
+            };
+            items.push(Arc::new(Presentation::Lines {
+                lines,
                 layout: ScrollbackLayout::User,
             }));
         }

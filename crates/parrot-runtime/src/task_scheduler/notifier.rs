@@ -5,7 +5,7 @@ use crate::{
 };
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
-    protocol::messages::parrot::Delivery,
+    protocol::messages::parrot::{Delivery, InputSource},
     values::agent_state::TaskNotificationSnapshot,
 };
 use parrot_storage::events::ConversationPart;
@@ -109,7 +109,7 @@ impl TaskNotifier {
                             IncomingActivity {
                                 name: "agent-tasks".into(),
                                 cause: Some("AgentTask update".into()),
-                                ..IncomingActivity::default()
+                                source: InputSource::INPUT_SOURCE_NOTIFICATION,
                             },
                         )
                         .await

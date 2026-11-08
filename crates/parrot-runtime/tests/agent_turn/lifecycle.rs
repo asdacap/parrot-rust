@@ -446,7 +446,12 @@ async fn unary_observer_cancellation_never_owns_the_selected_drain() {
     let token = caller();
     let sent = bounded(
         session
-            .send_and_select_execution(parts("first"), "first".into(), token.clone())
+            .send_and_select_execution(
+                parts("first"),
+                "first".into(),
+                InputSource::INPUT_SOURCE_UNSPECIFIED,
+                token.clone(),
+            )
             .unwrap()
             .join(),
     )
@@ -545,6 +550,7 @@ async fn close_joins_admission_and_accepted_mutation_before_backend_close() {
             parts("record"),
             "record".into(),
             Delivery::DELIVERY_QUEUE,
+            InputSource::INPUT_SOURCE_UNSPECIFIED,
             caller(),
         )
         .unwrap();
@@ -582,6 +588,7 @@ async fn close_joins_admission_and_accepted_mutation_before_backend_close() {
                 parts("late"),
                 "late".into(),
                 Delivery::DELIVERY_QUEUE,
+                InputSource::INPUT_SOURCE_UNSPECIFIED,
                 caller()
             )
             .is_err()
@@ -937,7 +944,12 @@ async fn fresh_public_send_returns_execution_completion_including_finished_callb
     *backend.finish_gate.lock().unwrap() = Some(finish.clone());
     let sent = bounded(
         session
-            .send_and_select_execution(parts("public"), "public".into(), caller())
+            .send_and_select_execution(
+                parts("public"),
+                "public".into(),
+                InputSource::INPUT_SOURCE_UNSPECIFIED,
+                caller(),
+            )
             .unwrap()
             .join(),
     )
@@ -1254,6 +1266,7 @@ async fn public_execution_classifies_only_typed_cancellation_as_canceled() {
                         .send_and_select_execution(
                             parts("typed error"),
                             "typed error".into(),
+                            InputSource::INPUT_SOURCE_UNSPECIFIED,
                             caller(),
                         )
                         .unwrap()
