@@ -169,10 +169,12 @@ nix flake check
 
 Keep the target directory and feature selection consistent between runs. Atomic
 compaction-artifact fixtures use `std::env::temp_dir()`; ensure `TMPDIR` is on a
-local filesystem supporting atomic rename exchange, not an NFS mount. Production
-artifact quarantine also requires that filesystem operation; this test setup does
-not establish NFS support. Additional native-platform and package-smoke gates are
-listed in [.github/workflows/check.yml](.github/workflows/check.yml).
+local filesystem supporting atomic rename exchange, not an NFS mount. Keep that
+path short: native host fixtures append session and listener names that must fit
+within the platform's Unix socket path limit. Production artifact quarantine also
+requires atomic rename exchange; this test setup does not establish NFS support.
+Additional native-platform and package-smoke gates are listed in
+[.github/workflows/check.yml](.github/workflows/check.yml).
 
 ## Operator guide
 

@@ -74,7 +74,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "parrot-prod-{}-{}",
+            "p{:x}-{:x}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
