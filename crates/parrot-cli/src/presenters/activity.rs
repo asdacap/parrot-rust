@@ -8,6 +8,7 @@ use std::time::Duration;
 use parrot_domain::protocol::messages::{parrot as wire, process, queue};
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::reasoning::{ReasoningEntry, ReasoningRow};
 use super::state::{
     AGENT_ACTIVITY_ID, AgentSessionState, COMPACTION_ACTIVITY_ID, TOOL_ACTIVITY_PREFIX,
 };
@@ -20,8 +21,7 @@ use crate::terminal_frames::{
     ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext,
 };
 use crate::terminal_layout::{
-    EnhancedFinalMessageRenderer, MarkdownRenderer, TerminalCellStyleSpan, TerminalLine,
-    TerminalStyle, TerminalText,
+    EnhancedFinalMessageRenderer, TerminalCellStyleSpan, TerminalLine, TerminalStyle, TerminalText,
 };
 
 const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -46,7 +46,7 @@ pub(crate) enum ActivityValue {
         marker: String,
         text: String,
     },
-    ReasoningSummary(String),
+    ReasoningRow(ReasoningRow),
     Final(String),
     NeutralAgent(String),
     Queue(queue::QueueState),
@@ -207,6 +207,17 @@ impl ActivityValue {
         let marker_style = style(context.color, "\x1b[48;5;236m\x1b[36m");
         let muted_style = style(context.color, "\x1b[48;5;236m\x1b[38;5;245m");
         let (marker, content, retention, base_style) = match self {
+            Self::ReasoningRow(row) => {
+                return Ok(LiveBufferRender {
+                    lines: row
+                        .render(context.columns)
+                        .into_iter()
+                        .map(|line| TerminalLine::new(line, muted_style.clone()))
+                        .collect(),
+                    caret: None,
+                    retention: LiveBufferRetention::Tail,
+                });
+            }
             Self::Spinner { text, frame } => (
                 SPINNERS[frame % 10].to_string(),
                 vec![TerminalText::clip(&TerminalText::sanitize(text), columns)],
@@ -446,8 +457,12 @@ impl ActivityValue {
                 marker.as_str(),
                 TerminalText::layout_words(&TerminalText::sanitize(text), columns),
             ),
-            Self::ReasoningSummary(markdown) => {
-                ("✦", MarkdownRenderer::render("", markdown, columns, false))
+            Self::ReasoningRow(row) => {
+                return Ok(row
+                    .render(context.columns)
+                    .into_iter()
+                    .map(|line| style(context.color, "\x1b[38;5;245m").apply(&line))
+                    .collect());
             }
             Self::Final(markdown) => {
                 return EnhancedFinalMessageRenderer::render(
@@ -743,6 +758,9 @@ struct PendingStart {
 }
 
 pub struct RawActivityView {
+    columns: usize,
+    reasoning_row: Option<ReasoningRow>,
+    reasoning_owners: Vec<String>,
     presenters: Arc<ToolPresenterRegistry>,
     hierarchy: AgentSessionHierarchy,
     agents: BTreeMap<String, AgentSessionState>,
@@ -764,8 +782,11 @@ pub struct RawActivityView {
 }
 
 impl RawActivityView {
-    pub fn new(presenters: Arc<ToolPresenterRegistry>) -> Self {
+    pub fn new(columns: usize, presenters: Arc<ToolPresenterRegistry>) -> Self {
         Self {
+            columns: columns.max(1),
+            reasoning_row: None,
+            reasoning_owners: Vec::new(),
             presenters,
             hierarchy: AgentSessionHierarchy::new(),
             agents: BTreeMap::new(),
@@ -846,13 +867,87 @@ impl RawActivityView {
         })
     }
     fn flush_reasoning_into(&mut self, owner: &str, commits: &mut Vec<Arc<dyn ScrollbackItem>>) {
+        self.reasoning_owners.retain(|id| id != owner);
         if let Some(value) = self
             .agents
             .get_mut(owner)
             .and_then(AgentSessionState::drain_reasoning)
         {
-            commits.push(self.wrap(owner, Arc::new(value)));
+            self.append_reasoning(owner, value, commits);
         }
+    }
+    fn append_reasoning(
+        &mut self,
+        owner: &str,
+        entry: ReasoningEntry,
+        commits: &mut Vec<Arc<dyn ScrollbackItem>>,
+    ) {
+        if self
+            .reasoning_row
+            .as_ref()
+            .is_some_and(|row| row.owner() != owner)
+        {
+            self.flush_reasoning_row_into(commits);
+        }
+        let row = self.reasoning_row.get_or_insert_with(|| {
+            ReasoningRow::new(
+                owner.to_owned(),
+                self.hierarchy.get_depth(owner),
+                self.hierarchy.get_label(owner).map(str::to_owned),
+            )
+        });
+        commits.extend(
+            row.append(entry, self.columns)
+                .into_iter()
+                .map(|row| Arc::new(ActivityValue::ReasoningRow(row)) as Arc<dyn ScrollbackItem>),
+        );
+    }
+    fn flush_reasoning_row_into(&mut self, commits: &mut Vec<Arc<dyn ScrollbackItem>>) {
+        if let Some(row) = self.reasoning_row.take().filter(|row| !row.is_empty()) {
+            commits.push(Arc::new(ActivityValue::ReasoningRow(row)));
+        }
+    }
+    fn commit_item(
+        &mut self,
+        commits: &mut Vec<Arc<dyn ScrollbackItem>>,
+        item: Arc<dyn ScrollbackItem>,
+    ) {
+        self.flush_reasoning_row_into(commits);
+        commits.push(item);
+    }
+    pub fn flush_reasoning(&mut self, owner: &str) -> PresenterResult<ActivityUpdate> {
+        let mut commits = Vec::new();
+        self.flush_reasoning_into(owner, &mut commits);
+        self.flush_reasoning_row_into(&mut commits);
+        self.update(commits, None)
+    }
+    pub fn flush_reasoning_row(&mut self) -> PresenterResult<ActivityUpdate> {
+        let mut commits = Vec::new();
+        self.flush_reasoning_row_into(&mut commits);
+        self.update(commits, None)
+    }
+    fn flush_all_reasoning_into(&mut self, commits: &mut Vec<Arc<dyn ScrollbackItem>>) {
+        for owner in std::mem::take(&mut self.reasoning_owners) {
+            self.flush_reasoning_into(&owner, commits);
+        }
+        self.flush_reasoning_row_into(commits);
+    }
+    pub fn flush_all_reasoning(&mut self) -> PresenterResult<ActivityUpdate> {
+        let mut commits = Vec::new();
+        self.flush_all_reasoning_into(&mut commits);
+        self.update(commits, None)
+    }
+    pub fn resize(&mut self, columns: usize) -> PresenterResult<ActivityUpdate> {
+        self.columns = columns.max(1);
+        let mut commits: Vec<Arc<dyn ScrollbackItem>> = Vec::new();
+        if let Some(row) = self.reasoning_row.as_mut() {
+            commits.extend(
+                row.repack(self.columns).into_iter().map(|row| {
+                    Arc::new(ActivityValue::ReasoningRow(row)) as Arc<dyn ScrollbackItem>
+                }),
+            );
+        }
+        self.update(commits, None)
     }
     fn flush_response_into(&mut self, owner: &str, commits: &mut Vec<Arc<dyn ScrollbackItem>>) {
         if let Some(response) = self
@@ -860,7 +955,11 @@ impl RawActivityView {
             .get_mut(owner)
             .and_then(AgentSessionState::drain_response)
         {
-            commits.push(self.wrap(owner, Arc::new(ActivityValue::Final(response))));
+            self.flush_reasoning_into(owner, commits);
+            self.commit_item(
+                commits,
+                self.wrap(owner, Arc::new(ActivityValue::Final(response))),
+            );
         }
     }
     pub fn flush_response(&mut self, owner: &str) -> PresenterResult<ActivityUpdate> {
@@ -881,6 +980,19 @@ impl RawActivityView {
         let mut main_activity = None;
         if !matches!(published.payload, Some(Payload::ReasoningChunk(_))) {
             self.flush_reasoning_into(owner, &mut commits);
+        }
+        if matches!(
+            published.payload,
+            Some(
+                Payload::TurnStarted(_)
+                    | Payload::TurnEnded(_)
+                    | Payload::TurnFailed(_)
+                    | Payload::AgentFinished(_)
+                    | Payload::AgentFailed(_)
+                    | Payload::ModeTurnCompleted(_)
+            )
+        ) {
+            self.flush_reasoning_row_into(&mut commits);
         }
         if matches!(published.payload.as_ref(),Some(Payload::ToolSnapshot(snapshot)) if snapshot.kind=="queue")
         {
@@ -923,7 +1035,10 @@ impl RawActivityView {
                     self.activities
                         .retain(|(id, activity)| id != owner || activity != AGENT_ACTIVITY_ID);
                     if !response.is_empty() {
-                        commits.push(self.wrap(owner, Arc::new(ActivityValue::Final(response))));
+                        self.commit_item(
+                            &mut commits,
+                            self.wrap(owner, Arc::new(ActivityValue::Final(response))),
+                        );
                     }
                     if !child {
                         if self.hierarchy.is_root(owner) {
@@ -944,7 +1059,7 @@ impl RawActivityView {
                             marker: marker.to_owned(),
                             text,
                         });
-                        commits.push(self.wrap_notice(owner, notice));
+                        self.commit_item(&mut commits, self.wrap_notice(owner, notice));
                     }
                 }
             }
@@ -967,7 +1082,7 @@ impl RawActivityView {
                         marker: marker.to_owned(),
                         text,
                     });
-                    commits.push(self.wrap_notice(owner, notice));
+                    self.commit_item(&mut commits, self.wrap_notice(owner, notice));
                     self.activities
                         .retain(|(id, activity)| id != owner || activity != AGENT_ACTIVITY_ID);
                     self.state(owner).complete_agent();
@@ -1005,7 +1120,7 @@ impl RawActivityView {
                         marker: marker.to_owned(),
                         text,
                     });
-                    commits.push(self.wrap_notice(owner, notice));
+                    self.commit_item(&mut commits, self.wrap_notice(owner, notice));
                 }
             }
             Some(Payload::ProviderRequestPhaseChanged(phase)) => {
@@ -1045,7 +1160,7 @@ impl RawActivityView {
                                 },
                             );
                         } else {
-                            commits.push(started);
+                            self.commit_item(&mut commits, started);
                         }
                     }
                 }
@@ -1078,76 +1193,101 @@ impl RawActivityView {
                 }
             }
             Some(Payload::ReasoningChunk(chunk)) => {
+                if self
+                    .reasoning_row
+                    .as_ref()
+                    .is_some_and(|row| row.owner() != owner)
+                    && (!chunk.fragment.is_empty()
+                        || self
+                            .agents
+                            .get(owner)
+                            .is_some_and(AgentSessionState::has_reasoning))
+                {
+                    self.flush_reasoning_row_into(&mut commits);
+                }
                 let summary = chunk.kind == wire::ReasoningKind::REASONING_KIND_SUMMARY.into();
                 if self.state(owner).has_reasoning()
                     && self.state(owner).is_reasoning_summary != summary
                 {
                     self.flush_reasoning_into(owner, &mut commits);
                 }
+                let started = !self.state(owner).has_reasoning();
                 self.state(owner).collect_reasoning(chunk);
+                if started && self.state(owner).has_reasoning() {
+                    self.reasoning_owners.push(owner.clone());
+                }
                 if chunk.completed {
                     self.flush_reasoning_into(owner, &mut commits);
                 }
             }
-            Some(Payload::EncryptedReasoningReceived(_)) => commits.push(self.wrap(
-                owner,
-                Arc::new(ActivityValue::Notice {
-                    marker: "✦".to_owned(),
-                    text: "Reasoning received (encrypted)".to_owned(),
-                }),
-            )),
+            Some(Payload::EncryptedReasoningReceived(_)) => {
+                self.append_reasoning(owner, ReasoningEntry::Encrypted, &mut commits);
+            }
             Some(Payload::InputAdmitted(input))
                 if input.delivery == wire::Delivery::DELIVERY_STEER.into()
                     && input.source == wire::InputSource::INPUT_SOURCE_MONITOR.into() =>
             {
-                commits.push(self.wrap(
-                    owner,
-                    Arc::new(ActivityValue::Notice {
-                        marker: "↻".to_owned(),
-                        text: "Monitor notification received".to_owned(),
-                    }),
-                ))
+                self.commit_item(
+                    &mut commits,
+                    self.wrap(
+                        owner,
+                        Arc::new(ActivityValue::Notice {
+                            marker: "↻".to_owned(),
+                            text: "Monitor notification received".to_owned(),
+                        }),
+                    ),
+                )
             }
             Some(Payload::AgentNotice(notice))
                 if !notice.notice.is_empty() && self.hierarchy.is_child(owner) =>
             {
-                commits.push(self.wrap(
-                    owner,
-                    Arc::new(ActivityValue::Notice {
-                        marker: "↻".to_owned(),
-                        text: notice.notice.clone(),
-                    }),
-                ))
+                self.commit_item(
+                    &mut commits,
+                    self.wrap(
+                        owner,
+                        Arc::new(ActivityValue::Notice {
+                            marker: "↻".to_owned(),
+                            text: notice.notice.clone(),
+                        }),
+                    ),
+                )
             }
-            Some(Payload::SkillLoaded(skill)) if self.hierarchy.is_child(owner) => {
-                commits.push(self.wrap(
-                    owner,
-                    Arc::new(ActivityValue::Notice {
-                        marker: "↻".to_owned(),
-                        text: format!("Skill loaded: {}", skill.path),
-                    }),
-                ))
-            }
-            Some(Payload::RetryNotice(retry)) if self.hierarchy.is_child(owner) => {
-                commits.push(self.wrap(
-                    owner,
-                    Arc::new(ActivityValue::Notice {
-                        marker: "↻".to_owned(),
-                        text: format!(
-                            "retry {} in {} ms: {}",
-                            retry.attempt, retry.retry_after_ms, retry.reason
-                        ),
-                    }),
-                ))
-            }
-            Some(Payload::ToolRequestReceived(request)) if request.tool_call_count > 1 => commits
-                .push(self.wrap(
-                    owner,
-                    Arc::new(ActivityValue::Notice {
-                        marker: "⚙".to_owned(),
-                        text: format!("requested {} tool calls", request.tool_call_count),
-                    }),
-                )),
+            Some(Payload::SkillLoaded(skill)) if self.hierarchy.is_child(owner) => self
+                .commit_item(
+                    &mut commits,
+                    self.wrap(
+                        owner,
+                        Arc::new(ActivityValue::Notice {
+                            marker: "↻".to_owned(),
+                            text: format!("Skill loaded: {}", skill.path),
+                        }),
+                    ),
+                ),
+            Some(Payload::RetryNotice(retry)) if self.hierarchy.is_child(owner) => self
+                .commit_item(
+                    &mut commits,
+                    self.wrap(
+                        owner,
+                        Arc::new(ActivityValue::Notice {
+                            marker: "↻".to_owned(),
+                            text: format!(
+                                "retry {} in {} ms: {}",
+                                retry.attempt, retry.retry_after_ms, retry.reason
+                            ),
+                        }),
+                    ),
+                ),
+            Some(Payload::ToolRequestReceived(request)) if request.tool_call_count > 1 => self
+                .commit_item(
+                    &mut commits,
+                    self.wrap(
+                        owner,
+                        Arc::new(ActivityValue::Notice {
+                            marker: "⚙".to_owned(),
+                            text: format!("requested {} tool calls", request.tool_call_count),
+                        }),
+                    ),
+                ),
             _ => {}
         }
         if main_activity.is_none()
@@ -1183,7 +1323,7 @@ impl RawActivityView {
         if let Some(pending) = self.pending_starts.remove(&key) {
             if matches!(published.payload.as_ref(),Some(Payload::ToolFinished(tool))if tool.yielded_process.is_some())
             {
-                commits.push(pending.scrollback);
+                self.commit_item(commits, pending.scrollback);
             } else {
                 start_omitted = true;
             }
@@ -1240,7 +1380,7 @@ impl RawActivityView {
             };
         }
         if let Some(scrollback) = scrollback {
-            commits.push(scrollback);
+            self.commit_item(commits, scrollback);
         }
         Ok(())
     }
@@ -1429,7 +1569,7 @@ impl RawActivityView {
                     &completion.process.owner_agent_session_id,
                     &completion.process.process_id,
                 );
-                commits.push(self.wrap_process(&completion.process, value));
+                self.commit_item(&mut commits, self.wrap_process(&completion.process, value));
             }
         }
         self.update(commits, None)
@@ -1641,14 +1781,17 @@ impl RawActivityView {
         }
         let snapshot = pending.snapshot.clone();
         if !AgentTaskProgressFormatter::format(&snapshot).is_empty() {
-            commits.push(self.wrap(
-                owner,
-                ActivityValue::Tasks {
-                    snapshot: snapshot.clone(),
-                    agent_lines: BTreeMap::new(),
-                    active: BTreeSet::new(),
-                },
-            ));
+            self.commit_item(
+                commits,
+                self.wrap(
+                    owner,
+                    ActivityValue::Tasks {
+                        snapshot: snapshot.clone(),
+                        agent_lines: BTreeMap::new(),
+                        active: BTreeSet::new(),
+                    },
+                ),
+            );
         }
         if let Some(pending) = self.pending_progress.get_mut(owner) {
             pending.flushed_revision = snapshot.revision;
@@ -1667,7 +1810,7 @@ impl RawActivityView {
                 .collect();
             for key in starts {
                 if let Some(start) = self.pending_starts.remove(&key) {
-                    commits.push(start.scrollback);
+                    self.commit_item(&mut commits, start.scrollback);
                 }
             }
             let progress: Vec<_> = self
@@ -1687,10 +1830,11 @@ impl RawActivityView {
             return self.update(Vec::new(), None);
         }
         self.shutdown = true;
-        let mut commits: Vec<_> = std::mem::take(&mut self.pending_starts)
-            .into_values()
-            .map(|start| start.scrollback)
-            .collect();
+        let mut commits = Vec::new();
+        self.flush_all_reasoning_into(&mut commits);
+        for start in std::mem::take(&mut self.pending_starts).into_values() {
+            self.commit_item(&mut commits, start.scrollback);
+        }
         let owners: Vec<_> = self.pending_progress.keys().cloned().collect();
         for owner in owners {
             self.flush_progress(&owner, &mut commits);
@@ -1700,6 +1844,9 @@ impl RawActivityView {
     }
     pub fn snapshot(&self) -> PresenterResult<Vec<Arc<dyn LiveBufferItem>>> {
         let mut items: Vec<Arc<dyn LiveBufferItem>> = Vec::new();
+        if let Some(row) = self.reasoning_row.as_ref().filter(|row| !row.is_empty()) {
+            items.push(Arc::new(ActivityValue::ReasoningRow(row.clone())));
+        }
         if let Some(root) = self.hierarchy.root_session_id() {
             if let Some(state) = self.agents.get(root) {
                 if state.has_reasoning() {

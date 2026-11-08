@@ -67,12 +67,15 @@ fn phase(owner: &str) -> wire::Event {
     )
 }
 fn live(view: &RawActivityView) -> String {
+    live_at(view, 160)
+}
+fn live_at(view: &RawActivityView, columns: usize) -> String {
     view.snapshot()
         .unwrap()
         .iter()
         .flat_map(|item| {
             item.render(LiveBufferRenderContext {
-                columns: 160,
+                columns,
                 color: false,
             })
             .unwrap()
@@ -83,12 +86,15 @@ fn live(view: &RawActivityView) -> String {
         .join("|")
 }
 fn commits(update: &ActivityUpdate) -> Vec<String> {
+    commits_at(update, 160)
+}
+fn commits_at(update: &ActivityUpdate, columns: usize) -> Vec<String> {
     update
         .commits
         .iter()
         .map(|item| {
             item.render(ScrollbackRenderContext {
-                columns: 160,
+                columns,
                 color: false,
                 inline_diff: false,
                 previous_packing: None,
@@ -99,9 +105,13 @@ fn commits(update: &ActivityUpdate) -> Vec<String> {
         .collect()
 }
 fn view() -> RawActivityView {
-    RawActivityView::new(Arc::new(
-        ToolPresenterRegistry::new(Vec::new(), Arc::new(GenericToolPresenter)).unwrap(),
-    ))
+    view_at(160)
+}
+fn view_at(columns: usize) -> RawActivityView {
+    RawActivityView::new(
+        columns,
+        Arc::new(ToolPresenterRegistry::new(Vec::new(), Arc::new(GenericToolPresenter)).unwrap()),
+    )
 }
 
 #[test]
@@ -361,7 +371,8 @@ fn raw_reasoning_shows_a_counted_spinner_and_flushes_one_notice() {
                     .observe(&reasoning(owner, "# Findings", true, false))
                     .unwrap(),
             };
-            let actual = commits(&flushed);
+            assert!(commits(&flushed).is_empty());
+            let actual = commits(&view.flush_reasoning_row().unwrap());
             assert_eq!(actual.len(), 1);
             assert_eq!(
                 actual[0],
@@ -400,8 +411,10 @@ fn raw_reasoning_count_is_humanized_once_it_is_large() {
     view.observe(&reasoning("root", &" a".repeat(4_100), false, false))
         .unwrap();
     assert!(live(&view).contains("⠋ Thinking (4.1k tokens)…"));
+    assert!(commits(&view.observe(&phase("root")).unwrap()).is_empty());
+    assert!(live(&view).contains("✦ Reasoned for 4.1k tokens…"));
     assert_eq!(
-        commits(&view.observe(&phase("root")).unwrap()),
+        commits(&view.flush_reasoning_row().unwrap()),
         ["✦ Reasoned for 4.1k tokens…"]
     );
 }
@@ -424,18 +437,20 @@ fn raw_reasoning_state_is_isolated_per_agent() {
     assert!(live(&view).contains("⠋ Thinking (2 tokens)…"));
     assert!(live(&view).contains("  ⠋ [worker] Thinking (5 tokens)…"));
     let child = view.observe(&phase("child")).unwrap();
-    assert_eq!(commits(&child).len(), 1);
-    assert!(commits(&child)[0].contains("[worker]"));
+    assert!(commits(&child).is_empty());
+    assert!(live(&view).contains("✦ [worker] Reasoned for 5 tokens…"));
     assert!(live(&view).contains("Thinking ("));
     assert!(!live(&view).contains("[worker] Thinking ("));
     let root = view.observe(&phase("root")).unwrap();
     assert_eq!(commits(&root).len(), 1);
-    assert!(!commits(&root)[0].contains("[worker]"));
+    assert!(commits(&root)[0].contains("[worker]"));
     assert!(!live(&view).contains("Thinking ("));
+    let root = view.flush_reasoning_row().unwrap();
+    assert_eq!(commits(&root), ["✦ Reasoned for 2 tokens…"]);
 }
 
 #[test]
-fn encrypted_reasoning_commits_one_hierarchical_notice_per_event() {
+fn encrypted_reasoning_keeps_one_hierarchical_entry_per_event_in_the_live_row() {
     for owner in ["root", "child"] {
         let mut view = view();
         view.observe(&turn("root")).unwrap();
@@ -443,7 +458,12 @@ fn encrypted_reasoning_commits_one_hierarchical_notice_per_event() {
             view.observe(&child("child", "worker", "root")).unwrap();
             view.observe(&turn("child")).unwrap();
         }
-        for _ in 0..2 {
+        let entry = if owner == "root" {
+            "✦ Reasoning received (encrypted)"
+        } else {
+            "✦ [worker] Reasoning received (encrypted)"
+        };
+        for count in 1..=2 {
             let update = view
                 .observe(&event(
                     owner,
@@ -452,16 +472,21 @@ fn encrypted_reasoning_commits_one_hierarchical_notice_per_event() {
                     ),
                 ))
                 .unwrap();
-            assert_eq!(
-                commits(&update),
-                [if owner == "root" {
-                    "✦ Reasoning received (encrypted)"
-                } else {
-                    "  ✦ [worker] Reasoning received (encrypted)"
-                }]
+            assert!(commits(&update).is_empty());
+            let expected = format!(
+                "{}{}",
+                if owner == "root" { "" } else { "  " },
+                vec![entry; count].join(" ")
             );
+            assert!(live(&view).starts_with(&expected));
+            assert_eq!(live(&view).matches(entry).count(), count);
             assert!(!live(&view).contains("Thinking ("));
         }
+        let flushed = view.finish().unwrap();
+        assert_eq!(commits(&flushed).len(), 1);
+        assert_eq!(commits(&flushed)[0].matches(entry).count(), 2);
+        assert!(!live(&view).contains(entry));
+        assert!(commits(&view.finish().unwrap()).is_empty());
     }
 }
 
@@ -484,11 +509,21 @@ fn encrypted_reasoning_notice_flushes_and_preserves_readable_summary() {
                 ),
             ))
             .unwrap();
-        let actual = commits(&update);
-        assert_eq!(actual.len(), 2);
+        assert!(commits(&update).is_empty());
+        let displayed = live(&view);
+        let summary = displayed.find("Readable summary").unwrap();
+        let receipt = displayed.find("Reasoning received (encrypted)").unwrap();
+        assert!(summary < receipt);
+        assert!(!displayed[summary..receipt].contains('|'));
+        let actual = commits(&view.flush_reasoning_row().unwrap());
+        assert_eq!(actual.len(), 1);
         assert!(actual[0].contains("Readable summary"));
-        assert!(actual[1].contains("Reasoning received (encrypted)"));
-        assert_eq!(actual.join("|").matches("Readable summary").count(), 1);
+        assert!(actual[0].contains("Reasoning received (encrypted)"));
+        assert_eq!(actual[0].matches("Readable summary").count(), 1);
+        assert_eq!(
+            actual[0].matches("Reasoning received (encrypted)").count(),
+            1
+        );
     }
 }
 
@@ -518,11 +553,322 @@ fn encrypted_reasoning_notices_survive_retry_and_failure() {
     ] {
         actual.extend(commits(&view.observe(&event("child", payload)).unwrap()));
     }
+    actual.extend(commits(&view.finish().unwrap()));
     assert_eq!(actual.len(), 3);
     assert!(actual[0].contains("Reasoning received (encrypted)"));
     assert!(actual[1].contains("retry 1"));
     assert!(actual[2].contains("Reasoning received (encrypted)"));
     assert!(!actual.join("|").contains("tokens"));
+}
+
+#[test]
+fn supplied_reasoning_sequence_packs_live_rows_and_commits_each_entry_once() {
+    let entries = [
+        Some("Refining NativeBinding lifecycle"),
+        None,
+        Some("Locating terminal handling code"),
+        Some("Refactoring close helper results"),
+        None,
+        Some("Reviewing closure status"),
+        Some("Refining core-call binding"),
+        None,
+        Some("Moving initialization outside loop"),
+        Some("Refining turn binding"),
+        None,
+        Some("Defining per-call turn metadata"),
+        Some("Moving driver turn finalization"),
+        None,
+        Some("Checking NativeDriver cleanup order"),
+        Some("Checking per-call flow"),
+        None,
+        Some("Designing native driver cleanup"),
+    ];
+    for (columns, expected) in [
+        (
+            80,
+            vec![
+                "✦ Refining NativeBinding lifecycle ✦ Reasoning received (encrypted)",
+                "✦ Locating terminal handling code ✦ Refactoring close helper results",
+                "✦ Reasoning received (encrypted) ✦ Reviewing closure status",
+                "✦ Refining core-call binding ✦ Reasoning received (encrypted)",
+                "✦ Moving initialization outside loop ✦ Refining turn binding",
+                "✦ Reasoning received (encrypted) ✦ Defining per-call turn metadata",
+                "✦ Moving driver turn finalization ✦ Reasoning received (encrypted)",
+                "✦ Checking NativeDriver cleanup order ✦ Checking per-call flow",
+                "✦ Reasoning received (encrypted) ✦ Designing native driver cleanup",
+            ],
+        ),
+        (
+            160,
+            vec![
+                "✦ Refining NativeBinding lifecycle ✦ Reasoning received (encrypted) ✦ Locating terminal handling code ✦ Refactoring close helper results",
+                "✦ Reasoning received (encrypted) ✦ Reviewing closure status ✦ Refining core-call binding ✦ Reasoning received (encrypted) ✦ Moving initialization outside loop",
+                "✦ Refining turn binding ✦ Reasoning received (encrypted) ✦ Defining per-call turn metadata ✦ Moving driver turn finalization ✦ Reasoning received (encrypted)",
+                "✦ Checking NativeDriver cleanup order ✦ Checking per-call flow ✦ Reasoning received (encrypted) ✦ Designing native driver cleanup",
+            ],
+        ),
+    ] {
+        let mut view = view_at(columns);
+        view.observe(&turn("root")).unwrap();
+        let mut committed = Vec::new();
+        let mut frozen = Vec::new();
+        for (index, fragment) in entries.iter().copied().enumerate() {
+            let published = match fragment {
+                Some(text) => reasoning("root", text, true, true),
+                None => event(
+                    "root",
+                    wire::event::Payload::EncryptedReasoningReceived(
+                        wire::EncryptedReasoningReceivedEvent::default(),
+                    ),
+                ),
+            };
+            let update = view.observe(&published).unwrap();
+            committed.extend(commits_at(&update, columns));
+            let pending = live_at(&view, columns);
+            assert!(!pending.is_empty());
+            assert!(!pending.contains('|'));
+            assert!(parrot_cli::terminal_layout::TerminalText::width(&pending) <= columns);
+            assert_eq!(
+                committed.join(" ").matches('✦').count() + pending.matches('✦').count(),
+                index + 1
+            );
+            frozen.push(update);
+        }
+        let finished = view.finish().unwrap();
+        committed.extend(commits_at(&finished, columns));
+        frozen.push(finished);
+        assert_eq!(committed, expected);
+        assert_eq!(committed.join(" ").matches('✦').count(), entries.len());
+        assert_eq!(
+            committed
+                .join(" ")
+                .matches("Reasoning received (encrypted)")
+                .count(),
+            6
+        );
+        let retained: Vec<_> = frozen
+            .iter()
+            .flat_map(|update| commits_at(update, columns))
+            .collect();
+        assert_eq!(retained, committed);
+        assert!(live_at(&view, columns).is_empty());
+        assert!(commits_at(&view.finish().unwrap(), columns).is_empty());
+    }
+}
+
+#[test]
+fn reasoning_rows_pack_whole_entries_at_exact_terminal_width() {
+    for columns in [6, 7] {
+        let mut view = view_at(columns);
+        view.observe(&turn("root")).unwrap();
+        assert!(commits(&view.observe(&reasoning("root", "A", true, true)).unwrap()).is_empty());
+        assert_eq!(live_at(&view, columns), "✦ A");
+        let update = view.observe(&reasoning("root", "B", true, true)).unwrap();
+        if columns == 7 {
+            assert!(commits(&update).is_empty());
+            assert_eq!(live_at(&view, columns), "✦ A ✦ B");
+            assert_eq!(commits(&view.finish().unwrap()), ["✦ A ✦ B"]);
+        } else {
+            assert_eq!(commits(&update), ["✦ A"]);
+            assert_eq!(live_at(&view, columns), "✦ B");
+            assert_eq!(commits(&view.finish().unwrap()), ["✦ B"]);
+        }
+        assert!(live_at(&view, columns).is_empty());
+        assert!(commits(&view.finish().unwrap()).is_empty());
+    }
+}
+
+#[test]
+fn reasoning_rows_measure_terminal_cells_without_splitting_graphemes() {
+    for (first, second, columns) in [("界", "e\u{301}", 8), ("🦜", "x", 8), ("e\u{301}", "z", 7)]
+    {
+        for width in [columns - 1, columns] {
+            let mut view = view_at(width);
+            view.observe(&turn("root")).unwrap();
+            view.observe(&reasoning("root", first, true, true)).unwrap();
+            let update = view
+                .observe(&reasoning("root", second, true, true))
+                .unwrap();
+            if width == columns {
+                assert!(commits(&update).is_empty());
+                assert_eq!(live_at(&view, width), format!("✦ {first} ✦ {second}"));
+            } else {
+                assert_eq!(commits(&update), [format!("✦ {first}")]);
+                assert_eq!(live_at(&view, width), format!("✦ {second}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn reasoning_rows_flush_before_standalone_wrapped_or_structured_summaries() {
+    for summary in ["abcdefghijk", "# Findings\n\n- **item**\n- other"] {
+        let mut view = view_at(10);
+        view.observe(&turn("root")).unwrap();
+        view.observe(&reasoning("root", "A", true, true)).unwrap();
+        let update = view
+            .observe(&reasoning("root", summary, true, true))
+            .unwrap();
+        let decoration = parrot_cli::presenters::ActivityDecoration::default();
+        let expected = decoration.apply(
+            "✦",
+            parrot_cli::terminal_layout::MarkdownRenderer::render("", summary, 8, false),
+        );
+        assert_eq!(
+            commits_at(&update, 10),
+            ["✦ A".to_owned(), expected.join("|")]
+        );
+        assert!(live_at(&view, 10).is_empty());
+        view.observe(&reasoning("root", "B", true, true)).unwrap();
+        assert_eq!(live_at(&view, 10), "✦ B");
+    }
+}
+
+#[test]
+fn reasoning_rows_keep_immutable_live_and_scrollback_snapshots_at_sink_width() {
+    let mut view = view_at(7);
+    view.observe(&turn("root")).unwrap();
+    view.observe(&reasoning("root", "A", true, true)).unwrap();
+    view.observe(&reasoning("root", "B", true, true)).unwrap();
+    let snapshot = view.snapshot().unwrap();
+    let committed = view.observe(&reasoning("root", "C", true, true)).unwrap();
+    view.observe(&reasoning("root", "D", true, true)).unwrap();
+    assert_eq!(commits(&committed), ["✦ A ✦ B"]);
+    assert_eq!(commits_at(&committed, 3), ["✦ A|✦ B"]);
+    assert_eq!(live_at(&view, 7), "✦ C ✦ D");
+    let original = snapshot[0]
+        .render(LiveBufferRenderContext {
+            columns: 7,
+            color: false,
+        })
+        .unwrap();
+    assert_eq!(original.lines[0].text(), "✦ A ✦ B");
+}
+
+#[test]
+fn reasoning_rows_pack_counted_summary_and_encrypted_entries_with_color() {
+    let mut view = view();
+    view.observe(&turn("root")).unwrap();
+    view.observe(&reasoning("root", "first reasoning", false, true))
+        .unwrap();
+    view.observe(&reasoning("root", "**Summary**", true, true))
+        .unwrap();
+    view.observe(&event(
+        "root",
+        wire::event::Payload::EncryptedReasoningReceived(
+            wire::EncryptedReasoningReceivedEvent::default(),
+        ),
+    ))
+    .unwrap();
+    let expected = "✦ Reasoned for 2 tokens… ✦ Summary ✦ Reasoning received (encrypted)";
+    assert_eq!(live(&view), expected);
+    let snapshot = view.snapshot().unwrap();
+    for color in [false, true] {
+        let rendered = snapshot[0]
+            .render(LiveBufferRenderContext {
+                columns: 160,
+                color,
+            })
+            .unwrap();
+        assert_eq!(rendered.lines[0].text(), expected);
+        assert_eq!(rendered.lines[0].style().start().is_empty(), !color);
+    }
+    let committed = view.flush_reasoning_row().unwrap();
+    assert_eq!(commits(&committed), [expected]);
+    let colored = committed.commits[0]
+        .render(ScrollbackRenderContext {
+            columns: 160,
+            color: true,
+            inline_diff: false,
+            previous_packing: None,
+        })
+        .unwrap();
+    assert_eq!(colored, [format!("\x1b[38;5;245m{expected}\x1b[0m")]);
+}
+
+#[test]
+fn reasoning_rows_flush_before_other_activity_and_delayed_progress() {
+    let mut view = view();
+    view.observe(&turn("root")).unwrap();
+    view.observe(&child("child", "worker", "root")).unwrap();
+    view.observe(&turn("child")).unwrap();
+    view.observe(&reasoning("child", "A", true, true)).unwrap();
+    let notice = view
+        .observe(&event(
+            "child",
+            wire::event::Payload::SkillLoaded(wire::SkillLoadedEvent {
+                path: "example".into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    let output = commits(&notice);
+    assert_eq!(output.len(), 2);
+    assert_eq!(output[0], "  ✦ [worker] A");
+    assert!(output[1].contains("Skill loaded: example"));
+    assert!(!live(&view).contains("✦"));
+    view.observe(&reasoning("root", "B", true, true)).unwrap();
+    assert!(
+        commits(
+            &view
+                .observe(&progress(
+                    "root",
+                    1,
+                    vec![task(
+                        "pending task",
+                        "",
+                        false,
+                        wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
+                    )]
+                ))
+                .unwrap()
+        )
+        .is_empty()
+    );
+    let delayed = view.tick(Duration::from_secs(1)).unwrap();
+    let output = commits(&delayed);
+    assert_eq!(output.len(), 2);
+    assert_eq!(output[0], "✦ B");
+    assert!(output[1].contains("pending task"));
+    assert!(!live(&view).contains("✦"));
+}
+
+#[test]
+fn reasoning_rows_survive_silent_events_and_precede_unfinished_reasoning() {
+    let mut view = view();
+    view.observe(&turn("root")).unwrap();
+    view.observe(&reasoning("root", "A", true, true)).unwrap();
+    for published in [
+        phase("root"),
+        event(
+            "root",
+            wire::event::Payload::AgentStatisticsUpdated(
+                wire::AgentStatisticsUpdatedEvent::default(),
+            ),
+        ),
+        reasoning("root", "", true, true),
+    ] {
+        assert!(commits(&view.observe(&published).unwrap()).is_empty());
+        assert_eq!(live(&view), "✦ A");
+    }
+    assert!(commits(&view.tick(Duration::from_millis(80)).unwrap()).is_empty());
+    view.observe(&reasoning("root", "B", true, false)).unwrap();
+    assert_eq!(live(&view), "✦ A|✦ B");
+    assert_eq!(commits(&view.flush_reasoning("root").unwrap()), ["✦ A ✦ B"]);
+    assert!(!live(&view).contains("✦"));
+}
+
+#[test]
+fn reasoning_rows_repack_pending_entries_on_resize() {
+    let mut view = view_at(7);
+    view.observe(&turn("root")).unwrap();
+    view.observe(&reasoning("root", "A", true, true)).unwrap();
+    view.observe(&reasoning("root", "B", true, true)).unwrap();
+    assert_eq!(commits(&view.resize(3).unwrap()), ["✦ A"]);
+    assert_eq!(live_at(&view, 3), "✦ B");
+    assert!(commits(&view.resize(7).unwrap()).is_empty());
+    view.observe(&reasoning("root", "C", true, true)).unwrap();
+    assert_eq!(live_at(&view, 7), "✦ B ✦ C");
 }
 
 fn task(
@@ -807,13 +1153,16 @@ struct Processes {
 }
 impl Processes {
     fn new() -> Self {
-        let mut view = RawActivityView::new(Arc::new(
-            ToolPresenterRegistry::new(
-                vec![Arc::new(ExecCommandToolPresenter::new(Vec::new()))],
-                Arc::new(GenericToolPresenter),
-            )
-            .unwrap(),
-        ));
+        let mut view = RawActivityView::new(
+            160,
+            Arc::new(
+                ToolPresenterRegistry::new(
+                    vec![Arc::new(ExecCommandToolPresenter::new(Vec::new()))],
+                    Arc::new(GenericToolPresenter),
+                )
+                .unwrap(),
+            ),
+        );
         view.observe(&turn("main")).unwrap();
         Self { view }
     }
@@ -1586,7 +1935,8 @@ fn returned_scrollback_owns_stable_data_until_actual_driver_acknowledges_it() {
     view.observe(&turn("root")).unwrap();
     view.observe(&reasoning("root", "first reasoning", false, false))
         .unwrap();
-    let pending = view.observe(&phase("root")).unwrap();
+    assert!(commits(&view.observe(&phase("root")).unwrap()).is_empty());
+    let pending = view.flush_reasoning_row().unwrap();
     assert_eq!(commits(&pending), ["✦ Reasoned for 2 tokens…"]);
     assert!(commits(&view.observe(&phase("root")).unwrap()).is_empty());
     view.observe(&reasoning("root", "new reasoning state", false, false))

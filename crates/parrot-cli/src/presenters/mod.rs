@@ -6,6 +6,7 @@ mod immediate;
 pub use immediate::ImmediateScrollbackValue;
 mod model;
 mod progress;
+mod reasoning;
 mod registry;
 pub mod rendering;
 mod replay;

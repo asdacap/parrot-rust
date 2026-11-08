@@ -13,6 +13,7 @@ use super::{
 use crate::terminal_layout::TerminalText;
 
 use super::activity::{ActivityItem, ActivityValue};
+use super::reasoning::ReasoningEntry;
 
 pub const AGENT_ACTIVITY_ID: &str = "agent";
 pub const COMPACTION_ACTIVITY_ID: &str = "compaction";
@@ -202,22 +203,18 @@ impl AgentSessionState {
         }
     }
 
-    pub(crate) fn drain_reasoning(&mut self) -> Option<ActivityValue> {
+    pub(super) fn drain_reasoning(&mut self) -> Option<ReasoningEntry> {
         let reasoning = std::mem::take(&mut self.reasoning);
         self.reasoning_tokens = 0;
         if reasoning.trim().is_empty() {
             return None;
         }
         Some(if self.is_reasoning_summary {
-            ActivityValue::ReasoningSummary(reasoning)
+            ReasoningEntry::Summary(reasoning)
         } else {
-            ActivityValue::Notice {
-                marker: "✦".to_owned(),
-                text: format!(
-                    "Reasoned for {} tokens…",
-                    format_token_count(TokenEstimator::estimate_tokens(&reasoning))
-                ),
-            }
+            ReasoningEntry::Counted(format_token_count(TokenEstimator::estimate_tokens(
+                &reasoning,
+            )))
         })
     }
 

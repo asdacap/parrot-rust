@@ -40,7 +40,15 @@ fn ordered_blocker_messages_are_recorded_together_and_retain_the_candidate_once(
         1
     );
     assert!(!state.trace.values().iter().any(|entry| entry == "complete"));
-    assert!(state.open);
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "begin")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -65,7 +73,15 @@ fn an_empty_blocker_list_closes_the_candidate_without_reading_another_snapshot()
         1
     );
     assert_eq!(state.trace.values().last().unwrap(), "complete");
-    assert!(!state.open);
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "complete")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -121,7 +137,15 @@ fn every_blocker_list_retains_the_exact_candidate_and_forces_continuation() {
             candidate.provider_content
         );
         assert_eq!(turn.messages.last().unwrap().role, Role::System);
-        assert!(state.open);
+        assert_eq!(
+            state
+                .trace
+                .values()
+                .iter()
+                .filter(|step| *step == "begin")
+                .count(),
+            1
+        );
         assert!(!state.trace.values().iter().any(|entry| entry == "complete"));
     }
 }
@@ -193,7 +217,10 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
             vec![Content::Text("accepted answer".into())]
         ]
     );
-    assert!(!state.open);
+    assert_eq!(
+        turn.result.as_ref().unwrap().contents,
+        [Content::Text("accepted answer".into())]
+    );
 }
 
 #[test]
@@ -224,7 +251,16 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     assert_eq!(turn.messages.len(), 1);
     assert_eq!(turn.messages[0].role, Role::User);
     assert!(turn.result.is_none());
-    assert!(state.open);
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "begin")
+            .count(),
+        1
+    );
+    assert!(!state.trace.values().iter().any(|step| step == "complete"));
     assert_eq!(state.trace.values().last().unwrap(), "completion_feedback");
     assert!(budget.admit(1).is_none());
 }
@@ -255,7 +291,16 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     assert!(state.completion_feedback.is_empty());
     assert_eq!(state.exit_blockers.len(), 1);
     assert_eq!(state.last_turn.as_ref().unwrap().messages.len(), 1);
-    assert!(state.open);
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "begin")
+            .count(),
+        1
+    );
+    assert!(!state.trace.values().iter().any(|step| step == "complete"));
     assert_eq!(state.trace.values().last().unwrap(), "exit_blockers");
     assert!(budget.admit(1).is_none());
 }

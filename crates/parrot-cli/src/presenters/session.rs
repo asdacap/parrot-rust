@@ -108,7 +108,7 @@ impl EnhancedSessionPresenter {
             was_replaying,
             hierarchy: AgentSessionHierarchy::default(),
             turn: EnhancedTurnRenderer::new(columns, color),
-            activity: RawActivityView::new(registry.clone()),
+            activity: RawActivityView::new(columns, registry.clone()),
             registry,
             queues: QueueSnapshotStreamReader::default(),
             processes: ShellProcessSnapshotStreamReader::default(),
@@ -161,8 +161,21 @@ impl EnhancedSessionPresenter {
             replay_completed,
             ..Default::default()
         };
+        if replay_completed.is_some() {
+            Self::merge_activity(
+                self.activity.flush_reasoning_row()?,
+                &mut update,
+                &mut self.main_activity,
+            );
+        }
+        if ends_reasoning_row(published) {
+            self.flush_reasoning_before_output(&published.agent_session_id, &mut update)?;
+        }
         if response_boundary(published) {
             let flushed = self.turn.flush_response(response_owner(published))?;
+            if !flushed.commits.is_empty() {
+                self.flush_reasoning_before_output(response_owner(published), &mut update)?;
+            }
             update.commits.extend(flushed.commits);
             Self::merge_activity(
                 self.activity.flush_response(response_owner(published))?,
@@ -245,6 +258,7 @@ impl EnhancedSessionPresenter {
                     .position(|pending| pending.input_id == input.input_id)
                 {
                     let pending = self.pending_steers.remove(index);
+                    self.flush_reasoning_before_output(&published.agent_session_id, &mut update)?;
                     update
                         .commits
                         .push(Arc::new(ImmediateScrollbackValue::user(&pending.content)));
@@ -268,6 +282,9 @@ impl EnhancedSessionPresenter {
             }
         }
         let turn = self.turn.apply_event(published, replaying)?;
+        if !turn.commits.is_empty() || !turn.errors.is_empty() {
+            self.flush_reasoning_before_output(&published.agent_session_id, &mut update)?;
+        }
         update.commits.extend(turn.commits);
         update.errors.extend(turn.errors);
         update.completion = turn.completion;
@@ -278,6 +295,7 @@ impl EnhancedSessionPresenter {
         );
         if let Some(Payload::PlanCompleted(plan)) = &published.payload {
             if main && replaying {
+                self.flush_reasoning_before_output(&published.agent_session_id, &mut update)?;
                 self.render_plan(plan, &mut update);
             }
         }
@@ -291,19 +309,38 @@ impl EnhancedSessionPresenter {
         Ok(update)
     }
 
-    pub fn commit(&self, item: Arc<dyn ScrollbackItem>) -> PresenterResult<PresentationUpdate> {
-        Ok(PresentationUpdate {
-            commits: vec![item],
-            live: self.snapshot()?,
-            ..Default::default()
-        })
+    fn flush_reasoning_before_output(
+        &mut self,
+        owner: &str,
+        update: &mut PresentationUpdate,
+    ) -> PresenterResult<()> {
+        Self::merge_activity(
+            self.activity.flush_reasoning(owner)?,
+            update,
+            &mut self.main_activity,
+        );
+        Ok(())
+    }
+
+    pub fn commit(&mut self, item: Arc<dyn ScrollbackItem>) -> PresenterResult<PresentationUpdate> {
+        let mut update = PresentationUpdate::default();
+        Self::merge_activity(
+            self.activity.flush_all_reasoning()?,
+            &mut update,
+            &mut self.main_activity,
+        );
+        update.commits.push(item);
+        update.live = self.snapshot()?;
+        Ok(update)
     }
 
     pub fn flush_response(&mut self, owner: &str) -> PresenterResult<PresentationUpdate> {
         let mut update = PresentationUpdate::default();
-        update
-            .commits
-            .extend(self.turn.flush_response(owner)?.commits);
+        let flushed = self.turn.flush_response(owner)?;
+        if !flushed.commits.is_empty() {
+            self.flush_reasoning_before_output(owner, &mut update)?;
+        }
+        update.commits.extend(flushed.commits);
         Self::merge_activity(
             self.activity.flush_response(owner)?,
             &mut update,
@@ -315,6 +352,11 @@ impl EnhancedSessionPresenter {
 
     pub fn finish(&mut self) -> PresenterResult<PresentationUpdate> {
         let mut update = PresentationUpdate::default();
+        Self::merge_activity(
+            self.activity.flush_all_reasoning()?,
+            &mut update,
+            &mut self.main_activity,
+        );
         update.commits.extend(self.turn.finish()?.commits);
         Self::merge_activity(
             self.activity.finish()?,
@@ -375,7 +417,14 @@ impl EnhancedSessionPresenter {
     pub fn resize(&mut self, columns: usize) -> PresenterResult<PresentationUpdate> {
         self.columns = columns.max(1);
         self.turn.resize(columns);
-        self.refresh()
+        let mut update = PresentationUpdate::default();
+        Self::merge_activity(
+            self.activity.resize(columns)?,
+            &mut update,
+            &mut self.main_activity,
+        );
+        update.live = self.snapshot()?;
+        Ok(update)
     }
 
     pub fn set_session(&mut self, mode: &str, model: &str) -> PresenterResult<PresentationUpdate> {
@@ -567,6 +616,21 @@ fn duration(value: Duration) -> String {
         )
     }
 }
+fn ends_reasoning_row(published: &wire::Event) -> bool {
+    match &published.payload {
+        Some(Payload::TextChunk(chunk)) => !chunk.fragment.is_empty(),
+        Some(
+            Payload::TurnStarted(_)
+            | Payload::TurnEnded(_)
+            | Payload::TurnFailed(_)
+            | Payload::AgentFinished(_)
+            | Payload::AgentFailed(_)
+            | Payload::ModeTurnCompleted(_),
+        ) => true,
+        _ => false,
+    }
+}
+
 fn root_lifecycle(published: &wire::Event) -> bool {
     match &published.payload {
         Some(Payload::AgentStarted(agent)) => agent.parent_agent_session_id.is_empty(),
