@@ -301,6 +301,16 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
         executable: false,
     },
     PackagedSkillAsset {
+        relative_path: "queue/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/queue/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "queue/scripts/queue.py",
+        bytes: include_bytes!("../../../../assets/skills/queue/scripts/queue.py"),
+        executable: true,
+    },
+    PackagedSkillAsset {
         relative_path: "review-agent/agents/openai.yaml",
         bytes: include_bytes!("../../../../assets/skills/review-agent/agents/openai.yaml"),
         executable: false,

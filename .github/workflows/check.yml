@@ -58,6 +58,7 @@ jobs:
           export HOME="$RUNNER_TEMP/parrot-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.profile }}"
           mkdir -p "$HOME"
           nix develop --offline --no-write-lock-file --command npm --prefix web ci --offline --no-audit --no-fund
+          nix develop --offline --no-write-lock-file --command python3 -B -m unittest discover -s tests/skills/queue -p 'test_*.py'
           nix develop --offline --no-write-lock-file --command cargo fmt --all -- --check
           nix develop --offline --no-write-lock-file --command cargo clippy --workspace --all-targets --locked -- -D warnings
           nix develop --offline --no-write-lock-file --command cargo test --workspace --locked
