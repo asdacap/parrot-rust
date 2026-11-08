@@ -2,7 +2,7 @@ use super::node::{Node, Style, mapping, validate_keys};
 use super::{ConfigError, Result};
 use std::collections::BTreeMap;
 
-const BUILTIN_SYSTEM_PROMPTS: [(&str, &str); 7] = [
+const BUILTIN_PROMPTS: [(&str, &str); 17] = [
     (
         "system-prompts/base.md",
         include_str!("../../../../assets/config/system-prompts/base.md"),
@@ -30,6 +30,46 @@ const BUILTIN_SYSTEM_PROMPTS: [(&str, &str); 7] = [
     (
         "system-prompts/git-ethics.md",
         include_str!("../../../../assets/config/system-prompts/git-ethics.md"),
+    ),
+    (
+        "profile-prompts/general.md",
+        include_str!("../../../../assets/config/profile-prompts/general.md"),
+    ),
+    (
+        "profile-prompts/coordinator.md",
+        include_str!("../../../../assets/config/profile-prompts/coordinator.md"),
+    ),
+    (
+        "profile-prompts/build.md",
+        include_str!("../../../../assets/config/profile-prompts/build.md"),
+    ),
+    (
+        "profile-prompts/plan.md",
+        include_str!("../../../../assets/config/profile-prompts/plan.md"),
+    ),
+    (
+        "profile-prompts/query.md",
+        include_str!("../../../../assets/config/profile-prompts/query.md"),
+    ),
+    (
+        "profile-prompts/explorer.md",
+        include_str!("../../../../assets/config/profile-prompts/explorer.md"),
+    ),
+    (
+        "profile-prompts/review.md",
+        include_str!("../../../../assets/config/profile-prompts/review.md"),
+    ),
+    (
+        "profile-prompts/worker.md",
+        include_str!("../../../../assets/config/profile-prompts/worker.md"),
+    ),
+    (
+        "profile-prompts/thinker.md",
+        include_str!("../../../../assets/config/profile-prompts/thinker.md"),
+    ),
+    (
+        "profile-prompts/agent-task-payload.md",
+        include_str!("../../../../assets/config/profile-prompts/agent-task-payload.md"),
     ),
 ];
 
@@ -59,6 +99,27 @@ pub fn nonempty_scalar(parent: &Node, key: &str, path: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 
+pub(super) fn resolve_builtin_prompt(text: String, path: &str) -> Result<String> {
+    if let Some(reference) = text.strip_prefix("@builtin:") {
+        let resolved = BUILTIN_PROMPTS
+            .iter()
+            .find_map(|(name, text)| (*name == reference).then_some(*text))
+            .ok_or_else(|| {
+                ConfigError::invalid_data(format!(
+                    "{path}: unknown built-in prompt reference {text:?}"
+                ))
+            })?;
+        if resolved.trim().is_empty() {
+            return Err(ConfigError::invalid_data(format!(
+                "{path} must be a non-empty string"
+            )));
+        }
+        Ok(resolved.to_owned())
+    } else {
+        Ok(text)
+    }
+}
+
 pub fn read_system_prompts(root: &Node) -> Result<BTreeMap<String, String>> {
     let configured = root
         .get("system_prompts")
@@ -79,24 +140,7 @@ pub fn read_system_prompts(root: &Node) -> Result<BTreeMap<String, String>> {
         let path = format!("system_prompts.{key}");
         let wrapper = Node::mapping(vec![(Node::scalar("value"), value.clone())]);
         let text = nonempty_scalar(&wrapper, "value", &path)?;
-        let text = if let Some(reference) = text.strip_prefix("@builtin:") {
-            let resolved = BUILTIN_SYSTEM_PROMPTS
-                .iter()
-                .find_map(|(name, text)| (*name == reference).then_some(*text))
-                .ok_or_else(|| {
-                    ConfigError::invalid_data(format!(
-                        "{path}: unknown built-in system prompt reference {text:?}"
-                    ))
-                })?;
-            if resolved.trim().is_empty() {
-                return Err(ConfigError::invalid_data(format!(
-                    "{path} must be a non-empty string"
-                )));
-            }
-            resolved.to_owned()
-        } else {
-            text
-        };
+        let text = resolve_builtin_prompt(text, &path)?;
         prompts.insert(key.to_owned(), text);
     }
     Ok(prompts)

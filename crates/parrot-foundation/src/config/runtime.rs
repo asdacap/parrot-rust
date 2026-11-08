@@ -404,7 +404,10 @@ fn read_profiles(
         result.insert(
             id.to_owned(),
             ProfileConfig {
-                prompt: nonempty_scalar(profile, "prompt", &format!("{path}.prompt"))?,
+                prompt: super::templates::resolve_builtin_prompt(
+                    nonempty_scalar(profile, "prompt", &format!("{path}.prompt"))?,
+                    &format!("{path}.prompt"),
+                )?,
                 usage: nonempty_scalar(profile, "usage", &format!("{path}.usage"))?,
                 allowed_tools: read_allowed_tools(profile, &format!("{path}.allowed_tools"))?,
                 max_turns: positive_integer(profile, "max_turns", &format!("{path}.max_turns"))?,

@@ -1,6 +1,7 @@
 mod a008_templates;
 #[path = "cases/agent_task_configuration_parses_extra_concurrent_tasks.rs"]
 mod agent_task_configuration_parses_extra_concurrent_tasks;
+mod builtin_profile_prompts;
 mod builtin_system_prompts;
 mod fixtures;
 mod integration;
