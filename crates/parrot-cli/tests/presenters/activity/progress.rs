@@ -59,7 +59,8 @@ fn main_and_child_progress_replace_close_and_reopen_independently() {
         }),
     );
     let rendered = live(&view);
-    assert!(rendered.contains("[captain] 2/5 ["), "{rendered}");
+    assert!(rendered.contains("2/5 ["), "{rendered}");
+    assert!(!rendered.contains("[captain]"), "{rendered}");
     assert!(rendered.contains("40% Running tests"));
     assert!(rendered.contains("[worker] 0/4 ["));
     assert!(rendered.contains("0% Inspecting"));
@@ -353,7 +354,7 @@ fn progress_adapts_to_width_color_unicode_and_large_counts() {
                 .collect();
             assert_eq!(rows.len(), 1);
             let row = &rows[0];
-            assert!(row.text().contains("2/5"));
+            assert!(row.text().trim_start().starts_with("2/5"), "{}", row.text());
             assert!(row.text().contains("40%"));
             assert!(
                 parrot_cli::terminal_layout::TerminalText::width(row.text()) <= columns,

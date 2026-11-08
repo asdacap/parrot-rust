@@ -1992,12 +1992,7 @@ impl RawActivityView {
                     owner.clone(),
                     0,
                     "progress".to_owned(),
-                    Arc::new(HierarchicalLiveValue {
-                        value: ActivityValue::Progress(progress.clone()).into(),
-                        depth: self.hierarchy.get_depth(owner),
-                        label: Some(self.hierarchy.resolve_agent_reference(owner, owner)),
-                        icon: None,
-                    }),
+                    self.wrap_live(owner, ActivityValue::Progress(progress.clone()), None),
                 ));
             }
             if state.has_reasoning() && self.hierarchy.is_child(owner) {
