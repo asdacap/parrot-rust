@@ -94,7 +94,7 @@ fn actual_registry_spawn_preserves_full_prompt_under_nested_activity_decoration(
     assert_eq!(expected.last().unwrap(), "    [child] five");
     assert!(!expected.join("|").contains("truncated"));
 
-    let mut view = RawActivityView::new(registry);
+    let mut view = RawActivityView::new(160, registry);
     let event = |owner: &str, payload| wire::Event {
         agent_session_id: owner.into(),
         payload: Some(payload),
