@@ -12,6 +12,8 @@ use parrot_tools::{
 use serde_json::{Value, json};
 use std::sync::{Arc, atomic::Ordering};
 
+const REMOVED_QUEUE_TOOLS: [&str; 4] = ["queue_create", "queue_info", "queue_push", "queue_take"];
+
 #[tokio::test]
 async fn native_configuration_and_retained_factories_preserve_evolved_source_order_and_definitions()
 {
@@ -24,6 +26,7 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
             .as_array()
             .unwrap()
             .iter()
+            .filter(|row| !REMOVED_QUEUE_TOOLS.contains(&row["name"].as_str().unwrap()))
             .flat_map(|row| match row["name"].as_str().unwrap() {
                 "answer" => vec!["ask", "reply"],
                 name => vec![name],
@@ -32,7 +35,7 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
             .collect::<Vec<_>>(),
         BUILTIN_NAMES
     );
-    assert_eq!(definitions.definitions().len(), 32);
+    assert_eq!(definitions.definitions().len(), 28);
     assert_eq!(
         fixture
             .catalog
@@ -79,6 +82,26 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
     assert!(!fixture.configuration.runtime.tools.contains_key("answer"));
     assert!(!snapshot.definitions().iter().any(|d| d.name == "bash"));
     assert!(fixture.services.calls().is_empty());
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn legacy_queue_definitions_do_not_restore_retired_tools() {
+    let overrides = "tools:\n".to_owned()
+        + &REMOVED_QUEUE_TOOLS
+            .iter()
+            .map(|name| format!("  {name}:\n    description: Legacy queue tool.\n    parameters:\n      type: object\n"))
+            .collect::<String>();
+    let fixture = Fixture::new(&overrides, true, 0);
+    let snapshot = fixture.catalog.snapshot().unwrap();
+    assert_eq!(snapshot.factories().len(), 28);
+    for name in REMOVED_QUEUE_TOOLS {
+        assert!(fixture.configuration.runtime.tools.contains_key(name));
+        assert!(snapshot.find(name).is_none());
+        assert!(!snapshot.definitions().iter().any(|tool| tool.name == name));
+    }
+    assert!(snapshot.find("set_agent_tasks").is_some());
+    assert!(snapshot.find("progress").is_some());
     fixture.close().await;
 }
 
@@ -140,9 +163,9 @@ async fn exact_t26_native_configuration_actual_read_glob_catalog_to_real_provide
 async fn source_support_send_definition_and_interruption_flags_are_bound_without_recreating_tools()
 {
     let fixture = Fixture::new("", false, 1);
-    assert_eq!(fixture.catalog.factories().len(), 32);
+    assert_eq!(fixture.catalog.factories().len(), 28);
     let snapshot = fixture.catalog.snapshot().unwrap();
-    assert_eq!(snapshot.factories().len(), 30);
+    assert_eq!(snapshot.factories().len(), 26);
     assert!(snapshot.find("request_write_permission").is_none());
     assert!(snapshot.find("question").is_none());
     assert!(snapshot.find("answer").is_none());
@@ -180,7 +203,7 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
             "wait"
         ]
     );
-    assert_eq!(snapshot.factories().len(), 30);
+    assert_eq!(snapshot.factories().len(), 26);
     for factory in surviving.factories() {
         assert!(Arc::ptr_eq(
             &factory.create(),
@@ -288,10 +311,6 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         ("wait", json!({})),
         ("status", json!({})),
         ("compact_context", json!({})),
-        ("queue_create", json!({"name":"work"})),
-        ("queue_info", json!({"name":"work"})),
-        ("queue_push", json!({"name":"work","items":["item"]})),
-        ("queue_take", json!({"name":"work"})),
         (
             "request_write_permission",
             json!({"paths":["target.txt"],"reason":"Write output"}),
@@ -327,10 +346,6 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
             ),
             "wait" => assert_eq!(result.text, "wait interrupted"),
             "status" => assert_eq!(result.text, "catalog runtime\n\ncatalog statistics"),
-            "queue_take" => {
-                let value: Value = serde_json::from_str(&result.text).unwrap();
-                assert_eq!(value["items"], json!(["item"]));
-            }
             _ => {}
         }
         if name != "read_image" {
@@ -340,11 +355,15 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         observed.insert(name.into(), Value::String(result.text));
     }
     let observed = Value::Object(observed);
-    let expected: Value =
+    let mut expected: Value =
         serde_json::from_str(include_str!("fixtures/native-result-snapshot.json")).unwrap();
+    expected
+        .as_object_mut()
+        .unwrap()
+        .retain(|name, _| !REMOVED_QUEUE_TOOLS.contains(&name.as_str()));
     assert_eq!(
         observed, expected,
-        "native aggregate regression snapshot; not an independent source observation"
+        "native aggregate regression snapshot excluding retired queues; not an independent source observation"
     );
     println!("CATALOG_RESULT_OBSERVATION={observed}");
     let calls = fixture.services.calls();
@@ -392,10 +411,6 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         "compact",
         "image_generate",
         "task_update",
-        "queue_create",
-        "queue_info",
-        "queue_push",
-        "queue_take",
         "permission_request",
         "process_launch",
         "progress",
