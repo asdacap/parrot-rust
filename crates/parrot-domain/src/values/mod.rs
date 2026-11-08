@@ -6,6 +6,7 @@ pub mod config;
 pub mod context;
 pub mod identifiers;
 pub mod lineage;
+pub mod progress;
 pub mod project_workspace;
 pub mod services;
 pub mod tools;
