@@ -58,7 +58,7 @@ pub trait Provider: Send + Sync {
 /// Retains executable tools and executes explicitly supplied calls.
 pub trait Tools: Send + Sync {
     /// Captures permitted definitions backed by the original executable identities
-    /// for this turn. The final catalog is their interruption-enabled subset.
+    /// for this turn. The final catalog is the subset permitted in the final phase.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
     /// Executes the complete supplied batch using retained executable identities,
     /// returning results in call order and joining all admitted work before returning,
@@ -90,8 +90,6 @@ pub trait States: Send {
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and batching its content effects.
     fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>>;
-    /// Consumes a request to enter the interrupted final phase.
-    fn take_interruption(&mut self) -> bool;
     /// Prepares context using exactly the supplied definitions and core-selected phase.
     /// Returns rendered instructions and the resulting output-token budget.
     fn prepare_context<'a>(

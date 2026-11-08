@@ -49,7 +49,7 @@ runtime state.
 
 The core specifies and implements:
 
-- Provider-request assembly, request admission/counting, interruption, final-phase
+- Provider-request assembly, request admission/counting, limit-triggered final-phase
   catalog selection, and bounded tool-settlement extensions.
 - Truncated tool-call detection and JSON-argument validation before recording or
   executing calls.
@@ -81,7 +81,9 @@ from run configuration rather than queried through `States`. Native orchestratio
 checks its scheduled-operation queue between `run_turn` calls. Unscheduled turns
 share the existing budget scope; a native scheduled-work boundary ends that scope
 before processing queued operations. Scheduler priority never changes what the
-state getters report, and core has no scheduler-query method.
+state getters report, and core has no scheduler-query method. Provider-request
+limits are the only final-phase trigger; cancellation uses the separate live token,
+not a state-polled wrap-up signal.
 
 Core returns a typed `BudgetExhausted` outcome when request or settlement limits
 are reached. Native orchestration renders, records, and publishes the configured

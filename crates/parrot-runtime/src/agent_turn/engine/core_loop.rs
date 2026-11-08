@@ -408,9 +408,6 @@ where
                 .await
         })
     }
-    fn take_interruption(&mut self) -> bool {
-        self.backend.interruption.swap(false, Ordering::AcqRel)
-    }
     fn prepare_context<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
@@ -428,16 +425,11 @@ where
             let definitions = definitions.as_slice();
             let events = ContextEmitter { backend };
             if phase.enters_final_phase {
-                let content = if phase.interrupted {
-                    &backend.notices.interrupted_final
-                } else {
-                    &backend.notices.final_request
-                };
                 state
                     .context
                     .inject_final_provider_request_prompt(
                         &mut state.conversation,
-                        content,
+                        &backend.notices.final_request,
                         &events,
                         cancellation,
                     )

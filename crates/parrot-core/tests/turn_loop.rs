@@ -224,7 +224,6 @@ struct MemoryState {
     admissions: Vec<InputAdmission>,
     begin_message: Option<Message>,
     cancellation: Arc<CancellationSource>,
-    interrupted: bool,
     unlimited: bool,
     maximum: i32,
     reduced: bool,
@@ -272,7 +271,6 @@ impl MemoryState {
             admissions: Vec::new(),
             begin_message: None,
             cancellation: Arc::default(),
-            interrupted: false,
             unlimited: false,
             maximum: 10,
             reduced: true,
@@ -441,9 +439,6 @@ impl States for MemoryState {
             }
             Ok(())
         })
-    }
-    fn take_interruption(&mut self) -> bool {
-        std::mem::take(&mut self.interrupted)
     }
     fn prepare_context<'a>(
         &'a mut self,
@@ -709,14 +704,26 @@ fn exhausted_budget_returns_without_provider_or_terminal_state_effects() {
 }
 
 #[test]
-fn interruption_enters_final_phase_even_when_request_limits_are_disabled() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
+fn disabled_request_limits_keep_every_request_in_normal_phase() {
+    let mut state = MemoryState::new([
+        Reply::tools("call1"),
+        Reply::tools("call2"),
+        Reply::final_response("answer"),
+    ]);
     state.unlimited = true;
-    state.interrupted = true;
+    state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    let (phase, tools) = &state.requests[0];
-    assert!(phase.final_phase && phase.enters_final_phase && phase.interrupted);
-    assert_eq!(tools, &["read"]);
+    assert_eq!(state.requests.len(), 3);
+    assert!(state.requests.iter().all(|(phase, tools)| {
+        !phase.final_phase && !phase.enters_final_phase && tools == &["read", "write"]
+    }));
+    assert_eq!(state.applied_results.len(), 2);
+    assert!(
+        state
+            .recorded_catalogs
+            .iter()
+            .all(|tools| tools == &["read", "write"])
+    );
 }
 
 #[test]
@@ -951,8 +958,9 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
 }
 
 #[test]
-fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() {
+fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     let mut state = MemoryState::new([
+        Reply::tools("call0"),
         Reply::tools("call1"),
         Reply::final_response("candidate"),
         Reply::tools("call2"),
@@ -963,12 +971,26 @@ fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() 
         Reply::tools("call7"),
     ]);
     state.maximum = 2;
-    state.interrupted = true;
     state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert!(!state.requests[2].0.final_phase);
-    assert!(!state.requests[2].0.interrupted);
-    assert!(state.requests[3].0.enters_final_phase);
+    assert_eq!(state.requests.len(), 9);
+    assert!(!state.requests[0].0.final_phase);
+    assert!(state.requests[1].0.enters_final_phase);
+    assert!(state.requests[2].0.final_phase);
+    assert!(!state.requests[2].0.enters_final_phase);
+    assert!(!state.requests[3].0.final_phase);
+    assert_eq!(state.requests[3].1, ["read", "write"]);
+    assert!(state.requests[4].0.enters_final_phase);
+    assert!(
+        state.requests[5..]
+            .iter()
+            .all(|(phase, _)| phase.final_phase && !phase.enters_final_phase)
+    );
+    assert_eq!(state.completion_feedback.len(), 1);
+    assert_eq!(
+        state.completion_feedback[0].candidate.assistant_text,
+        "candidate"
+    );
     assert_eq!(
         state
             .trace
@@ -976,8 +998,10 @@ fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() 
             .iter()
             .filter(|entry| *entry == "execute")
             .count(),
-        7
+        8
     );
+    assert_eq!(state.applied_results.len(), 8);
+    assert_eq!(state.trace.values().last().unwrap(), "record_results");
 }
 
 #[test]

@@ -58,7 +58,7 @@ pub async fn run_turn<'a>(
         };
         states.promote_input(admission).await?;
         let (options, catalog) = selected.as_ref().ok_or_else(Error::missing_turn)?;
-        let Some(phase) = budget.admit(options.maximum_requests, states.take_interruption()) else {
+        let Some(phase) = budget.admit(options.maximum_requests) else {
             return Ok(Some(Outcome::BudgetExhausted));
         };
         let definitions = if phase.final_phase {

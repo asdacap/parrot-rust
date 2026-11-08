@@ -138,7 +138,6 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     sessions: ProviderSessions,
     usage: Arc<SessionUsageRecorder>,
     reminders: Arc<ExitReminders<Publisher>>,
-    interruption: AtomicBool,
     suspending: AtomicBool,
     state: Mutex<State>,
     prompt: SessionPrompt,
@@ -153,7 +152,6 @@ struct Notices {
     truncated: String,
     invalid: String,
     final_request: String,
-    interrupted_final: String,
     restored: String,
     interrupted: String,
 }
@@ -205,7 +203,6 @@ where
             truncated: render("agent-session.truncated-tool-call")?,
             invalid: render("agent-session.invalid-tool-call")?,
             final_request: render("agent-session.final-request")?,
-            interrupted_final: render("agent-session.final-request-interrupted")?,
             restored: render("agent-session.tools-restored")?,
             interrupted: render("agent-session.interrupted-note")?,
         };
@@ -227,7 +224,6 @@ where
             sessions,
             usage: usage.clone(),
             reminders,
-            interruption: AtomicBool::new(false),
             suspending: AtomicBool::new(false),
             prompt: SessionPrompt::new(config.prompt),
             conversation: conversation.read_view(),
@@ -278,9 +274,6 @@ where
             })
             .await??;
         Ok(super::observation::ObservedContext { selection, context })
-    }
-    pub fn request_final_phase(&self) {
-        self.interruption.store(true, Ordering::Release);
     }
     pub fn history(&self) -> &AgentHistoryView {
         &self.history

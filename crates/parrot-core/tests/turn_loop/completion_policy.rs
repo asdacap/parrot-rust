@@ -226,7 +226,7 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     assert!(turn.result.is_none());
     assert!(state.open);
     assert_eq!(state.trace.values().last().unwrap(), "completion_feedback");
-    assert!(budget.admit(1, false).is_none());
+    assert!(budget.admit(1).is_none());
 }
 
 #[test]
@@ -257,5 +257,5 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     assert_eq!(state.last_turn.as_ref().unwrap().messages.len(), 1);
     assert!(state.open);
     assert_eq!(state.trace.values().last().unwrap(), "exit_blockers");
-    assert!(budget.admit(1, false).is_none());
+    assert!(budget.admit(1).is_none());
 }
