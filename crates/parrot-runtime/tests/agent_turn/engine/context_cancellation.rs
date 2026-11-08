@@ -43,11 +43,102 @@ async fn awaited_actual_epoch_prompt_cancellation_closes_interrupted_without_pro
         ExecutionStatus::Canceled
     );
     assert!(provider.requests.lock().unwrap().is_empty());
-    assert_interrupted(&fixture.events().await);
+    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 0);
+    let events = fixture.events().await;
+    assert_interrupted(&events);
+    let started = events
+        .iter()
+        .find(|event| event.has_turn_started())
+        .unwrap();
+    let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
+    assert_eq!(diagnostic.len(), 2);
+    assert_eq!(diagnostic[0], format!("started:{}", started.id));
+    assert!(diagnostic[1].starts_with(&format!("finished:{}:cancelled:", started.id)));
     assert!(trace.values().iter().any(|entry| entry == "epoch-start"));
     assert!(!trace.values().iter().any(|entry| entry == "epoch-done"));
+    assert!(!trace.values().iter().any(|entry| entry == "skills-begin"));
     runtime.close().await;
 }
+struct FailingEpochPrompt;
+impl SystemPrompt for FailingEpochPrompt {
+    fn renew_epoch(&mut self) {}
+
+    fn sample_epoch<'a>(&'a mut self, _: &'a dyn Cancellation) -> BoxFuture<'a, PromptResult<()>> {
+        Box::pin(async {
+            Err(parrot_runtime::prompt_context::PromptError::Context(
+                "epoch initialization failed".into(),
+            ))
+        })
+    }
+
+    fn build(
+        &mut self,
+        _: &parrot_provider::routing::aliases::ResolvedModelSelection,
+    ) -> PromptResult<String> {
+        panic!("failed epoch must not be built")
+    }
+}
+
+#[tokio::test]
+async fn native_initialization_failure_finishes_its_started_activity_without_entering_core() {
+    let fixture = Fixture::new();
+    let tools = Arc::new(Tools::default());
+    let provider = Scripted::default();
+    let runtime = fixture
+        .runtime_with_overrides(
+            provider.clone(),
+            tools.clone(),
+            vec![],
+            Arc::new(Signal::new()),
+            0,
+            RuntimeOverrides {
+                prompt: Some(Box::new(FailingEpochPrompt)),
+                ..Default::default()
+            },
+        )
+        .await;
+    let sent = runtime
+        .send("question", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Failed
+    );
+    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 0);
+    assert!(provider.requests.lock().unwrap().is_empty());
+    assert_eq!(tools.executions.load(Ordering::SeqCst), 0);
+    assert!(
+        !tools
+            .trace
+            .values()
+            .iter()
+            .any(|entry| entry == "skills-begin")
+    );
+    let events = fixture.events().await;
+    let starts: Vec<_> = events
+        .iter()
+        .filter(|event| event.has_turn_started())
+        .collect();
+    let failures: Vec<_> = events
+        .iter()
+        .filter(|event| event.has_turn_failed())
+        .collect();
+    assert_eq!(starts.len(), 1);
+    assert_eq!(failures.len(), 1);
+    assert!(
+        failures[0]
+            .turn_failed()
+            .message
+            .contains("epoch initialization failed")
+    );
+    assert!(!events.iter().any(|event| event.has_turn_ended()));
+    let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
+    assert_eq!(diagnostic.len(), 2);
+    assert_eq!(diagnostic[0], format!("started:{}", starts[0].id));
+    assert!(diagnostic[1].starts_with(&format!("finished:{}:failed:", starts[0].id)));
+    runtime.close().await;
+}
+
 #[tokio::test]
 async fn actual_inline_summary_provider_typed_cancellations_are_interrupted_and_join_stream_cleanup()
  {

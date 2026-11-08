@@ -5,41 +5,46 @@ mod protocol;
 pub use protocol::*;
 
 /// Runs admission, response validation, retry, and completion using the caller-owned budget.
+/// The supplied settings apply to every execution turn drained by this call.
 pub async fn run<'a>(
     states: &mut dyn States,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
+    options: &TurnOptions,
     budget: &mut budget::TurnBudget,
     cancellation: CancellationToken<'a>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
     loop {
-        match run_turn(states, tools, provider, budget, cancellation).await? {
-            Some(Outcome::Completed(completed)) => answer = completed,
-            Some(Outcome::BudgetExhausted) => return Ok(Outcome::BudgetExhausted),
-            None => return Ok(Outcome::Completed(answer)),
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+        let turn = states.get_last_turn().await?;
+        if !turn.as_ref().is_some_and(ConversationTurn::needs_response)
+            && states.get_pending_message().await?.is_none()
+        {
+            return Ok(Outcome::Completed(answer));
+        }
+        match run_turn(states, tools, provider, options, budget, cancellation).await? {
+            Outcome::Completed(completed) => answer = completed,
+            Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
         }
     }
 }
 
-/// Runs one execution turn with settings and tools captured once for this invocation.
-/// Returns none before initialization when the conversation and pending input need no response.
+/// Runs one active execution turn using supplied settings and tools captured once.
 pub async fn run_turn<'a>(
     states: &mut dyn States,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
+    options: &TurnOptions,
     budget: &mut budget::TurnBudget,
     cancellation: CancellationToken<'a>,
-) -> Result<Option<Outcome>, Error> {
+) -> Result<Outcome, Error> {
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let turn = states.get_last_turn().await?;
-    if !needs_response(turn.as_ref()) && states.get_pending_message().await?.is_none() {
-        return Ok(None);
-    }
     budget.begin_turn();
-    let options = states.begin_turn().await?;
     let catalog = tools.capture_catalog().await?;
     let mut compacted_oversized = false;
     loop {
@@ -47,14 +52,14 @@ pub async fn run_turn<'a>(
             return Err(Error::cancelled());
         }
         let turn = states.get_last_turn().await?;
-        let admission = if needs_response(turn.as_ref()) {
+        let admission = if turn.as_ref().is_some_and(ConversationTurn::needs_response) {
             InputAdmission::SteersOnly
         } else {
             InputAdmission::SteersOrNextQueued
         };
         states.promote_input(admission).await?;
         let Some(phase) = budget.admit(options.maximum_requests) else {
-            return Ok(Some(Outcome::BudgetExhausted));
+            return Ok(Outcome::BudgetExhausted);
         };
         let definitions = if phase.final_phase {
             &catalog.final_phase
@@ -112,15 +117,13 @@ pub async fn run_turn<'a>(
             }
             states.record_tool_results(&results).await?;
             if phase.final_phase && !budget.try_extend_settlement() {
-                return Ok(Some(Outcome::BudgetExhausted));
+                return Ok(Outcome::BudgetExhausted);
             }
             continue;
         }
         let messages = states.get_exit_blockers().await?;
         if messages.is_empty() {
-            return Ok(Some(Outcome::Completed(
-                states.complete_turn(&response).await?,
-            )));
+            return Ok(Outcome::Completed(states.complete_turn(&response).await?));
         }
         states
             .record_completion_feedback(CompletionFeedback {
@@ -130,18 +133,4 @@ pub async fn run_turn<'a>(
             .await?;
         budget.restart();
     }
-}
-
-fn needs_response(turn: Option<&ConversationTurn>) -> bool {
-    turn.is_some_and(|turn| {
-        turn.result.is_none()
-            && matches!(
-                turn.messages
-                    .iter()
-                    .rev()
-                    .find(|message| message.role != Role::System)
-                    .map(|message| message.role),
-                Some(Role::User | Role::Tool)
-            )
-    })
 }

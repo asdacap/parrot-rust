@@ -770,6 +770,7 @@ impl Step {
 struct Scripted {
     steps: Arc<Mutex<VecDeque<Step>>>,
     requests: Arc<Mutex<Vec<Request>>>,
+    turn_begins: Arc<AtomicUsize>,
     stream_closes: Arc<AtomicUsize>,
     session_closes: Arc<AtomicUsize>,
     session_close_gate: Arc<Mutex<Option<Arc<Gate>>>>,
@@ -839,7 +840,10 @@ impl Provider for Scripted {
 }
 impl Session for Scripted {
     fn begin_turn(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
+        Box::pin(async move {
+            self.turn_begins.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
     }
     fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
         self.call_impl(request)
@@ -988,6 +992,7 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
     assert!(position("skills-select") < position("skills-render"));
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 1);
+    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 1);
     assert_eq!(requests[0].instructions, "sampled epoch instructions");
     drop(requests);
     assert_eq!(
@@ -1037,6 +1042,7 @@ async fn borrowed_tool_context_prepare_runs_inline_and_is_used_by_the_next_provi
     );
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 2);
+    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 1);
     assert_eq!(requests[1].instructions, "sampled epoch instructions");
     assert!(
         requests[1]

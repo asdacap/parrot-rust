@@ -210,6 +210,15 @@ where
             }
             let binding = TurnBinding::new();
             let mut states = RuntimeStates::new(backend, &binding, cancellation, work);
+            if cancellation.is_cancelled() {
+                return Err(CoreError::cancelled());
+            }
+            let turn = states.get_last_turn().await?;
+            if !turn.as_ref().is_some_and(|turn| turn.needs_response())
+                && states.get_pending_message().await?.is_none()
+            {
+                return Ok(parrot_core::Outcome::Completed(answer));
+            }
             let tools = RuntimeTools {
                 backend,
                 binding: &binding,
@@ -223,8 +232,88 @@ where
             let is_cancelled = || cancellation.is_cancelled();
             let cancelled = || cancellation.cancelled();
             let token = parrot_core::CancellationToken::new(&is_cancelled, &cancelled);
-            match parrot_core::run_turn(&mut states, &tools, &provider, &mut budget, token).await {
-                Ok(Some(parrot_core::Outcome::Completed(completed))) => {
+            let result = async {
+                let options = adapt_operation(async {
+                    let mut guard = backend.state.lock().await;
+                    let state = &mut *guard;
+                    let events = ContextEmitter { backend };
+                    backend.skills.end_turn().await;
+                    let mut selection = backend.selection.capture()?;
+                    backend.sessions.begin_turn().await?;
+                    let mut started = backend.event();
+                    let mut payload = protocol::TurnStarted {
+                        model: selection.model.canonical_model.selector(),
+                        ..Default::default()
+                    };
+                    if let Some(icon) = selection
+                        .model
+                        .alias
+                        .as_ref()
+                        .and_then(|alias| alias.icon.as_ref())
+                    {
+                        payload.model_alias_icon =
+                            protobuf::MessageField::some(protocol::TurnModelAliasIcon {
+                                glyph: icon.glyph.clone(),
+                                color: protobuf::EnumOrUnknown::from_i32(icon.color as i32),
+                                ..Default::default()
+                            });
+                    }
+                    started.set_turn_started(payload);
+                    states.persistence_key = Some(TurnKey {
+                        agent_session_id: backend.identity.session_id.clone(),
+                        start_event_id: started.id.clone(),
+                    });
+                    backend.activity.turn_started(&started.id);
+                    backend.emit(started, cancellation).await?;
+                    state
+                        .context
+                        .ensure_epoch(&backend.prompt, cancellation)
+                        .await?;
+                    loop {
+                        let snapshot = backend.snapshot(&selection)?;
+                        let definitions = backend.tools.definitions(&snapshot).to_vec();
+                        let status = backend.status.bind(&selection);
+                        let outcome = state
+                            .context
+                            .inject_status(
+                                EpochInput {
+                                    selection: &selection.model,
+                                    tools: &definitions,
+                                    conversation: &mut state.conversation,
+                                    prompt: &backend.prompt,
+                                    sessions: &backend.sessions,
+                                    status: status.as_ref(),
+                                    events: &events,
+                                },
+                                backend.identity.depth,
+                                &selection.profile.id,
+                                cancellation,
+                            )
+                            .await?;
+                        if matches!(outcome, StatusInjection::Complete) {
+                            break;
+                        }
+                        selection = backend.selection.capture()?;
+                        tokio::task::yield_now().await;
+                    }
+                    backend.skills.begin_turn(cancellation).await?;
+                    let options = TurnOptions {
+                        maximum_requests: selection.profile.maximum_requests,
+                        model: selection.model.canonical_model.model.id.clone(),
+                        reasoning: selection.model.canonical_model.reasoning().map(Into::into),
+                        provider_preferences: String::new(),
+                        include_router_metadata: false,
+                    };
+                    binding.bind(selection);
+                    Ok(options)
+                })
+                .await?;
+                parrot_core::run_turn(&mut states, &tools, &provider, &options, &mut budget, token)
+                    .await
+            }
+            .await;
+            match result {
+                Ok(parrot_core::Outcome::Completed(completed)) => {
                     if let Some(key) = &states.persistence_key {
                         backend
                             .activity
@@ -233,14 +322,13 @@ where
                     backend.activity.assistant_message(&completed);
                     answer = completed;
                 }
-                Ok(Some(parrot_core::Outcome::BudgetExhausted)) => {
+                Ok(parrot_core::Outcome::BudgetExhausted) => {
                     failed_key = states.persistence_key;
                     backend
                         .fail(backend.notices.runaway.clone(), String::new())
                         .await?;
                     return Ok(parrot_core::Outcome::BudgetExhausted);
                 }
-                Ok(None) => return Ok(parrot_core::Outcome::Completed(answer)),
                 Err(error) => {
                     failed_key = states.persistence_key;
                     return Err(error);
@@ -332,84 +420,6 @@ where
                 message_id: input.message_id,
                 delivery,
             }))
-        })
-    }
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let cancellation = self.cancellation;
-            let events = ContextEmitter { backend };
-            backend.skills.end_turn().await;
-            let mut selection = backend.selection.capture()?;
-            backend.sessions.begin_turn().await?;
-            let mut started = backend.event();
-            let mut payload = protocol::TurnStarted {
-                model: selection.model.canonical_model.selector(),
-                ..Default::default()
-            };
-            if let Some(icon) = selection
-                .model
-                .alias
-                .as_ref()
-                .and_then(|alias| alias.icon.as_ref())
-            {
-                payload.model_alias_icon =
-                    protobuf::MessageField::some(protocol::TurnModelAliasIcon {
-                        glyph: icon.glyph.clone(),
-                        color: protobuf::EnumOrUnknown::from_i32(icon.color as i32),
-                        ..Default::default()
-                    });
-            }
-            started.set_turn_started(payload);
-            self.persistence_key = Some(TurnKey {
-                agent_session_id: backend.identity.session_id.clone(),
-                start_event_id: started.id.clone(),
-            });
-            backend.activity.turn_started(&started.id);
-            backend.emit(started, cancellation).await?;
-            state
-                .context
-                .ensure_epoch(&backend.prompt, cancellation)
-                .await?;
-            loop {
-                let snapshot = backend.snapshot(&selection)?;
-                let definitions = backend.tools.definitions(&snapshot).to_vec();
-                let status = backend.status.bind(&selection);
-                let outcome = state
-                    .context
-                    .inject_status(
-                        EpochInput {
-                            selection: &selection.model,
-                            tools: &definitions,
-                            conversation: &mut state.conversation,
-                            prompt: &backend.prompt,
-                            sessions: &backend.sessions,
-                            status: status.as_ref(),
-                            events: &events,
-                        },
-                        backend.identity.depth,
-                        &selection.profile.id,
-                        cancellation,
-                    )
-                    .await?;
-                if matches!(outcome, StatusInjection::Complete) {
-                    break;
-                }
-                selection = backend.selection.capture()?;
-                tokio::task::yield_now().await;
-            }
-            backend.skills.begin_turn(cancellation).await?;
-            let options = TurnOptions {
-                maximum_requests: selection.profile.maximum_requests,
-                model: selection.model.canonical_model.model.id.clone(),
-                reasoning: selection.model.canonical_model.reasoning().map(Into::into),
-                provider_preferences: String::new(),
-                include_router_metadata: false,
-            };
-            self.binding.bind(selection);
-            Ok(options)
         })
     }
     fn promote_input(

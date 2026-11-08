@@ -210,6 +210,15 @@ async fn completed_and_never_started_recovery_stays_idle_and_retains_results() {
     );
     assert!(idle.session.wait(0, &NeverCancelled).await.is_err());
     assert!(provider.requests.lock().unwrap().is_empty());
+    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 0);
+    assert!(idle.activity.diagnostic.lock().unwrap().is_empty());
+    assert!(
+        !fixture
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_turn_started())
+    );
     idle.close().await;
     let active = fixture
         .recovered_runtime(
@@ -262,6 +271,8 @@ async fn completed_and_never_started_recovery_stays_idle_and_retains_results() {
         Some(Execution::succeeded("saved answer"))
     );
     assert!(provider.requests.lock().unwrap().is_empty());
+    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 0);
+    assert!(resumed.activity.diagnostic.lock().unwrap().is_empty());
     assert_eq!(parent.messages.lock().unwrap().len(), 1);
     assert_eq!(
         restarted

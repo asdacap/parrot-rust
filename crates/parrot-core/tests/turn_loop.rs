@@ -222,7 +222,6 @@ struct MemoryState {
     next_input: usize,
     turn_reads: AtomicUsize,
     admissions: Vec<InputAdmission>,
-    begin_message: Option<Message>,
     cancellation: Arc<CancellationSource>,
     unlimited: bool,
     maximum: i32,
@@ -269,7 +268,6 @@ impl MemoryState {
             next_input: 0,
             turn_reads: AtomicUsize::new(0),
             admissions: Vec::new(),
-            begin_message: None,
             cancellation: Arc::default(),
             unlimited: false,
             maximum: 10,
@@ -325,6 +323,15 @@ impl MemoryState {
     fn step(&mut self, name: &'static str) -> Result<(), Error> {
         self.trace.step(name, self.fail_at)
     }
+    fn capture_options(&self) -> TurnOptions {
+        TurnOptions {
+            maximum_requests: self.maximum,
+            model: self.model.clone(),
+            reasoning: self.reasoning.clone(),
+            provider_preferences: self.provider_preferences.clone(),
+            include_router_metadata: self.include_router_metadata,
+        }
+    }
     fn run(&mut self) -> Result<Outcome, Error> {
         *self.tools.fail_at.lock().unwrap() = self.fail_at;
         *self.provider.fail_at.lock().unwrap() = self.fail_at;
@@ -336,11 +343,13 @@ impl MemoryState {
         let cancellation = self.cancellation.clone();
         let is_cancelled = || cancellation.is_cancelled();
         let cancelled = || cancellation.cancelled();
+        let options = self.capture_options();
         let mut budget = TurnBudget::new(self.unlimited);
         finish(run(
             self,
             tools,
             provider,
+            &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),
         ))
@@ -395,21 +404,6 @@ impl States for MemoryState {
                 .find(|(message, _)| message.delivery == Delivery::Steer)
                 .or_else(|| self.pending_messages.front())
                 .map(|(message, _)| message.clone()))
-        })
-    }
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>> {
-        Box::pin(async move {
-            self.step("begin")?;
-            if let Some(message) = self.begin_message.take() {
-                self.append_turn_message(message);
-            }
-            Ok(TurnOptions {
-                maximum_requests: self.maximum,
-                model: self.model.clone(),
-                reasoning: self.reasoning.clone(),
-                provider_preferences: self.provider_preferences.clone(),
-                include_router_metadata: self.include_router_metadata,
-            })
         })
     }
     fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>> {
@@ -544,7 +538,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
     assert_eq!(
         state.trace.values(),
         [
-            "begin",
             "catalog",
             "promote",
             "prepare",
@@ -644,12 +637,14 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         let source = state.cancellation.clone();
         let is_cancelled = || source.is_cancelled();
         let cancelled = || source.cancelled();
+        let options = state.capture_options();
         let mut budget = TurnBudget::new(disable_limits);
         assert_eq!(
             finish(run(
                 &mut state,
                 &tools,
                 &provider,
+                &options,
                 &mut budget,
                 CancellationToken::new(&is_cancelled, &cancelled),
             )),
@@ -687,7 +682,7 @@ fn exhausted_budget_returns_without_provider_or_terminal_state_effects() {
     let mut state = MemoryState::new([]);
     state.maximum = 0;
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.trace.values(), ["begin", "catalog", "promote"]);
+    assert_eq!(state.trace.values(), ["catalog", "promote"]);
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert!(state.tools.requests.lock().unwrap().is_empty());
     assert!(state.pending_messages.is_empty());
@@ -697,7 +692,7 @@ fn exhausted_budget_returns_without_provider_or_terminal_state_effects() {
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "begin")
+            .filter(|step| *step == "catalog")
             .count(),
         1
     );
@@ -748,7 +743,7 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
             .trace
             .values()
             .iter()
-            .filter(|entry| *entry == "begin")
+            .filter(|entry| *entry == "catalog")
             .count(),
         1
     );
@@ -873,7 +868,7 @@ fn compaction_that_does_not_reduce_context_returns_the_original_provider_error()
 }
 
 #[test]
-fn fresh_invocations_initialize_and_capture_settings_once() {
+fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     let mut state = MemoryState::new([
         Reply::invalid("invalid"),
         Reply::TooLarge("oversized"),
@@ -882,7 +877,8 @@ fn fresh_invocations_initialize_and_capture_settings_once() {
         Reply::final_response("first answer"),
         Reply::final_response("second answer"),
     ]);
-    state.model = "first/model".into();
+    state.maximum = 0;
+    state.model = "unused/state-model".into();
     state.exit_blockers.push_back(vec!["work remains".into()]);
     let tools = state.tools.clone();
     let provider = state.provider.clone();
@@ -890,49 +886,95 @@ fn fresh_invocations_initialize_and_capture_settings_once() {
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
     let token = CancellationToken::new(&is_cancelled, &cancelled);
+    let options = TurnOptions {
+        maximum_requests: 10,
+        model: "first/model".into(),
+        reasoning: Some(Reasoning {
+            effort: "first effort".into(),
+            summary: "first summary".into(),
+        }),
+        provider_preferences: " { \"raw\" : [1.2300] } ".into(),
+        include_router_metadata: true,
+    };
     let mut budget = TurnBudget::new(false);
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
-        Ok(Some(Outcome::Completed("first answer".into())))
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            token
+        )),
+        Ok(Outcome::Completed("first answer".into()))
     );
     assert_eq!(state.requests.len(), 5);
-    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
+    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 5);
     assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
     assert_eq!(state.applied_results.len(), 1);
     assert_eq!(state.completion_feedback.len(), 1);
-    assert!(
-        provider
-            .requests
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|request| request.model == "first/model")
-    );
+    assert!(provider.requests.lock().unwrap().iter().all(|request| {
+        request.model == options.model
+            && request.reasoning == options.reasoning
+            && request.provider_preferences == options.provider_preferences
+            && request.include_router_metadata == options.include_router_metadata
+    }));
     let trace = state.trace.values();
-    assert_eq!(trace.iter().filter(|step| *step == "begin").count(), 1);
     assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 1);
     assert_eq!(trace.iter().filter(|step| *step == "compact").count(), 1);
     assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 1);
 
-    state.model = "second/model".into();
+    let options = TurnOptions {
+        maximum_requests: 1,
+        model: "second/model".into(),
+        reasoning: None,
+        provider_preferences: "second preferences".into(),
+        include_router_metadata: false,
+    };
     state.enqueue_message(Delivery::Queue, "second question");
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
-        Ok(Some(Outcome::Completed("second answer".into())))
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            token
+        )),
+        Ok(Outcome::Completed("second answer".into()))
     );
-    assert_eq!(provider.requests.lock().unwrap()[5].model, "second/model");
-    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 8);
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests[5].model, options.model);
+        assert_eq!(requests[5].reasoning, options.reasoning);
+        assert_eq!(
+            requests[5].provider_preferences,
+            options.provider_preferences
+        );
+        assert_eq!(
+            requests[5].include_router_metadata,
+            options.include_router_metadata
+        );
+    }
+    assert!(state.requests[5].0.enters_final_phase);
+    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
     let trace = state.trace.values();
-    assert_eq!(trace.iter().filter(|step| *step == "begin").count(), 2);
     assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 2);
     assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 2);
 
-    state.fail_at = Some("begin");
+    *tools.fail_at.lock().unwrap() = Some("catalog");
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
-        Ok(None)
+        finish(run(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            token
+        )),
+        Ok(Outcome::Completed(String::new()))
     );
-    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 9);
+    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 7);
     assert_eq!(state.trace.values(), trace);
     assert_eq!(provider.requests.lock().unwrap().len(), 6);
 }
@@ -947,6 +989,26 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     state.cancellation.cancel();
     assert_eq!(state.run(), Err(Error::cancelled()));
     assert!(state.trace.values().is_empty());
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+    let options = state.capture_options();
+    let source = state.cancellation.clone();
+    let is_cancelled = || source.is_cancelled();
+    let cancelled = || source.cancelled();
+    let mut budget = TurnBudget::new(false);
+    assert_eq!(
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            CancellationToken::new(&is_cancelled, &cancelled),
+        )),
+        Err(Error::cancelled())
+    );
+    assert!(state.trace.values().is_empty());
+    assert!(provider.requests.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -959,7 +1021,6 @@ fn provider_failure_propagates_without_recording_or_completing_a_response() {
 #[test]
 fn adapter_errors_stop_at_the_failing_effect() {
     for (stage, reply) in [
-        ("begin", Reply::final_response("response")),
         ("catalog", Reply::final_response("response")),
         ("promote", Reply::final_response("response")),
         ("prepare", Reply::final_response("response")),
@@ -1012,7 +1073,7 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
             .trace
             .values()
             .iter()
-            .filter(|entry| *entry == "begin")
+            .filter(|entry| *entry == "catalog")
             .count(),
         2
     );

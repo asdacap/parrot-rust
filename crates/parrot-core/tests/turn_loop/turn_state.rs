@@ -130,25 +130,47 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
     let token = CancellationToken::new(&is_cancelled, &cancelled);
+    let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
-        Ok(Some(Outcome::Completed("first answer".into())))
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            token
+        )),
+        Ok(Outcome::Completed("first answer".into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.pending_messages.len(), 1);
     assert!(state.requests[0].0.enters_final_phase);
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
-        Ok(Some(Outcome::Completed("second answer".into())))
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            token
+        )),
+        Ok(Outcome::Completed("second answer".into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert!(state.pending_messages.is_empty());
     assert!(state.requests[1].0.final_phase);
     assert!(!state.requests[1].0.enters_final_phase);
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
-        Ok(None)
+        finish(run(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            token
+        )),
+        Ok(Outcome::Completed(String::new()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
 }
@@ -168,7 +190,7 @@ fn run_convenience_drains_real_pending_messages_and_returns_the_latest_answer() 
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "begin")
+            .filter(|step| *step == "catalog")
             .count(),
         2
     );
@@ -184,13 +206,13 @@ fn run_convenience_drains_real_pending_messages_and_returns_the_latest_answer() 
 }
 
 #[test]
-fn admission_reloads_actual_turn_facts_after_begin_turn() {
+fn admission_uses_actual_turn_facts_after_native_preparation() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.append_response(&ProviderResponse {
         assistant_text: "old answer".into(),
         ..ProviderResponse::default()
     });
-    state.begin_message = Some(Message {
+    state.append_turn_message(Message {
         role: Role::User,
         contents: vec![Content::Text("status added a new input".into())],
         ..Message::default()
@@ -201,16 +223,18 @@ fn admission_reloads_actual_turn_facts_after_begin_turn() {
     let source = state.cancellation.clone();
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
+    let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
     assert_eq!(
         finish(run_turn(
             &mut state,
             &tools,
             &provider,
+            &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),
         )),
-        Ok(Some(Outcome::Completed("answer".into())))
+        Ok(Outcome::Completed("answer".into()))
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
     assert_eq!(finish(state.get_pending_message()).unwrap(), pending);
@@ -235,16 +259,18 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     let source = state.cancellation.clone();
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
+    let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
     assert_eq!(
         finish(run_turn(
             &mut state,
             &tools,
             &provider,
+            &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),
         )),
-        Ok(Some(Outcome::Completed("answer".into())))
+        Ok(Outcome::Completed("answer".into()))
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
     assert_eq!(state.pending_messages.len(), 1);
@@ -277,7 +303,7 @@ fn exit_blockers_retain_the_candidate_and_continue_without_pending_input() {
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "begin")
+            .filter(|step| *step == "catalog")
             .count(),
         1
     );

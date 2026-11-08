@@ -30,9 +30,9 @@ ported from the .NET repository. Repository contributor guidance is in
 
 `parrot-core` owns the agent turn protocol and loop, with exactly three traits:
 
-- `States`: factual conversation turns and pending-message headers, turn effects,
-  frozen model settings, prepared context, explicit messages, result recording,
-  observed completion context, and explicit feedback effects.
+- `States`: factual conversation turns and pending-message headers, prepared
+  context, explicit messages, result recording, observed completion context,
+  and explicit feedback and completion effects.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
@@ -40,10 +40,10 @@ Requests, responses, tool execution results, messages, tool definitions, and err
 are concrete core-owned types. Adapters implement the same interface; they do not
 choose their own associated payload types. `Provider` accepts a complete request;
 `Tools` accepts explicit calls and the caller's cancellation token. Core assembles
-each provider request from turn settings, prepared context values, an explicit
-message read, and its selected tool definitions. States never returns a provider
-request. Runtime state privately binds the executable selection during context
-preparation; execution receives no workflow phase or adapter-specific callbacks.
+each provider request from caller-supplied turn settings, prepared context values,
+an explicit message read, and its selected tool definitions. States never returns
+a provider request. Native initialization binds the final model/profile selection;
+execution receives no workflow phase or adapter-specific callbacks.
 Attempts and request phases stay in the core loop, and input estimates stay in
 runtime state.
 
@@ -75,24 +75,28 @@ category-specific retention policy. Native state owns observation order, configu
 prompt rendering, source identity, and per-message persistence/publication. It
 joins accepted mutations before observing blockers and before final closure.
 
-Each active `run_turn` invocation owns one execution turn. Core checks readiness
-before initialization, then captures settings and tools once into local values and
-continues until completion, exhaustion, or error. `None` means initialization never
-started. There is no runtime open-turn flag or core state query for one. Native
-start-event identities are invocation-scoped persistence metadata for terminal
-arbitration and error cleanup; they never control whether core initializes. Turn
-activity finishes after the core invocation returns, while accepted-response
-persistence remains its final awaited effect to preserve commit/publication order.
+Each `run_turn` call executes one active turn using immutable, caller-supplied
+`TurnOptions` and returns an `Outcome`. Core captures tools once and continues
+until completion, exhaustion, or error. Native orchestration checks actual
+conversation and pending-input facts before initializing provider/skill context,
+recording the start event, and passing the finalized settings into core. Idle
+passes perform none of that initialization. There is no core begin-turn hook,
+runtime open-turn flag, or core state query for one. Native start-event identities
+are invocation-scoped persistence metadata for terminal arbitration and error
+cleanup, including initialization failures before core is entered. Successful turn
+activity finishes after core returns, while accepted-response persistence remains
+its final awaited effect to preserve commit/publication order.
 
-`run` is the multi-turn convenience entry point. Both entry points accept a
-caller-owned core `TurnBudget`, initialized from run configuration rather than
-queried through `States`. Native orchestration checks its scheduled-operation
-queue between `run_turn` calls. Unscheduled turns share the existing budget scope;
-a native scheduled-work boundary ends that scope before processing queued
-operations. Scheduler priority never changes what the state getters report, and
-core has no scheduler-query method. Provider-request limits are the only
-final-phase trigger; cancellation uses the separate live token, not a state-polled
-wrap-up signal.
+`run` is the multi-turn convenience entry point: it checks factual readiness before
+each turn and uses the supplied settings throughout that convenience call. Both
+entry points accept a caller-owned core `TurnBudget`, initialized from run
+configuration rather than queried through `States`. Native orchestration checks
+its scheduled-operation queue between `run_turn` calls. Unscheduled turns share the
+existing budget scope; a native scheduled-work boundary ends that scope before
+processing queued operations. Scheduler priority never changes what the state
+getters report, and core has no scheduler-query method. Provider-request limits
+are the only final-phase trigger; cancellation uses the separate live token, not a
+state-polled wrap-up signal.
 
 Core returns a typed `BudgetExhausted` outcome when request or settlement limits
 are reached. Native orchestration renders, records, and publishes the configured

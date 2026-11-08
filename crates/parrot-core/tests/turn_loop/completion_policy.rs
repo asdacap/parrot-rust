@@ -45,7 +45,7 @@ fn ordered_blocker_messages_are_recorded_together_and_retain_the_candidate_once(
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "begin")
+            .filter(|step| *step == "catalog")
             .count(),
         1
     );
@@ -142,7 +142,7 @@ fn every_blocker_list_retains_the_exact_candidate_and_forces_continuation() {
                 .trace
                 .values()
                 .iter()
-                .filter(|step| *step == "begin")
+                .filter(|step| *step == "catalog")
                 .count(),
             1
         );
@@ -193,7 +193,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
         ["first candidate", "second candidate", "third candidate"]
     );
     let trace = state.trace.values();
-    assert_eq!(trace.iter().filter(|entry| *entry == "begin").count(), 1);
+    assert_eq!(trace.iter().filter(|entry| *entry == "catalog").count(), 1);
     assert_eq!(trace.iter().filter(|entry| *entry == "complete").count(), 1);
     assert_eq!(
         trace
@@ -234,12 +234,14 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     let source = state.cancellation.clone();
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
+    let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
     assert_eq!(
         finish(run_turn(
             &mut state,
             &tools,
             &provider,
+            &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled)
         )),
@@ -256,7 +258,7 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "begin")
+            .filter(|step| *step == "catalog")
             .count(),
         1
     );
@@ -276,12 +278,14 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     let source = state.cancellation.clone();
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
+    let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
     assert_eq!(
         finish(run_turn(
             &mut state,
             &tools,
             &provider,
+            &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled)
         )),
@@ -296,7 +300,7 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "begin")
+            .filter(|step| *step == "catalog")
             .count(),
         1
     );

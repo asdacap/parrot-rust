@@ -83,8 +83,6 @@ pub trait States: Send {
     /// Peeks at the next durable pending input header without reserving, promoting,
     /// or materializing its content.
     fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>>;
-    /// Opens a turn and freezes its model, profile, and authority privately.
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>>;
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and batching its content effects.
     fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>>;
@@ -187,6 +185,20 @@ pub struct ConversationTurn {
     /// Present only when the non-system tail is a no-tool assistant response,
     /// including a retained candidate; it does not prove durable turn closure.
     pub result: Option<Message>,
+}
+
+impl ConversationTurn {
+    pub fn needs_response(&self) -> bool {
+        self.result.is_none()
+            && matches!(
+                self.messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.role != Role::System)
+                    .map(|message| message.role),
+                Some(Role::User | Role::Tool)
+            )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

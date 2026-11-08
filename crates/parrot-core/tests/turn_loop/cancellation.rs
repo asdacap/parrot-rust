@@ -107,7 +107,7 @@ fn cancellation_during_catalog_capture_stops_before_the_first_request_iteration(
         cancellation: state.cancellation.clone(),
     };
     assert_eq!(state.run_with(&tools, &provider), Err(Error::cancelled()));
-    assert_eq!(state.trace.values(), ["begin", "catalog"]);
+    assert_eq!(state.trace.values(), ["catalog"]);
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 1);
     assert_eq!(state.pending_messages.len(), 1);
     assert!(state.admissions.is_empty());
@@ -166,9 +166,17 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
     let mut context = Context::from_waker(&waker);
+    let options = state.capture_options();
     let mut budget = TurnBudget::new(state.unlimited);
     let result = {
-        let mut running = std::pin::pin!(run(&mut state, &tools, &provider, &mut budget, token));
+        let mut running = std::pin::pin!(run(
+            &mut state,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            token
+        ));
         assert!(running.as_mut().poll(&mut context).is_pending());
         assert!(tools.admitted.load(Ordering::SeqCst));
         assert!(!joined.load(Ordering::SeqCst));
