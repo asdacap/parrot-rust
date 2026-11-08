@@ -1,7 +1,4 @@
-use crate::{
-    ContextCadence, ContextCompaction, ContextReminderCheckpoint, ContextSnapshot, ContextState,
-    budget,
-};
+use crate::{ContextCompaction, ContextSnapshot, ContextState, budget};
 use std::{fmt, future::Future, pin::Pin};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -104,32 +101,21 @@ pub trait States: Send {
     ) -> BoxFuture<'a, Result<i64, Error>>;
     /// Records and publishes the configured final-request context before preparation.
     fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>>;
-    /// Reads the latest durable reminder checkpoint without changing cadence state.
-    fn read_context_checkpoint(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>>;
-    /// Applies the core's cadence state before later context effects or publication.
-    fn write_context_cadence(
-        &mut self,
-        cadence: ContextCadence,
-    ) -> BoxFuture<'_, Result<(), Error>>;
-    /// Renders configured reminder text for the supplied observed context and band.
-    fn render_context_reminder<'a>(
-        &'a self,
+    /// Observes readiness and retains an optional steer or status prompt for fitting,
+    /// without appending or publishing it. Source-specific cadence and rendering stay native.
+    fn get_pending_prompt<'a>(
+        &'a mut self,
         context: &'a ContextSnapshot,
-        percentage: i32,
-    ) -> BoxFuture<'a, Result<String, Error>>;
-    /// Durably appends a reminder idempotently, updating conversation only when
-    /// inserted and retaining its native receipt without publishing it yet. The
-    /// observed percentage is unrounded pre-candidate usage, not the checkpoint band.
-    fn append_context_reminder(
-        &mut self,
-        checkpoint: ContextReminderCheckpoint,
-        content: String,
-        observed_percentage: i32,
-    ) -> BoxFuture<'_, Result<bool, Error>>;
-    /// Publishes the retained reminder receipt uncancelled after cadence is written.
-    fn publish_context_reminder(&mut self) -> BoxFuture<'_, Result<(), Error>>;
+    ) -> BoxFuture<'a, Result<Option<Message>, Error>>;
+    /// Durably appends the retained prompt idempotently, updating conversation only
+    /// when inserted and retaining its native receipt without publishing it yet.
+    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>>;
+    /// Acknowledges the retained prompt using the fitted or persisted context before
+    /// uncancelled publication, publishing nothing when insertion was a duplicate.
+    fn acknowledge_prompt<'a>(
+        &'a mut self,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), Error>>;
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
     /// Prepares a safe-prefix plan and scoped native effects for core-selected compaction.

@@ -1,7 +1,6 @@
 use super::*;
 use parrot_core::{
-    CompletionFeedback as CoreCompletionFeedback, ContextCadence as CoreContextCadence,
-    ContextCompaction as CoreContextCompaction,
+    CompletionFeedback as CoreCompletionFeedback, ContextCompaction as CoreContextCompaction,
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
     ContextSnapshot as CoreContextSnapshot, ContextState as CoreContextState, Error as CoreError,
     ErrorCode, ErrorKind, ProviderRequest, ProviderResponse, RetryReason, States as CoreStates,
@@ -13,10 +12,17 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     binding: &'a TurnBinding<S, T>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
-    pending_context_reminder: Option<Event>,
+    pending_prompt: Option<PendingPrompt>,
     exit_blocker_sources: Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>,
     persistence_key: Option<TurnKey>,
     pending_compaction: Option<PendingCompaction>,
+}
+
+struct PendingPrompt {
+    checkpoint: CoreContextReminderCheckpoint,
+    content: String,
+    observed_percentage: i32,
+    published: Option<Event>,
 }
 
 struct PendingCompaction {
@@ -183,7 +189,7 @@ where
             binding,
             cancellation,
             work,
-            pending_context_reminder: None,
+            pending_prompt: None,
             exit_blocker_sources: Vec::new(),
             persistence_key: None,
             pending_compaction: None,
@@ -514,36 +520,31 @@ where
             Ok(())
         })
     }
-    fn read_context_checkpoint(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<CoreContextReminderCheckpoint>, CoreError>> {
-        adapt_operation(async move {
-            let state = self.backend.state.lock().await;
-            Ok(state.context.read_context_checkpoint().await?)
-        })
-    }
-    fn write_context_cadence(
-        &mut self,
-        cadence: CoreContextCadence,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .write_context_cadence(cadence);
-            Ok(())
-        })
-    }
-    fn render_context_reminder<'a>(
-        &'a self,
+    fn get_pending_prompt<'a>(
+        &'a mut self,
         context: &'a CoreContextSnapshot,
-        percentage: i32,
-    ) -> BoxFuture<'a, Result<String, CoreError>> {
+    ) -> BoxFuture<'a, Result<Option<parrot_core::Message>, CoreError>> {
         adapt_operation(async move {
-            let state = self.backend.state.lock().await;
-            Ok(state.context.render_reminder(
+            self.pending_prompt = None;
+            let mut state = self.backend.state.lock().await;
+            let selection = self.binding.capture_selection()?;
+            let mut cadence = state.context.capture_state(&selection.model).cadence;
+            if !cadence.is_restored() {
+                cadence.restore(state.context.read_context_checkpoint().await?);
+            }
+            let observation = cadence.observe(
+                context,
+                &selection.model.canonical_model.selector(),
+                state.conversation.len() as i64,
+            );
+            state.context.write_context_cadence(cadence);
+            let Some(percentage) = observation
+                .map_err(CoreError::from)
+                .map_err(TurnError::Core)?
+            else {
+                return Ok(None);
+            };
+            let content = state.context.render_reminder(
                 &crate::compaction::ContextSnapshot {
                     estimated_tokens: context.estimated_tokens,
                     context_limit: context.context_limit,
@@ -554,40 +555,71 @@ where
                     has_context_limit_override: context.has_context_limit_override,
                 },
                 percentage,
-            )?)
+            )?;
+            let message = sessions::Message::system(&content).into();
+            self.pending_prompt = Some(PendingPrompt {
+                checkpoint: CoreContextReminderCheckpoint {
+                    canonical_model: selection.model.canonical_model.selector(),
+                    context_limit: context.context_limit,
+                    percentage,
+                },
+                content,
+                observed_percentage: context.usage_percent.unwrap_or_default(),
+                published: None,
+            });
+            Ok(Some(message))
         })
     }
-    fn append_context_reminder(
-        &mut self,
-        checkpoint: CoreContextReminderCheckpoint,
-        content: String,
-        observed_percentage: i32,
-    ) -> BoxFuture<'_, Result<bool, CoreError>> {
+    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, CoreError>> {
         adapt_operation(async move {
+            let pending = self
+                .pending_prompt
+                .as_mut()
+                .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?;
             let mut guard = self.backend.state.lock().await;
             let state = &mut *guard;
-            self.pending_context_reminder = state
+            pending.published = state
                 .context
                 .append_context_reminder(
                     &mut state.conversation,
-                    checkpoint,
-                    content,
-                    observed_percentage,
+                    pending.checkpoint.clone(),
+                    pending.content.clone(),
+                    pending.observed_percentage,
                 )
                 .await?;
-            Ok(self.pending_context_reminder.is_some())
+            Ok(pending.published.is_some())
         })
     }
-    fn publish_context_reminder(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn acknowledge_prompt<'a>(
+        &'a mut self,
+        context: &'a CoreContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
         adapt_operation(async move {
-            let published = self.pending_context_reminder.take().ok_or_else(|| {
-                TurnError::Service("context reminder publication is unavailable".into())
-            })?;
-            ContextEmitter {
-                backend: self.backend,
+            let pending = self
+                .pending_prompt
+                .take()
+                .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?;
+            {
+                let mut state = self.backend.state.lock().await;
+                let selection = self.binding.capture_selection()?;
+                let mut cadence = state.context.capture_state(&selection.model).cadence;
+                cadence
+                    .acknowledge(
+                        context,
+                        &pending.checkpoint.canonical_model,
+                        state.conversation.len() as i64,
+                    )
+                    .map_err(CoreError::from)
+                    .map_err(TurnError::Core)?;
+                state.context.write_context_cadence(cadence);
             }
-            .publish(published, &NeverCancelled)
-            .await?;
+            if let Some(published) = pending.published {
+                ContextEmitter {
+                    backend: self.backend,
+                }
+                .publish(published, &NeverCancelled)
+                .await?;
+            }
             Ok(())
         })
     }

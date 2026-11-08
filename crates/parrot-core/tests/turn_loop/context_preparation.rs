@@ -1,6 +1,123 @@
 use super::*;
 
 #[test]
+fn pending_steer_and_status_prompts_are_fitted_without_a_context_reminder() {
+    for role in [Role::User, Role::System] {
+        let mut state = MemoryState::new([Reply::final_response("answer")]);
+        state.prime_context(100);
+        let prompt = Message {
+            role,
+            contents: vec![Content::Text("pending prompt".into())],
+            provider_content: "{\"native\":true}".into(),
+            ..Message::default()
+        };
+        state.pending_prompts.push_back(prompt.clone());
+        *state.estimate_script.lock().unwrap() = [100, 150, 160, 160].into();
+
+        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+        assert!(state.rendered_reminders.lock().unwrap().is_empty());
+        assert!(state.reminder_appends.is_empty());
+        assert_eq!(state.recorded_prompts, [prompt.clone()]);
+        assert_eq!(state.acknowledged_prompts[0].estimated_tokens, 160);
+        let estimates = state.estimates.lock().unwrap();
+        assert_eq!(estimates[1].messages.last(), Some(&prompt));
+        assert_eq!(estimates[1].tokens, 150);
+        let requests = state.provider.requests.lock().unwrap();
+        assert_eq!(requests[0].messages.last(), Some(&prompt));
+        assert_eq!(requests[0].messages, estimates.last().unwrap().messages);
+        let trace = state.trace.values();
+        let fitted = trace
+            .iter()
+            .position(|step| step == "record_prompt")
+            .unwrap();
+        let acknowledged = trace
+            .iter()
+            .position(|step| step == "acknowledge_prompt")
+            .unwrap();
+        let published = trace
+            .iter()
+            .position(|step| step == "publish_prompt")
+            .unwrap();
+        let invoked = trace.iter().position(|step| step == "invoke").unwrap();
+        assert!(fitted < acknowledged && acknowledged < published && published < invoked);
+    }
+}
+
+#[test]
+fn pending_prompt_is_recorded_when_context_capacity_is_unknown() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    let prompt = Message {
+        role: Role::System,
+        contents: vec![Content::Text("pending status".into())],
+        ..Message::default()
+    };
+    state.pending_prompts.push_back(prompt.clone());
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.recorded_prompts, [prompt.clone()]);
+    assert!(!state.acknowledged_prompts[0].is_available());
+    assert_eq!(
+        state.provider.requests.lock().unwrap()[0].messages.last(),
+        Some(&prompt)
+    );
+    assert!(state.compacted_definitions.is_empty());
+}
+
+#[test]
+fn oversized_pending_status_prompt_compacts_without_recording_or_acknowledging_it() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.prime_context(100);
+    state.pending_prompts.push_back(Message {
+        role: Role::System,
+        contents: vec![Content::Text("oversized status".into())],
+        ..Message::default()
+    });
+    *state.estimate_script.lock().unwrap() = [100, 910, 100, 100].into();
+    let messages = vec![Message {
+        role: Role::System,
+        contents: vec![Content::Text("compacted status".into())],
+        ..Message::default()
+    }];
+    state.compactions.push_back(CompactedContext {
+        instructions: "compacted instructions".into(),
+        messages: messages.clone(),
+        state: state.context.clone(),
+        reduced: true,
+    });
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.compacted_definitions.len(), 1);
+    assert!(state.recorded_prompts.is_empty());
+    assert!(state.acknowledged_prompts.is_empty());
+    assert_eq!(
+        state.provider.requests.lock().unwrap()[0].messages,
+        messages
+    );
+}
+
+#[test]
+fn pending_prompt_failures_stop_before_later_effects() {
+    for stage in [
+        "pending_prompt",
+        "record_prompt",
+        "acknowledge_prompt",
+        "publish_prompt",
+    ] {
+        let mut state = MemoryState::new([Reply::final_response("not invoked")]);
+        state.pending_prompts.push_back(Message {
+            role: Role::System,
+            contents: vec![Content::Text("pending status".into())],
+            ..Message::default()
+        });
+        state.fail_at = Some(stage);
+
+        assert_eq!(state.run(), Err(Error::failed(stage)));
+        assert_eq!(state.trace.values().last().unwrap(), stage);
+        assert!(state.provider.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
 fn core_records_final_request_once_before_rendering_and_retains_final_catalogs() {
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     state.maximum = 1;

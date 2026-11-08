@@ -59,8 +59,8 @@ The core specifies and implements:
 
 - Provider-request assembly, request admission/counting, limit-triggered final-phase
   catalog selection, and bounded tool-settlement extensions.
-- Context preparation: strict raw/calibrated compaction triggers, reminder cadence
-  and candidate-fit decisions, final-request notices, and output-token capacity.
+- Context preparation: strict raw/calibrated compaction triggers, pending-prompt
+  candidate fitting, final-request notices, and output-token capacity.
 - Truncated tool-call detection and JSON-argument validation before recording or
   executing calls.
 - Shared compaction request assembly, ordered first-pass and summary-dependent
@@ -89,11 +89,14 @@ chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch.
 
 There is no `States::prepare_context` workflow hook. Core reads raw model limits,
-context overrides, calibration, and cadence, then directs explicit native effects.
-It restores reminder checkpoints lazily, acknowledges inserted or duplicate
-reminders before publication, and calculates the output budget from the final
-messages and tool definitions. Prompt/template rendering, exact token estimates,
-idempotent persistence, and uncancelled post-commit notice publication remain native.
+context overrides, and calibration, then directs explicit native effects.
+`States::get_pending_prompt` observes native readiness and returns an optional steer
+or status message, retaining its source identity for idempotent recording. Core fits
+that exact message before insertion or compaction, acknowledges the fitted or
+persisted context, and calculates the output budget from the final messages and
+tool definitions. Native state owns reminder checkpoint restoration, cadence,
+prompt/template rendering, exact token estimates, idempotent persistence, and
+acknowledgement before uncancelled post-commit notice publication.
 Calibration survives later stream/publication failures and resets only after
 successful compaction persistence.
 

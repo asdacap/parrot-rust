@@ -259,6 +259,12 @@ struct MemoryState {
     reminder_appends: Vec<(ContextReminderCheckpoint, String, i32)>,
     append_reminder: bool,
     reminder_publications: usize,
+    pending_prompts: VecDeque<Message>,
+    pending_prompt: Option<Message>,
+    pending_reminder: Option<(ContextReminderCheckpoint, String, i32)>,
+    recorded_prompts: Vec<Message>,
+    acknowledged_prompts: Vec<ContextSnapshot>,
+    prompt_inserted: bool,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(PendingMessage, Message)>,
     next_input: usize,
@@ -332,6 +338,12 @@ impl MemoryState {
             reminder_appends: Vec::new(),
             append_reminder: true,
             reminder_publications: 0,
+            pending_prompts: VecDeque::new(),
+            pending_prompt: None,
+            pending_reminder: None,
+            recorded_prompts: Vec::new(),
+            acknowledged_prompts: Vec::new(),
+            prompt_inserted: false,
             last_turn: None,
             pending_messages: VecDeque::new(),
             next_input: 0,
@@ -593,66 +605,104 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn read_context_checkpoint(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
+    fn get_pending_prompt<'a>(
+        &'a mut self,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<Option<Message>, Error>> {
         Box::pin(async move {
-            self.trace.step("checkpoint", self.fail_at)?;
-            Ok(self.checkpoint.clone())
-        })
-    }
-    fn write_context_cadence(
-        &mut self,
-        cadence: ContextCadence,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
+            self.step("pending_prompt")?;
+            self.pending_prompt = None;
+            self.pending_reminder = None;
+            self.prompt_inserted = false;
+            if let Some(prompt) = self.pending_prompts.front() {
+                self.pending_prompt = Some(prompt.clone());
+                return Ok(self.pending_prompt.clone());
+            }
+            let mut cadence = self.context.cadence.clone();
+            if !cadence.is_restored() {
+                self.step("checkpoint")?;
+                cadence.restore(self.checkpoint.clone());
+            }
+            let observation = cadence.observe(
+                context,
+                &self.context.configuration.model.canonical_model,
+                self.messages.len() as i64,
+            );
             self.step("cadence")?;
             self.cadence_writes.push(cadence.clone());
             self.context.cadence = cadence;
-            Ok(())
-        })
-    }
-    fn render_context_reminder<'a>(
-        &'a self,
-        context: &'a ContextSnapshot,
-        percentage: i32,
-    ) -> BoxFuture<'a, Result<String, Error>> {
-        Box::pin(async move {
-            self.trace.step("reminder", self.fail_at)?;
+            let Some(percentage) = observation? else {
+                return Ok(None);
+            };
+            self.step("reminder")?;
             self.rendered_reminders
                 .lock()
                 .unwrap()
                 .push((context.clone(), percentage));
-            Ok(self.reminder.clone())
+            self.pending_reminder = Some((
+                ContextReminderCheckpoint {
+                    canonical_model: self.context.configuration.model.canonical_model.clone(),
+                    context_limit: context.context_limit,
+                    percentage,
+                },
+                self.reminder.clone(),
+                context.usage_percent.unwrap_or_default(),
+            ));
+            self.pending_prompt = Some(Message {
+                role: Role::System,
+                contents: vec![Content::Text(self.reminder.clone())],
+                ..Message::default()
+            });
+            Ok(self.pending_prompt.clone())
         })
     }
-    fn append_context_reminder(
-        &mut self,
-        checkpoint: ContextReminderCheckpoint,
-        content: String,
-        observed_percentage: i32,
-    ) -> BoxFuture<'_, Result<bool, Error>> {
+    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async move {
-            self.step("append_reminder")?;
-            self.reminder_appends
-                .push((checkpoint.clone(), content.clone(), observed_percentage));
-            if self.append_reminder {
-                self.checkpoint = Some(checkpoint);
-                let message = Message {
-                    role: Role::System,
-                    contents: vec![Content::Text(content)],
-                    ..Message::default()
-                };
-                self.messages.push(message.clone());
-                self.append_turn_message(message);
+            self.step("record_prompt")?;
+            if let Some(reminder) = self.pending_reminder.clone() {
+                self.step("append_reminder")?;
+                self.reminder_appends.push(reminder.clone());
+                if !self.append_reminder {
+                    return Ok(false);
+                }
+                self.checkpoint = Some(reminder.0);
+            } else {
+                self.pending_prompts.pop_front().unwrap();
             }
-            Ok(self.append_reminder)
+            let message = self.pending_prompt.clone().unwrap();
+            self.recorded_prompts.push(message.clone());
+            self.messages.push(message.clone());
+            self.append_turn_message(message);
+            self.prompt_inserted = true;
+            Ok(true)
         })
     }
-    fn publish_context_reminder(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+    fn acknowledge_prompt<'a>(
+        &'a mut self,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
-            self.reminder_publications += 1;
-            self.step("publish_reminder")
+            self.step("acknowledge_prompt")?;
+            self.acknowledged_prompts.push(context.clone());
+            if self.pending_reminder.take().is_some() {
+                let mut cadence = self.context.cadence.clone();
+                cadence.acknowledge(
+                    context,
+                    &self.context.configuration.model.canonical_model,
+                    self.messages.len() as i64,
+                )?;
+                self.step("cadence")?;
+                self.cadence_writes.push(cadence.clone());
+                self.context.cadence = cadence;
+                if self.prompt_inserted {
+                    self.reminder_publications += 1;
+                    self.step("publish_reminder")?;
+                }
+            } else if self.prompt_inserted {
+                self.step("publish_prompt")?;
+            }
+            self.pending_prompt = None;
+            Ok(())
         })
     }
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
@@ -782,6 +832,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "messages",
             "context",
             "estimate",
+            "pending_prompt",
             "checkpoint",
             "cadence",
             "messages",
@@ -796,6 +847,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "messages",
             "context",
             "estimate",
+            "pending_prompt",
             "cadence",
             "messages",
             "context",

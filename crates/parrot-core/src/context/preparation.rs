@@ -1,7 +1,6 @@
 use crate::{
-    CancellationToken, Content, ContextCompaction, ContextReminderCheckpoint, ContextSnapshot,
-    Error, Message, ProviderRequest, Role, States, ToolDefinition, TurnOptions,
-    budget::TurnRequestPhase,
+    CancellationToken, ContextCompaction, ContextSnapshot, Error, ProviderRequest, States,
+    ToolDefinition, TurnOptions, budget::TurnRequestPhase,
 };
 
 pub(crate) async fn compact_context(
@@ -52,76 +51,34 @@ pub(crate) async fn prepare_request(
         context = ContextSnapshot::estimate(estimate, &state.configuration);
         context.ensure_input_fits()?;
     }
-    if !state.cadence.is_restored() {
-        state
-            .cadence
-            .restore(states.read_context_checkpoint().await?);
-    }
-    let observation = state.cadence.observe(
-        &context,
-        &state.configuration.model.canonical_model,
-        messages.len() as i64,
-    );
-    states.write_context_cadence(state.cadence.clone()).await?;
-    if let Some(percentage) = observation? {
-        let reminder = states.render_context_reminder(&context, percentage).await?;
+    if let Some(prompt) = states.get_pending_prompt(&context).await? {
         let mut candidate = messages.clone();
-        candidate.push(Message {
-            role: Role::System,
-            contents: vec![Content::Text(reminder.clone())],
-            ..Message::default()
-        });
+        candidate.push(prompt);
         let estimate = states
             .estimate_input_tokens(&instructions, definitions, &candidate)
             .await?;
         let inserted = ContextSnapshot::estimate(estimate, &state.configuration);
-        if inserted.is_available() {
-            if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-                instructions = compact_context(states, definitions, cancellation)
-                    .await?
-                    .instructions;
+        if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
+            instructions = compact_context(states, definitions, cancellation)
+                .await?
+                .instructions;
+            messages = states.read_messages().await?;
+            state = states.read_context_state().await?;
+            let estimate = states
+                .estimate_input_tokens(&instructions, definitions, &messages)
+                .await?;
+            ContextSnapshot::estimate(estimate, &state.configuration).ensure_input_fits()?;
+        } else {
+            let acknowledged = if states.record_pending_prompt().await? {
                 messages = states.read_messages().await?;
-                state = states.read_context_state().await?;
                 let estimate = states
                     .estimate_input_tokens(&instructions, definitions, &messages)
                     .await?;
-                ContextSnapshot::estimate(estimate, &state.configuration).ensure_input_fits()?;
+                ContextSnapshot::estimate(estimate, &state.configuration)
             } else {
-                let checkpoint = ContextReminderCheckpoint {
-                    canonical_model: state.configuration.model.canonical_model.clone(),
-                    context_limit: context.context_limit,
-                    percentage,
-                };
-                let appended = states
-                    .append_context_reminder(
-                        checkpoint,
-                        reminder,
-                        context.usage_percent.unwrap_or_default(),
-                    )
-                    .await?;
-                if appended {
-                    messages = states.read_messages().await?;
-                    let estimate = states
-                        .estimate_input_tokens(&instructions, definitions, &messages)
-                        .await?;
-                    let persisted = ContextSnapshot::estimate(estimate, &state.configuration);
-                    state.cadence.acknowledge(
-                        &persisted,
-                        &state.configuration.model.canonical_model,
-                        messages.len() as i64,
-                    )?;
-                } else {
-                    state.cadence.acknowledge(
-                        &inserted,
-                        &state.configuration.model.canonical_model,
-                        messages.len() as i64,
-                    )?;
-                }
-                states.write_context_cadence(state.cadence).await?;
-                if appended {
-                    states.publish_context_reminder().await?;
-                }
-            }
+                inserted
+            };
+            states.acknowledge_prompt(&acknowledged).await?;
         }
     }
     let messages = states.read_messages().await?;
