@@ -4,7 +4,7 @@ mod product_changes;
 use parrot_foundation::{
     config::{
         node::{Kind, Node},
-        yaml,
+        templates, yaml,
     },
     template_minijinja::MiniJinjaPromptTemplateEngine,
     template_scalar::ScalarPromptTemplateEngine,
@@ -184,7 +184,12 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
                 .unwrap()
                 .to_owned();
             base.kind = Kind::Scalar(Some(text));
-            assert_eq!(&expected, new_value, "system prompt resource changed");
+            let expected = Node::mapping(vec![(Node::scalar("system_prompts"), expected)]);
+            assert_eq!(
+                templates::read_system_prompts(&expected).unwrap(),
+                templates::read_system_prompts(&new).unwrap(),
+                "system prompt resource changed"
+            );
         } else if scalar(old_key) != Some("prompt_templates") {
             assert_eq!(
                 old_value, new_value,

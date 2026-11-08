@@ -142,3 +142,75 @@ fn provider_keys_and_values_still_require_valid_namespaced_nonempty_strings() {
         assert_eq!(error.kind(), ConfigErrorKind::InvalidData, "{content}");
     }
 }
+
+#[test]
+fn loading_keeps_references_in_generated_yaml_and_preserves_user_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.yaml");
+    let predefined = directory.path().join("predefined_config.yaml");
+    let content = b"# Preserve this comment and formatting.\nmodel: openai/gpt-5\nsystem_prompts:\n  custom:guidance: Keep this literal.\n";
+    std::fs::write(&path, content).unwrap();
+    std::fs::write(&predefined, "model: stale/model\n").unwrap();
+    let environment = [
+        ("HOME", "home"),
+        ("XDG_CONFIG_HOME", "config"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_STATE_HOME", "state"),
+        ("XDG_CACHE_HOME", "cache"),
+    ]
+    .map(|(name, child)| {
+        (
+            name.to_owned(),
+            directory.path().join(child).to_string_lossy().into_owned(),
+        )
+    })
+    .into_iter()
+    .collect();
+    let (configuration, _) = PromptTemplateCatalog::load(&path, &predefined, &environment).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), content);
+    let reference = std::fs::read_to_string(&predefined).unwrap();
+    assert!(!reference.contains("stale/model"));
+    let documents = yaml::parse_documents(&reference).unwrap();
+    assert_eq!(documents.len(), 1);
+    let root = &documents[0];
+    for (key, reference) in [
+        (
+            "runtime:system-context:01-base",
+            "@builtin:system-prompts/base.md",
+        ),
+        (
+            "runtime:system-context:02a-agent-tasks",
+            "@builtin:system-prompts/agent-tasks.md",
+        ),
+    ] {
+        assert_eq!(
+            root.get("system_prompts")
+                .unwrap()
+                .get(key)
+                .unwrap()
+                .as_str(),
+            Some(reference)
+        );
+    }
+    assert!(
+        configuration.system_prompts["runtime:system-context:01-base"]
+            .starts_with("You are parrot, a coding agent.")
+    );
+    assert!(
+        configuration.system_prompts["runtime:system-context:02a-agent-tasks"]
+            .starts_with("## Agent Tasks")
+    );
+    assert!(
+        configuration
+            .system_prompts
+            .values()
+            .all(|text| !text.starts_with("@builtin:"))
+    );
+    assert_eq!(
+        configuration.system_prompts["custom:guidance"],
+        "Keep this literal."
+    );
+    for key in ["system_prompts", "agent_tasks", "profiles", "tools"] {
+        assert!(root.get(key).is_some());
+    }
+}

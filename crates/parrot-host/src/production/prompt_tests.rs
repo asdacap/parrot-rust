@@ -183,8 +183,18 @@ async fn production_requests_include_host_context_and_explicit_or_inherited_scop
                 .contains("Child agent name: prompt-grandchild\n")
         })
         .unwrap();
+    let static_sections = fixture
+        .configuration
+        .system_prompts
+        .values()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n\n");
     for request in [root, child, grandchild] {
         let prompt = &request.instructions;
+        assert!(prompt.contains(&static_sections));
+        assert!(prompt.contains("## Agent Tasks"));
+        assert!(!prompt.contains("@builtin:system-prompts/"));
         for marker in [
             "PROMPT-GLOBAL-INSTRUCTION",
             "PROMPT-ANCESTOR-INSTRUCTION",
@@ -240,6 +250,83 @@ async fn production_requests_include_host_context_and_explicit_or_inherited_scop
             .instructions
             .contains("### 1st Ancestor (prompt-child)\nPROMPT-EXPLICIT-SCOPE")
     );
+    drop(requests);
+    std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[tokio::test]
+async fn production_requests_use_loaded_inline_prompt_overrides() {
+    let mut fixture = Fixture::new();
+    let inherited = fixture.configuration.system_prompts.clone();
+    let path = fixture.root.join("config.yaml");
+    std::fs::write(
+        &path,
+        "model: local/test\nskills:\n  enabled: false\nsystem_prompts:\n  runtime:system-context:01-base: PROMPT-CUSTOM-BASE\n",
+    )
+    .unwrap();
+    let environment = BTreeMap::from([(
+        "HOME".into(),
+        fixture.root.join("home").to_string_lossy().into_owned(),
+    )]);
+    let (configuration, templates) =
+        PromptTemplateCatalog::load(&path, &fixture.root.join("predefined.yaml"), &environment)
+            .unwrap();
+    fixture.configuration = configuration;
+    fixture.templates = Arc::new(templates);
+    let capture = CaptureProvider {
+        root_spawned: Arc::new(AtomicBool::new(true)),
+        ..Default::default()
+    };
+    let host = fixture.host_with(Arc::new(capture.clone()));
+    let session = bounded(host.service().create_session(
+        &wire::CreateSessionRequest {
+            model: "local/test".into(),
+            mode: "build".into(),
+            ..Default::default()
+        },
+        Arc::new(NeverCancelled),
+    ))
+    .await
+    .unwrap();
+    bounded(host.service().send_message(
+        &wire::SendMessageRequest {
+            user_session_id: session.id,
+            text: "Capture the overridden system prompt.".into(),
+            delivery: wire::Delivery::DELIVERY_QUEUE.into(),
+            ..Default::default()
+        },
+        Arc::new(NeverCancelled),
+    ))
+    .await
+    .unwrap();
+    bounded(async {
+        while capture.requests.lock().unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    bounded(host.close()).await.unwrap();
+    let requests = capture.requests.lock().unwrap();
+    for request in requests.iter() {
+        let prompt = &request.instructions;
+        assert_eq!(prompt.matches("PROMPT-CUSTOM-BASE").count(), 1);
+        assert!(!prompt.contains("@builtin:system-prompts/"));
+        for (key, text) in &inherited {
+            if key == "runtime:system-context:01-base" {
+                assert!(!prompt.contains(text));
+            } else {
+                assert_eq!(prompt.matches(text).count(), 1, "{key}");
+            }
+        }
+        let ordered = fixture
+            .configuration
+            .system_prompts
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert!(prompt.contains(&ordered));
+    }
     drop(requests);
     std::fs::remove_dir_all(&fixture.root).unwrap();
 }
