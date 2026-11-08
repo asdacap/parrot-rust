@@ -22,8 +22,8 @@ pub async fn run<'a>(
     }
 }
 
-/// Runs at most one completed turn using the caller-owned run-scope budget.
-/// Returns none when the factual conversation and pending input need no response.
+/// Runs one execution turn with settings and tools captured once for this invocation.
+/// Returns none before initialization when the conversation and pending input need no response.
 pub async fn run_turn<'a>(
     states: &mut dyn States,
     tools: &'a dyn Tools,
@@ -31,24 +31,20 @@ pub async fn run_turn<'a>(
     budget: &mut budget::TurnBudget,
     cancellation: CancellationToken<'a>,
 ) -> Result<Option<Outcome>, Error> {
-    let mut retry_pending = false;
+    if cancellation.is_cancelled() {
+        return Err(Error::cancelled());
+    }
+    let turn = states.get_last_turn().await?;
+    if !needs_response(turn.as_ref()) && states.get_pending_message().await?.is_none() {
+        return Ok(None);
+    }
+    budget.begin_turn();
+    let options = states.begin_turn().await?;
+    let catalog = tools.capture_catalog().await?;
     let mut compacted_oversized = false;
-    let mut selected = None;
     loop {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
-        }
-        if !retry_pending {
-            let turn = states.get_last_turn().await?;
-            if !needs_response(turn.as_ref()) && states.get_pending_message().await?.is_none() {
-                return Ok(None);
-            }
-        }
-        if !states.is_turn_open().await {
-            budget.begin_turn();
-            let options = states.begin_turn().await?;
-            let catalog = tools.capture_catalog().await?;
-            selected = Some((options, catalog));
         }
         let turn = states.get_last_turn().await?;
         let admission = if needs_response(turn.as_ref()) {
@@ -57,7 +53,6 @@ pub async fn run_turn<'a>(
             InputAdmission::SteersOrNextQueued
         };
         states.promote_input(admission).await?;
-        let (options, catalog) = selected.as_ref().ok_or_else(Error::missing_turn)?;
         let Some(phase) = budget.admit(options.maximum_requests) else {
             return Ok(Some(Outcome::BudgetExhausted));
         };
@@ -133,7 +128,6 @@ pub async fn run_turn<'a>(
                 candidate: response,
             })
             .await?;
-        retry_pending = true;
         budget.restart();
     }
 }

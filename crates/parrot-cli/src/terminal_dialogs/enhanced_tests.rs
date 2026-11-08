@@ -117,7 +117,7 @@ fn frame_view(
     let terminal = EnhancedTerminal::with_input(
         Box::new(UnusedFrameInput(reads.clone())),
         Box::new(capture.clone()),
-        Box::new(io::sink()),
+        Box::new(capture.clone()),
         Arc::new(move || (columns as isize, 30)),
         false,
     );
@@ -302,6 +302,211 @@ fn failed_commit_retains_same_arc_and_does_not_replay_successful_prefix() {
     assert_eq!(reads.load(Ordering::SeqCst), 0);
 }
 
+#[test]
+fn deferred_failures_flush_queued_reasoning_before_errors_and_remove_the_live_row() {
+    let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
+    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    view.apply(
+        presenter
+            .observe(&wire::Event {
+                agent_session_id: "root".into(),
+                payload: Some(wire::event::Payload::TurnStarted(
+                    wire::TurnStarted::default(),
+                )),
+                ..Default::default()
+            })
+            .unwrap(),
+    )
+    .unwrap();
+    view.apply(
+        presenter
+            .observe(&wire::Event {
+                agent_session_id: "root".into(),
+                payload: Some(wire::event::Payload::ReasoningChunk(wire::ReasoningChunk {
+                    kind: wire::ReasoningKind::REASONING_KIND_SUMMARY.into(),
+                    fragment: "Planning".into(),
+                    completed: true,
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(output.text().contains("✦ Planning"));
+    output.0.lock().unwrap().clear();
+    view.enqueue(PresentationUpdate {
+        commits: vec![CommitItem::new("queued prefix", false)],
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(output.text().is_empty());
+    let mut failed = presenter
+        .apply_event(&wire::Event {
+            agent_session_id: "root".into(),
+            payload: Some(wire::event::Payload::TurnFailed(wire::TurnFailed {
+                message: "reported failure".into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(failed.live.is_empty());
+    let error = failed.errors[0].clone();
+    failed.live = presenter.snapshot().unwrap();
+    view.enqueue(failed).unwrap();
+    let flushed = output.text();
+    assert_eq!(flushed.matches("queued prefix").count(), 1);
+    assert_eq!(flushed.matches("✦ Planning").count(), 1);
+    assert_eq!(flushed.matches(&error).count(), 1);
+    assert!(flushed.find("queued prefix").unwrap() < flushed.find("✦ Planning").unwrap());
+    assert!(flushed.find("✦ Planning").unwrap() < flushed.find(&error).unwrap());
+    {
+        let state = view.state.lock().unwrap();
+        assert!(state.pending.is_empty());
+        for item in &state.body {
+            let rendered = item
+                .render(LiveBufferRenderContext {
+                    columns: 80,
+                    color: false,
+                })
+                .unwrap();
+            assert!(
+                rendered
+                    .lines
+                    .iter()
+                    .all(|line| !line.text().contains("Planning"))
+            );
+        }
+    }
+    let before_input = output.text().len();
+    view.replace_input(vec![prompt("> ", "still responsive", 0)])
+        .unwrap();
+    assert!(!output.text()[before_input..].contains("Planning"));
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn pending_reasoning_is_published_live_then_committed_once_before_dialog_output() {
+    let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
+    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    view.enqueue(
+        presenter
+            .apply_event(&wire::Event {
+                agent_session_id: "root".into(),
+                payload: Some(wire::event::Payload::TurnStarted(
+                    wire::TurnStarted::default(),
+                )),
+                ..Default::default()
+            })
+            .unwrap(),
+    )
+    .unwrap();
+    for fragment in ["A", "B"] {
+        let update = presenter
+            .apply_event(&wire::Event {
+                agent_session_id: "root".into(),
+                payload: Some(wire::event::Payload::ReasoningChunk(wire::ReasoningChunk {
+                    kind: wire::ReasoningKind::REASONING_KIND_SUMMARY.into(),
+                    fragment: fragment.into(),
+                    completed: true,
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(update.commits.is_empty());
+        assert!(update.live.is_empty());
+        view.enqueue(update).unwrap();
+    }
+    assert!(output.text().is_empty());
+    view.apply(PresentationUpdate {
+        live: presenter.snapshot().unwrap(),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(output.text().contains("✦ A ✦ B"));
+    assert!(output.text().contains("> draft"));
+    output.0.lock().unwrap().clear();
+    let update = presenter
+        .commit(Arc::new(
+            crate::presenters::ImmediateScrollbackValue::trusted(vec!["dialog output".into()]),
+        ))
+        .unwrap();
+    view.apply(update).unwrap();
+    let flushed = output.text();
+    assert_eq!(flushed.matches("✦ A ✦ B").count(), 1);
+    assert_eq!(flushed.matches("dialog output").count(), 1);
+    assert!(flushed.find("✦ A ✦ B").unwrap() < flushed.find("dialog output").unwrap());
+    assert!(flushed.contains("> draft"));
+    {
+        let state = view.state.lock().unwrap();
+        assert!(state.pending.is_empty());
+        for item in &state.body {
+            let rendered = item
+                .render(LiveBufferRenderContext {
+                    columns: 80,
+                    color: false,
+                })
+                .unwrap();
+            assert!(rendered.lines.iter().all(|line| !line.text().contains('✦')));
+        }
+    }
+    let before_finish = output.text().len();
+    view.apply(presenter.finish().unwrap()).unwrap();
+    assert!(!output.text()[before_finish..].contains("✦ A ✦ B"));
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn replacement_cleanup_commits_unfinished_reasoning_without_leaving_it_live() {
+    let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
+    let mut old = EnhancedSessionPresenter::new(80, false, false);
+    view.apply(
+        old.observe(&wire::Event {
+            agent_session_id: "root".into(),
+            payload: Some(wire::event::Payload::TurnStarted(
+                wire::TurnStarted::default(),
+            )),
+            ..Default::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    view.apply(
+        old.observe(&wire::Event {
+            agent_session_id: "root".into(),
+            payload: Some(wire::event::Payload::ReasoningChunk(wire::ReasoningChunk {
+                kind: wire::ReasoningKind::REASONING_KIND_SUMMARY.into(),
+                fragment: "Old planning".into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(output.text().contains("✦ Old planning"));
+    output.0.lock().unwrap().clear();
+    view.apply(old.cancel().unwrap()).unwrap();
+    assert!(old.cancel().unwrap().commits.is_empty());
+    let mut replacement = EnhancedSessionPresenter::new(80, false, false);
+    view.apply(replacement.set_session("build", "replacement").unwrap())
+        .unwrap();
+    assert_eq!(output.text().matches("✦ Old planning").count(), 1);
+    assert!(!replacement.snapshot().unwrap().iter().any(|item| {
+        item.render(LiveBufferRenderContext {
+            columns: 80,
+            color: false,
+        })
+        .unwrap()
+        .lines
+        .iter()
+        .any(|line| line.text().contains("Old planning"))
+    }));
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+}
+
 #[derive(Default)]
 struct CountedLiveValue {
     rendered: AtomicUsize,
@@ -341,7 +546,12 @@ fn body_render_cache_survives_input_changes_and_commits_but_invalidates_on_resiz
     assert_eq!(body.rendered.load(Ordering::SeqCst), 1);
     view.replace_input(vec![prompt("> ", "draft changed", 3)])
         .unwrap();
-    view.commit(CommitItem::new("second", false)).unwrap();
+    view.enqueue(PresentationUpdate {
+        commits: vec![CommitItem::new("second", false)],
+        ..Default::default()
+    })
+    .unwrap();
+    view.flush_commits(&mut view.state.lock().unwrap()).unwrap();
     assert_eq!(body.rendered.load(Ordering::SeqCst), 1);
 
     columns.store(40, Ordering::SeqCst);

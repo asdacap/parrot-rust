@@ -457,12 +457,17 @@ impl EnhancedInput {
             },
         });
         let commit: super::dialog::CommitScrollback = {
-            let frame = shared.frame.clone();
+            let shared = shared.clone();
             Arc::new(move |item, c| {
-                let frame = frame.clone();
+                let shared = shared.clone();
                 Box::pin(async move {
                     check(c)?;
-                    frame.commit(item).map_err(io_status)
+                    shared
+                        .apply_presenter(|presenter| presenter.commit(item))
+                        .map_err(|error| match error {
+                            EnhancedFailure::Rpc(status) => status,
+                            error => Status::unknown(error.to_string()),
+                        })
                 })
             })
         };
@@ -1008,14 +1013,6 @@ impl FrameView {
         self.renderer
             .draw(&items, columns, rows, &CancellationToken::new())
     }
-    fn commit(&self, item: Arc<dyn ScrollbackItem>) -> io::Result<()> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| io::Error::other("terminal frame lock poisoned"))?;
-        state.pending.push_back(item);
-        self.flush_commits(&mut state)
-    }
     fn flush_commits(&self, state: &mut FrameState) -> io::Result<()> {
         let (columns, rows) = (self.dimensions)();
         let mut items = state.body.clone();
@@ -1051,14 +1048,14 @@ impl FrameView {
         self.draw(&state)
     }
     fn enqueue(&self, update: PresentationUpdate) -> io::Result<()> {
+        if !update.errors.is_empty() {
+            return self.apply(update);
+        }
         self.state
             .lock()
             .map_err(|_| io::Error::other("terminal frame lock poisoned"))?
             .pending
             .extend(update.commits);
-        for error in update.errors {
-            writeln!(self.error.clone(), "{error}")?;
-        }
         Ok(())
     }
     fn clear(&self) -> io::Result<()> {
@@ -1214,11 +1211,16 @@ impl EnhancedSession {
                 .presenter
                 .lock()
                 .map_err(|_| Status::internal("presenter lock poisoned"))?;
-            action(&mut presenter).map_err(presenter_error)?
+            let mut update = action(&mut presenter).map_err(presenter_error)?;
+            if !update.errors.is_empty() {
+                update.live = presenter.snapshot().map_err(presenter_error)?;
+            }
+            update
         };
+        let published = !update.errors.is_empty();
         self.apply_effects(&update);
         self.frame.enqueue(update)?;
-        self.live_dirty.store(true, Ordering::Release);
+        self.live_dirty.store(!published, Ordering::Release);
         Ok(())
     }
     fn publish(&self) -> Result<(), EnhancedFailure> {

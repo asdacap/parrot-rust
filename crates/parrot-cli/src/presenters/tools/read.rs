@@ -134,17 +134,23 @@ impl ToolPresenter for ReadToolPresenter {
         call: &ToolCallPresentation,
         terminal: &ToolTerminalPresentation,
     ) -> PresenterResult<Option<Presentation>> {
-        let (label, metadata) = self.describe_call(call)?;
+        let (mut label, metadata) = self.describe_call(call)?;
         let status = terminal.resolve_status();
         let block = if matches!(
             status,
             ToolTerminalStatus::Errored | ToolTerminalStatus::ReportedFailure
         ) {
-            ToolBlock::from_error(format!(
-                "{}\n---\n{}",
-                ToolYamlFormatter::format(&call.arguments_json)?,
-                terminal.describe_block(ToolBlockKind::None).text
-            ))
+            let error = terminal.describe_block(ToolBlockKind::None).text;
+            if error == "error: no such file or directory" {
+                label.push_str(" · not found");
+                ToolBlock::empty()
+            } else {
+                ToolBlock::from_error(format!(
+                    "{}\n---\n{}",
+                    ToolYamlFormatter::format(&call.arguments_json)?,
+                    error
+                ))
+            }
         } else {
             ToolBlock::empty()
         };

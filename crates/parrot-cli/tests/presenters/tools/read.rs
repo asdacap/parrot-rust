@@ -33,12 +33,50 @@ fn rendered_with(
     .unwrap()
 }
 #[test]
-fn failed_read_shows_full_request_yaml_not_raw_json() {
+fn missing_read_is_compact_and_keeps_failure_status() {
+    for (arguments, label) in [
+        (
+            r#"{"path":"crates/parrot-domain/tests/protocol/fixtures/README.md"}"#,
+            "read crates/parrot-domain/tests/protocol/fixtures/README.md",
+        ),
+        (
+            r#"{"path":"missing-directory","offset":12,"limit":3}"#,
+            "read L12-L14 missing-directory",
+        ),
+    ] {
+        let call = ToolCallPresentation::new("read", arguments);
+        let terminal = ToolTerminalPresentation {
+            result_present: true,
+            result: "error: no such file or directory".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            rendered(&call, &terminal, false),
+            vec![format!("✗ {label} · not found")]
+        );
+        let Presentation::Tool(report) = ReadToolPresenter::default()
+            .present_terminal(&call, &terminal)
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("tool")
+        };
+        assert_eq!(report.status, Some(ToolTerminalStatus::ReportedFailure));
+        assert!(report.block.text.is_empty());
+    }
+}
+#[test]
+fn other_read_failures_show_full_request_yaml_not_raw_json() {
     let call = ToolCallPresentation::new("read", r#"{"path":"src/App.cs","offset":12,"limit":3}"#);
     for terminal in [
         ToolTerminalPresentation {
             result_present: true,
-            result: "error: no such file or directory".into(),
+            result: "error: permission denied".into(),
+            ..Default::default()
+        },
+        ToolTerminalPresentation {
+            result_present: true,
+            result: "error: no such file or directory\nadditional details".into(),
             ..Default::default()
         },
         ToolTerminalPresentation {
@@ -52,6 +90,7 @@ fn failed_read_shows_full_request_yaml_not_raw_json() {
         } else {
             &terminal.error
         };
+        let expected = expected.replace('\n', "\n  ");
         assert_eq!(
             rendered(&call, &terminal, false).join("\n"),
             format!(
@@ -350,6 +389,19 @@ fn skill_reads_use_normal_rendered_styles_and_preserve_original_failure_details(
             )
         );
     }
+    assert_eq!(
+        rendered_with(
+            &presenter,
+            &call,
+            &ToolTerminalPresentation {
+                result_present: true,
+                result: "error: no such file or directory".into(),
+                ..Default::default()
+            },
+            false
+        ),
+        [format!("✗ {label} · not found")]
+    );
     assert_eq!(call.arguments_json, arguments);
     assert_eq!(
         rendered_with(
