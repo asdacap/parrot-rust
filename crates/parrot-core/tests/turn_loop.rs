@@ -12,7 +12,7 @@ use std::{
     future::Future,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::{Context, Poll, Wake, Waker},
     thread,
@@ -220,7 +220,7 @@ struct MemoryState {
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(PendingMessage, Message)>,
     next_input: usize,
-    open: bool,
+    turn_reads: AtomicUsize,
     admissions: Vec<InputAdmission>,
     begin_message: Option<Message>,
     cancellation: Arc<CancellationSource>,
@@ -267,7 +267,7 @@ impl MemoryState {
             last_turn: None,
             pending_messages: VecDeque::new(),
             next_input: 0,
-            open: false,
+            turn_reads: AtomicUsize::new(0),
             admissions: Vec::new(),
             begin_message: None,
             cancellation: Arc::default(),
@@ -377,6 +377,7 @@ impl States for MemoryState {
     }
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
         Box::pin(async move {
+            self.turn_reads.fetch_add(1, Ordering::SeqCst);
             if self.fail_at == Some("last_turn") {
                 self.trace.step("last_turn", self.fail_at)?;
             }
@@ -396,13 +397,9 @@ impl States for MemoryState {
                 .map(|(message, _)| message.clone()))
         })
     }
-    fn is_turn_open(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move { self.open })
-    }
     fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>> {
         Box::pin(async move {
             self.step("begin")?;
-            self.open = true;
             if let Some(message) = self.begin_message.take() {
                 self.append_turn_message(message);
             }
@@ -534,7 +531,6 @@ impl States for MemoryState {
     ) -> BoxFuture<'a, Result<String, Error>> {
         Box::pin(async move {
             self.step("complete")?;
-            self.open = false;
             self.append_response(response);
             Ok(response.assistant_text.clone())
         })
@@ -696,7 +692,15 @@ fn exhausted_budget_returns_without_provider_or_terminal_state_effects() {
     assert!(state.tools.requests.lock().unwrap().is_empty());
     assert!(state.pending_messages.is_empty());
     assert_eq!(state.admissions, [InputAdmission::SteersOrNextQueued]);
-    assert!(state.open);
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "begin")
+            .count(),
+        1
+    );
     assert_eq!(
         state.last_turn.as_ref().unwrap().messages[0].role,
         Role::User
@@ -785,7 +789,17 @@ fn cleared_completion_blockers_close_only_the_final_candidate() {
         1
     );
     assert_eq!(state.trace.values().last().unwrap(), "complete");
-    assert!(!state.open);
+    assert_eq!(
+        state
+            .last_turn
+            .as_ref()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .contents,
+        [Content::Text("candidate2".into())]
+    );
 }
 
 #[test]
@@ -859,12 +873,68 @@ fn compaction_that_does_not_reduce_context_returns_the_original_provider_error()
 }
 
 #[test]
-fn open_turn_without_captured_settings_fails_before_provider_invocation() {
-    let mut state = MemoryState::new([]);
-    state.open = true;
-    assert_eq!(state.run(), Err(Error::missing_turn()));
-    assert_eq!(state.trace.values(), ["promote"]);
-    assert!(state.provider.requests.lock().unwrap().is_empty());
+fn fresh_invocations_initialize_and_capture_settings_once() {
+    let mut state = MemoryState::new([
+        Reply::invalid("invalid"),
+        Reply::TooLarge("oversized"),
+        Reply::tools("call"),
+        Reply::final_response("candidate"),
+        Reply::final_response("first answer"),
+        Reply::final_response("second answer"),
+    ]);
+    state.model = "first/model".into();
+    state.exit_blockers.push_back(vec!["work remains".into()]);
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+    let source = state.cancellation.clone();
+    let is_cancelled = || source.is_cancelled();
+    let cancelled = || source.cancelled();
+    let token = CancellationToken::new(&is_cancelled, &cancelled);
+    let mut budget = TurnBudget::new(false);
+    assert_eq!(
+        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
+        Ok(Some(Outcome::Completed("first answer".into())))
+    );
+    assert_eq!(state.requests.len(), 5);
+    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
+    assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+    assert_eq!(state.applied_results.len(), 1);
+    assert_eq!(state.completion_feedback.len(), 1);
+    assert!(
+        provider
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|request| request.model == "first/model")
+    );
+    let trace = state.trace.values();
+    assert_eq!(trace.iter().filter(|step| *step == "begin").count(), 1);
+    assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 1);
+    assert_eq!(trace.iter().filter(|step| *step == "compact").count(), 1);
+    assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 1);
+
+    state.model = "second/model".into();
+    state.enqueue_message(Delivery::Queue, "second question");
+    assert_eq!(
+        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
+        Ok(Some(Outcome::Completed("second answer".into())))
+    );
+    assert_eq!(provider.requests.lock().unwrap()[5].model, "second/model");
+    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 8);
+    let trace = state.trace.values();
+    assert_eq!(trace.iter().filter(|step| *step == "begin").count(), 2);
+    assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 2);
+    assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 2);
+
+    state.fail_at = Some("begin");
+    assert_eq!(
+        finish(run_turn(&mut state, &tools, &provider, &mut budget, token)),
+        Ok(None)
+    );
+    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 9);
+    assert_eq!(state.trace.values(), trace);
+    assert_eq!(provider.requests.lock().unwrap().len(), 6);
 }
 
 #[test]

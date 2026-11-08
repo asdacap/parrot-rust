@@ -13,6 +13,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     work: &'a dyn DrainWork,
     request_tools: Option<T::Snapshot>,
     exit_blocker_sources: Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>,
+    persistence_key: Option<TurnKey>,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -157,31 +158,21 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    async fn new(
+    fn new(
         backend: &'a RuntimeBackend<S, T>,
         binding: &'a TurnBinding<S, T>,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
-    ) -> Result<Self, TurnError> {
-        {
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            state.request_status = None;
-            state.request_accounting = None;
-            state.tool_conversation.reset_pending();
-            state
-                .tool_conversation
-                .restore_results(&mut state.conversation)
-                .await?;
-        }
-        Ok(Self {
+    ) -> Self {
+        Self {
             backend,
             binding,
             cancellation,
             work,
             request_tools: None,
             exit_blocker_sources: Vec::new(),
-        })
+            persistence_key: None,
+        }
     }
 }
 
@@ -189,44 +180,71 @@ pub(super) async fn run<S, T>(
     backend: &RuntimeBackend<S, T>,
     cancellation: &dyn Cancellation,
     work: &dyn DrainWork,
-) -> Result<Execution, TurnError>
+) -> (Result<Execution, TurnError>, Option<TurnKey>)
 where
     S: AccessSnapshot + 'static,
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    let binding = TurnBinding::new();
-    let mut states = RuntimeStates::new(backend, &binding, cancellation, work).await?;
-    let tools = RuntimeTools {
-        backend,
-        binding: &binding,
-        cancellation,
+    let initialized = {
+        let mut guard = backend.state.lock().await;
+        let state = &mut *guard;
+        state.request_status = None;
+        state.request_accounting = None;
+        state.tool_conversation.reset_pending();
+        state
+            .tool_conversation
+            .restore_results(&mut state.conversation)
+            .await
     };
-    let provider = RuntimeProvider {
-        backend,
-        binding: &binding,
-        cancellation,
-    };
-    let is_cancelled = || cancellation.is_cancelled();
-    let cancelled = || cancellation.cancelled();
-    let token = parrot_core::CancellationToken::new(&is_cancelled, &cancelled);
+    if let Err(error) = initialized {
+        return (Err(error), None);
+    }
     let mut budget = parrot_core::budget::TurnBudget::new(backend.agent_limits.disable_max_turns);
+    let mut failed_key = None;
     let outcome: Result<parrot_core::Outcome, CoreError> = async {
         let mut answer = String::new();
         loop {
-            let turn_open = backend.state.lock().await.turn.is_some();
-            if !turn_open && work.has_scheduled() {
+            if work.has_scheduled() {
                 return Ok(parrot_core::Outcome::Completed(answer));
             }
-            match parrot_core::run_turn(&mut states, &tools, &provider, &mut budget, token).await? {
-                Some(parrot_core::Outcome::Completed(completed)) => answer = completed,
-                Some(parrot_core::Outcome::BudgetExhausted) => {
+            let binding = TurnBinding::new();
+            let mut states = RuntimeStates::new(backend, &binding, cancellation, work);
+            let tools = RuntimeTools {
+                backend,
+                binding: &binding,
+                cancellation,
+            };
+            let provider = RuntimeProvider {
+                backend,
+                binding: &binding,
+                cancellation,
+            };
+            let is_cancelled = || cancellation.is_cancelled();
+            let cancelled = || cancellation.cancelled();
+            let token = parrot_core::CancellationToken::new(&is_cancelled, &cancelled);
+            match parrot_core::run_turn(&mut states, &tools, &provider, &mut budget, token).await {
+                Ok(Some(parrot_core::Outcome::Completed(completed))) => {
+                    if let Some(key) = &states.persistence_key {
+                        backend
+                            .activity
+                            .turn_finished(&key.start_event_id, "completed", None);
+                    }
+                    backend.activity.assistant_message(&completed);
+                    answer = completed;
+                }
+                Ok(Some(parrot_core::Outcome::BudgetExhausted)) => {
+                    failed_key = states.persistence_key;
                     backend
                         .fail(backend.notices.runaway.clone(), String::new())
                         .await?;
                     return Ok(parrot_core::Outcome::BudgetExhausted);
                 }
-                None => return Ok(parrot_core::Outcome::Completed(answer)),
+                Ok(None) => return Ok(parrot_core::Outcome::Completed(answer)),
+                Err(error) => {
+                    failed_key = states.persistence_key;
+                    return Err(error);
+                }
             }
         }
     }
@@ -237,13 +255,14 @@ where
         state.request_accounting = None;
         state.tool_conversation.reset_pending();
     }
-    match outcome {
+    let execution = match outcome {
         Ok(parrot_core::Outcome::Completed(answer)) => Ok(Execution::succeeded(answer)),
         Ok(parrot_core::Outcome::BudgetExhausted) => {
             Ok(Execution::failed(&backend.notices.runaway))
         }
         Err(error) => Err(TurnError::Core(error)),
-    }
+    };
+    (execution, failed_key)
 }
 
 impl<S, T> CoreStates for RuntimeStates<'_, S, T>
@@ -270,9 +289,6 @@ where
                 .take();
             Ok(())
         })
-    }
-    fn is_turn_open(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move { self.backend.state.lock().await.turn.is_some() })
     }
     fn get_last_turn(
         &self,
@@ -347,11 +363,10 @@ where
                     });
             }
             started.set_turn_started(payload);
-            state.turn = Some(TurnKey {
+            self.persistence_key = Some(TurnKey {
                 agent_session_id: backend.identity.session_id.clone(),
                 start_event_id: started.id.clone(),
             });
-            state.diagnostic_turn = Some(started.id.clone());
             backend.activity.turn_started(&started.id);
             backend.emit(started, cancellation).await?;
             state
@@ -693,13 +708,13 @@ where
             work.join_mutations()
                 .await
                 .map_err(|e| TurnError::Service(e.to_string()))?;
-            backend.close_turn(state, completed, cancellation).await?;
-            if let Some(turn) = state.diagnostic_turn.take() {
-                backend.activity.turn_finished(&turn, "completed", None);
-            }
+            let key = self
+                .persistence_key
+                .as_ref()
+                .ok_or_else(|| TurnError::Service("turn start is unavailable".into()))?;
             backend
-                .activity
-                .assistant_message(&completed.assistant_text);
+                .close_turn(state, key, completed, cancellation)
+                .await?;
             Ok(completed.assistant_text.clone())
         })
     }

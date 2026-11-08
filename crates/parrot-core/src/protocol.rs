@@ -83,8 +83,6 @@ pub trait States: Send {
     /// Peeks at the next durable pending input header without reserving, promoting,
     /// or materializing its content.
     fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>>;
-    /// Reports whether a durable turn is already open.
-    fn is_turn_open(&self) -> BoxFuture<'_, bool>;
     /// Opens a turn and freezes its model, profile, and authority privately.
     fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnOptions, Error>>;
     /// Promotes all currently pending steers, or one queued input when permitted,
@@ -315,7 +313,6 @@ pub enum ErrorKind {
     Failed,
     Cancelled,
     RequestTooLarge,
-    MissingTurn,
 }
 
 /// Bounded diagnostic metadata, separate from error messages and provider bodies.
@@ -383,15 +380,6 @@ impl Error {
             kind: ErrorKind::RequestTooLarge,
             code: ErrorCode::RequestTooLarge,
             message: message.into(),
-            response_body: String::new(),
-        }
-    }
-
-    pub fn missing_turn() -> Self {
-        Self {
-            kind: ErrorKind::MissingTurn,
-            code: ErrorCode::Unexpected,
-            message: "turn selection is unavailable".into(),
             response_body: String::new(),
         }
     }
