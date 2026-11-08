@@ -272,6 +272,7 @@ fn actual_factory_registers_every_source_presenter_once() {
         "read",
         "set_agent_tasks",
         "get_agent_tasks",
+        "progress",
         "question",
         "set_checkpoint",
         "set_exit_reminder",

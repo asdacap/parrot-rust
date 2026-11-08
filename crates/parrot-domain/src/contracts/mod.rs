@@ -16,6 +16,7 @@ pub mod interactions;
 pub mod packaged_files;
 pub mod paths;
 pub mod processes;
+pub mod progress;
 pub mod providers;
 pub mod runtime;
 pub mod security;

@@ -7,7 +7,10 @@ use parrot_domain::{
         security::{AccessSnapshot, InvocationContext},
         tools::Tool,
     },
-    values::context::{ContextSize, ContextSnapshot},
+    values::{
+        context::{ContextSize, ContextSnapshot},
+        progress::ProgressUpdate,
+    },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{routing::aliases::ResolvedModelSelection, sessions};
@@ -346,6 +349,13 @@ where
     }
     fn reminder_titles(&self) -> BoxFuture<'_, Vec<String>> {
         self.ancillary.reminder_titles()
+    }
+    fn update_progress<'a>(
+        &'a self,
+        update: ProgressUpdate,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<bool, Failure>> {
+        self.ancillary.update_progress(update, cancellation)
     }
     fn runtime_status<'a>(
         &'a self,

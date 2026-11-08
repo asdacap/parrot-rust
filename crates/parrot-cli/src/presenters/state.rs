@@ -50,6 +50,7 @@ pub struct AgentSessionState {
     pub statistics: Option<wire::AgentStatisticsUpdatedEvent>,
     pub model_alias_icon: Option<LiveModelAliasIcon>,
     pub agent_task_progress: Option<wire::AgentTaskProgressSnapshot>,
+    pub(crate) agent_progress: super::progress::ProgressInventory,
     pub is_reasoning_summary: bool,
 }
 

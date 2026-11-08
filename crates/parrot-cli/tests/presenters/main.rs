@@ -24,6 +24,7 @@ mod tools {
     mod glob;
     mod image_generation;
     mod interrupt_process;
+    mod progress;
     mod question;
     mod queue_push;
     mod queue_take;

@@ -31,6 +31,7 @@ impl ToolPresenterRegistry {
             Arc::new(glob::GlobToolPresenter),
             Arc::new(image_generation::ImageGenerationToolPresenter),
             Arc::new(interrupt_process::InterruptProcessToolPresenter),
+            Arc::new(progress::ProgressToolPresenter),
             Arc::new(read_image::ReadImageToolPresenter),
             Arc::new(read::ReadToolPresenter::new(skill_paths)),
             Arc::new(set_agent_tasks::SetAgentTasksToolPresenter::new(

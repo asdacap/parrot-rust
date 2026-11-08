@@ -213,6 +213,59 @@ assignment. They do not promise exactly-once external tool effects: if a process
 dies after an effect but before its terminal settlement commits, unresolved-tool
 recovery may invoke it again. Do not treat resume as a rollback of external work.
 
+## Agent progress
+
+The `progress` tool reports completed `steps` against positive `total_steps`, with
+an optional `current_step` description. Each agent has one report. An update
+replaces its counts and description; counts may decrease or the total may change
+when work is replanned. Omitting the description clears the previous one.
+
+Active progress blocks that agent's normal completion, including at 100%. The
+agent must call `progress` with `close: true` to close it. A close-only call needs
+no counts, and closing below the total is allowed: it dismisses the report rather
+than asserting that all work succeeded. Repeated closes are harmless. A later
+update starts a new report. Closing progress does not clear goals, ordinary exit
+reminders, or other active work, and `clear_exit_reminder` cannot close progress.
+
+Each agent stores its versioned snapshot in its own directory:
+
+- Root: `root-agents/<root-name>/progress.json`.
+- Child: `root-agents/<root-name>/<child-name>/.../progress.json`.
+
+These paths are relative to the selected session directory, not the project
+workspace or the agent's `scratch/` subdirectory. The JSON contains
+`schema_version`, `owner_session_id`, `revision`, and `progress`. An active
+`progress` value contains `steps`, `total_steps`, and nullable `current_step`.
+Closing writes `progress: null` while retaining the owner and revision. The
+existing `agent-state.json` format is unchanged. An absent progress file means
+inactive progress, so older sessions need no migration. Opening an agent that has
+never reported progress does not create a file.
+
+The enhanced CLI shows independent labeled bars for the main agent and reporting
+children. Reattach or reopen restores the current bars without another progress
+call. The basic CLI and web UI retain their generic tool presentation rather than
+adding a progress widget. Interrupting an agent or closing the application does
+not close its saved report. User interruption and shutdown remain available, but
+the report blocks that agent's next normal completion until explicitly closed.
+Saved progress alone does not activate a provider or resume an idle agent.
+
+Tool allowlists and disabled-tool settings still apply. If `progress` is disabled
+while an agent has an active saved report, re-enable it before expecting normal
+completion. The runtime does not silently close the report or bypass the policy.
+
+Snapshot replacement is atomic within the agent directory, using
+`progress.json.tmp` as staging. A pre-commit error preserves the prior report. A
+failure after rename can mean the new file is already visible; the runtime
+reconciles from the file or fails closed rather than claiming rollback. Corrupt,
+unsupported, or wrong-owner files are errors, not an implicit close. Preserve the
+session and diagnostic instead of editing or deleting state to bypass the gate;
+there is no automatic repair or orphan-directory recovery.
+
+Back up progress files with the rest of the selected session after closing its
+owner. They are independent of SQLite conversation and tool-settlement history,
+not a transaction with it. Absolute-count replacements and closes can be retried,
+but this does not promise exactly-once external tool effects.
+
 ## Ownership, takeover and concurrency
 
 **Never use .NET and Rust concurrently on the same workspace**, even if their

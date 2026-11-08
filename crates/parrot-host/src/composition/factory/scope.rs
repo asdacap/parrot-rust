@@ -29,6 +29,7 @@ use parrot_domain::{
         config::ModelProfiles,
         context::{ContextSize, ContextSnapshot},
         identifiers::Identifier,
+        progress::ProgressUpdate,
     },
 };
 use parrot_foundation::{
@@ -56,6 +57,7 @@ use parrot_runtime::{
         },
         completion::SessionCompletion,
         exit_reminders::{ExitReminders, ReminderError},
+        progress::{AgentProgress, ProgressBlocker, ProgressSnapshotPublisher},
         runtime_tree::{RegistryRuntimeTreeSource, RuntimeTreeStatusProvider},
         status::{
             RuntimeStatus, StatusError, StatusObservation, StatusProvider, StatusQuery,
@@ -99,6 +101,7 @@ use parrot_storage::{
     conversation::AgentHistoryView,
     diagnostics::{DiagnosticEvent, DiagnosticSeverity},
     events::NeverCancelled,
+    progress::FileProgressStore,
 };
 use parrot_tools::{
     agents::ResultTemplates,
@@ -923,6 +926,7 @@ struct ScopedSessionServices<S: RestrictableAccessSnapshot + 'static> {
     link: Arc<ScopeLink<S>>,
     history: AgentHistoryView,
     reminders: Arc<ExitReminders<Publisher>>,
+    progress: Arc<AgentProgress>,
     status: Arc<ScopedTurnStatus<S>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionServices<S> {
@@ -971,6 +975,21 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
     }
     fn reminder_titles(&self) -> BoxFuture<'_, Vec<String>> {
         Box::pin(self.reminders.titles())
+    }
+    fn update_progress<'a>(
+        &'a self,
+        update: ProgressUpdate,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<bool, Failure>> {
+        Box::pin(async move {
+            cancellation
+                .check()
+                .map_err(|_| OperationError::Cancelled)?;
+            self.progress
+                .update(update)
+                .await
+                .map_err(operation_failure)
+        })
     }
     fn runtime_status<'a>(
         &'a self,
@@ -1474,9 +1493,21 @@ where
                     )
                     .map_err(child)?,
             );
+            let mut progress_owner: Option<Arc<AgentProgress>> = None;
             let mut session: Option<Arc<RuntimeSession<S>>> = None;
             let mut controller: Option<Arc<ScopedTaskController<S, ContextSelection<S>>>> = None;
             let constructed = async {
+                let store = Arc::new(
+                    FileProgressStore::open(scratch.root(), identity.session.session_id.clone())
+                        .await
+                        .map_err(child)?,
+                );
+                let progress = Arc::new(
+                    AgentProgress::new(store, identity.session.session_id.clone())
+                        .await
+                        .map_err(child)?,
+                );
+                progress_owner = Some(progress.clone());
                 let permission =
                     (self.config.permission_authority)(self.user.clone(), identity.clone())
                         .map_err(child)?;
@@ -1521,6 +1552,10 @@ where
                 let child_work = Arc::new(BoundWork::new());
                 let active_work = Arc::new(ActiveWorkReminder {
                     blockers: vec![
+                        Arc::new(ProgressBlocker {
+                            progress: progress.clone(),
+                            templates: self.user.templates.clone(),
+                        }),
                         child_work.clone(),
                         Arc::new(ProcessBlocker {
                             processes: process_status.clone(),
@@ -1577,6 +1612,7 @@ where
                     link: link.clone(),
                     history: prepared.history.clone(),
                     reminders: reminders.clone(),
+                    progress: progress.clone(),
                     status: status.clone(),
                 });
                 let context_control = Arc::new(ContextControl::new(ancillary.clone()));
@@ -1894,6 +1930,7 @@ where
                         ServiceRegistration::new(tasks.scheduler().clone()),
                         ServiceRegistration::new(tasks.clone()),
                         ServiceRegistration::new(queues.clone()),
+                        ServiceRegistration::new(progress.clone()),
                         ServiceRegistration::new(processes.clone()),
                         ServiceRegistration::new::<dyn ProcessStatusSource>(process_status),
                         ServiceRegistration::new(agents.clone()),
@@ -1905,6 +1942,10 @@ where
                         ServiceRegistration::new(binding),
                     ],
                     publishers: vec![
+                        Arc::new(ProgressSnapshotPublisher::new(
+                            progress.clone(),
+                            self.user.broker.clone(),
+                        )),
                         Arc::new(QueueSnapshotPublisher::new(
                             queues.clone(),
                             self.user.broker.clone(),
@@ -1920,6 +1961,7 @@ where
                         Arc::new(ProcessWork(processes.clone())),
                     ],
                     resources: vec![
+                        Arc::new(ProgressClose(progress.clone())),
                         Arc::new(ProcessWork(processes.clone())),
                         Arc::new(AsksClose(asks.clone())),
                     ],
@@ -1952,6 +1994,11 @@ where
                         failure = io_child(error);
                     }
                     asks.close();
+                    if let Some(progress) = progress_owner {
+                        if let Err(error) = progress.stop_publication().await {
+                            failure = child(error);
+                        }
+                    }
                     if let Err(error) = queues.dispose() {
                         failure = error.into();
                     }
@@ -1968,5 +2015,13 @@ impl ScopeLifetime for AsksClose {
     fn close(&self) -> BoxFuture<'_, ChildResult<()>> {
         self.0.close();
         Box::pin(async { Ok(()) })
+    }
+}
+
+struct ProgressClose(Arc<AgentProgress>);
+impl ScopeLifetime for ProgressClose {
+    type Error = ChildError;
+    fn close(&self) -> BoxFuture<'_, ChildResult<()>> {
+        Box::pin(async move { self.0.stop_publication().await.map_err(child) })
     }
 }

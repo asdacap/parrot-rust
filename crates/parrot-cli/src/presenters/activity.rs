@@ -50,6 +50,7 @@ pub(crate) enum ActivityValue {
     Final(String),
     NeutralAgent(String),
     Queue(queue::QueueState),
+    Progress(parrot_domain::values::progress::Progress),
     Process {
         process: process::ActiveShellProcess,
         elapsed: Duration,
@@ -237,6 +238,12 @@ impl ActivityValue {
                 )],
                 LiveBufferRetention::Fixed,
                 muted_style,
+            ),
+            Self::Progress(progress) => (
+                String::new(),
+                vec![super::progress::format_progress(progress, columns)],
+                LiveBufferRetention::Fixed,
+                marker_style,
             ),
             Self::Queue(queue) => {
                 let name = TerminalText::sanitize_line(&queue.name).trim().to_owned();
@@ -1161,6 +1168,11 @@ impl RawActivityView {
             Some(Payload::ToolFinished(_))
             | Some(Payload::ToolCancelled(_))
             | Some(Payload::ToolError(_)) => self.finish_tool(published, &mut commits)?,
+            Some(Payload::ToolSnapshot(inventory))
+                if inventory.kind == parrot_domain::values::progress::PROGRESS_INVENTORY_KIND =>
+            {
+                self.state(owner).agent_progress.observe(owner, inventory)?;
+            }
             Some(Payload::ToolSnapshot(_)) => {
                 if let Some(progress) = AgentTaskProgressFormatter::try_read(published)? {
                     if !self.shutdown && self.state(owner).offer_agent_task_progress(&progress) {
@@ -1895,6 +1907,12 @@ impl RawActivityView {
             .chain(
                 self.agents
                     .iter()
+                    .filter(|(_, state)| state.agent_progress.progress.is_some())
+                    .map(|(owner, _)| owner.clone()),
+            )
+            .chain(
+                self.agents
+                    .iter()
                     .filter(|(owner, state)| {
                         state.has_reasoning() && self.hierarchy.is_child(owner)
                     })
@@ -1981,6 +1999,19 @@ impl RawActivityView {
             ));
         }
         for (owner, state) in &self.agents {
+            if let Some(progress) = &state.agent_progress.progress {
+                rows.push((
+                    owner.clone(),
+                    0,
+                    "progress".to_owned(),
+                    Arc::new(HierarchicalLiveValue {
+                        value: ActivityValue::Progress(progress.clone()).into(),
+                        depth: self.hierarchy.get_depth(owner),
+                        label: Some(self.hierarchy.resolve_agent_reference(owner, owner)),
+                        icon: None,
+                    }),
+                ));
+            }
             if state.has_reasoning() && self.hierarchy.is_child(owner) {
                 rows.push((
                     owner.clone(),

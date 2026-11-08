@@ -7,12 +7,13 @@ use parrot_domain::{
     },
     values::{
         context::{ContextSize, ContextSnapshot},
+        progress::{ProgressSnapshot, ProgressUpdate},
         tools::ConfiguredToolDefinition,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_tools::session::{
-    Compaction, Failure, Invocation, Kind, Output, SessionServices, SessionTool,
+    Compaction, Failure, FailureKind, Invocation, Kind, Output, SessionServices, SessionTool,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -57,6 +58,7 @@ pub enum Stage {
     Runtime,
     Statistics,
     Compact,
+    Progress,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,6 +67,7 @@ pub enum Call {
     Set(String, String),
     Clear(String),
     Titles,
+    Progress(ProgressUpdate),
     Runtime(String),
     Statistics(String),
     Compact(String, Option<ContextSize>),
@@ -75,6 +78,7 @@ pub struct State {
     pub calls: Vec<Call>,
     pub checkpoints: Vec<(String, i64, String)>,
     pub reminders: Vec<(String, String)>,
+    pub progress: ProgressSnapshot,
     pub failure: Option<(Stage, Failure)>,
     pub checkpoint_gate: Option<Arc<tokio::sync::Notify>>,
     pub reminder_titles_gate: Option<Arc<tokio::sync::Notify>>,
@@ -89,6 +93,7 @@ impl Default for State {
             calls: Vec::new(),
             checkpoints: Vec::new(),
             reminders: Vec::new(),
+            progress: ProgressSnapshot::new("session-test".into()),
             failure: None,
             checkpoint_gate: None,
             reminder_titles_gate: None,
@@ -191,6 +196,21 @@ impl SessionServices for Services {
             } else {
                 Ok(false)
             }
+        })
+    }
+
+    fn update_progress<'a>(
+        &'a self,
+        update: ProgressUpdate,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<bool, Failure>> {
+        Box::pin(async move {
+            let mut state = self.0.lock().unwrap();
+            state.calls.push(Call::Progress(update.clone()));
+            state.result(Stage::Progress, cancellation)?;
+            state.progress.apply(update).map_err(|error| {
+                OperationError::Failed(Failure::new(FailureKind::Argument, error.to_string()))
+            })
         })
     }
 

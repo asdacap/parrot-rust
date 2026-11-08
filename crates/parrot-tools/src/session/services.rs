@@ -3,7 +3,10 @@ use parrot_domain::{
         async_ops::{BoxFuture, Cancellation, OperationResult},
         security::AccessSnapshot,
     },
-    values::context::{ContextSize, ContextSnapshot},
+    values::{
+        context::{ContextSize, ContextSnapshot},
+        progress::ProgressUpdate,
+    },
 };
 use std::fmt;
 
@@ -76,6 +79,14 @@ pub trait SessionServices: Send + Sync {
     fn clear_reminder<'a>(
         &'a self,
         title: &'a str,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<bool, Failure>>;
+
+    /// Replaces or explicitly closes this agent's progress. False means it was
+    /// already closed; admitted durable mutations must be retained and joined.
+    fn update_progress<'a>(
+        &'a self,
+        update: ProgressUpdate,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<bool, Failure>>;
 

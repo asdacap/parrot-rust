@@ -358,6 +358,22 @@ prompt_templates:
     template: 'A new exit reminder was set: {reminder}'
     allowed_arguments: [reminder]
     required_arguments: [reminder]
+  progress-tool.updated:
+    template: 'Progress updated: {steps}/{total_steps}.'
+    allowed_arguments: [steps, total_steps]
+    required_arguments: [steps, total_steps]
+  progress-tool.closed:
+    template: 'Progress closed.'
+    allowed_arguments: []
+    required_arguments: []
+  progress-tool.already-closed:
+    template: 'Progress is already closed.'
+    allowed_arguments: []
+    required_arguments: []
+  agent-session.progress-reminder:
+    template: 'Your progress report is still active at {steps}/{total_steps}. {current_step} Call progress with close: true before finishing. Reaching the total does not close progress; closing below the total is allowed.'
+    allowed_arguments: [steps, total_steps, current_step]
+    required_arguments: [steps, total_steps, current_step]
   set-exit-reminder-tool.set:
     template: 'Exit reminder set: {title}: {description}'
     allowed_arguments: [title, description]
