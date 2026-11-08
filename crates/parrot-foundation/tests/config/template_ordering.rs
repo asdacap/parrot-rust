@@ -67,7 +67,7 @@ fn a008_retained_descriptor_order_matches_source_inventory_with_exact_ten_mappin
         Ok(())
     })
     .unwrap();
-    assert_eq!(descriptors.len(), 101);
+    assert_eq!(descriptors.len(), 100);
     descriptors.retain(|row| {
         !crate::fixtures::CONSOLIDATED_IDS.contains(&row["id"].as_str().unwrap())
             && !crate::fixtures::AGENT_COMMUNICATION_IDS.contains(&row["id"].as_str().unwrap())

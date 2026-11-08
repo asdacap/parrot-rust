@@ -79,7 +79,7 @@ system_prompts:
 
     ## Queues
 
-    Queues are for more than 20 work items or multiple producer subagents. For many work items, use a parent-owned queue and multiple workers. Keep one work item per entry (flatten batches), one item type and shared consumer prompt per queue, and separate queues by role. Allow batched pulls; specify a reasonable batch size. If each agent would take only one item, spawn agents directly. Agents resolve their own queues first and can also access only their direct parent's queues; names must be unique across that edge in either creation order, but siblings may reuse names. Root queues last for the user session; child queues last for their owner's lifetime. Producers close with queue_push(close:true) when no more items will arrive; the items list may be empty. Consumers continue until queue_take reports closed with no items; an open empty timeout means keep taking.
+    For more than 20 work items or multiple producer subagents, use the `$queue` skill for shared file-based queues. Pass workers explicit absolute queue paths under the owner's agent scratch directory. The owner reports aggregate waiting-item counts through `progress`. If each agent would take only one item, spawn agents directly.
 
   runtime:system-context:03-subagent-pattern: >-
     # Common subagent spawn strategy
@@ -114,14 +114,14 @@ system_prompts:
 
     ## Work Queue
 
-    - Agent A creates a work-item queue and spawns N equivalent agents.
-    - Each subagent is instructed to keep taking work items from its direct parent's queue.
-    - Agent A waits until all agents are finished.
+    - Agent A uses the `$queue` skill to create a work-item queue and spawns N equivalent agents.
+    - Each subagent receives the absolute queue file path and a shared consumer assignment.
+    - Agent A reports the remaining waiting items through `progress` and waits until all agents are finished.
     - This is useful for many work items and unnecessary for a small task.
 
     ## Pipeline graph
 
-    - Agent A creates a graph whose edges are queues and whose nodes are groups of parallel agents.
+    - Agent A uses the `$queue` skill to create a graph whose edges are queues and whose nodes are groups of parallel agents.
     - For example:
       - Agent A creates three queues:
         - request queue
@@ -131,7 +131,7 @@ system_prompts:
         - request spawners create requests
         - workers take requests and push them to the verify queue, or skip directly to the result queue
         - verifiers take items from the verify queue and send them to results or back to requests for more work
-      - Agent A takes from the result queue.
+      - Agent A takes from the result queue and reports aggregate waiting-item counts through `progress`.
 
   runtime:system-context:04-behavior-guideline: >-
 
@@ -259,8 +259,7 @@ prompt_templates:
     engine: scriban
     template: |-
       {{ if section == "tree" }}Runtime:{{ for agent in agents }}
-      {{ agent.indent }}- agent: {{ agent.name }}{{ if agent.status != "" }} ({{ agent.status }}){{ end }}{{ for queue in agent.queues }}
-      {{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items{{ if queue.description != "" }}, description: {{ queue.description }}{{ end }}){{ end }}{{ for process in agent.processes }}
+      {{ agent.indent }}- agent: {{ agent.name }}{{ if agent.status != "" }} ({{ agent.status }}){{ end }}{{ for process in agent.processes }}
       {{ agent.indent }}  - process: {{ process.id }} (shell, {{ process.state }}, name: {{ process.name }}){{ end }}{{ end }}{{ else }}{{ for run in runs }}{{ if !for.first }}
       {{ end }}- AgentTask graph: {{ run.run_id }} (name: {{ run.display_name }}, owner: {{ run.owner_session_id }}, revision: {{ run.revision }}){{ for node in run.nodes }}
       {{ node.indent }}- task: {{ node.name }} ({{ node.status }}, description: {{ node.description }}){{ end }}{{ end }}{{ end }}
@@ -296,14 +295,6 @@ prompt_templates:
       Use the wait tool until no direct subagent, AgentTask graph, or process remains. To interrupt a direct subagent, use agent_send to instruct it to complete. To interrupt a process, use interrupt_process. Do not finish this turn until all listed work has completed or been interrupted.
     allowed_arguments: [active_work]
     required_arguments: [active_work]
-  agent-session.nonempty-queues-reminder:
-    engine: minijinja
-    template: |-
-      This turn must not exit while queues owned by this agent contain items.
-      {% for queue in queues %}- {{ queue.name }} (remaining items: {{ queue.size }})
-      {% endfor %}Drain every listed queue before finishing, even when asked to stop. Use queue_take to consume items or coordinate consumers and wait until all owned queues are empty. Closing a queue does not drain it. There is no waiver or abandon action. Parent-owned queues do not block completion; an empty open queue does not block completion.
-    allowed_arguments: [queues]
-    required_arguments: [queues]
   agent-session.active-work-agent-tasks-heading:
     template: 'Running AgentTask graphs'
     allowed_arguments: []

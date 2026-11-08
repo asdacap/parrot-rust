@@ -44,9 +44,8 @@ pub const CONSOLIDATED_SOURCE_IDS: [&str; 13] = [
     "compact-context-tool.no-op-with-limit",
     "compact-context-tool.unavailable-with-limit",
 ];
-pub const CONSOLIDATED_IDS: [&str; 3] = [
+pub const CONSOLIDATED_IDS: [&str; 2] = [
     "agent-task.assignment-context",
-    "agent-session.nonempty-queues-reminder",
     "compact-context-tool.result",
 ];
 

@@ -1,8 +1,18 @@
-//! Exact post-source changes: monitor 796d57f and composite 3f4782c/d641aa5.
+//! Exact post-source changes: monitor 796d57f, composite 3f4782c/d641aa5,
+//! and native queue removal.
 //! Pinned independent fixtures stay unchanged.
 
 pub fn align_product_text(id: &str, text: &str) -> String {
     let (original, current) = match id {
+        "status.runtime" => (
+            concat!(
+                "{% for queue in agent.queues %}\n",
+                "{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items",
+                "{% if queue.description != \"\" %}, description: {{ queue.description }}",
+                "{% endif %}){% endfor %}"
+            ),
+            "",
+        ),
         "monitor.started" => (
             "a running monitor does not keep this turn open",
             "a running monitor keeps this turn open",
