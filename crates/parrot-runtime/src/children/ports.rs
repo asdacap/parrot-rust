@@ -174,7 +174,7 @@ pub struct ScopeParts<S: RestrictableAccessSnapshot + 'static> {
     pub services: Vec<ServiceRegistration>,
     pub publishers: Vec<Arc<dyn SnapshotPublisher>>,
     pub work: Vec<Arc<dyn WorkOwner<Error = super::ChildError>>>,
-    /// Composition disposal order, followed by queue disposal and question close.
+    /// Composition disposal order, followed by final resource disposal.
     pub resources: Vec<Arc<dyn ScopeResource<Error = super::ChildError>>>,
     pub final_resources: Vec<Arc<dyn ScopeResource<Error = super::ChildError>>>,
 }

@@ -46,7 +46,6 @@ use parrot_host::composition::{
         },
     },
     protocol::{self, HostedSession, HostedSessionFactory, RpcCode, RpcError},
-    queues::ScopedQueueBackend,
 };
 use parrot_provider::{
     catalogs::Model,
@@ -62,7 +61,6 @@ use parrot_provider::{
     },
 };
 use parrot_runtime::{
-    agent_queues::AgentQueues,
     agent_turn::{
         lifecycle::DrainBackend,
         provider_call::OutputWriter,
@@ -106,10 +104,7 @@ use parrot_tools::{
         Failure, FailureKind, PermissionReply, PermissionServices, WriteTarget, WriteTargetKind,
     },
     task_artifacts::TaskArtifactParserAdapter,
-    tasks_queues::{
-        ToolInvocation,
-        queues::{QueueDiagnostic, QueueDiagnostics, QueueTool, QueueToolKind},
-    },
+    tasks_queues::ToolInvocation,
     web_fetch::{
         FetchError, GzipDecoder, Options, PublicAddressPolicy, Resolver, ResponseBody, Transport,
         TransportSession, WebFetcher,
@@ -511,9 +506,6 @@ impl ChildDiagnostics for Diagnostics {
 }
 impl InteractionDiagnostics for Diagnostics {
     fn write(&self, _: BrokerDiagnostic) {}
-}
-impl QueueDiagnostics for Diagnostics {
-    fn record(&self, _: QueueDiagnostic) {}
 }
 struct Policies;
 impl RetainedModePolicyMaterializer<Security> for Policies {
@@ -1075,17 +1067,23 @@ async fn actual_factory_binds_same_identity_selection_scheduler_and_task_owner_b
 }
 
 #[tokio::test]
-async fn actual_scoped_queue_tool_publishes_inventory_and_blocks_completion_until_drained() {
+async fn legacy_queue_files_do_not_block_completion_or_publish_inventory() {
     let fixture = Fixture::new(false, false).await;
     let hosted = fixture.open().await.unwrap();
     let root = fixture.root();
     let user = fixture.user();
-    let registry = user.registry().unwrap();
-    let queues = root.get_service::<AgentQueues<Security>>().unwrap();
     let services = root
         .get_service::<AgentSessionServices<Security>>()
         .unwrap();
-    let definitions = catalog::configured_definitions(&fixture.configuration);
+    let directory = user
+        .resources
+        .agents_directory()
+        .join(&root.identity().session.name)
+        .join("queues");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("legacy.jsonl");
+    let contents = b"malformed legacy queue containing waiting items";
+    std::fs::write(&path, contents).unwrap();
     let subscription = user
         .broker
         .listen(
@@ -1095,86 +1093,15 @@ async fn actual_scoped_queue_tool_publishes_inventory_and_blocks_completion_unti
         )
         .await
         .unwrap();
-    for (kind, input) in [
-        (QueueToolKind::Create, json!({"name":"actual-work"})),
-        (
-            QueueToolKind::Push,
-            json!({"name":"actual-work", "items":["actual payload"]}),
-        ),
-    ] {
-        let tool = QueueTool::new(
-            kind,
-            &definitions,
-            Arc::new(ScopedQueueBackend::new(root.clone(), registry.clone()).unwrap()),
-            Arc::new(Files::<Security>(PhantomData)),
-            Arc::new(FixtureClock::default()),
-            Arc::new(Diagnostics),
-        )
-        .unwrap();
-        let output = tool
-            .invoke(
-                ToolInvocation {
-                    call_id: "queue-tool-call".into(),
-                    arguments_json: input.to_string(),
-                    assistant_sequence: 1,
-                },
-                InvocationContext::new(Security, (), &NeverCancelled),
-            )
-            .await
-            .unwrap();
-        let value: Value = serde_json::from_str(&output.text).unwrap();
-        assert_eq!(value["name"], "actual-work");
-    }
-    assert!(Arc::ptr_eq(
-        &queues,
-        &root.get_service::<AgentQueues<Security>>().unwrap()
-    ));
-    assert!(
-        services
-            .active_work
-            .build()
-            .await
-            .unwrap()
-            .unwrap()
-            .contains("actual-work")
-    );
-    let tool = QueueTool::new(
-        QueueToolKind::Take,
-        &definitions,
-        Arc::new(ScopedQueueBackend::new(root.clone(), registry.clone()).unwrap()),
-        Arc::new(Files::<Security>(PhantomData)),
-        Arc::new(FixtureClock::default()),
-        Arc::new(Diagnostics),
-    )
-    .unwrap();
-    let output = tool
-        .invoke(
-            ToolInvocation {
-                call_id: "queue-take-call".into(),
-                arguments_json: json!({"name":"actual-work", "yield_after_ms":0}).to_string(),
-                assistant_sequence: 1,
-            },
-            InvocationContext::new(Security, (), &NeverCancelled),
-        )
-        .await
-        .unwrap();
-    let value: Value = serde_json::from_str(&output.text).unwrap();
-    assert_eq!(value["items"], json!(["actual payload"]));
     assert!(services.active_work.build().await.unwrap().is_none());
     tokio::time::timeout(Duration::from_secs(10), hosted.close())
         .await
         .expect("actual hosted shutdown timed out")
         .unwrap();
-    let mut inventories = 0;
     while let Some(event) = subscription.next(&NeverCancelled).await.unwrap() {
-        if event.has_tool_snapshot() && event.tool_snapshot().kind == "queue" {
-            inventories += 1;
-        }
+        assert!(!event.has_tool_snapshot() || event.tool_snapshot().kind != "queue");
     }
-    assert!(
-        inventories > 0,
-        "actual queue publisher ran and broker completed after scope close"
-    );
+    assert_eq!(std::fs::read(&path).unwrap(), contents);
     user.lease.close().await.unwrap();
 }
 
@@ -1943,7 +1870,7 @@ async fn actual_drain_and_external_observer_share_live_routing_and_same_prepared
     let mut updated = original.clone();
     updated.security = Arc::new(Security);
     updated.profile.maximum_requests = 3;
-    updated.profile.allowed_tools = Some(vec!["queue_info".into()]);
+    updated.profile.allowed_tools = Some(vec!["read".into()]);
     session.backend().update_selection(updated.clone()).unwrap();
     assert_same_policy(&prepared.capture().unwrap(), &updated);
     assert!(!Arc::ptr_eq(&original.security, &updated.security));
@@ -1986,7 +1913,7 @@ async fn actual_drain_and_external_observer_share_live_routing_and_same_prepared
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["queue_info"]
+        vec!["read"]
     );
     assert!(
         fixture.requests.lock().unwrap().is_empty(),
@@ -2035,7 +1962,7 @@ async fn actual_drain_and_external_observer_share_live_routing_and_same_prepared
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["queue_info"]
+            vec!["read"]
         );
     }
     {

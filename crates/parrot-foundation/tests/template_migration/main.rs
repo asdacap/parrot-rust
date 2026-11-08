@@ -118,7 +118,7 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
     .collect();
     assert_eq!(approved, expected);
     assert_eq!(mapping(old_templates).len(), 75);
-    assert_eq!(mapping(new_templates).len(), 76);
+    assert_eq!(mapping(new_templates).len(), 80);
     let legacy_warning = field(new_templates, "session.legacy-resume-warning");
     assert_eq!(mapping(legacy_warning).len(), 3);
     assert!(sequence(field(legacy_warning, "allowed_arguments")).is_empty());
@@ -130,7 +130,11 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
     );
     let retained_templates = mapping(new_templates)
         .iter()
-        .filter(|(id, _)| scalar(id) != Some("session.legacy-resume-warning"))
+        .filter(|(id, _)| {
+            let id = scalar(id).unwrap();
+            id != "session.legacy-resume-warning"
+                && (!NATIVE_SCALAR_IDS.contains(&id) || field_opt(old_templates, id).is_some())
+        })
         .collect::<Vec<_>>();
     assert_eq!(mapping(old_templates).len(), retained_templates.len());
     for ((old_id, old_fields), (new_id, new_fields)) in
@@ -155,16 +159,12 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
                     .iter()
                     .find(|row| row["id"] == id)
                     .unwrap();
-                assert_eq!(
-                    scalar(old_value).unwrap(),
-                    product_changes::align_product_text(id, row["old"]["text"].as_str().unwrap()),
-                    "{id}"
-                );
-                assert_eq!(
-                    scalar(new_value).unwrap(),
-                    product_changes::align_product_text(id, row["new"]["text"].as_str().unwrap()),
-                    "{id}"
-                );
+                let old_text =
+                    product_changes::align_product_text(id, row["old"]["text"].as_str().unwrap());
+                let new_text =
+                    product_changes::align_product_text(id, row["new"]["text"].as_str().unwrap());
+                assert_eq!(scalar(old_value), Some(old_text.as_str()), "{id}");
+                assert_eq!(scalar(new_value), Some(new_text.as_str()), "{id}");
             } else {
                 assert_eq!(
                     old_value, new_value,
@@ -208,7 +208,7 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
                 .unwrap_or("scalar")
                 == "scalar")
             .count(),
-        64
+        69
     );
 }
 
@@ -259,10 +259,16 @@ const CONSOLIDATED_SOURCE_IDS: [&str; 13] = [
     "compact-context-tool.no-op-with-limit",
     "compact-context-tool.unavailable-with-limit",
 ];
-const CONSOLIDATED_IDS: [&str; 3] = [
+const CONSOLIDATED_IDS: [&str; 2] = [
     "agent-task.assignment-context",
-    "agent-session.nonempty-queues-reminder",
     "compact-context-tool.result",
+];
+const NATIVE_SCALAR_IDS: [&str; 5] = [
+    "agent-session.crashed-tool-result",
+    "agent-session.progress-reminder",
+    "progress-tool.already-closed",
+    "progress-tool.closed",
+    "progress-tool.updated",
 ];
 
 const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
@@ -335,13 +341,14 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let old_templates = mapping(field(&old, "prompt_templates"));
     let new_templates = mapping(field(&new, "prompt_templates"));
     assert_eq!(old_templates.len(), 100);
-    assert_eq!(new_templates.len(), 101);
+    assert_eq!(new_templates.len(), 105);
     let expected_ids = expected
         .iter()
         .map(|row| row["id"].as_str().unwrap())
         .chain(CONSOLIDATED_IDS)
         .chain(AGENT_COMMUNICATION_IDS)
         .chain(["session.legacy-resume-warning"])
+        .chain(NATIVE_SCALAR_IDS)
         .collect::<BTreeSet<_>>();
     assert_eq!(
         new_templates
@@ -355,6 +362,7 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
         .filter(|(id, _)| {
             !CONSOLIDATED_IDS.contains(&scalar(id).unwrap())
                 && !AGENT_COMMUNICATION_IDS.contains(&scalar(id).unwrap())
+                && !NATIVE_SCALAR_IDS.contains(&scalar(id).unwrap())
         })
         .collect::<Vec<_>>();
     let new_templates = new_templates
@@ -362,6 +370,7 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
         .filter(|(id, _)| {
             !CONSOLIDATED_IDS.contains(&scalar(id).unwrap())
                 && !AGENT_COMMUNICATION_IDS.contains(&scalar(id).unwrap())
+                && !NATIVE_SCALAR_IDS.contains(&scalar(id).unwrap())
                 && scalar(id) != Some("session.legacy-resume-warning")
         })
         .collect::<Vec<_>>();

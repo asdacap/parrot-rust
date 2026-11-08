@@ -12,10 +12,7 @@ use parrot_runtime::{
     agent_turn::lifecycle::Signal,
     children::{CompletionDelivery, HistorySource, LaunchRequest},
 };
-use parrot_storage::{
-    conversation::{HistoryForkBoundary, HistoryForkSelection},
-    queue_files::Direction,
-};
+use parrot_storage::conversation::{HistoryForkBoundary, HistoryForkSelection};
 use tokio::sync::Semaphore;
 
 type Scheduler = TaskScheduler<Security, TaskArtifactParserAdapter>;
@@ -495,7 +492,8 @@ async fn actual_recovery_counts_later_owners_before_admitting_earlier_pending_wo
 }
 
 #[tokio::test]
-async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_without_requests() {
+async fn actual_reopen_preserves_legacy_queue_files_graphs_and_idle_public_results_without_requests()
+ {
     let fixture = fixture().await;
     let hosted = bounded(fixture.open()).await.unwrap();
     let root = fixture.root();
@@ -537,24 +535,22 @@ async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_with
         .map(|scope| (scope.identity().session.session_id.clone(), scope))
         .collect::<BTreeMap<_, _>>();
     for scope in [&root, &child, &grandchild] {
-        let queues = scope.get_service::<AgentQueues<Security>>().unwrap();
-        let name = format!("retained-{}", scope.identity().session.name);
-        let queue = queues.create(&name, "metadata").unwrap();
-        let agent_directory = scope.identity().name_path.iter().fold(
-            fixture.user().resources.agents_directory(),
-            |directory, name| directory.join(name),
-        );
-        assert_eq!(queue.path.parent().unwrap(), agent_directory.join("queues"));
-        assert!(!fixture.user().resources.root().join("queues").exists());
-        queues
-            .push(
-                &name,
-                &[scope.identity().session.name.clone()],
-                Direction::Back,
-                true,
-                &NeverCancelled,
+        let directory = scope
+            .identity()
+            .name_path
+            .iter()
+            .fold(
+                fixture.user().resources.agents_directory(),
+                |directory, name| directory.join(name),
             )
-            .unwrap();
+            .join("queues");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("legacy.jsonl"),
+            b"malformed nonempty legacy queue",
+        )
+        .unwrap();
+        assert!(!fixture.user().resources.root().join("queues").exists());
     }
     let root_tasks = root.get_service::<Scheduler>().unwrap().snapshot().await;
     let child_tasks = child.get_service::<Scheduler>().unwrap().snapshot().await;
@@ -586,7 +582,7 @@ async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_with
     let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
     let mut hosted = hosted;
     let requests = fixture.requests.lock().unwrap().len();
-    for reopen_index in 0..2 {
+    for _ in 0..2 {
         bounded(hosted.close()).await.unwrap();
         let resumed = reopen(&fixture, &id).await;
         assert_eq!(fixture.requests.lock().unwrap().len(), requests);
@@ -613,21 +609,19 @@ async fn actual_reopen_retains_nested_queues_graphs_and_idle_public_results_with
                     .format(original.identity().session.depth)
                     .unwrap()
             );
-            let queues = scope.get_service::<AgentQueues<Security>>().unwrap();
+            let directory = scope
+                .identity()
+                .name_path
+                .iter()
+                .fold(
+                    fixture.user().resources.agents_directory(),
+                    |directory, name| directory.join(name),
+                )
+                .join("queues");
             assert_eq!(
-                queues.capture_inventory().queues.len(),
-                usize::from(reopen_index == 0)
+                std::fs::read(directory.join("legacy.jsonl")).unwrap(),
+                b"malformed nonempty legacy queue"
             );
-            let name = format!("retained-{}", scope.identity().session.name);
-            assert!(queues.get(&name).unwrap().closed);
-            let taken = queues.try_take(&name, 1, Direction::Front).unwrap();
-            assert!(taken.info.unwrap().closed);
-            if reopen_index == 0 {
-                assert_eq!(taken.items, [scope.identity().session.name.clone()]);
-            } else {
-                assert!(taken.items.is_empty());
-            }
-            assert_eq!(queues.get(&name).unwrap().size, 0);
             assert!(!scope.session().is_active());
         }
         let restored_root = fixture.root();

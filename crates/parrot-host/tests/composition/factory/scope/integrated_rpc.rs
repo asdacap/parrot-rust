@@ -1139,7 +1139,7 @@ async fn actual_listener_inventory_follows_durable_replay_and_preserves_monitor_
         .unwrap();
     let first = bounded(fresh.next(&NeverCancelled)).await.unwrap().unwrap();
     assert!(first.has_tool_snapshot());
-    assert_eq!(first.tool_snapshot().kind, "queue");
+    assert_eq!(first.tool_snapshot().kind, "agent_progress");
     assert_eq!(
         first.tool_snapshot().owner_agent_session_id,
         f.user().root_identity.session.session_id
@@ -1208,7 +1208,7 @@ async fn actual_listener_inventory_follows_durable_replay_and_preserves_monitor_
         .unwrap()
         .unwrap();
     assert!(inventory.has_tool_snapshot());
-    assert_eq!(inventory.tool_snapshot().kind, "queue");
+    assert_eq!(inventory.tool_snapshot().kind, "agent_progress");
     f.close().await;
     bounded(async { while replay.next(&NeverCancelled).await.unwrap().is_some() {} }).await;
 }

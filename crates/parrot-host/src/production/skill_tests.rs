@@ -114,6 +114,9 @@ async fn production_skill_catalog_uses_nearest_repo_then_ancestors_user_and_syst
             .any(|skill| skill.name == "domain-modeling"
                 && skill.scope.enum_value() == Ok(wire::ListedSkillScope::SKILL_SCOPE_SYSTEM))
     );
+    assert!(listed.skills.iter().any(|skill| skill.name == "queue"
+        && skill.enabled
+        && skill.scope.enum_value() == Ok(wire::ListedSkillScope::SKILL_SCOPE_SYSTEM)));
     assert!(!format!("{listed:?}").contains("Private test instructions."));
     let mut client = bounded(host.open_local_client(&NeverCancelled))
         .await
@@ -281,6 +284,67 @@ async fn production_installs_packaged_assets_and_preserves_local_edits_and_modes
     );
     bounded(next.close()).await.unwrap();
     std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[tokio::test]
+async fn production_installed_queue_helper_distributes_work_and_reports_waiting_items() {
+    let fixture = Fixture::new();
+    let host = fixture.host();
+    let script = fixture
+        .roots
+        .current()
+        .skills_directory()
+        .join("queue/scripts/queue.py");
+    let queue = fixture.root.join("agent/scratch/queues/work.json");
+    let run = |arguments: &[&str]| {
+        let output = std::process::Command::new("python3")
+            .arg("-B")
+            .arg(&script)
+            .arg(arguments[0])
+            .arg(&queue)
+            .args(&arguments[1..])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create"]);
+    run(&[
+        "push",
+        "--items",
+        r#"["0","1","2","3","4","5","6","7","8","9"]"#,
+        "--close",
+    ]);
+    let taken = run(&["take", "--count", "7"]);
+    assert_eq!(taken["items"].as_array().unwrap().len(), 7);
+    let summary = run(&["summary"]);
+    assert_eq!(summary["taken"], 7);
+    assert_eq!(summary["enqueued_total"], 10);
+    assert_eq!(summary["remaining"], 3);
+    assert_eq!(summary["drained"], false);
+    run(&["take", "--count", "3"]);
+    assert_eq!(run(&["info"])["drained"], true);
+    let output = std::process::Command::new("python3")
+        .args(["-B", "-m", "unittest", "discover", "-s"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/skills/queue"))
+        .args(["-p", "test_*.py"])
+        .env("PARROT_QUEUE_HELPER", &script)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    bounded(host.close()).await.unwrap();
+    drop(host);
+    let root = fixture.root.clone();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

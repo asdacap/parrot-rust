@@ -10,7 +10,6 @@ use crate::composition::{
     context::{ContextControl, ContextSelection, ContextServices},
     processes::{ScopedProcessStatus, production_filename_generator},
     protocol,
-    queues::ScopedQueueBackend,
 };
 use parrot_domain::{
     contracts::{
@@ -53,7 +52,7 @@ use parrot_runtime::{
     active_work::{
         blockers::{
             ActiveWorkBlocker, ActiveWorkReminder, BlockerResult, ChildBlocker, ProcessBlocker,
-            QueueBlocker, TaskBlocker,
+            TaskBlocker,
         },
         completion::SessionCompletion,
         exit_reminders::{ExitReminders, ReminderError},
@@ -63,9 +62,6 @@ use parrot_runtime::{
             RuntimeStatus, StatusError, StatusObservation, StatusProvider, StatusQuery,
             StatusResult,
         },
-    },
-    agent_queues::{
-        AgentQueues, QueueDiagnostic, QueueDiagnostics, QueueInventory, QueueSnapshotPublisher,
     },
     agent_turn::{
         activity::{LiveActivity, TurnDiagnostics},
@@ -127,9 +123,6 @@ use parrot_tools::{
         Compaction, Failure, FailureKind, ImageProvider, PermissionServices, SessionServices,
     },
     task_artifacts::TaskArtifactParserAdapter,
-    tasks_queues::queues::{
-        QueueDiagnostic as ToolQueueDiagnostic, QueueDiagnostics as ToolQueueDiagnostics,
-    },
     web_fetch::WebFetcher,
 };
 use std::{
@@ -413,28 +406,6 @@ impl<S: RestrictableAccessSnapshot + 'static> ProcessDiagnostics for ScopeLog<S>
             DiagnosticSeverity::Information,
             Some(observed.outcome),
             observed.error_kind.map(|_| "io"),
-        );
-    }
-}
-impl<S: RestrictableAccessSnapshot + 'static> QueueDiagnostics for ScopeLog<S> {
-    fn record(&self, observed: QueueDiagnostic) {
-        self.event(
-            "queue",
-            observed.event,
-            DiagnosticSeverity::Information,
-            Some(observed.outcome),
-            None,
-        );
-    }
-}
-impl<S: RestrictableAccessSnapshot + 'static> ToolQueueDiagnostics for ScopeLog<S> {
-    fn record(&self, observed: ToolQueueDiagnostic) {
-        self.event(
-            "queue",
-            observed.event,
-            DiagnosticSeverity::Information,
-            observed.outcome,
-            observed.error_code,
         );
     }
 }
@@ -1157,23 +1128,6 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionControl for ScopedSessionSe
     }
 }
 
-struct ScopeClock(Arc<dyn Clock>);
-impl Clock for ScopeClock {
-    fn now(&self) -> std::time::Instant {
-        self.0.now()
-    }
-    fn utc_now(&self) -> std::time::SystemTime {
-        self.0.utc_now()
-    }
-    fn sleep_until<'a>(
-        &'a self,
-        deadline: std::time::Instant,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), parrot_domain::contracts::async_ops::Cancelled>> {
-        self.0.sleep_until(deadline, cancellation)
-    }
-}
-
 /// The scheduler and retained tools belong to the session. Their forwarding
 /// edge back to that same session must therefore be weak, not a second owner.
 struct ScopedTaskSession<S: RestrictableAccessSnapshot + 'static> {
@@ -1340,7 +1294,6 @@ type CatalogBinder<S> = dyn Fn(&Arc<Scope<S>>) -> ChildResult<()> + Send + Sync;
 struct ScopeBindings<S: RestrictableAccessSnapshot + 'static> {
     link: Arc<ScopeLink<S>>,
     agents: Arc<ScopedAgentRuntime<S>>,
-    queues: Arc<AgentQueues<S>>,
     child_work: Arc<BoundWork>,
     catalog: Box<CatalogBinder<S>>,
 }
@@ -1352,8 +1305,6 @@ fn bind_scope<S: RestrictableAccessSnapshot + 'static>(scope: &Arc<Scope<S>>) ->
         .set(Arc::downgrade(scope))
         .map_err(|_| child("scope services are already bound"))?;
     bindings.agents.bind(scope)?;
-    bindings.queues.bind_scope(scope)?;
-    bindings.queues.initialize().map_err(ChildError::from)?;
     bindings
         .child_work
         .0
@@ -1459,21 +1410,6 @@ where
             );
             let process_status: Arc<dyn ProcessStatusSource> =
                 Arc::new(ScopedProcessStatus::new(processes.clone()));
-            let inventory = QueueInventory::new(
-                parrot_storage::queue_files::Owner {
-                    session_id: identity.session.session_id.clone(),
-                    name: identity.session.name.clone(),
-                    parent_session_id: identity.session.parent_session_id.clone(),
-                    parent_name: identity.parent_name.clone(),
-                },
-                format!(
-                    "queue-inventory-{}",
-                    Identifier::event_id().map_err(io_child)?
-                ),
-            )
-            .map_err(child)?;
-            let queues = AgentQueues::new(identity.clone(), &scratch, inventory, log.clone())
-                .map_err(ChildError::from)?;
             let agents = Arc::new(ScopedAgentRuntime::new(
                 Arc::downgrade(&registry),
                 self.config.router.clone(),
@@ -1562,10 +1498,6 @@ where
                         }),
                         Arc::new(TaskBlocker {
                             tasks: tasks.scheduler().clone(),
-                            templates: self.user.templates.clone(),
-                        }),
-                        Arc::new(QueueBlocker {
-                            queues: queues.clone(),
                             templates: self.user.templates.clone(),
                         }),
                     ],
@@ -1832,11 +1764,9 @@ where
                 let catalog_context = context_services.clone();
                 let catalog_environment = environment.clone();
                 let catalog_planner = planner.clone();
-                let catalog_log = log.clone();
                 let binding = Arc::new(ScopeBindings {
                     link: link.clone(),
                     agents: agents.clone(),
-                    queues: queues.clone(),
                     child_work,
                     catalog: Box::new(move |scope: &Arc<Scope<S>>| {
                         let definitions = catalog::configured_definitions(&config.configuration);
@@ -1890,12 +1820,6 @@ where
                                 tasks: catalog_tasks.clone(),
                                 filesystem: Arc::new(config.filesystem.clone()),
                                 templates: user.templates.clone(),
-                                queues: Arc::new(ScopedQueueBackend::new(
-                                    scope.clone(),
-                                    user.registry()?,
-                                )?),
-                                clock: Arc::new(ScopeClock(config.clock.clone())),
-                                diagnostics: catalog_log.clone(),
                             },
                             &definitions,
                         )
@@ -1930,7 +1854,6 @@ where
                         ServiceRegistration::new::<dyn TaskSession>(task_session),
                         ServiceRegistration::new(tasks.scheduler().clone()),
                         ServiceRegistration::new(tasks.clone()),
-                        ServiceRegistration::new(queues.clone()),
                         ServiceRegistration::new(progress.clone()),
                         ServiceRegistration::new(processes.clone()),
                         ServiceRegistration::new::<dyn ProcessStatusSource>(process_status),
@@ -1947,11 +1870,6 @@ where
                             progress.clone(),
                             self.user.broker.clone(),
                         )),
-                        Arc::new(QueueSnapshotPublisher::new(
-                            queues.clone(),
-                            self.user.broker.clone(),
-                            self.user.root_identity.session.session_id.clone(),
-                        )),
                         Arc::new(ProcessPublisher {
                             owner: processes.clone(),
                             broker: self.user.broker.clone(),
@@ -1966,7 +1884,7 @@ where
                         Arc::new(ProcessWork(processes.clone())),
                         Arc::new(AsksClose(asks.clone())),
                     ],
-                    final_resources: vec![queues.clone()],
+                    final_resources: vec![],
                 })
             }
             .await;
@@ -1999,9 +1917,6 @@ where
                         if let Err(error) = progress.stop_publication().await {
                             failure = child(error);
                         }
-                    }
-                    if let Err(error) = queues.dispose() {
-                        failure = error.into();
                     }
                     Err(failure)
                 }

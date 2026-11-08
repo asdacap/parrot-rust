@@ -51,6 +51,7 @@
             perl
             pkg-config
             protobuf
+            python3
             rust
             sccache
           ]

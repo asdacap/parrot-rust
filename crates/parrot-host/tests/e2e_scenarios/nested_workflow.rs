@@ -3,12 +3,11 @@ use parrot_domain::{
     protocol::messages::parrot::{AgentTaskProgressSnapshot, AgentTaskProgressStatus},
     values::agent_tasks::ExecutionStatus,
 };
-use parrot_storage::queue_files::Direction;
 use protobuf::Message as _;
 use tokio::sync::Semaphore;
 
 #[tokio::test]
-async fn catalog_task_worker_nested_child_queue_receipt_wait_and_durable_progress_join_together() {
+async fn catalog_task_worker_nested_child_wait_and_durable_progress_join_together() {
     let fixture = fixture().await;
     let hosted = fixture.open().await.unwrap();
     let root = fixture.root();
@@ -17,23 +16,6 @@ async fn catalog_task_worker_nested_child_queue_receipt_wait_and_durable_progres
     let controller = root
         .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
         .unwrap();
-    let queues = root.get_service::<AgentQueues<Security>>().unwrap();
-    queues
-        .create("workflow-work", "root-owned input for task worker")
-        .unwrap();
-    queues
-        .push(
-            "workflow-work",
-            &["t76-work-item".into()],
-            Direction::Back,
-            true,
-            &NeverCancelled,
-        )
-        .unwrap();
-    queues
-        .create("workflow-receipts", "nested child delivery to root")
-        .unwrap();
-    let receipts = format!("/{}/workflow-receipts", root.identity().session.name);
     let gate = Arc::new(Semaphore::new(0));
     script(
         &fixture,
@@ -52,16 +34,6 @@ async fn catalog_task_worker_nested_child_queue_receipt_wait_and_durable_progres
         &fixture,
         "t76-workflow-worker",
         tool_reply(
-            "t76-worker-take",
-            "queue_take",
-            json!({"name":"workflow-work","yield_after_ms":0}),
-        ),
-        None,
-    );
-    script(
-        &fixture,
-        "t76-workflow-worker",
-        tool_reply(
             "t76-worker-spawn",
             "agent_spawn",
             json!({"name":"receipt-child","agent":"adapter","prompt":"t76-workflow-nested","fork":"empty"}),
@@ -71,18 +43,8 @@ async fn catalog_task_worker_nested_child_queue_receipt_wait_and_durable_progres
     script(
         &fixture,
         "t76-workflow-nested",
-        tool_reply(
-            "t76-nested-push",
-            "queue_push",
-            json!({"name":receipts,"items":["t76-nested-receipt"],"close":true}),
-        ),
-        Some(gate.clone()),
-    );
-    script(
-        &fixture,
-        "t76-workflow-nested",
         reply("t76-nested-complete"),
-        None,
+        Some(gate.clone()),
     );
     script(
         &fixture,
@@ -138,19 +100,6 @@ async fn catalog_task_worker_nested_child_queue_receipt_wait_and_durable_progres
     };
     let woke_before_release = premature.is_some();
     gate.add_permits(1);
-    let receipt = bounded(async {
-        loop {
-            match queues.try_take("workflow-receipts", 1, Direction::Front) {
-                Ok(result) if !result.items.is_empty() => break result,
-                Ok(_) => {}
-                Err(parrot_runtime::agent_queues::QueueError::Storage(error))
-                    if error.kind == parrot_storage::queue_files::ErrorKind::Empty => {}
-                Err(error) => panic!("receipt queue take failed: {error:?}"),
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
     let wake = if let Some(result) = premature {
         result
     } else {
@@ -178,37 +127,30 @@ async fn catalog_task_worker_nested_child_queue_receipt_wait_and_durable_progres
     let worker_history = worker.history().conversation().await.unwrap();
     let nested_history = nested.history().conversation().await.unwrap();
     let durable = user.lease.events.replay().await.unwrap();
-    let queue_state = queues.get("workflow-receipts").unwrap();
     bounded(hosted.close()).await.unwrap();
     assert_database_closed(&user);
 
+    assert!(
+        nested_history
+            .iter()
+            .any(|item| parrot_storage::events::content(&item.message.parts)
+                == "t76-nested-complete")
+    );
     assert!(registered && nested_parent);
     assert!(!woke_before_release);
     assert!(wake.contains("AgentTask update"), "{wake}");
-    assert_eq!(receipt.items, vec!["t76-nested-receipt"]);
-    assert!(queue_state.closed && queue_state.size == 0);
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].state, ExecutionStatus::Succeeded, "{tasks:?}");
     assert_eq!(tasks[0].result.as_deref(), Some("t76-workflow-delivered"));
-    for (history, call, text) in [
-        (&worker_history, "t76-worker-take", "t76-work-item"),
-        (
-            &worker_history,
-            "t76-worker-wait",
-            "receipt-child completion",
-        ),
-        (&nested_history, "t76-nested-push", "workflow-receipts"),
-    ] {
-        let result = history
-            .iter()
-            .find(|item| item.message.tool_call_id == call)
-            .unwrap();
-        assert!(
-            parrot_storage::events::content(&result.message.parts).contains(text),
-            "{}",
-            parrot_storage::events::content(&result.message.parts)
-        );
-    }
+    let result = worker_history
+        .iter()
+        .find(|item| item.message.tool_call_id == "t76-worker-wait")
+        .unwrap();
+    assert!(
+        parrot_storage::events::content(&result.message.parts).contains("receipt-child completion"),
+        "{}",
+        parrot_storage::events::content(&result.message.parts)
+    );
     assert!(
         worker_history
             .iter()
@@ -235,6 +177,5 @@ async fn catalog_task_worker_nested_child_queue_receipt_wait_and_durable_progres
     );
     assert!(!registry.contains(&worker));
     assert!(!registry.contains(&nested));
-    assert!(queues.is_disposed());
     assert!(fixture.scripts.lock().unwrap().is_empty());
 }

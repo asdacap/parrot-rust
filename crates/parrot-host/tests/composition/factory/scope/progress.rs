@@ -41,7 +41,7 @@ async fn actual_catalog_progress_uses_the_scoped_file_blocker_and_snapshot_owner
                 id: "progress-start".into(),
                 name: "progress".into(),
                 arguments_json:
-                    json!({"steps":2,"total_steps":5,"current_step":"Running actual tests"})
+                    json!({"steps":7,"total_steps":10,"current_step":"queue review: 3 waiting"})
                         .to_string(),
             });
         script(&fixture, "progress-catalog-marker", completion, None);
@@ -60,11 +60,12 @@ async fn actual_catalog_progress_uses_the_scoped_file_blocker_and_snapshot_owner
             completion,
             Some(gate.clone()),
         );
+        let finish_gate = Arc::new(Semaphore::new(0));
         script(
             &fixture,
             "progress-catalog-marker",
             reply("progress finished"),
-            None,
+            Some(finish_gate.clone()),
         );
         let session = root.get_service::<RuntimeSession<Security>>().unwrap();
         let sent = bounded(
@@ -91,7 +92,12 @@ async fn actual_catalog_progress_uses_the_scoped_file_blocker_and_snapshot_owner
             serde_json::from_slice(&std::fs::read(progress_path(&fixture, &root)).unwrap())
                 .unwrap();
         assert_eq!(snapshot, owner.capture_snapshot().unwrap());
-        assert_eq!(snapshot.progress.as_ref().unwrap().steps, 2);
+        let report = snapshot.progress.as_ref().unwrap();
+        assert_eq!((report.steps, report.total_steps), (7, 10));
+        assert_eq!(
+            report.current_step.as_deref(),
+            Some("queue review: 3 waiting")
+        );
         assert_eq!(
             snapshot.owner_session_id,
             root.identity().session.session_id
@@ -126,14 +132,32 @@ async fn actual_catalog_progress_uses_the_scoped_file_blocker_and_snapshot_owner
             .set("manual", "ordinary reminder", &NeverCancelled)
             .await
             .unwrap();
+        assert!(owner.capture_snapshot().unwrap().progress.is_some());
+        gate.add_permits(1);
+        bounded(async {
+            while owner.capture_snapshot().unwrap().progress.is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert_eq!(session.backend().reminders().titles().await, ["manual"]);
+        assert!(
+            session
+                .backend()
+                .reminders()
+                .build()
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("ordinary reminder")
+        );
         session
             .backend()
             .reminders()
             .clear("manual", &NeverCancelled)
             .await
             .unwrap();
-        assert!(owner.capture_snapshot().unwrap().progress.is_some());
-        gate.add_permits(1);
+        finish_gate.add_permits(1);
         bounded(sent.execution.join()).await.unwrap();
         assert_eq!(owner.capture_snapshot().unwrap().progress, None);
         assert_eq!(services.active_work.build().await.unwrap(), None);

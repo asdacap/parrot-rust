@@ -17,24 +17,18 @@ use parrot_domain::{
     values::{
         accounting::RetainedAgentBudget,
         agent_tasks::{ExecutionStatus as TaskState, Task, TaskPayload},
-        identifiers::UserSessionId,
     },
 };
-use parrot_foundation::paths::UserSessionResources;
 use parrot_provider::sessions;
 use parrot_runtime::{
     active_work::{
         blockers::{
-            ActiveWorkBlocker, ActiveWorkReminder, ChildBlocker, ProcessBlocker, QueueBlocker,
-            TaskBlocker, TaskSnapshotSource,
+            ActiveWorkBlocker, ActiveWorkReminder, ChildBlocker, ProcessBlocker, TaskBlocker,
+            TaskSnapshotSource,
         },
         completion::SessionCompletion,
         exit_reminders::ExitReminders,
         wait::{WaitDuration, WaitService},
-    },
-    agent_queues::{
-        AgentQueues, QueueChildAdmissionValidator, QueueDiagnostic, QueueDiagnostics,
-        QueueInventory,
     },
     agent_turn::{
         engine::{Publisher, RuntimeBackend, RuntimeConfig},
@@ -53,7 +47,6 @@ use parrot_runtime::{
 use parrot_storage::{
     conversation::{AgentHistoryView, MessageRole},
     events::{ConversationPart, NeverCancelled},
-    queue_files::{Direction, Owner},
 };
 use std::{
     collections::BTreeMap,
@@ -168,12 +161,6 @@ impl ParentCompletion for NoParent {
         Box::pin(async { Ok(()) })
     }
 }
-#[derive(Default)]
-struct QueueLog;
-impl QueueDiagnostics for QueueLog {
-    fn record(&self, _: QueueDiagnostic) {}
-}
-
 #[derive(Default)]
 struct Tasks {
     values: Mutex<Vec<Task>>,
@@ -304,7 +291,6 @@ struct Built {
     session: AgentSession<Backend>,
     provider: Scripted,
     history: AgentHistoryView,
-    queues: Arc<AgentQueues<Security>>,
     broker: Arc<EventBroker>,
     callback: Arc<CallbackBinding>,
     active: Mutex<Option<Arc<ActiveWorkReminder>>>,
@@ -364,7 +350,6 @@ impl Built {
 }
 struct Factory {
     histories: Arc<Histories>,
-    resources: UserSessionResources<()>,
     ask_broker: Arc<AgentAskBroker>,
     built: Mutex<BTreeMap<String, Arc<Built>>>,
     providers: Mutex<BTreeMap<String, Scripted>>,
@@ -375,7 +360,6 @@ impl Factory {
     }
     fn bind(&self, scope: &Arc<Scope<Security>>) {
         let built = self.get(&scope.identity().session.name);
-        built.queues.bind_scope(scope).unwrap();
         let active = Arc::new(ActiveWorkReminder {
             blockers: vec![
                 Arc::new(ChildBlocker {
@@ -387,10 +371,6 @@ impl Factory {
                 }),
                 Arc::new(TaskBlocker {
                     tasks: built.tasks.clone(),
-                    templates: templates(),
-                }),
-                Arc::new(QueueBlocker {
-                    queues: built.queues.clone(),
                     templates: templates(),
                 }),
             ],
@@ -423,30 +403,6 @@ impl ScopeFactory<Security> for Factory {
                     .unwrap(),
             );
             let callback = Arc::new(CallbackBinding::default());
-            let inventory = QueueInventory::new(
-                Owner {
-                    session_id: identity.session.session_id.clone(),
-                    name: identity.session.name.clone(),
-                    parent_session_id: identity.session.parent_session_id.clone(),
-                    parent_name: identity.parent_name.clone(),
-                },
-                id(),
-            )
-            .unwrap();
-            let scratch = self
-                .resources
-                .agent_scratch(
-                    &identity
-                        .name_path
-                        .iter()
-                        .map(String::as_str)
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap();
-            let queues =
-                AgentQueues::new(identity.clone(), &scratch, inventory, Arc::new(QueueLog))
-                    .unwrap();
-            queues.initialize().unwrap();
             let delivery = Arc::new(AskDelivery::default());
             let asks = Arc::new(
                 self.ask_broker
@@ -525,7 +481,6 @@ impl ScopeFactory<Security> for Factory {
                 session: session.clone(),
                 provider,
                 history,
-                queues: queues.clone(),
                 broker,
                 callback,
                 active: Mutex::new(None),
@@ -546,11 +501,11 @@ impl ScopeFactory<Security> for Factory {
             Ok(ScopeParts {
                 agent_state: prepared.agent_state.clone(),
                 session: adapter,
-                services: vec![ServiceRegistration::new(queues.clone())],
+                services: vec![],
                 publishers: vec![],
                 work: vec![],
                 resources: vec![],
-                final_resources: vec![queues],
+                final_resources: vec![],
             })
         })
     }
@@ -563,21 +518,8 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let histories = Histories::new();
-        let root = histories
-            .repository
-            .events()
-            .database()
-            .selected_root()
-            .clone();
-        let resources = UserSessionResources::new(
-            root,
-            UserSessionId::parse(histories.path.file_name().unwrap().to_str().unwrap()).unwrap(),
-            (),
-        )
-        .unwrap();
         let factory = Arc::new(Factory {
             histories: histories.clone(),
-            resources,
             ask_broker: Arc::new(AgentAskBroker::new(
                 Duration::from_secs(300),
                 Arc::new(TokioClock),
@@ -606,7 +548,7 @@ impl Harness {
             diagnostics: Arc::new(support::Diagnostics::default()),
             retained: RetainedAgentBudget::new(32),
             lifetime: Arc::new(Signal::new()),
-            validate_child: Arc::new(QueueChildAdmissionValidator::validate),
+            validate_child: Arc::new(|_| Ok(())),
         });
         Self {
             histories,
@@ -723,22 +665,6 @@ impl Harness {
     }
 }
 
-fn push(queues: &AgentQueues<Security>, name: &str, populated: bool, closed: bool) {
-    queues.create(name, "owned work").unwrap();
-    queues
-        .push(
-            name,
-            &if populated {
-                vec!["pending".into()]
-            } else {
-                vec![]
-            },
-            Direction::Back,
-            closed,
-            &NeverCancelled,
-        )
-        .unwrap();
-}
 fn task(state: TaskState) -> Task {
     Task {
         name: "hidden-owned".into(),
@@ -755,133 +681,6 @@ fn task(state: TaskState) -> Task {
 }
 async fn assert_pending<F: Future>(mut future: std::pin::Pin<&mut F>) {
     assert!(std::future::poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx).is_pending())).await);
-}
-
-#[tokio::test]
-async fn queue_blocker_formats_sorted_structured_queues_and_omits_empty_queues() {
-    let h = Harness::new();
-    let _scope = h.scope(None, "root").await;
-    let built = h.factory.get("root");
-    let blocker = QueueBlocker {
-        queues: built.queues.clone(),
-        templates: super::templates(),
-    };
-    assert!(blocker.observe().await.unwrap().is_none());
-    push(&built.queues, "empty", false, false);
-    assert!(blocker.observe().await.unwrap().is_none());
-    push(&built.queues, "zulu", true, true);
-    push(&built.queues, "alpha", true, false);
-    built
-        .queues
-        .push(
-            "alpha",
-            &["second".into()],
-            Direction::Back,
-            false,
-            &NeverCancelled,
-        )
-        .unwrap();
-    let observation = blocker.observe().await.unwrap().unwrap();
-    assert_eq!(observation.work_section, None);
-    assert_eq!(
-        observation.reminder.as_deref(),
-        Some(
-            "This turn must not exit while queues owned by this agent contain items.\n- alpha (remaining items: 2)\n- zulu (remaining items: 1)\nDrain every listed queue before finishing, even when asked to stop. Use queue_take to consume items or coordinate consumers and wait until all owned queues are empty. Closing a queue does not drain it. There is no waiver or abandon action. Parent-owned queues do not block completion; an empty open queue does not block completion."
-        )
-    );
-    for name in ["alpha", "zulu"] {
-        built.queues.try_take(name, 2, Direction::Front).unwrap();
-    }
-    assert!(blocker.observe().await.unwrap().is_none());
-    h.close().await;
-}
-
-#[tokio::test]
-async fn owned_queues_block_only_when_populated_for_all_four_closed_empty_combinations() {
-    for closed in [false, true] {
-        for populated in [false, true] {
-            let h = Harness::new();
-            let _scope = h.scope(None, "root").await;
-            let built = h.factory.get("root");
-            push(&built.queues, "owned-work", populated, closed);
-            let subscription = built.broker.subscribe();
-            let gates = built.gates(if populated { 2 } else { 1 });
-            let sent = built.send("Stop now").await;
-            gates[0].entered().await;
-            gates[0].open();
-            if populated {
-                gates[1].entered().await;
-                assert_eq!(built.endings().await, 0);
-                assert!(!sent.execution.is_finished());
-                {
-                    let requests = built.provider.requests.lock().unwrap();
-                    assert_eq!(requests.len(), 2);
-                    assert!(requests[1].messages.iter().any(|message| {
-                        message.role == sessions::Role::System
-                            && message
-                                .content()
-                                .contains("owned-work (remaining items: 1)")
-                            && message.content().contains("even when asked to stop")
-                    }));
-                    assert_eq!(
-                        requests[1]
-                            .messages
-                            .iter()
-                            .filter(|message| message.role == sessions::Role::Assistant)
-                            .count(),
-                        1
-                    );
-                }
-                assert_eq!(
-                    built
-                        .events()
-                        .await
-                        .iter()
-                        .filter(|event| event.has_agent_notice()
-                            && event.agent_notice().kind == "active_work_reminder")
-                        .count(),
-                    1
-                );
-                built
-                    .queues
-                    .try_take("owned-work", 1, Direction::Front)
-                    .unwrap();
-                gates[1].open();
-            }
-            assert_eq!(
-                bounded(sent.execution.join()).await.unwrap().status,
-                ExecutionStatus::Succeeded
-            );
-            assert_eq!(built.endings().await, 1);
-            assert_eq!(
-                built.provider.requests.lock().unwrap().len(),
-                if populated { 2 } else { 1 }
-            );
-            let mut notices = 0;
-            while let Some(event) = subscription.try_next() {
-                if event.has_agent_notice() && event.agent_notice().kind == "active_work_reminder" {
-                    notices += 1;
-                }
-            }
-            assert_eq!(notices, usize::from(populated));
-            let conversation = built.history.conversation().await.unwrap();
-            assert_eq!(
-                conversation
-                    .iter()
-                    .filter(|entry| entry.message.role == MessageRole::Assistant)
-                    .count(),
-                if populated { 2 } else { 1 }
-            );
-            let jsonl = std::fs::read_to_string(
-                h.histories
-                    .path
-                    .join(format!("{}.jsonl", built.history.agent_session_id())),
-            )
-            .unwrap();
-            assert!(jsonl.contains("answer"));
-            h.close().await;
-        }
-    }
 }
 
 #[tokio::test]
@@ -1074,7 +873,7 @@ async fn automatic_direct_child_completion_restarts_parent_once_with_one_active_
 }
 
 #[tokio::test]
-async fn scope_excludes_active_sibling_grandchild_parent_queue_and_foreign_process_owner() {
+async fn scope_excludes_active_sibling_grandchild_and_foreign_process_owner() {
     let h = Harness::new();
     let root_scope = h.scope(None, "root").await;
     let monitored_scope = h.scope(Some(&root_scope), "monitored").await;
@@ -1082,7 +881,6 @@ async fn scope_excludes_active_sibling_grandchild_parent_queue_and_foreign_proce
     let idle_child = h.scope(Some(&monitored_scope), "idle-child").await;
     let grandchild_scope = h.scope(Some(&idle_child), "grandchild").await;
     let root = h.factory.get("root");
-    push(&root.queues, "parent-owned", true, false);
     root.processes
         .0
         .lock()
@@ -1115,7 +913,6 @@ async fn scope_excludes_active_sibling_grandchild_parent_queue_and_foreign_proce
     while let Some(event) = subscription.try_next() {
         assert!(!event.has_agent_notice() || event.agent_notice().kind != "active_work_reminder");
     }
-    assert_eq!(root.queues.get("parent-owned").unwrap().size, 1);
     assert_eq!(root.processes.active().len(), 1);
     sibling_gate.open();
     grandchild_gate.open();
@@ -1273,7 +1070,7 @@ async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with
     let h = Harness::new();
     let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
-    push(&root.queues, "remaining", true, false);
+    *root.tasks.values.lock().unwrap() = vec![task(TaskState::Failed)];
     root.session
         .backend()
         .reminders()
@@ -1320,7 +1117,7 @@ async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with
             .iter()
             .position(|message| {
                 message.role == sessions::Role::System
-                    && message.content().contains("remaining (remaining items: 1)")
+                    && message.content().contains("hidden-owned [failed]")
             })
             .unwrap();
         let exit = messages
@@ -1381,9 +1178,7 @@ async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with
         );
     }
     assert!(root.asks.pending().is_empty());
-    root.queues
-        .try_take("remaining", 1, Direction::Front)
-        .unwrap();
+    root.tasks.values.lock().unwrap().clear();
     root.session
         .backend()
         .reminders()
@@ -1475,7 +1270,6 @@ async fn cancelled_and_dropped_waits_release_registration_without_erasing_blocke
     let h = Harness::new();
     let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
-    push(&root.queues, "remaining", true, true);
     *root.tasks.values.lock().unwrap() = vec![task(TaskState::Failed)];
     root.session
         .backend()
@@ -1501,7 +1295,6 @@ async fn cancelled_and_dropped_waits_release_registration_without_erasing_blocke
         .unwrap()
         .is_none()
     );
-    assert_eq!(root.queues.get("remaining").unwrap().size, 1);
     assert_eq!(
         root.tasks.values.lock().unwrap()[0].state,
         TaskState::Failed
@@ -1717,7 +1510,7 @@ async fn real_append_failure_prevents_active_and_retained_feedback_publication()
                 .await
                 .unwrap();
         } else {
-            push(&root.queues, "remaining", true, false);
+            *root.tasks.values.lock().unwrap() = vec![task(TaskState::Failed)];
         }
         let subscription = root.broker.subscribe();
         h.histories
@@ -1758,7 +1551,10 @@ async fn real_append_failure_prevents_active_and_retained_feedback_publication()
             if retained { vec!["goal"] } else { vec![] }
         );
         if !retained {
-            assert_eq!(root.queues.get("remaining").unwrap().size, 1);
+            assert_eq!(
+                root.tasks.values.lock().unwrap()[0].state,
+                TaskState::Failed
+            );
         }
         h.close().await;
     }
@@ -1805,11 +1601,10 @@ async fn pending_ask_observation_pre_cancel_precedes_blocker_observation_and_rem
 }
 
 #[tokio::test]
-async fn actual_wait_timeout_includes_work_sections_but_not_queue_only_reminders() {
+async fn actual_wait_timeout_includes_process_work_sections() {
     let h = Harness::new();
     let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
-    push(&root.queues, "remaining", true, true);
     root.processes
         .0
         .lock()
@@ -1831,7 +1626,6 @@ async fn actual_wait_timeout_includes_work_sections_but_not_queue_only_reminders
         result,
         "Wait timed out after 10000 ms.\nRunning processes:\n- root/compiler (name: compiler)"
     );
-    assert_eq!(root.queues.get("remaining").unwrap().size, 1);
     assert_eq!(root.processes.active().len(), 1);
     h.close().await;
 }
