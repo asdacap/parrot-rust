@@ -73,6 +73,39 @@ new config, credentials or presets **never** cause automatic legacy lookup.
 Copying credentials does not authorize a network action, and remote attachment
 does not move the CLI machine's credential store onto the server.
 
+## System prompt overrides
+
+Use inline text in `config.yaml` to replace an inherited system prompt. For
+example, add the following key to an existing `system_prompts` mapping, or add the
+mapping if it does not exist:
+
+```yaml
+system_prompts:
+  runtime:system-context:01-base: |-
+    Your replacement instructions.
+```
+
+Removing that key restores its built-in default. Other inherited prompts remain
+unchanged, and additional namespaced provider keys can be added with nonempty
+inline strings or block scalars.
+
+The seven built-in static system prompts are Markdown files under
+`assets/config/system-prompts/`, embedded into the binary at compile time. The
+[resource reference](../../assets/config/README-resources.md#built-in-system-prompts)
+lists their provider keys and filenames. Predefined configuration uses values
+such as `@builtin:system-prompts/base.md` to select these bundled assets. A value
+beginning with the exact, case-sensitive `@builtin:` prefix must be a complete
+known reference; an empty or unknown reference is a configuration error. Any
+other nonempty value remains literal text. References do not load arbitrary
+filesystem paths.
+
+The generated `predefined_config.yaml` retains the references and is regenerated;
+put overrides in `config.yaml` rather than editing it. Editing installed Markdown
+does not change the built binary, and source Markdown changes require a rebuild.
+Neither is hot-reloaded. Dynamic `prompt_templates` and profile/model guidance
+remain in configuration; the historical `predefined_config.system_prompts.yaml`
+remains a reference resource.
+
 ## Default setting and disabling compatibility
 
 The top-level YAML boolean **`legacy_path_read_fallback` defaults to `true`**.

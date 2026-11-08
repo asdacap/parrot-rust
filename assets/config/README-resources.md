@@ -14,6 +14,47 @@ explicitly migrated descriptors and two consolidated message templates.
 `predefined_config.agent_tasks.yaml` adds one consolidated MiniJinja template;
 the remaining descriptors use the scalar engine. There is no general
 Scriban-to-Jinja translator or automatic rewriting of user configuration.
+The historical `predefined_config.system_prompts.yaml` remains a reference
+resource, not the active production resource.
+
+## Built-in system prompts
+
+The seven static `system_prompts` bodies live in `assets/config/system-prompts/`:
+
+| Provider key | Markdown file |
+| --- | --- |
+| `runtime:system-context:01-base` | `base.md` |
+| `runtime:system-context:02-delegation` | `delegation.md` |
+| `runtime:system-context:02a-agent-tasks` | `agent-tasks.md` |
+| `runtime:system-context:03-subagent-pattern` | `subagent-patterns.md` |
+| `runtime:system-context:04-behavior-guideline` | `behavior-guidelines.md` |
+| `runtime:system-context:04a-markdown-reading` | `markdown-reading.md` |
+| `runtime:system-context:05-git-ethics` | `git-ethics.md` |
+
+Predefined configuration selects these files with reserved string values such as
+`@builtin:system-prompts/base.md`. The files are embedded at compile time. A
+value beginning with the exact, case-sensitive prefix `@builtin:` must be a
+complete known reference; an empty or unknown reference is a configuration
+error. The suffix identifies a bundled asset, not an arbitrary filesystem path.
+Other nonempty values are literal prompt text, including text with the marker
+elsewhere in the value. Additional namespaced provider keys remain supported,
+and any valid namespaced key can use a known built-in reference.
+
+Override an inherited key with inline text in `config.yaml`, for example:
+
+```yaml
+system_prompts:
+  runtime:system-context:01-base: |-
+    Your replacement instructions.
+```
+
+If `system_prompts` already exists, add or replace the key in that mapping.
+Remove the override to restore the built-in default. The generated
+`predefined_config.yaml` retains references and is regenerated; do not edit it
+for customization. Editing installed Markdown does not change the built binary,
+and source Markdown changes require a rebuild. Neither is hot-reloaded.
+Dynamic `prompt_templates` and profile/model guidance have not moved to these
+Markdown files.
 
 ## Consolidated message templates
 
