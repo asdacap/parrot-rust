@@ -15,11 +15,10 @@ use parrot_domain::{
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_runtime::{
     active_work::{runtime_tree::*, status::*},
-    agent_queues::QueueOwnerSnapshot,
     agent_turn::lifecycle::Signal,
     children::AgentIdentity,
 };
-use parrot_storage::{events::NeverCancelled, queue_files::QueueInfo};
+use parrot_storage::events::NeverCancelled;
 use std::{
     collections::BTreeMap,
     error::Error,
@@ -734,14 +733,7 @@ impl RuntimeTreeSnapshotSource for TreeSource {
     fn capture(&self) -> Result<RuntimeTreeSnapshot, StatusError> {
         let value = self.0.lock().unwrap();
         Ok(RuntimeTreeSnapshot {
-            queue_owners: value
-                .queue_owners
-                .iter()
-                .map(|owner| QueueOwnerSnapshot {
-                    identity: owner.identity.clone(),
-                    queues: owner.queues.clone(),
-                })
-                .collect(),
+            agents: value.agents.clone(),
             active_agents: value.active_agents.clone(),
             processes: value.processes.clone(),
             activity: value.activity.clone(),
@@ -756,15 +748,6 @@ fn identity(id: &str, parent: &str, name: &str) -> Arc<AgentIdentity> {
         .parent_session_id = parent.into();
     identity
 }
-fn queue(name: &str, description: &str) -> QueueInfo {
-    QueueInfo {
-        path: "synthetic-not-read".into(),
-        name: name.into(),
-        description: description.into(),
-        size: 0,
-        closed: false,
-    }
-}
 fn process(owner: &str, process_id: &str, name: &str) -> ProcessStatusSnapshot {
     ProcessStatusSnapshot {
         owner_session_id: owner.into(),
@@ -774,18 +757,12 @@ fn process(owner: &str, process_id: &str, name: &str) -> ProcessStatusSnapshot {
     }
 }
 #[tokio::test]
-async fn runtime_tree_nests_queues_processes_active_agents_and_preserves_source_sorting() {
+async fn runtime_tree_nests_retained_agents_processes_and_preserves_source_sorting() {
     let child = identity("child", "root", "worker");
     let source = Arc::new(TreeSource(Mutex::new(RuntimeTreeSnapshot {
-        queue_owners: vec![
-            QueueOwnerSnapshot {
-                identity: identity("root", "", "main"),
-                queues: vec![queue("work", "queued work\n{{ hostile }}")],
-            },
-            QueueOwnerSnapshot {
-                identity: child.clone(),
-                queues: vec![queue("results", "")],
-            },
+        agents: vec![
+            identity("root", "", "main").session.clone(),
+            child.session.clone(),
         ],
         active_agents: vec![child.session.clone()],
         processes: vec![
@@ -806,7 +783,7 @@ async fn runtime_tree_nests_queues_processes_active_agents_and_preserves_source_
             .await
             .unwrap()
             .text,
-        "Runtime:\n- agent: main\n  - queue: work (0 items, description: \"queued work\\n{{ hostile }}\")\n  - process: root/build (shell, running, name: build)\n  - agent: worker (running)\n    - queue: results (0 items)\n    - process: child/fetch (shell, running, name: fetch)"
+        "Runtime:\n- agent: main\n  - process: root/build (shell, running, name: build)\n  - agent: worker (running)\n    - process: child/fetch (shell, running, name: fetch)"
     );
     // A child query must not disclose its parent or unrelated roots.
     query.session_id = "child".into();
@@ -820,23 +797,52 @@ async fn runtime_tree_nests_queues_processes_active_agents_and_preserves_source_
     assert!(!text.contains("root/build"));
     source.0.lock().unwrap().processes =
         vec![process("root", "a", "zulu"), process("root", "z", "alpha")];
-    source.0.lock().unwrap().queue_owners[0].queues = vec![queue("zulu", ""), queue("alpha", "")];
     query.session_id = "root".into();
     let text = provider
         .observe(&query, &NeverCancelled)
         .await
         .unwrap()
         .text;
-    assert!(text.find("queue: alpha").unwrap() < text.find("queue: zulu").unwrap());
     assert!(text.find("root/zulu").unwrap() < text.find("root/alpha").unwrap());
+}
+#[tokio::test]
+async fn runtime_tree_keeps_idle_ancestors_of_active_descendants() {
+    let root = identity("root", "", "main");
+    let parent = identity("parent", "root", "idle-parent");
+    let child = identity("child", "parent", "worker");
+    let source = Arc::new(TreeSource(Mutex::new(RuntimeTreeSnapshot {
+        agents: vec![
+            root.session.clone(),
+            parent.session.clone(),
+            child.session.clone(),
+        ],
+        active_agents: vec![child.session.clone()],
+        processes: vec![process("child", "opaque", "fetch")],
+        activity: vec![
+            ("root".into(), DrainState::Idle),
+            ("parent".into(), DrainState::Idle),
+            ("child".into(), DrainState::Running),
+        ],
+    })));
+    let provider = RuntimeTreeStatusProvider {
+        source,
+        templates: catalog(""),
+    };
+    let mut query = query();
+    query.session_id = "root".into();
+    assert_eq!(
+        provider
+            .observe(&query, &NeverCancelled)
+            .await
+            .unwrap()
+            .text,
+        "Runtime:\n- agent: main\n  - agent: idle-parent\n    - agent: worker (running)\n      - process: child/fetch (shell, running, name: fetch)"
+    );
 }
 #[tokio::test]
 async fn runtime_tree_reports_idle_root_custom_model_cycles_and_unknown_owners_without_leaks() {
     let source = Arc::new(TreeSource(Mutex::new(RuntimeTreeSnapshot {
-        queue_owners: vec![QueueOwnerSnapshot {
-            identity: identity("root", "", "main"),
-            queues: vec![],
-        }],
+        agents: vec![identity("root", "", "main").session.clone()],
         ..RuntimeTreeSnapshot::default()
     })));
     let mut query = query();
@@ -859,7 +865,7 @@ async fn runtime_tree_reports_idle_root_custom_model_cycles_and_unknown_owners_w
     let child = identity("child", "root", "worker");
     {
         let mut snapshot = source.0.lock().unwrap();
-        snapshot.queue_owners[0].identity = identity("root", "child", "main");
+        snapshot.agents[0] = identity("root", "child", "main").session.clone();
         snapshot.active_agents.push(child.session.clone());
         snapshot
             .processes
@@ -1193,13 +1199,8 @@ impl ProcessStatusSource for ProcessSource {
         self.snapshots.lock().unwrap().clone()
     }
 }
-struct QueueDiagnostics;
-impl parrot_runtime::agent_queues::QueueDiagnostics for QueueDiagnostics {
-    fn record(&self, _: parrot_runtime::agent_queues::QueueDiagnostic) {}
-}
 struct RealFactory {
     sessions: Arc<support::Factory>,
-    resources: parrot_foundation::paths::UserSessionResources<()>,
     processes: Mutex<BTreeMap<String, Arc<ProcessSource>>>,
     omit_process: bool,
 }
@@ -1214,44 +1215,9 @@ impl parrot_runtime::children::ScopeFactory<support::Security> for RealFactory {
         >,
     > {
         Box::pin(async move {
-            use parrot_runtime::{
-                agent_queues::{AgentQueues, QueueInventory},
-                children::ServiceRegistration,
-            };
+            use parrot_runtime::children::ServiceRegistration;
             let identity = prepared.identity.clone();
-            let inventory = QueueInventory::new(
-                parrot_storage::queue_files::Owner {
-                    session_id: identity.session.session_id.clone(),
-                    name: identity.session.name.clone(),
-                    parent_session_id: identity.session.parent_session_id.clone(),
-                    parent_name: identity.parent_name.clone(),
-                },
-                support::id(),
-            )
-            .unwrap();
-            let scratch = self
-                .resources
-                .agent_scratch(
-                    &identity
-                        .name_path
-                        .iter()
-                        .map(String::as_str)
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap();
-            let queues = AgentQueues::<support::Security>::new(
-                identity.clone(),
-                &scratch,
-                inventory,
-                Arc::new(QueueDiagnostics),
-            )
-            .unwrap();
-            queues.initialize().unwrap();
             let mut parts = self.sessions.build(prepared).await?;
-            parts
-                .services
-                .push(ServiceRegistration::new(queues.clone()));
-            parts.final_resources.push(queues);
             if !self.omit_process {
                 let processes = Arc::new(ProcessSource::default());
                 self.processes
@@ -1277,23 +1243,8 @@ async fn real_root(
     let histories = support::Histories::new();
     let sessions = Arc::new(support::Factory::default());
     *sessions.histories.lock().unwrap() = Some(histories.clone());
-    let resources = parrot_foundation::paths::UserSessionResources::new(
-        histories
-            .repository
-            .events()
-            .database()
-            .selected_root()
-            .clone(),
-        parrot_domain::values::identifiers::UserSessionId::parse(
-            histories.path.file_name().unwrap().to_str().unwrap(),
-        )
-        .unwrap(),
-        (),
-    )
-    .unwrap();
     let factory = Arc::new(RealFactory {
         sessions,
-        resources,
         processes: Mutex::new(BTreeMap::new()),
         omit_process,
     });
@@ -1318,9 +1269,7 @@ async fn real_root(
         diagnostics: Arc::new(support::Diagnostics::default()),
         retained: parrot_domain::values::accounting::RetainedAgentBudget::new(8),
         lifetime: Arc::new(Signal::new()),
-        validate_child: Arc::new(
-            parrot_runtime::agent_queues::QueueChildAdmissionValidator::validate,
-        ),
+        validate_child: Arc::new(|_, _| Ok(())),
     });
     let identity = AgentIdentity::root(support::id(), "root".into(), catalog(""));
     let history = histories.history(&identity);
@@ -1384,25 +1333,18 @@ async fn real_root(
     .join()
     .await
     .unwrap();
-    scope
-        .get_service::<parrot_runtime::agent_queues::AgentQueues<support::Security>>()
-        .unwrap()
-        .bind_scope(&scope)
-        .unwrap();
     registry.register_root(scope.clone()).unwrap();
     (registry, factory, scope, histories)
 }
 #[tokio::test]
-async fn registry_runtime_tree_source_reads_actual_retained_scopes_queues_and_process_port() {
-    use parrot_runtime::{agent_queues::AgentQueues, children::*};
+async fn registry_runtime_tree_source_reads_actual_retained_scopes_and_process_port() {
+    use parrot_runtime::children::*;
     support::bounded(async {
         let (registry, factory, root, _histories) = real_root(false).await;
         let root_id = root.identity().session.session_id.clone();
-        root.get_service::<AgentQueues<support::Security>>().unwrap().create("work", "queued work").unwrap();
         let request = LaunchRequest { parent: root.session().clone(), requested_name: "worker".into(), requested_profile: "child".into(), model: support::Scripted::default().selection("first"), requested_scope: "status worker".into(), delivery: CompletionDelivery::RetainedOnly, boundary: parrot_storage::conversation::HistoryForkBoundary::AfterCompletedHistory, fork: parrot_storage::conversation::HistoryForkSelection::parse("empty"), history_source: HistorySource::Parent };
         let child = root.spawner().spawn(request).unwrap().join().await.unwrap();
         let child_id = child.identity().session.session_id.clone();
-        child.get_service::<AgentQueues<support::Security>>().unwrap().create("results", "").unwrap();
         factory.processes.lock().unwrap().get("root").unwrap().snapshots.lock().unwrap().push(process(&root_id, "opaque-z", "build"));
         factory.processes.lock().unwrap().get("worker").unwrap().snapshots.lock().unwrap().push(process(&child_id, "opaque-a", "fetch"));
         // Completed-but-undelivered snapshots remain visible as Running even
@@ -1415,10 +1357,13 @@ async fn registry_runtime_tree_source_reads_actual_retained_scopes_queues_and_pr
         let sent = support::send(child.session().as_ref(), "work").await; gate.entered().await;
         let sessions = factory.sessions.clone();
         let source = RegistryRuntimeTreeSource::new(registry.clone(), Arc::new(move |scope| Ok(sessions.get(&scope.identity().session.name).adapter.session().state())));
-        let captured = source.capture().unwrap(); assert_eq!(captured.queue_owners.len(), 2); assert_eq!(captured.active_agents.len(), 1); assert_eq!(captured.active_agents[0].session_id, child_id); assert_eq!(captured.processes.len(), 2);
+        let captured = source.capture().unwrap(); assert_eq!(captured.agents.len(), 2); assert_eq!(captured.active_agents.len(), 1); assert_eq!(captured.active_agents[0].session_id, child_id); assert_eq!(captured.processes.len(), 2);
+        assert!(!root.session().is_active());
+        assert!(captured.agents.iter().any(|agent| agent.session_id == root_id && agent.name == "root"));
+        assert!(captured.agents.iter().any(|agent| agent.session_id == child_id && agent.parent_session_id == root_id));
         let provider = RuntimeTreeStatusProvider { source: Arc::new(source), templates: catalog("") };
         let mut query = query(); query.session_id = root_id.clone();
-        assert_eq!(provider.observe(&query, &NeverCancelled).await.unwrap().text, format!("Runtime:\n- agent: root\n  - queue: work (0 items, description: \"queued work\")\n  - process: {root_id}/build (shell, running, name: build)\n  - agent: worker (running)\n    - queue: results (0 items)\n    - process: {child_id}/fetch (shell, running, name: fetch)"));
+        assert_eq!(provider.observe(&query, &NeverCancelled).await.unwrap().text, format!("Runtime:\n- agent: root\n  - process: {root_id}/build (shell, running, name: build)\n  - agent: worker (running)\n    - process: {child_id}/fetch (shell, running, name: fetch)"));
         gate.open(); sent.execution.join().await.unwrap();
         registry.shutdown().join().await.unwrap();
     }).await;
