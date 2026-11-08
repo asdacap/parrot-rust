@@ -81,7 +81,9 @@ impl ReadToolPresenter {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let skill_path = self.skill_paths.shorten(path);
-        let display_path = skill_path.as_deref().unwrap_or(path);
+        let display_path = skill_path
+            .as_deref()
+            .map_or_else(|| call.shorten_path(path), str::to_owned);
         let offset = value.get("offset").and_then(Value::as_i64);
         let limit = value.get("limit").and_then(Value::as_i64);
         let label = if offset.is_some() || limit.is_some() {

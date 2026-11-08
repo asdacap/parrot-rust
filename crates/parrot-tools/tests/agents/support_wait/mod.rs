@@ -649,6 +649,7 @@ impl Harness {
         let bridge = Arc::new(WaitBridge::default());
         let tools = Arc::new(
             ToolSettlement::new(ToolSettlementConfig {
+                path_variables: Default::default(),
                 factory: Arc::new(Factory(Arc::new(RetainedTool {
                     metadata: ToolMetadata {
                         name: "wait".into(),

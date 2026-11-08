@@ -844,6 +844,7 @@ message ToolCallChunk {
 message ToolStarted {
   string tool_call_id = 1;
   string tool_name    = 2;
+  map<string, string> path_variables = 3;
 }
 
 message ToolFinished {

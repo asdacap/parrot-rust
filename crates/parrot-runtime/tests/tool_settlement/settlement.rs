@@ -36,6 +36,37 @@ fn gated(
     (Arc::new(tool), gate)
 }
 #[tokio::test]
+async fn tool_start_persists_and_publishes_its_agent_path_variables() {
+    let fixture = Fixture::new();
+    let tool = Arc::new(RecordingTool::new(
+        &fixture,
+        "read",
+        ParallelSafety::Sequential,
+    ));
+    fixture.batch(vec![call("paths", "read")]).await;
+    let mut harness = Harness::new(&fixture, vec![tool.handle()]).await;
+    bounded(harness.run(&fixture, &NeverCancelled))
+        .await
+        .unwrap();
+    for events in [
+        fixture.events().await,
+        harness.publisher.events.lock().unwrap().clone(),
+    ] {
+        let started = events
+            .iter()
+            .find(|event| event.has_tool_started())
+            .unwrap();
+        assert_eq!(
+            started
+                .tool_started()
+                .path_variables
+                .get("AGENT_HISTORY_DIR"),
+            Some(&fixture.path.display().to_string())
+        );
+    }
+}
+
+#[tokio::test]
 async fn contiguous_parallel_starts_in_call_order_joins_all_before_settlement_and_respects_barriers()
  {
     let fixture = Fixture::new();

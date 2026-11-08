@@ -56,6 +56,7 @@ pub struct ToolSettlementConfig<S: AccessSnapshot + 'static> {
     pub activity: Arc<AgentSessionActivity>,
     pub diagnostics: Arc<dyn ToolDiagnostics>,
     pub image_bytes_per_cycle: i32,
+    pub path_variables: std::collections::BTreeMap<String, String>,
 }
 pub struct ToolSettlement<S: AccessSnapshot + 'static> {
     config: ToolSettlementConfig<S>,

@@ -15,6 +15,65 @@ fn rows(item: &Presentation) -> Vec<String> {
     .unwrap()
 }
 #[test]
+fn mutation_paths_are_shortened_in_live_terminal_and_diff_labels() {
+    for name in ["write", "edit"] {
+        let presenter = FileMutationToolPresenter::new(name);
+        let mut call = ToolCallPresentation::new(
+            name,
+            r#"{"path":"/remote/agent/scratch/plan.md","content":"secret"}"#,
+        );
+        call.path_variables
+            .insert("AGENT_SCRATCH_DIR".into(), "/remote/agent/scratch".into());
+        let Presentation::Tool(live) = presenter.present_live(&call, 0).unwrap() else {
+            panic!("tool")
+        };
+        assert_eq!(live.label, format!("{name} $AGENT_SCRATCH_DIR/plan.md"));
+        for terminal in [
+            ToolTerminalPresentation::default(),
+            ToolTerminalPresentation {
+                status: ToolTerminalStatus::Errored,
+                error: "denied".into(),
+                ..Default::default()
+            },
+        ] {
+            let Presentation::Tool(report) = presenter
+                .present_terminal(&call, &terminal)
+                .unwrap()
+                .unwrap()
+            else {
+                panic!("tool")
+            };
+            assert_eq!(report.label, live.label);
+        }
+        let diff = "--- /remote/agent/scratch/plan.md\n+++ /remote/agent/scratch/plan.md\n@@ -1 +1 @@\n-old\n+new\n";
+        let Presentation::Diff {
+            path,
+            diff: displayed,
+            ..
+        } = presenter
+            .present_terminal(
+                &call,
+                &ToolTerminalPresentation {
+                    result_present: true,
+                    result: diff.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("diff")
+        };
+        assert_eq!(path, "$AGENT_SCRATCH_DIR/plan.md");
+        assert_eq!(displayed, diff);
+        assert!(
+            call.arguments_json
+                .contains("/remote/agent/scratch/plan.md")
+        );
+    }
+}
+
+#[test]
 fn mutation_labels_only_path_and_does_not_show_secret_content() {
     for (name, arguments, hidden) in [
         (

@@ -28,6 +28,71 @@ fn summary(owner: &str, fragment: &str, completed: bool) -> wire::Event {
 }
 
 #[test]
+fn tool_path_aliases_flow_from_events_to_live_and_replayed_labels_per_agent() {
+    for replaying in [false, true] {
+        let mut presenter = EnhancedSessionPresenter::new(200, false, replaying);
+        presenter.set_session("build", "provider/model").unwrap();
+        presenter.observe(&start("root")).unwrap();
+        presenter.observe(&child("root")).unwrap();
+        for (agent, root) in [("root", "/remote/main"), ("child", "/remote/worker")] {
+            for name in ["read", "write", "edit"] {
+                let arguments = serde_json::json!({"path": format!("{root}/blobs/output.dat"), "offset":1, "limit":90}).to_string();
+                presenter
+                    .observe(&event(
+                        agent,
+                        Payload::ToolCallChunk(wire::ToolCallChunk {
+                            tool_call_id: name.into(),
+                            tool_name: name.into(),
+                            arguments_fragment: arguments,
+                            ..Default::default()
+                        }),
+                    ))
+                    .unwrap();
+                let started = presenter
+                    .observe(&event(
+                        agent,
+                        Payload::ToolStarted(wire::ToolStarted {
+                            tool_call_id: name.into(),
+                            tool_name: name.into(),
+                            path_variables: [("AGENT_HISTORY_DIR".into(), root.into())]
+                                .into_iter()
+                                .collect(),
+                            ..Default::default()
+                        }),
+                    ))
+                    .unwrap();
+                let label = if name == "read" { "read L1-L90" } else { name };
+                if !replaying {
+                    let output = live(&started.live, 200);
+                    assert!(
+                        output.contains(&format!("{label} $AGENT_HISTORY_DIR/blobs/output.dat")),
+                        "{output}"
+                    );
+                    assert!(!output.contains(root), "{output}");
+                }
+                let finished = presenter
+                    .observe(&event(
+                        agent,
+                        Payload::ToolFinished(wire::ToolFinished {
+                            tool_call_id: name.into(),
+                            tool_name: name.into(),
+                            result: Some(String::new()),
+                            ..Default::default()
+                        }),
+                    ))
+                    .unwrap();
+                let output = commits(&finished.commits, 200);
+                assert!(
+                    output.contains(&format!("{label} $AGENT_HISTORY_DIR/blobs/output.dat")),
+                    "{output}"
+                );
+                assert!(!output.contains(root), "{output}");
+            }
+        }
+    }
+}
+
+#[test]
 fn reasoning_rows_flush_before_streaming_answers_and_preserve_terminal_order() {
     for complete in [false, true] {
         let mut presenter = configured(80);

@@ -1,6 +1,6 @@
 //! Typed tool presentation models and source redaction boundaries.
 
-use std::{fmt, sync::Arc};
+use std::{collections::BTreeMap, fmt, path::Path, sync::Arc};
 
 use parrot_domain::protocol::messages::parrot::{ArtifactReference, YieldedShellProcess};
 
@@ -32,6 +32,7 @@ impl From<FinalFormatError> for PresenterError {
 pub struct ToolCallPresentation {
     pub tool_name: String,
     pub arguments_json: String,
+    pub path_variables: BTreeMap<String, String>,
     pub agent_reference_resolver: Arc<dyn Fn(&str) -> String + Send + Sync>,
 }
 impl ToolCallPresentation {
@@ -39,11 +40,39 @@ impl ToolCallPresentation {
         Self {
             tool_name: tool_name.into(),
             arguments_json: arguments_json.into(),
+            path_variables: BTreeMap::new(),
             agent_reference_resolver: Arc::new(str::to_owned),
         }
     }
     pub fn resolve_agent_reference(&self, reference: &str) -> String {
         (self.agent_reference_resolver)(reference)
+    }
+    pub fn shorten_path(&self, path: &str) -> String {
+        let Ok(normalized) = parrot_runtime::prompt_context::normalize_skill_path(path, None)
+        else {
+            return path.to_owned();
+        };
+        let mut matched: Option<(usize, String)> = None;
+        for (name, root) in &self.path_variables {
+            let Ok(root) = parrot_runtime::prompt_context::normalize_skill_path(root, None) else {
+                continue;
+            };
+            let Ok(suffix) = Path::new(&normalized).strip_prefix(&root) else {
+                continue;
+            };
+            if matched
+                .as_ref()
+                .is_none_or(|(length, _)| root.len() > *length)
+            {
+                let display = if suffix.as_os_str().is_empty() {
+                    format!("${name}")
+                } else {
+                    format!("${name}/{}", suffix.display())
+                };
+                matched = Some((root.len(), display));
+            }
+        }
+        matched.map_or_else(|| path.to_owned(), |(_, display)| display)
     }
 }
 
