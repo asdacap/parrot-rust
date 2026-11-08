@@ -906,7 +906,7 @@ fn progress(owner: &str, revision: u64, nodes: Vec<wire::AgentTaskProgressNode>)
 }
 
 #[test]
-fn task_rows_do_not_inherit_the_headings_marker_indent() {
+fn task_rows_align_with_command_content_and_indent_two_cells_per_level() {
     let mut view = view();
     view.observe(&turn("root")).unwrap();
     let mut parent = task(
@@ -915,20 +915,35 @@ fn task_rows_do_not_inherit_the_headings_marker_indent() {
         false,
         wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
     );
-    parent.children.push(task(
+    let mut child = task(
         "child task",
+        "",
+        false,
+        wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
+    );
+    child.children.push(task(
+        "grandchild task",
         "",
         false,
         wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_PENDING,
     ));
+    parent.children = vec![
+        child,
+        task(
+            "sibling task",
+            "",
+            false,
+            wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_PENDING,
+        ),
+    ];
     view.observe(&progress("root", 1, vec![parent])).unwrap();
-    let expected = "• Agent tasks:|◐ parent task|└── ○ child task";
+    let expected = "• Agent tasks:|  ◐ parent task|  ├ ◐ child task|  │ └ ○ grandchild task|  └ ○ sibling task";
     assert_eq!(live(&view), expected);
     assert_eq!(commits(&view.finish().unwrap()), [expected]);
 }
 
 #[test]
-fn task_rows_use_the_width_freed_by_removing_the_marker_indent() {
+fn task_rows_reserve_marker_indent_when_wrapping() {
     let mut view = view();
     view.observe(&turn("root")).unwrap();
     view.observe(&progress(
@@ -948,7 +963,7 @@ fn task_rows_use_the_width_freed_by_removing_the_marker_indent() {
             color: false,
         })
         .unwrap();
-    let expected = ["• Agent tasks:", "◐ twelve chars"];
+    let expected = ["• Agent tasks:", "  ◐ twelve", "    chars"];
     assert_eq!(
         rendered
             .lines

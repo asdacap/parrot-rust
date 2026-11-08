@@ -1524,7 +1524,7 @@ async fn actual_initial_and_interactive_plans_approve_after_markdown_and_optiona
             if with_tree {
                 let tree = output.find("Agent tasks:").expect("integrated plan must render task tree");
                 let first = output.find("○ first root").expect("first root must render pending status");
-                let child = output.find("└── ○ nested task").expect("nested child must render with tree connector");
+                let child = output.find("└ ○ nested task").expect("nested child must render with tree connector");
                 let second = output.find("○ second root").expect("second root must render pending status");
                 assert!(markdown < tree && tree < first && first < child && child < second && second < picker,
                     "actual Enhanced plan order must be markdown < tree < first root < nested task < second root < picker");
