@@ -725,7 +725,7 @@ fn pending_notifications_show_only_the_headline_and_promote_the_full_content() {
                 ))
                 .unwrap();
             let pending = live(&admitted.live, 120);
-            assert!(pending.contains(&format!("{icon} {headline} (pending)")));
+            assert!(pending.contains(&format!("{icon} {headline} (steer pending)")));
             assert!(!pending.contains("Details that should not fill"));
             assert!(admitted.commits.is_empty());
             let promoted = presenter
@@ -761,7 +761,7 @@ fn pending_notification_previews_stay_on_one_line_when_resized() {
             }),
         ))
         .unwrap();
-    for columns in [120, 40, 16, 8, 1] {
+    for columns in [120, 40, 24, 16, 8, 1] {
         let resized = presenter.resize(columns).unwrap();
         let pending = live(&resized.live, columns);
         assert_eq!(pending.lines().count(), 2, "{pending:?}");
@@ -769,8 +769,8 @@ fn pending_notification_previews_stay_on_one_line_when_resized() {
         assert!(parrot_cli::terminal_layout::TerminalText::width(preview) <= columns);
         assert!(!preview.contains('\u{1b}'));
         assert!(!pending.contains("Hidden details"));
-        if columns >= 16 {
-            assert!(preview.ends_with("… (pending)"), "{preview:?}");
+        if columns >= 24 {
+            assert!(preview.ends_with("… (steer pending)"), "{preview:?}");
         }
     }
 }
@@ -790,10 +790,10 @@ fn pending_user_messages_keep_their_full_multiline_content() {
             }),
         ))
         .unwrap();
-    assert!(
-        live(&admitted.live, 120)
-            .contains(&format!("◇ {} (pending)", content.replace('\n', "\n  ")))
-    );
+    assert!(live(&admitted.live, 120).contains(&format!(
+        "◇ {} (steer pending)",
+        content.replace('\n', "\n  ")
+    )));
 }
 
 #[test]
@@ -811,7 +811,7 @@ fn empty_pending_notifications_have_a_readable_preview() {
             }),
         ))
         .unwrap();
-    assert!(live(&admitted.live, 80).contains("◇ Notification received (pending)"));
+    assert!(live(&admitted.live, 80).contains("◇ Notification received (steer pending)"));
 }
 
 #[test]
