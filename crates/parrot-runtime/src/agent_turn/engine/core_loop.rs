@@ -1,9 +1,10 @@
 use super::*;
 use parrot_core::{
     CompletionFeedback as CoreCompletionFeedback, ContextCompaction as CoreContextCompaction,
+    ContextConfiguration as CoreContextConfiguration,
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
-    ContextSnapshot as CoreContextSnapshot, ContextState as CoreContextState, Error as CoreError,
-    ErrorCode, ErrorKind, ProviderRequest, ProviderResponse, RetryReason, States as CoreStates,
+    ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorCode, ErrorKind,
+    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, TokenCalibration,
     ToolCall, ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
 };
 
@@ -454,11 +455,21 @@ where
                 .await
         })
     }
-    fn read_context_state(&self) -> BoxFuture<'_, Result<CoreContextState, CoreError>> {
+    fn read_context_configuration(
+        &self,
+    ) -> BoxFuture<'_, Result<CoreContextConfiguration, CoreError>> {
         adapt_operation(async move {
             let state = self.backend.state.lock().await;
             let selection = self.binding.capture_selection()?;
-            Ok(state.context.capture_state(&selection.model))
+            Ok(state
+                .context
+                .capture_context_configuration(&selection.model))
+        })
+    }
+    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, CoreError>> {
+        adapt_operation(async move {
+            let state = self.backend.state.lock().await;
+            Ok(state.context.budget().capture_state())
         })
     }
     fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
@@ -528,7 +539,7 @@ where
             self.pending_prompt = None;
             let mut state = self.backend.state.lock().await;
             let selection = self.binding.capture_selection()?;
-            let mut cadence = state.context.capture_state(&selection.model).cadence;
+            let mut cadence = state.context.capture_context_cadence();
             if !cadence.is_restored() {
                 cadence.restore(state.context.read_context_checkpoint().await?);
             }
@@ -601,8 +612,7 @@ where
                 .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?;
             {
                 let mut state = self.backend.state.lock().await;
-                let selection = self.binding.capture_selection()?;
-                let mut cadence = state.context.capture_state(&selection.model).cadence;
+                let mut cadence = state.context.capture_context_cadence();
                 cadence
                     .acknowledge(
                         context,

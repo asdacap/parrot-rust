@@ -1,7 +1,7 @@
 use parrot_core::{
     ContextCadence, ContextCadenceError, ContextConfiguration, ContextLimit, ContextModel,
-    ContextReminderCheckpoint, ContextSnapshot, ContextState, Error, ErrorCode, ErrorKind,
-    OutputTokenError, TokenCalibration,
+    ContextReminderCheckpoint, ContextSnapshot, Error, ErrorCode, ErrorKind, OutputTokenError,
+    TokenCalibration,
 };
 
 struct Fixture {
@@ -503,7 +503,7 @@ fn a_checkpoint_for_another_model_or_window_does_not_suppress_a_new_band() {
 }
 
 #[test]
-fn context_state_clones_keep_calibration_and_cadence_session_local() {
+fn calibration_and_cadence_clones_keep_mutations_session_local() {
     let fixture = Fixture::new(100);
     let mut cadence = ContextCadence::new();
     cadence.restore(None);
@@ -516,41 +516,32 @@ fn context_state_clones_keep_calibration_and_cadence_session_local() {
         .unwrap();
     let mut calibration = TokenCalibration::default();
     calibration.observe_usage("provider/model", 10, 20);
-    let mut parent = ContextState {
-        configuration: fixture.configuration,
-        calibration,
-        cadence,
-    };
-    let mut child = parent.clone();
+    let child_calibration = calibration.clone();
+    let mut child_cadence = cadence.clone();
     assert_eq!(
-        parent.cadence.observe(
-            &ContextSnapshot::estimate(64, &parent.configuration),
+        cadence.observe(
+            &ContextSnapshot::estimate(64, &fixture.configuration),
             "provider/model",
             2,
         ),
         Ok(Some(60))
     );
     assert_eq!(
-        child.cadence.observe(
-            &ContextSnapshot::estimate(59, &child.configuration),
+        child_cadence.observe(
+            &ContextSnapshot::estimate(59, &fixture.configuration),
             "provider/model",
             2,
         ),
         Ok(Some(50))
     );
-    parent.calibration.reset();
+    calibration.reset();
+    assert_eq!(calibration.estimate_input_tokens("provider/model", 5), 5);
     assert_eq!(
-        parent
-            .calibration
-            .estimate_input_tokens("provider/model", 5),
-        5
-    );
-    assert_eq!(
-        child.calibration.estimate_input_tokens("provider/model", 5),
+        child_calibration.estimate_input_tokens("provider/model", 5),
         15
     );
-    assert!(parent.cadence.is_restored());
-    assert!(child.cadence.is_restored());
+    assert!(cadence.is_restored());
+    assert!(child_cadence.is_restored());
 }
 
 #[test]

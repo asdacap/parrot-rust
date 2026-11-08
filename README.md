@@ -32,7 +32,7 @@ ported from the .NET repository. Repository contributor guidance is in
 Its turn contracts are:
 
 - `States`: factual conversation turns and pending-message headers, context
-  configuration/calibration/cadence, explicit messages, estimates, result recording,
+  configuration/calibration, explicit messages, estimates, result recording,
   observed completion context, and explicit persistence/rendering effects.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
@@ -88,8 +88,9 @@ delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch.
 
-There is no `States::prepare_context` workflow hook. Core reads raw model limits,
-context overrides, and calibration, then directs explicit native effects.
+There is no `States::prepare_context` workflow hook. Core reads raw model limits
+and context overrides through `read_context_configuration` and token calibration
+through `read_token_calibration`, then directs explicit native effects.
 `States::get_pending_prompt` observes native readiness and returns an optional steer
 or status message, retaining its source identity for idempotent recording. Core fits
 that exact message before insertion or compaction, acknowledges the fitted or

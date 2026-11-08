@@ -66,13 +66,6 @@ pub struct ContextConfiguration {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextState {
-    pub configuration: ContextConfiguration,
-    pub calibration: TokenCalibration,
-    pub cadence: ContextCadence,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextSnapshot {
     pub estimated_tokens: i64,
     pub context_limit: i32,

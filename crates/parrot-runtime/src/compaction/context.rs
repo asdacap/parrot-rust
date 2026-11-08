@@ -7,9 +7,9 @@ use super::{
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_core::{
-    ContextCadence as CoreContextCadence,
+    ContextCadence as CoreContextCadence, ContextConfiguration as CoreContextConfiguration,
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
-    ContextSnapshot as CoreContextSnapshot, ContextState as CoreContextState,
+    ContextSnapshot as CoreContextSnapshot,
 };
 use parrot_domain::{
     contracts::{
@@ -206,15 +206,17 @@ impl ContextController {
         &mut self.budget
     }
 
-    pub(crate) fn capture_state(&self, selection: &ResolvedModelSelection) -> CoreContextState {
-        CoreContextState {
-            configuration: self
-                .compactor
-                .planner()
-                .capture_context_configuration(selection),
-            calibration: self.budget.capture_state(),
-            cadence: self.cadence.capture_state(),
-        }
+    pub(crate) fn capture_context_configuration(
+        &self,
+        selection: &ResolvedModelSelection,
+    ) -> CoreContextConfiguration {
+        self.compactor
+            .planner()
+            .capture_context_configuration(selection)
+    }
+
+    pub(crate) fn capture_context_cadence(&self) -> CoreContextCadence {
+        self.cadence.capture_state()
     }
 
     pub(crate) fn write_context_cadence(&mut self, cadence: CoreContextCadence) {
