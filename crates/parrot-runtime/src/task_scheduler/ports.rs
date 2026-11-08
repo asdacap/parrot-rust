@@ -11,7 +11,7 @@ use parrot_domain::{
         events::EventPublisher,
         security::RestrictableAccessSnapshot,
     },
-    protocol::messages::parrot::{Delivery, Event},
+    protocol::messages::parrot::{Delivery, Event, InputSource},
     values::agent_state::{
         ExecutionCheckpoint, TaskResponseReference, TaskResultClaim, TaskRunnerCheckpoint,
     },
@@ -233,6 +233,7 @@ impl<B: DrainBackend> TaskSession for TaskSessionAdapter<B> {
                     parts,
                     message_id,
                     delivery,
+                    InputSource::INPUT_SOURCE_NOTIFICATION,
                     Arc::new(parrot_storage::events::NeverCancelled),
                 )?
                 .join()

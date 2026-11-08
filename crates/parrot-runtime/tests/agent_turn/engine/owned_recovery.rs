@@ -118,6 +118,7 @@ async fn suspension_reopens_original_admitted_prompt_and_restores_wait_and_paren
         .send_and_select_execution(
             vec![ConversationPart::text("original question")],
             "original-message".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -426,6 +427,7 @@ async fn explicit_interruption_remains_terminal_on_reopen() {
         .send_and_select_execution(
             vec![ConversationPart::text("question")],
             "cancel-message".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -577,6 +579,7 @@ async fn successor_does_not_replace_a_pending_parent_completion() {
         .send_and_select_execution(
             vec![ConversationPart::text("first question")],
             "first-question".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -593,6 +596,7 @@ async fn successor_does_not_replace_a_pending_parent_completion() {
         .send_and_select_execution(
             vec![ConversationPart::text("second question")],
             "second-question".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -610,6 +614,7 @@ async fn successor_does_not_replace_a_pending_parent_completion() {
         .send_and_select_execution(
             vec![ConversationPart::text("second question")],
             "second-question".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -649,6 +654,7 @@ async fn failed_initial_intent_write_does_not_finalize_previous_execution() {
         .send_and_select_execution(
             vec![ConversationPart::text("first")],
             "first".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -670,6 +676,7 @@ async fn failed_initial_intent_write_does_not_finalize_previous_execution() {
         .send_and_select_execution(
             vec![ConversationPart::text("must not be admitted")],
             "failed-intent".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -936,6 +943,7 @@ async fn fresh_durable_start_reserves_the_drain_before_snapshot_io() {
             .send_and_select_execution(
                 vec![ConversationPart::text("fresh question")],
                 "fresh-message".into(),
+                protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
                 Arc::new(NeverCancelled),
             )
             .unwrap();
@@ -993,6 +1001,7 @@ async fn canceled_follow_up_observer_does_not_own_a_durable_drain() {
         .send_and_select_execution(
             vec![ConversationPart::text("first")],
             "observer-first".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -1010,6 +1019,7 @@ async fn canceled_follow_up_observer_does_not_own_a_durable_drain() {
         .send_and_select_execution(
             vec![ConversationPart::text("follow-up")],
             "observer-follow-up".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             caller.clone(),
         )
         .unwrap();
@@ -1300,6 +1310,7 @@ async fn owned_result_reference_is_not_replaced_by_later_input_or_raw_response()
             .send_and_select_execution(
                 vec![ConversationPart::text("original question")],
                 "original-race-message".into(),
+                protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
                 Arc::new(NeverCancelled),
             )
             .unwrap()
@@ -1459,6 +1470,7 @@ async fn failed_terminal_persistence_blocks_deferred_raw_work_and_successor_inte
         .send_and_select_execution(
             vec![ConversationPart::text("original")],
             "failed-terminal-original".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -1504,6 +1516,7 @@ async fn failed_terminal_persistence_blocks_deferred_raw_work_and_successor_inte
         .send_and_select_execution(
             vec![ConversationPart::text("successor")],
             "must-not-replace".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()
@@ -1543,6 +1556,7 @@ async fn suspension_stops_deferred_raw_work_while_preserving_late_committed_resu
         .send_and_select_execution(
             vec![ConversationPart::text("original")],
             "suspend-finalization-original".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
             Arc::new(NeverCancelled),
         )
         .unwrap()

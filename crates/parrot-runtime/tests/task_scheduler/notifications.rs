@@ -1,6 +1,7 @@
 use super::{fixture::*, harness::Harness, support::*};
 use parrot_domain::{
-    protocol::messages::parrot::AgentTaskProgressSnapshot, values::agent_tasks::ExecutionStatus::*,
+    protocol::messages::parrot::{AgentTaskProgressSnapshot, InputSource},
+    values::agent_tasks::ExecutionStatus::*,
 };
 use parrot_runtime::task_scheduler::PROGRESS_KIND;
 use protobuf::Message;
@@ -50,6 +51,30 @@ async fn success_wakes_owner_before_graph_completes_initial_update_only_records_
             .contains("AgentTask succeeded: a\nDescription: Do a\n\nResult:\nanswer")
     );
     assert!(!conversation(&awake[0]).contains("All AgentTasks are complete:"));
+    let events = h.histories.repository.events().replay().await.unwrap();
+    let notices: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            event.agent_session_id == root.identity().session.session_id
+                && event.has_input_admitted()
+        })
+        .map(|event| event.input_admitted())
+        .collect();
+    assert!(
+        notices
+            .iter()
+            .any(|input| input.content.contains("states changed"))
+    );
+    assert!(
+        notices
+            .iter()
+            .any(|input| input.content.contains("AgentTask succeeded: a"))
+    );
+    assert!(
+        notices
+            .iter()
+            .all(|input| input.source == InputSource::INPUT_SOURCE_NOTIFICATION.into())
+    );
     assert_eq!(
         snapshot(&root)
             .await
