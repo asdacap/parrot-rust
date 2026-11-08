@@ -3,6 +3,8 @@
 
 #[path = "enhanced_fixture.rs"]
 mod fixture;
+#[path = "skill_reads.rs"]
+mod skill_reads;
 
 use fixture::{Fixture, TerminalFixture, event, question, wait_until};
 use parrot_domain::{contracts::async_ops::Cancellation, protocol::messages::parrot as wire};

@@ -131,6 +131,7 @@ pub struct ToolPresentationMetadata {
     pub suppress_terminal_details: bool,
     pub multiline_label: bool,
     pub defer_started: bool,
+    pub context_dependent_live: bool,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ToolBlockKind {

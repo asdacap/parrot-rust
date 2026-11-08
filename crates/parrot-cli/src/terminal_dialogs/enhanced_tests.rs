@@ -14,6 +14,63 @@ fn enhanced_run_future_preserves_existing_send_contract() {
     let _ = check;
 }
 
+#[tokio::test]
+async fn stale_skill_refresh_cannot_replace_the_current_binding_paths() {
+    use crate::presenters::{Presentation, ToolCallPresentation};
+    let diagnostics = Arc::new(
+        parrot_storage::diagnostics::FileDiagnosticLog::open_global(
+            std::env::temp_dir().join(format!(
+                "skill-refresh-{}",
+                parrot_domain::values::identifiers::Identifier::event_id().unwrap()
+            )),
+            "skill-refresh",
+            |_| {},
+        )
+        .unwrap(),
+    );
+    let mut transport = parrot_host::grpc::transport::GrpcTransportClient::connect(
+        &parrot_host::grpc::address::TransportAddress::Unix(
+            std::env::temp_dir().join("unused-skill-refresh.sock"),
+        ),
+        None,
+        None,
+        diagnostics,
+    )
+    .unwrap();
+    let client = transport.client().unwrap().clone();
+    let skill_paths = Arc::new(SkillReadPathFormatter::new(
+        "/server/work".into(),
+        vec![wire::SkillRootLocation {
+            path: "/server/skills".into(),
+            scope: wire::ListedSkillScope::SKILL_SCOPE_USER.into(),
+            ..Default::default()
+        }],
+    ));
+    let mut state = SessionState {
+        session: wire::UserSession::new(),
+        client: client.clone(),
+        generation: 9,
+        prepared_skills: None,
+        skill_paths: skill_paths.clone(),
+    };
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(Vec::new(), skill_paths);
+    let call =
+        ToolCallPresentation::new("read", r#"{"path":"/server/skills/solidifier/SKILL.md"}"#);
+    assert!(!state.prepare_skills(8, SkillCompletion::new(client.clone())));
+    assert!(state.prepared_skills.is_none());
+    let Presentation::Tool(report) = registry.present_live(&call, 0).unwrap() else {
+        panic!("tool")
+    };
+    assert_eq!(report.label, "read $USER_SKILLS/solidifier/SKILL.md");
+    assert!(state.prepare_skills(9, SkillCompletion::new(client)));
+    assert!(state.prepared_skills.is_some());
+    let Presentation::Tool(report) = registry.present_live(&call, 0).unwrap() else {
+        panic!("tool")
+    };
+    assert_eq!(report.label, "read /server/skills/solidifier/SKILL.md");
+    transport.close();
+}
+
 #[derive(Clone, Default)]
 struct Capture(Arc<Mutex<Vec<u8>>>);
 

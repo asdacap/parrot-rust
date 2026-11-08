@@ -63,6 +63,9 @@ pub struct RpcState {
     pub question_rejections: Vec<wire::RejectQuestionRequest>,
     pub permission_replies: Vec<wire::ReplyPermissionRequest>,
     pub skills: BTreeMap<String, Vec<wire::Skill>>,
+    pub skill_root_locations: BTreeMap<String, Vec<wire::SkillRootLocation>>,
+    pub skill_list_requests: Vec<String>,
+    pub skill_list_failures: BTreeMap<String, Status>,
     pub aliases: Vec<wire::ModelAlias>,
     pub model_variants: Vec<wire::ModelVariant>,
     pub listens: Vec<wire::ListenRequest>,
@@ -180,7 +183,18 @@ impl Endpoint {
             }),
             "list_skills" => {
                 let request: wire::ListSkillsRequest = parse_message(body)?;
+                state
+                    .skill_list_requests
+                    .push(request.user_session_id.clone());
+                if let Some(failure) = state.skill_list_failures.get(&request.user_session_id) {
+                    return Err(failure.clone());
+                }
                 bytes(&wire::ListSkillsResponse {
+                    root_locations: state
+                        .skill_root_locations
+                        .get(&request.user_session_id)
+                        .cloned()
+                        .unwrap_or_default(),
                     skills: state
                         .skills
                         .get(&request.user_session_id)
@@ -408,8 +422,8 @@ pub struct Fixture {
 }
 impl Fixture {
     pub async fn start() -> Self {
-        let root = PathBuf::from(format!(
-            "/tmp/t72-flow-{}-{}",
+        let root = std::env::temp_dir().join(format!(
+            "t72-flow-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
@@ -467,6 +481,49 @@ impl Fixture {
         for sender in senders {
             let _ = sender.send(Ok(published.clone())).await;
         }
+    }
+    pub async fn start_read(&self, session: &str, id: &str, path: &str) {
+        self.publish(
+            session,
+            event(
+                &format!("{id}-arguments"),
+                wire::event::Payload::ToolCallChunk(wire::ToolCallChunk {
+                    tool_call_id: id.into(),
+                    tool_name: "read".into(),
+                    arguments_fragment: serde_json::json!({"path":path,"offset":57,"limit":30})
+                        .to_string(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+        self.publish(
+            session,
+            event(
+                &format!("{id}-started"),
+                wire::event::Payload::ToolStarted(wire::ToolStarted {
+                    tool_call_id: id.into(),
+                    tool_name: "read".into(),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
+    }
+    pub async fn finish_read(&self, session: &str, id: &str) {
+        self.publish(
+            session,
+            event(
+                &format!("{id}-finished"),
+                wire::event::Payload::ToolFinished(wire::ToolFinished {
+                    tool_call_id: id.into(),
+                    tool_name: "read".into(),
+                    result: Some("1: fixture".into()),
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await;
     }
     pub async fn complete_turn(&self, session: &str, label: &str) {
         self.publish(
@@ -796,6 +853,9 @@ pub struct TerminalFixture {
 }
 impl TerminalFixture {
     pub fn new() -> Self {
+        Self::with_color(false)
+    }
+    pub fn with_color(color: bool) -> Self {
         let (input, handle) = ScriptedInput::new();
         let restored = input.restored.clone();
         let output = Capture::default();
@@ -810,7 +870,7 @@ impl TerminalFixture {
             Box::new(output.clone()),
             Box::new(error.clone()),
             dimensions,
-            false,
+            color,
         );
         Self {
             input: handle,

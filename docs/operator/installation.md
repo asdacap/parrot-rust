@@ -93,6 +93,22 @@ not a merged legacy-session listing or evidence that local resume succeeded.
 See [enhanced CLI Markdown output](markdown.md) for the enhanced renderer's syntax,
 highlighting and streaming behavior.
 
+The enhanced CLI shortens known skill-root prefixes in read summaries while
+keeping the requested line range and the path within the root:
+
+```text
+✓ read L57-L86 $USER_SKILLS/solidifier/SKILL.md
+```
+
+`$USER_SKILLS`, `$REPO_SKILLS`, and `$SYSTEM_SKILLS` identify user, repository,
+and bundled skill roots reported by the session's server. This also applies to
+supporting files and directory reads, in local and remote sessions. Recognized
+skill reads use normal tool colors rather than muted gray; ordinary reads are
+unchanged. Unknown roots, older servers without root metadata, and failed catalog
+refreshes leave paths unshortened and muted. These aliases are display-only,
+not environment variables or replacements for paths in tool calls. Failure
+details retain the original request path.
+
 `parrot chat --connect <address> [--token-file <owner-only-file>]` is an explicit
 experimental attach interface for a separately authorized compatible server, not
 a way to start the missing local service. Addresses include `unix:/path`, HTTP

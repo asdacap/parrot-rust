@@ -804,7 +804,17 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
         if request.user_session_id == "fail" {
             return Err(Status::unavailable("skills offline"));
         }
+        let root_locations = if request.user_session_id == "legacy" {
+            Vec::new()
+        } else {
+            vec![wire::SkillRootLocation {
+                path: format!("/remote/{}/skills", request.user_session_id),
+                scope: wire::ListedSkillScope::SKILL_SCOPE_USER.into(),
+                ..Default::default()
+            }]
+        };
         Ok(wire::ListSkillsResponse {
+            root_locations,
             skills: vec![wire::Skill {
                 name: request.user_session_id,
                 enabled: true,
@@ -818,8 +828,16 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
     .await;
     let mut completion = SkillCompletion::new(fixture.client());
     let stop = Stop::new();
-    for id in ["one", "two"] {
+    for id in ["one", "legacy", "two"] {
         completion.refresh_catalog(id, &stop).await.unwrap();
+        if id == "legacy" {
+            assert!(completion.root_locations().is_empty());
+        } else {
+            assert_eq!(
+                completion.root_locations()[0].path,
+                format!("/remote/{id}/skills")
+            );
+        }
         completion.refresh(&parrot_cli::terminal_input::PromptState {
             prefix: String::new(),
             text: "$".into(),
@@ -834,6 +852,7 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
         cursor: 1,
     });
     assert!(completion.skills().is_empty());
+    assert!(completion.root_locations().is_empty());
     let stopped = Stop::new();
     stopped.cancel();
     completion
@@ -850,7 +869,7 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
                     .unwrap()
                     .user_session_id)
                 .collect::<Vec<_>>(),
-            ["one", "two", "fail"]
+            ["one", "legacy", "two", "fail"]
         );
     }
     fixture.close().await;

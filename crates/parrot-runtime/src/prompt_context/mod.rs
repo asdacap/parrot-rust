@@ -34,10 +34,10 @@ pub use skills_rendering::{
 };
 mod skills_parsing;
 pub use skills_parsing::{
-    SkillDisplayMetadata, SkillMention, SkillMetadata, SkillParseError, SkillRoot, SkillScope,
-    normalize_skill_match_path, normalize_skill_path, parse_skill_display_metadata,
-    parse_skill_frontmatter, parse_skill_mentions, select_skills, select_skills_in_directory,
-    select_skills_on_platform,
+    SkillDisplayMetadata, SkillMention, SkillMetadata, SkillParseError, SkillRoot,
+    SkillRootLocation, SkillScope, normalize_skill_match_path, normalize_skill_path,
+    parse_skill_display_metadata, parse_skill_frontmatter, parse_skill_mentions, select_skills,
+    select_skills_in_directory, select_skills_on_platform,
 };
 
 pub use composition::{

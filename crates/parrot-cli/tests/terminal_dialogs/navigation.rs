@@ -72,8 +72,8 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
-        let root = PathBuf::from(format!(
-            "/tmp/t72n-{}-{}",
+        let root = std::env::temp_dir().join(format!(
+            "t72n-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));

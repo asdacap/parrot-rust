@@ -165,8 +165,8 @@ impl Fixture {
         + Sync
         + 'static,
     ) -> Self {
-        let root = PathBuf::from(format!(
-            "/tmp/t67-cat-{}-{}",
+        let root = std::env::temp_dir().join(format!(
+            "t67-cat-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));

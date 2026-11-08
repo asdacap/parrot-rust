@@ -7,6 +7,16 @@ impl ToolPresenterRegistry {
     /// read-only command classifier. This registers presentations, not tools or
     /// a local production security/capability bundle.
     pub fn standard(read_only_command_prefixes: Vec<String>) -> Self {
+        Self::standard_with_skill_read_paths(
+            read_only_command_prefixes,
+            Arc::new(read::SkillReadPathFormatter::default()),
+        )
+    }
+
+    pub fn standard_with_skill_read_paths(
+        read_only_command_prefixes: Vec<String>,
+        skill_paths: Arc<read::SkillReadPathFormatter>,
+    ) -> Self {
         let generic: Arc<dyn ToolPresenter> = Arc::new(generic::GenericToolPresenter);
         let presenters: Vec<Arc<dyn ToolPresenter>> = vec![
             Arc::new(answer::AnswerToolPresenter),
@@ -22,7 +32,7 @@ impl ToolPresenterRegistry {
             Arc::new(image_generation::ImageGenerationToolPresenter),
             Arc::new(interrupt_process::InterruptProcessToolPresenter),
             Arc::new(read_image::ReadImageToolPresenter),
-            Arc::new(read::ReadToolPresenter),
+            Arc::new(read::ReadToolPresenter::new(skill_paths)),
             Arc::new(set_agent_tasks::SetAgentTasksToolPresenter::new(
                 generic.clone(),
             )),

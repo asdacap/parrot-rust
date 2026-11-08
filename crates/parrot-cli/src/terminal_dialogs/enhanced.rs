@@ -27,7 +27,10 @@ use crate::{
         interrupts::{CliInterruptListener, Interrupts},
         prepared_stream::PreparedSessionStream,
     },
-    presenters::{EnhancedSessionPresenter, PresentationUpdate, ToolPresenterRegistry},
+    presenters::{
+        EnhancedSessionPresenter, PresentationUpdate, ToolPresenterRegistry,
+        tools::read::SkillReadPathFormatter,
+    },
     slash_sessions::{
         CallbackApplicationExit, CallbackSessionBinding, CommandContext, NavigationFailure,
         PollingSlashActivity, RpcSlashSession, SkillCompletion, SkillRefresh,
@@ -199,7 +202,7 @@ impl EnhancedCli {
         let binding_stop = Arc::new(Signal::new());
         // A supplied startup session may be resumed or attached, so its history,
         // agent names and task graphs arrive only through replay.
-        let stream = if supplied {
+        let mut stream = if supplied {
             PreparedSessionStream::open(
                 self.client.clone(),
                 &initial.id,
@@ -230,13 +233,25 @@ impl EnhancedCli {
                     .collect::<Vec<_>>(),
             )
         };
-        let registry = Arc::new(ToolPresenterRegistry::standard(prefixes));
+        let mut skills = SkillCompletion::new(self.client.clone());
+        if let Err(error) = skills.refresh_catalog(&initial.id, cancellation).await {
+            stream.close();
+            return Err(error.into());
+        }
+        let skill_paths = Arc::new(SkillReadPathFormatter::new(
+            initial.working_directory.clone(),
+            skills.root_locations().to_vec(),
+        ));
+        let registry = Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
+            prefixes.clone(),
+            skill_paths.clone(),
+        ));
         let (columns, _) = (self.terminal.dimensions)();
         let mut presenter = EnhancedSessionPresenter::with_registry(
             columns.max(1) as usize,
             self.terminal.color,
             stream.replay_context(),
-            registry.clone(),
+            registry,
         );
         let initial_update = presenter
             .set_session(&initial.mode, &initial.model)
@@ -277,12 +292,13 @@ impl EnhancedCli {
                 session: initial.clone(),
                 client: self.client.clone(),
                 generation: 0,
-                prepared_skills: None,
+                prepared_skills: Some(skills),
+                skill_paths,
             }),
             presenter: Mutex::new(presenter),
             live_dirty: AtomicBool::new(false),
             presenter_created: Mutex::new(Instant::now()),
-            registry,
+            read_only_command_prefixes: prefixes,
             frame: frame.clone(),
             input: input.clone(),
             color: self.terminal.color,
@@ -496,8 +512,9 @@ impl EnhancedInput {
         if !warnings.is_empty() {
             dialog.print(&warnings, c).await?;
         }
-        let mut skills = SkillCompletion::new(shared.snapshot().client);
-        skills.refresh_catalog(session.id(), c).await?;
+        let mut skills = shared
+            .take_prepared_skills()
+            .expect("initial skill catalog was prepared");
         let mut slash = SlashCommandCompletion::new();
         let mut editor = IncrementalEditor::new(PROMPT, 64 * 1024);
         let mut submit_at = None;
@@ -731,8 +748,8 @@ impl EnhancedInput {
                                 .state
                                 .lock()
                                 .map_err(|_| Status::internal("enhanced session lock poisoned"))?;
-                            if state.generation == snapshot.generation {
-                                state.prepared_skills = Some(skills);
+                            if state.prepare_skills(snapshot.generation, skills) {
+                                shared.live_dirty.store(true, Ordering::Release);
                             }
                             Ok(())
                         })
@@ -1066,6 +1083,18 @@ struct SessionState {
     client: WebClient,
     generation: u64,
     prepared_skills: Option<SkillCompletion>,
+    skill_paths: Arc<SkillReadPathFormatter>,
+}
+impl SessionState {
+    fn prepare_skills(&mut self, generation: u64, skills: SkillCompletion) -> bool {
+        if self.generation != generation {
+            return false;
+        }
+        self.skill_paths
+            .replace_root_locations(skills.root_locations().to_vec());
+        self.prepared_skills = Some(skills);
+        true
+    }
 }
 struct Binding {
     stream: PreparedSessionStream,
@@ -1111,7 +1140,7 @@ struct EnhancedSession {
     presenter: Mutex<EnhancedSessionPresenter>,
     live_dirty: AtomicBool,
     presenter_created: Mutex<Instant>,
-    registry: Arc<ToolPresenterRegistry>,
+    read_only_command_prefixes: Vec<String>,
     frame: Arc<FrameView>,
     input: Arc<InputPump>,
     color: bool,
@@ -1443,12 +1472,20 @@ impl SessionReplacement for EnhancedSession {
                 prepared.close();
                 return Err(error.into());
             }
+            let skill_paths = Arc::new(SkillReadPathFormatter::new(
+                session.working_directory.clone(),
+                skills.root_locations().to_vec(),
+            ));
+            let registry = Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
+                self.read_only_command_prefixes.clone(),
+                skill_paths.clone(),
+            ));
             let (columns, _) = (self.frame.dimensions)();
             let mut presenter = EnhancedSessionPresenter::with_registry(
                 columns.max(1) as usize,
                 self.color,
                 prepared.replay_context(),
-                self.registry.clone(),
+                registry,
             );
             let update = presenter
                 .set_session(&session.mode, &session.model)
@@ -1480,6 +1517,7 @@ impl SessionReplacement for EnhancedSession {
                 state.client = client;
                 state.generation = state.generation.wrapping_add(1);
                 state.prepared_skills = Some(skills);
+                state.skill_paths = skill_paths;
             }
             *self.presenter.lock().expect("presenter poisoned") = presenter;
             *self

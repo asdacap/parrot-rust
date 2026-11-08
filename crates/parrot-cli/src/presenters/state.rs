@@ -468,6 +468,9 @@ impl AgentSessionState {
             id.strip_prefix(TOOL_ACTIVITY_PREFIX).unwrap_or(id),
             resolver,
         );
+        if presenters.describe(&call.tool_name).context_dependent_live {
+            return Ok(ActivityItem::Tool(presenters.present_live(&call, frame)?));
+        }
         let mut cache = self
             .tool_live
             .lock()

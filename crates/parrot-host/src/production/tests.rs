@@ -73,8 +73,8 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
-        let root = PathBuf::from(format!(
-            "/tmp/parrot-prod-{}-{}",
+        let root = std::env::temp_dir().join(format!(
+            "parrot-prod-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));

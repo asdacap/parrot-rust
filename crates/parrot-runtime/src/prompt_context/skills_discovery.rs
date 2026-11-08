@@ -2,8 +2,8 @@
 //! Returned paths and cached metadata are observations, never read capabilities.
 
 use super::skills_parsing::{
-    SkillDisplayMetadata, SkillMetadata, SkillRoot, SkillScope, normalize_skill_path,
-    parse_skill_display_metadata, parse_skill_frontmatter,
+    SkillDisplayMetadata, SkillMetadata, SkillRoot, SkillRootLocation, SkillScope,
+    normalize_skill_path, parse_skill_display_metadata, parse_skill_frontmatter,
 };
 use parrot_domain::{
     contracts::{
@@ -40,6 +40,15 @@ pub struct SkillLoadError {
 pub struct SkillSnapshot {
     pub skills: Vec<SkillMetadata>,
     pub errors: Vec<SkillLoadError>,
+    pub root_locations: Vec<SkillRootLocation>,
+}
+impl SkillSnapshot {
+    fn record_root_location(&mut self, path: String, scope: SkillScope) {
+        let location = SkillRootLocation { path, scope };
+        if !self.root_locations.contains(&location) {
+            self.root_locations.push(location);
+        }
+    }
 }
 
 /// An explicit path base and platform, not host discovery or filesystem authority.
@@ -194,6 +203,8 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             .context
             .lexical(Path::new(&root.path))
             .map_err(boundary_error)?;
+        self.result
+            .record_root_location(logical.clone(), root.scope);
         let path = Path::new(&logical);
         let entry = match self
             .service
@@ -236,6 +247,8 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             .context
             .physical(&resolved.physical_path)
             .map_err(boundary_error)?;
+        self.result
+            .record_root_location(physical.clone(), root.scope);
         let mut pending = VecDeque::from([DirectoryVisit {
             logical: logical.clone().into(),
             physical: physical.into(),

@@ -16,6 +16,121 @@ fn configured(columns: usize) -> EnhancedSessionPresenter {
     presenter
 }
 #[test]
+fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_timers() {
+    use parrot_cli::presenters::{
+        ToolPresenter,
+        tools::{
+            exec_command::ExecCommandToolPresenter,
+            generic::GenericToolPresenter,
+            read::{ReadToolPresenter, SkillReadPathFormatter},
+        },
+    };
+    use parrot_cli::terminal_frames::LiveBufferRenderContext;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let clock = Arc::new(AtomicU64::new(0));
+    let paths = Arc::new(SkillReadPathFormatter::new(
+        "/server/work".into(),
+        vec![wire::SkillRootLocation {
+            path: "/server/skills".into(),
+            scope: wire::ListedSkillScope::SKILL_SCOPE_USER.into(),
+            ..Default::default()
+        }],
+    ));
+    let presenters: Vec<Arc<dyn ToolPresenter>> = vec![
+        Arc::new(ReadToolPresenter::new(paths.clone())),
+        Arc::new(ExecCommandToolPresenter::with_clock(
+            Vec::new(),
+            Arc::new({
+                let clock = clock.clone();
+                move || Duration::from_secs(clock.load(Ordering::Acquire))
+            }),
+        )),
+    ];
+    let registry =
+        Arc::new(ToolPresenterRegistry::new(presenters, Arc::new(GenericToolPresenter)).unwrap());
+    let mut presenter = EnhancedSessionPresenter::with_registry(
+        200,
+        true,
+        Arc::new(Mutex::new(SessionReplayContext::new(false))),
+        registry,
+    );
+    presenter.set_session("build", "provider/model").unwrap();
+    presenter.observe(&start("root")).unwrap();
+    for (id, name, arguments) in [
+        (
+            "read-call",
+            "read",
+            r#"{"path":"/server/skills/solidifier/SKILL.md"}"#,
+        ),
+        ("exec-call", "exec_command", r#"{"command":"perform-work"}"#),
+    ] {
+        presenter
+            .observe(&event(
+                "root",
+                Payload::ToolCallChunk(wire::ToolCallChunk {
+                    tool_call_id: id.into(),
+                    tool_name: name.into(),
+                    arguments_fragment: arguments.into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        presenter
+            .observe(&event(
+                "root",
+                Payload::ToolStarted(wire::ToolStarted {
+                    tool_call_id: id.into(),
+                    tool_name: name.into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+    }
+    let before = presenter.snapshot().unwrap();
+    assert!(live(&before, 200).contains("running 0s"));
+    let before_lines = before
+        .iter()
+        .flat_map(|item| {
+            item.render(LiveBufferRenderContext {
+                columns: 200,
+                color: true,
+            })
+            .unwrap()
+            .lines
+        })
+        .collect::<Vec<_>>();
+    let read = before_lines
+        .iter()
+        .find(|line| line.text().contains("$USER_SKILLS/solidifier/SKILL.md"))
+        .unwrap();
+    assert_eq!(read.style().start(), "\x1b[48;5;236m\x1b[36m");
+    clock.store(12, Ordering::Release);
+    paths.replace_root_locations(Vec::new());
+    let after = presenter.snapshot().unwrap();
+    assert!(
+        live(&after, 200).contains("running 12s"),
+        "unrelated cached timer origin must survive context refresh"
+    );
+    let after_lines = after
+        .iter()
+        .flat_map(|item| {
+            item.render(LiveBufferRenderContext {
+                columns: 200,
+                color: true,
+            })
+            .unwrap()
+            .lines
+        })
+        .collect::<Vec<_>>();
+    let read = after_lines
+        .iter()
+        .find(|line| line.text().contains("/server/skills/solidifier/SKILL.md"))
+        .unwrap();
+    assert_eq!(read.style().start(), "\x1b[48;5;236m\x1b[38;5;245m");
+    assert!(!live(&after, 200).contains("$USER_SKILLS"));
+}
+
+#[test]
 fn steer_remains_pending_across_turn_boundaries_until_its_own_promotion() {
     let mut presenter = configured(120);
     presenter.observe(&start("root")).unwrap();

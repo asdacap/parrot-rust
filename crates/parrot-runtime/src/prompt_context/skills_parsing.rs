@@ -21,6 +21,12 @@ pub struct SkillRoot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkillRootLocation {
+    pub path: String,
+    pub scope: SkillScope,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SkillMetadata {
     pub name: String,
     pub description: String,

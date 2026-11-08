@@ -213,6 +213,12 @@ message ListSkillsRequest {
 message ListSkillsResponse {
   repeated Skill skills = 1;
   repeated SkillLoadError errors = 2;
+  repeated SkillRootLocation root_locations = 3;
+}
+
+message SkillRootLocation {
+  string path = 1;
+  ListedSkillScope scope = 2;
 }
 
 message Skill {

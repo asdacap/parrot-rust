@@ -174,6 +174,20 @@ impl ParrotService {
         let session = self.sessions.find(&request.user_session_id)?;
         let snapshot = session.refresh_skills(cancellation).await?;
         Ok(wire::ListSkillsResponse {
+            root_locations: snapshot
+                .root_locations
+                .into_iter()
+                .map(|location| wire::SkillRootLocation {
+                    path: location.path,
+                    scope: match location.scope {
+                        SkillScope::Repo => wire::ListedSkillScope::SKILL_SCOPE_REPO,
+                        SkillScope::User => wire::ListedSkillScope::SKILL_SCOPE_USER,
+                        SkillScope::System => wire::ListedSkillScope::SKILL_SCOPE_SYSTEM,
+                    }
+                    .into(),
+                    ..Default::default()
+                })
+                .collect(),
             skills: snapshot.skills.into_iter().map(map_skill).collect(),
             errors: snapshot
                 .errors

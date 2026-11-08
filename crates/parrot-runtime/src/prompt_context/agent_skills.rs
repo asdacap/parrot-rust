@@ -65,6 +65,7 @@ where
             snapshot: Arc::new(SkillSnapshot {
                 skills: Vec::new(),
                 errors: Vec::new(),
+                root_locations: Vec::new(),
             }),
             catalog_rendering: None,
             catalog_view: Arc::new(RwLock::new(None)),
@@ -253,6 +254,7 @@ where
         self.snapshot = Arc::new(SkillSnapshot {
             skills: Vec::new(),
             errors: Vec::new(),
+            root_locations: Vec::new(),
         });
         *self
             .catalog_view

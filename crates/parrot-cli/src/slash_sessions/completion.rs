@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use parrot_domain::{
     contracts::async_ops::Cancellation,
-    protocol::messages::parrot::{ListSkillsRequest, Skill},
+    protocol::messages::parrot::{ListSkillsRequest, Skill, SkillRootLocation},
 };
 use parrot_host::web::router::WebClient;
 
@@ -97,6 +97,7 @@ impl SlashCommandCompletion {
 pub struct SkillCompletion {
     client: WebClient,
     state: SkillCompletionState,
+    root_locations: Vec<SkillRootLocation>,
 }
 
 impl SkillCompletion {
@@ -104,7 +105,12 @@ impl SkillCompletion {
         Self {
             client,
             state: SkillCompletionState::default(),
+            root_locations: Vec::new(),
         }
+    }
+
+    pub fn root_locations(&self) -> &[SkillRootLocation] {
+        &self.root_locations
     }
 
     pub fn skills(&self) -> &[Skill] {
@@ -138,8 +144,14 @@ impl SkillCompletion {
         )
         .await;
         match response {
-            Ok(listed) => self.state.replace_catalog(&listed.skills),
-            Err(SlashFailure::Rpc(_)) => self.state.replace_catalog(&[]),
+            Ok(listed) => {
+                self.state.replace_catalog(&listed.skills);
+                self.root_locations = listed.root_locations;
+            }
+            Err(SlashFailure::Rpc(_)) => {
+                self.state.replace_catalog(&[]);
+                self.root_locations.clear();
+            }
             Err(failure) => return Err(failure),
         }
         Ok(())

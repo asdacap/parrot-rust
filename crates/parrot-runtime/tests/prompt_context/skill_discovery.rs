@@ -338,6 +338,81 @@ async fn discover(fake: &Fake, roots: &[SkillRoot]) -> SkillSnapshot {
     .unwrap()
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn root_locations_preserve_scope_and_order_for_empty_and_missing_roots() {
+    let fake = Fake::default();
+    fake.dir("/work/repo");
+    fake.dir("/system");
+    let result = discover(
+        &fake,
+        &[
+            root("repo", SkillScope::Repo, true),
+            root("/user", SkillScope::User, true),
+            root("/system", SkillScope::System, false),
+            root("/work/repo", SkillScope::Repo, true),
+            root("/work/repo", SkillScope::User, true),
+        ],
+    )
+    .await;
+    assert_eq!(
+        result
+            .root_locations
+            .iter()
+            .map(|location| (location.path.as_str(), location.scope))
+            .collect::<Vec<_>>(),
+        [
+            ("/work/repo", SkillScope::Repo),
+            ("/user", SkillScope::User),
+            ("/system", SkillScope::System),
+            ("/work/repo", SkillScope::User),
+        ]
+    );
+    assert!(result.skills.is_empty());
+    assert!(result.errors.is_empty());
+    assert_eq!(fake.calls.lock().unwrap().len(), 13);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn root_locations_include_only_physical_targets_observed_by_authorized_discovery() {
+    let fake = Fake::default();
+    fake.dir("/physical");
+    fake.link("/user", "/physical");
+    fake.link("/system", "/physical");
+    fake.error("inspect", "/denied", FileReadErrorKind::Denied, "denied");
+    let result = discover(
+        &fake,
+        &[
+            root("/user", SkillScope::User, true),
+            root("/system", SkillScope::System, false),
+            root("/denied", SkillScope::Repo, true),
+        ],
+    )
+    .await;
+    assert_eq!(
+        result
+            .root_locations
+            .iter()
+            .map(|location| (location.path.as_str(), location.scope))
+            .collect::<Vec<_>>(),
+        [
+            ("/user", SkillScope::User),
+            ("/physical", SkillScope::User),
+            ("/system", SkillScope::System),
+            ("/denied", SkillScope::Repo),
+        ]
+    );
+    assert!(result.skills.is_empty());
+    assert_eq!(result.errors.len(), 2);
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(calls.len(), 5);
+    assert_eq!(calls[0].links, LinkPolicy::NoFollow);
+    assert_eq!(calls[1].links, LinkPolicy::Follow);
+    assert_eq!(calls[2].operation, "list");
+    assert_eq!(calls[3].links, LinkPolicy::NoFollow);
+    assert_eq!(calls[4].links, LinkPolicy::NoFollow);
+    assert!(calls.iter().all(|call| call.policy == 41));
+}
+
 #[test]
 fn roots_preserve_nearest_repository_then_user_then_packaged_and_physical_launch_fallback() {
     let workspace = ProjectWorkspace::from_resolved(

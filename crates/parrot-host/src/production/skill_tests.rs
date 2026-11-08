@@ -62,6 +62,26 @@ async fn production_skill_catalog_uses_nearest_repo_then_ancestors_user_and_syst
     let host = fixture.host_at(launch, Arc::new(NoCallProvider::default()));
     let listed = list(&host).await;
     assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+    assert_eq!(
+        listed
+            .root_locations
+            .iter()
+            .map(|location| (
+                PathBuf::from(&location.path),
+                location.scope.enum_value().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (roots[0].clone(), wire::ListedSkillScope::SKILL_SCOPE_REPO),
+            (
+                repository.join("src/.agents/skills"),
+                wire::ListedSkillScope::SKILL_SCOPE_REPO
+            ),
+            (roots[1].clone(), wire::ListedSkillScope::SKILL_SCOPE_REPO),
+            (roots[2].clone(), wire::ListedSkillScope::SKILL_SCOPE_USER),
+            (roots[3].clone(), wire::ListedSkillScope::SKILL_SCOPE_SYSTEM),
+        ]
+    );
     let duplicate: Vec<_> = listed
         .skills
         .iter()
@@ -95,8 +115,31 @@ async fn production_skill_catalog_uses_nearest_repo_then_ancestors_user_and_syst
                 && skill.scope.enum_value() == Ok(wire::ListedSkillScope::SKILL_SCOPE_SYSTEM))
     );
     assert!(!format!("{listed:?}").contains("Private test instructions."));
+    let mut client = bounded(host.open_local_client(&NeverCancelled))
+        .await
+        .unwrap();
+    let session = bounded(client.create_session(wire::CreateSessionRequest {
+        model: "local/test".into(),
+        mode: "build".into(),
+        ..Default::default()
+    }))
+    .await
+    .unwrap()
+    .into_inner();
+    let native = bounded(client.list_skills(wire::ListSkillsRequest {
+        user_session_id: session.id,
+        ..Default::default()
+    }))
+    .await
+    .unwrap()
+    .into_inner();
+    assert_eq!(native.root_locations, listed.root_locations);
     bounded(host.close()).await.unwrap();
-    std::fs::remove_dir_all(&fixture.root).unwrap();
+    drop(client);
+    drop(host);
+    let root = fixture.root.clone();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
@@ -130,8 +173,68 @@ async fn nonrepository_launch_skips_local_skill_roots_but_keeps_user_skills() {
         entry.scope.enum_value(),
         Ok(wire::ListedSkillScope::SKILL_SCOPE_USER)
     );
+    assert_eq!(
+        listed
+            .root_locations
+            .iter()
+            .map(|location| (
+                PathBuf::from(&location.path),
+                location.scope.enum_value().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                fixture.roots.user_home().join(".agents/skills"),
+                wire::ListedSkillScope::SKILL_SCOPE_USER
+            ),
+            (
+                std::fs::canonicalize(&user_root).unwrap(),
+                wire::ListedSkillScope::SKILL_SCOPE_USER
+            ),
+            (
+                fixture.roots.current().skills_directory(),
+                wire::ListedSkillScope::SKILL_SCOPE_SYSTEM
+            ),
+        ]
+    );
     bounded(host.close()).await.unwrap();
-    std::fs::remove_dir_all(&fixture.root).unwrap();
+    drop(host);
+    let root = fixture.root.clone();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn skill_root_locations_remain_available_without_enabled_skills_or_existing_user_root() {
+    let mut fixture = Fixture::new();
+    fixture.configuration.runtime.skills.enabled = false;
+    let user_root = fixture.roots.user_home().join(".agents/skills");
+    assert!(!user_root.exists());
+    let host = fixture.host();
+    let listed = list(&host).await;
+    assert!(listed.skills.iter().all(|skill| !skill.enabled));
+    assert_eq!(
+        listed
+            .root_locations
+            .iter()
+            .map(|location| (
+                PathBuf::from(&location.path),
+                location.scope.enum_value().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (user_root, wire::ListedSkillScope::SKILL_SCOPE_USER),
+            (
+                fixture.roots.current().skills_directory(),
+                wire::ListedSkillScope::SKILL_SCOPE_SYSTEM
+            ),
+        ]
+    );
+    bounded(host.close()).await.unwrap();
+    drop(host);
+    let root = fixture.root.clone();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

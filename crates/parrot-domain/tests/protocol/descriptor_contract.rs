@@ -148,6 +148,80 @@ fn descriptor_contract(bytes: &[u8]) -> Vec<FileContract> {
     files
 }
 
+fn assert_additive_messages(expected: &[MessageContract], actual: &[MessageContract], path: &str) {
+    for expected in expected {
+        let actual = actual
+            .iter()
+            .find(|message| message.name == expected.name)
+            .expect("existing message remains present");
+        let current = format!("{path}.{}", expected.name);
+        assert_eq!(actual.oneofs, expected.oneofs, "oneofs at {current}");
+        assert_eq!(actual.enums, expected.enums, "enums at {current}");
+        for expected_field in &expected.fields {
+            let actual_field = actual
+                .fields
+                .iter()
+                .find(|field| field.number == expected_field.number)
+                .expect("existing field number remains present");
+            assert_eq!(actual_field, expected_field, "wire field at {current}");
+        }
+        assert_additive_messages(&expected.nested, &actual.nested, &current);
+    }
+}
+
+#[test]
+fn skill_root_extension_preserves_existing_wire_fields_and_rpc_methods() {
+    let legacy = descriptor_contract(include_bytes!("fixtures/source-descriptors.pb"));
+    let current = descriptor_contract(include_bytes!(concat!(
+        env!("OUT_DIR"),
+        "/protocol-descriptors.pb"
+    )));
+    assert_eq!(current.len(), legacy.len());
+    for expected in legacy {
+        let actual = current
+            .iter()
+            .find(|file| file.name == expected.name)
+            .expect("existing schema remains present");
+        assert_eq!(actual.package, expected.package);
+        assert_eq!(actual.syntax, expected.syntax);
+        assert_eq!(actual.dependencies, expected.dependencies);
+        assert_eq!(actual.enums, expected.enums);
+        assert_eq!(actual.services, expected.services);
+        assert_additive_messages(&expected.messages, &actual.messages, &expected.name);
+    }
+}
+
+#[test]
+fn independent_current_protoc_and_rust_codegen_descriptors_match() {
+    let expected = descriptor_contract(include_bytes!("fixtures/current-descriptors.pb"));
+    let actual = descriptor_contract(include_bytes!(concat!(
+        env!("OUT_DIR"),
+        "/protocol-descriptors.pb"
+    )));
+    assert_eq!(actual, expected);
+    for (name, generated_file) in [
+        (
+            "parrot.proto",
+            protocol::messages::parrot::file_descriptor().proto(),
+        ),
+        (
+            "web.proto",
+            protocol::messages::web::file_descriptor().proto(),
+        ),
+        (
+            "queue.proto",
+            protocol::messages::queue::file_descriptor().proto(),
+        ),
+        (
+            "process.proto",
+            protocol::messages::process::file_descriptor().proto(),
+        ),
+    ] {
+        let expected_file = expected.iter().find(|file| file.name == name).unwrap();
+        assert_eq!(&file_contract(generated_file), expected_file);
+    }
+}
+
 fn assert_messages_match(expected: &[MessageContract], actual: &[MessageContract], path: &str) {
     assert_eq!(actual.len(), expected.len(), "message count at {path}");
     for (expected, actual) in expected.iter().zip(actual) {
@@ -224,6 +298,7 @@ fn assert_file_matches(expected: &FileContract, actual: &FileContract) {
 }
 
 #[test]
+#[ignore = "Legacy source descriptor predates the approved skill root metadata extension; current-schema equality and additive wire compatibility are tested separately"]
 fn independent_protoc_and_rust_codegen_descriptors_match() {
     let source = include_bytes!("fixtures/source-descriptors.pb");
     let generated = include_bytes!(concat!(env!("OUT_DIR"), "/protocol-descriptors.pb"));

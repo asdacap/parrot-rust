@@ -7,6 +7,7 @@ use parrot_domain::protocol::{
 use protobuf::Message;
 
 mod descriptor_contract;
+mod skill_roots;
 
 fn unhex(value: &str) -> Vec<u8> {
     value
