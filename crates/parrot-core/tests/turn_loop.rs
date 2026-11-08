@@ -1,9 +1,10 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionFeedback, Content, ContextSnapshot, ConversationTurn,
-    Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message, Outcome,
-    PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role,
-    States, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools,
-    TurnOptions,
+    BoxFuture, CancellationToken, CompletionFeedback, Content, ContextCadence, ContextCompaction,
+    ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot, ContextState,
+    ConversationTurn, Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message,
+    Outcome, PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason,
+    Role, States, TokenCalibration, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult,
+    ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnRequestPhase},
     run, run_turn,
 };
@@ -22,6 +23,8 @@ use std::{
 mod cancellation;
 #[path = "turn_loop/completion_policy.rs"]
 mod completion_policy;
+#[path = "turn_loop/context_preparation.rs"]
+mod context_preparation;
 #[path = "turn_loop/request_assembly.rs"]
 mod request_assembly;
 #[path = "turn_loop/tool_execution.rs"]
@@ -198,14 +201,40 @@ impl Provider for MemoryProvider {
     }
 }
 
+struct RenderedContext {
+    instructions: String,
+    maximum_output_tokens: i32,
+    messages: Vec<Message>,
+}
+
+#[derive(Clone)]
+struct InputEstimate {
+    request_index: usize,
+    instructions: String,
+    definitions: Vec<ToolDefinition>,
+    messages: Vec<Message>,
+    tokens: i64,
+}
+
+struct CompactedContext {
+    instructions: String,
+    messages: Vec<Message>,
+    state: ContextState,
+    reduced: bool,
+}
+
 struct MemoryState {
     trace: Trace,
     tools: MemoryTools,
     provider: MemoryProvider,
     exit_blockers: VecDeque<Vec<String>>,
     completion_feedback: Vec<CompletionFeedback>,
-    requests: Vec<(TurnRequestPhase, Vec<String>)>,
-    prepared_definitions: Vec<Vec<ToolDefinition>>,
+    rendered_instructions: Vec<String>,
+    final_requests: Vec<usize>,
+    recorded_phases: Vec<TurnRequestPhase>,
+    estimates: Mutex<Vec<InputEstimate>>,
+    estimate_script: Mutex<VecDeque<i64>>,
+    estimated_input_tokens: i64,
     retries: Vec<(RetryReason, i32)>,
     recorded_tools: Vec<ProviderResponse>,
     applied_results: Vec<ToolResult>,
@@ -214,9 +243,19 @@ struct MemoryState {
     reasoning: Option<Reasoning>,
     provider_preferences: String,
     include_router_metadata: bool,
-    context: ContextSnapshot,
+    context: ContextState,
+    instructions: String,
     messages: Vec<Message>,
-    preparations: VecDeque<(ContextSnapshot, Vec<Message>)>,
+    renderings: VecDeque<RenderedContext>,
+    compactions: VecDeque<CompactedContext>,
+    compacted_definitions: Vec<Vec<ToolDefinition>>,
+    checkpoint: Option<ContextReminderCheckpoint>,
+    cadence_writes: Vec<ContextCadence>,
+    reminder: String,
+    rendered_reminders: Mutex<Vec<(ContextSnapshot, i32)>>,
+    reminder_appends: Vec<(ContextReminderCheckpoint, String, i32)>,
+    append_reminder: bool,
+    reminder_publications: usize,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(PendingMessage, Message)>,
     next_input: usize,
@@ -247,8 +286,12 @@ impl MemoryState {
             },
             exit_blockers: VecDeque::new(),
             completion_feedback: Vec::new(),
-            requests: Vec::new(),
-            prepared_definitions: Vec::new(),
+            rendered_instructions: Vec::new(),
+            final_requests: Vec::new(),
+            recorded_phases: Vec::new(),
+            estimates: Mutex::default(),
+            estimate_script: Mutex::default(),
+            estimated_input_tokens: 0,
             retries: Vec::new(),
             recorded_tools: Vec::new(),
             applied_results: Vec::new(),
@@ -257,12 +300,32 @@ impl MemoryState {
             reasoning: None,
             provider_preferences: String::new(),
             include_router_metadata: false,
-            context: ContextSnapshot {
-                instructions: "core request".into(),
-                max_output_tokens: 0,
+            context: ContextState {
+                configuration: ContextConfiguration {
+                    model: ContextModel {
+                        canonical_model: "memory/model".into(),
+                        context_window: 0,
+                        maximum_input_tokens: 0,
+                        maximum_output_tokens: 0,
+                    },
+                    trigger_percent: 90,
+                    context_limit: None,
+                },
+                calibration: TokenCalibration::default(),
+                cadence: ContextCadence::new(),
             },
+            instructions: "core request".into(),
             messages: Vec::new(),
-            preparations: VecDeque::new(),
+            renderings: VecDeque::new(),
+            compactions: VecDeque::new(),
+            compacted_definitions: Vec::new(),
+            checkpoint: None,
+            cadence_writes: Vec::new(),
+            reminder: "configured reminder".into(),
+            rendered_reminders: Mutex::default(),
+            reminder_appends: Vec::new(),
+            append_reminder: true,
+            reminder_publications: 0,
             last_turn: None,
             pending_messages: VecDeque::new(),
             next_input: 0,
@@ -331,6 +394,46 @@ impl MemoryState {
             provider_preferences: self.provider_preferences.clone(),
             include_router_metadata: self.include_router_metadata,
         }
+    }
+    fn prime_context(&mut self, estimate: i64) {
+        self.context.configuration.model.context_window = 1000;
+        self.context.configuration.model.maximum_output_tokens = 1;
+        self.messages = vec![Message {
+            role: Role::User,
+            contents: vec![Content::Text("question".into())],
+            ..Message::default()
+        }];
+        self.context.cadence.restore(None);
+        self.context
+            .cadence
+            .observe(
+                &ContextSnapshot::estimate(estimate, &self.context.configuration),
+                &self.context.configuration.model.canonical_model,
+                self.messages.len() as i64,
+            )
+            .unwrap();
+    }
+    fn capture_catalogs(&self) -> Vec<Vec<String>> {
+        self.provider
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.tools.iter().map(|tool| tool.name.clone()).collect())
+            .collect()
+    }
+    fn capture_request_estimates(&self) -> Vec<InputEstimate> {
+        let estimates = self.estimates.lock().unwrap();
+        (0..self.rendered_instructions.len())
+            .map(|request_index| {
+                estimates
+                    .iter()
+                    .rev()
+                    .find(|estimate| estimate.request_index == request_index)
+                    .unwrap()
+                    .clone()
+            })
+            .collect()
     }
     fn run(&mut self) -> Result<Outcome, Error> {
         *self.tools.fail_at.lock().unwrap() = self.fail_at;
@@ -431,24 +534,116 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn prepare_context<'a>(
-        &'a mut self,
-        definitions: &'a [ToolDefinition],
-        phase: TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<ContextSnapshot, Error>> {
+    fn read_context_state(&self) -> BoxFuture<'_, Result<ContextState, Error>> {
         Box::pin(async move {
-            self.step("prepare")?;
-            let names: Vec<_> = definitions
-                .iter()
-                .map(|definition| definition.name.clone())
-                .collect();
-            self.requests.push((phase, names));
-            self.prepared_definitions.push(definitions.to_vec());
-            if let Some((context, messages)) = self.preparations.pop_front() {
-                self.context = context;
-                self.messages = messages;
-            }
+            self.trace.step("context", self.fail_at)?;
             Ok(self.context.clone())
+        })
+    }
+    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async move {
+            self.step("render")?;
+            if let Some(rendered) = self.renderings.pop_front() {
+                self.instructions = rendered.instructions;
+                self.context.configuration.model.maximum_output_tokens =
+                    rendered.maximum_output_tokens;
+                self.messages = rendered.messages;
+            }
+            self.rendered_instructions.push(self.instructions.clone());
+            Ok(self.instructions.clone())
+        })
+    }
+    fn estimate_input_tokens<'a>(
+        &'a self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
+        messages: &'a [Message],
+    ) -> BoxFuture<'a, Result<i64, Error>> {
+        Box::pin(async move {
+            self.trace.step("estimate", self.fail_at)?;
+            let tokens = self
+                .estimate_script
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(self.estimated_input_tokens);
+            self.estimates.lock().unwrap().push(InputEstimate {
+                request_index: self.rendered_instructions.len().saturating_sub(1),
+                instructions: instructions.into(),
+                definitions: definitions.to_vec(),
+                messages: messages.to_vec(),
+                tokens,
+            });
+            Ok(tokens)
+        })
+    }
+    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("final_request")?;
+            self.final_requests.push(self.rendered_instructions.len());
+            Ok(())
+        })
+    }
+    fn read_context_checkpoint(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
+        Box::pin(async move {
+            self.trace.step("checkpoint", self.fail_at)?;
+            Ok(self.checkpoint.clone())
+        })
+    }
+    fn write_context_cadence(
+        &mut self,
+        cadence: ContextCadence,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("cadence")?;
+            self.cadence_writes.push(cadence.clone());
+            self.context.cadence = cadence;
+            Ok(())
+        })
+    }
+    fn render_context_reminder<'a>(
+        &'a self,
+        context: &'a ContextSnapshot,
+        percentage: i32,
+    ) -> BoxFuture<'a, Result<String, Error>> {
+        Box::pin(async move {
+            self.trace.step("reminder", self.fail_at)?;
+            self.rendered_reminders
+                .lock()
+                .unwrap()
+                .push((context.clone(), percentage));
+            Ok(self.reminder.clone())
+        })
+    }
+    fn append_context_reminder(
+        &mut self,
+        checkpoint: ContextReminderCheckpoint,
+        content: String,
+        observed_percentage: i32,
+    ) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async move {
+            self.step("append_reminder")?;
+            self.reminder_appends
+                .push((checkpoint.clone(), content.clone(), observed_percentage));
+            if self.append_reminder {
+                self.checkpoint = Some(checkpoint);
+                let message = Message {
+                    role: Role::System,
+                    contents: vec![Content::Text(content)],
+                    ..Message::default()
+                };
+                self.messages.push(message.clone());
+                self.append_turn_message(message);
+            }
+            Ok(self.append_reminder)
+        })
+    }
+    fn publish_context_reminder(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.reminder_publications += 1;
+            self.step("publish_reminder")
         })
     }
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
@@ -459,11 +654,24 @@ impl States for MemoryState {
     }
     fn compact_request<'a>(
         &'a mut self,
-        _definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<bool, Error>> {
+        definitions: &'a [ToolDefinition],
+    ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async move {
             self.step("compact")?;
-            Ok(self.reduced)
+            self.compacted_definitions.push(definitions.to_vec());
+            if let Some(compacted) = self.compactions.pop_front() {
+                self.instructions = compacted.instructions;
+                self.messages = compacted.messages;
+                self.context = compacted.state;
+                return Ok(ContextCompaction {
+                    instructions: self.instructions.clone(),
+                    reduced: compacted.reduced,
+                });
+            }
+            Ok(ContextCompaction {
+                instructions: self.instructions.clone(),
+                reduced: self.reduced,
+            })
         })
     }
     fn record_retry(
@@ -480,17 +688,23 @@ impl States for MemoryState {
     fn record_tool_calls<'a>(
         &'a mut self,
         response: &'a ProviderResponse,
+        phase: TurnRequestPhase,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             self.step("record_tools")?;
+            self.recorded_phases.push(phase);
             self.recorded_tools.push(response.clone());
             self.append_response(response);
             self.recorded_catalogs.push(
-                self.requests
+                self.estimates
+                    .lock()
+                    .unwrap()
                     .last()
-                    .expect("prepared provider request")
-                    .1
-                    .clone(),
+                    .expect("estimated provider request")
+                    .definitions
+                    .iter()
+                    .map(|definition| definition.name.clone())
+                    .collect(),
             );
             Ok(())
         })
@@ -540,15 +754,28 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
         [
             "catalog",
             "promote",
-            "prepare",
+            "render",
             "messages",
+            "context",
+            "estimate",
+            "checkpoint",
+            "cadence",
+            "messages",
+            "context",
+            "estimate",
             "invoke",
             "record_tools",
             "execute",
             "record_results",
             "promote",
-            "prepare",
+            "render",
             "messages",
+            "context",
+            "estimate",
+            "cadence",
+            "messages",
+            "context",
+            "estimate",
             "invoke",
             "exit_blockers",
             "complete",
@@ -585,19 +812,16 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
     let mut state = MemoryState::new((0..5).map(|_| Reply::tools("call")));
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.requests.len(), 5);
+    assert_eq!(state.rendered_instructions.len(), 5);
+    assert!(state.recorded_phases.iter().all(|phase| phase.final_phase));
     assert!(
         state
-            .requests
+            .capture_catalogs()
             .iter()
-            .all(|(phase, tools)| phase.final_phase && tools == &["read"])
+            .all(|tools| tools == &["read"])
     );
-    assert!(state.requests[0].0.enters_final_phase);
-    assert!(
-        state.requests[1..]
-            .iter()
-            .all(|(phase, _)| !phase.enters_final_phase)
-    );
+    assert!(state.final_requests.contains(&0));
+    assert_eq!(state.final_requests, [0]);
     assert_eq!(
         state
             .trace
@@ -624,7 +848,7 @@ fn malformed_final_response_exhausts_the_request_limit_without_a_settlement_exte
     let mut state = MemoryState::new([Reply::invalid("bad")]);
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.requests.len(), 1);
+    assert_eq!(state.rendered_instructions.len(), 1);
 }
 
 #[test]
@@ -655,15 +879,21 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
             }
         );
         assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
-        assert_eq!(state.requests.len(), if disable_limits { 2 } else { 1 });
-        assert!(state.requests.iter().all(|(phase, tools)| {
-            phase.final_phase != disable_limits
-                && if disable_limits {
-                    tools == &["read", "write"]
-                } else {
-                    tools == &["read"]
-                }
+        assert_eq!(
+            state.rendered_instructions.len(),
+            if disable_limits { 2 } else { 1 }
+        );
+        assert!(state.capture_catalogs().iter().all(|tools| {
+            if disable_limits {
+                tools == &["read", "write"]
+            } else {
+                tools == &["read"]
+            }
         }));
+        assert_eq!(
+            state.final_requests,
+            if disable_limits { vec![] } else { vec![0] }
+        );
         assert!(state.recorded_tools.is_empty());
         assert!(state.tools.requests.lock().unwrap().is_empty());
         assert_eq!(
@@ -712,10 +942,20 @@ fn disabled_request_limits_keep_every_request_in_normal_phase() {
     state.unlimited = true;
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.requests.len(), 3);
-    assert!(state.requests.iter().all(|(phase, tools)| {
-        !phase.final_phase && !phase.enters_final_phase && tools == &["read", "write"]
-    }));
+    assert_eq!(state.rendered_instructions.len(), 3);
+    assert!(
+        state
+            .capture_catalogs()
+            .iter()
+            .all(|tools| tools == &["read", "write"])
+    );
+    assert!(state.final_requests.is_empty());
+    assert!(
+        state
+            .recorded_phases
+            .iter()
+            .all(|phase| !phase.final_phase && !phase.enters_final_phase)
+    );
     assert_eq!(state.applied_results.len(), 2);
     assert!(
         state
@@ -756,8 +996,9 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
             .count(),
         1
     );
-    assert!(!state.requests[1].0.final_phase);
-    assert!(state.requests[2].0.final_phase);
+    assert_eq!(state.capture_catalogs()[1], ["read", "write"]);
+    assert_eq!(state.capture_catalogs()[2], ["read"]);
+    assert_eq!(state.final_requests, [2]);
 }
 
 #[test]
@@ -768,7 +1009,7 @@ fn cleared_completion_blockers_close_only_the_final_candidate() {
     ]);
     state.exit_blockers.push_back(vec!["answer the ask".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("candidate2".into())));
-    assert_eq!(state.requests.len(), 2);
+    assert_eq!(state.rendered_instructions.len(), 2);
     assert_eq!(state.completion_feedback.len(), 1);
     assert_eq!(
         state.completion_feedback[0].candidate.assistant_text,
@@ -807,7 +1048,7 @@ fn successive_blocker_lists_retain_each_candidate_and_preserve_continuation() {
     state.exit_blockers.push_back(vec!["answer the ask".into()]);
     state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.requests.len(), 3);
+    assert_eq!(state.rendered_instructions.len(), 3);
     assert_eq!(state.completion_feedback.len(), 2);
     assert_eq!(
         state.completion_feedback[0].candidate.assistant_text,
@@ -839,7 +1080,7 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
             .count(),
         2
     );
-    assert_eq!(state.requests.len(), 4);
+    assert_eq!(state.rendered_instructions.len(), 4);
 }
 
 #[test]
@@ -863,7 +1104,7 @@ fn compaction_that_does_not_reduce_context_returns_the_original_provider_error()
     let mut state = MemoryState::new([Reply::TooLarge("original")]);
     state.reduced = false;
     assert_eq!(state.run(), Err(Error::request_too_large("original")));
-    assert_eq!(state.requests.len(), 1);
+    assert_eq!(state.rendered_instructions.len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
 }
 
@@ -908,7 +1149,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         )),
         Ok(Outcome::Completed("first answer".into()))
     );
-    assert_eq!(state.requests.len(), 5);
+    assert_eq!(state.rendered_instructions.len(), 5);
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 5);
     assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
     assert_eq!(state.applied_results.len(), 1);
@@ -956,7 +1197,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
             options.include_router_metadata
         );
     }
-    assert!(state.requests[5].0.enters_final_phase);
+    assert!(state.final_requests.contains(&5));
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
     let trace = state.trace.values();
     assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 2);
@@ -1023,7 +1264,7 @@ fn adapter_errors_stop_at_the_failing_effect() {
     for (stage, reply) in [
         ("catalog", Reply::final_response("response")),
         ("promote", Reply::final_response("response")),
-        ("prepare", Reply::final_response("response")),
+        ("render", Reply::final_response("response")),
         ("messages", Reply::final_response("response")),
         ("invoke", Reply::final_response("response")),
         ("retry", Reply::invalid("response")),
@@ -1061,13 +1302,9 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
     state.maximum = 1;
     state.enqueue_message(Delivery::Queue, "second question");
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.requests.len(), 6);
-    assert!(state.requests[0].0.enters_final_phase);
-    assert!(
-        state.requests[1..]
-            .iter()
-            .all(|(phase, _)| !phase.enters_final_phase)
-    );
+    assert_eq!(state.rendered_instructions.len(), 6);
+    assert!(state.final_requests.contains(&0));
+    assert_eq!(state.final_requests, [0]);
     assert_eq!(
         state
             .trace
@@ -1104,18 +1341,19 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     state.maximum = 2;
     state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.requests.len(), 9);
-    assert!(!state.requests[0].0.final_phase);
-    assert!(state.requests[1].0.enters_final_phase);
-    assert!(state.requests[2].0.final_phase);
-    assert!(!state.requests[2].0.enters_final_phase);
-    assert!(!state.requests[3].0.final_phase);
-    assert_eq!(state.requests[3].1, ["read", "write"]);
-    assert!(state.requests[4].0.enters_final_phase);
+    assert_eq!(state.rendered_instructions.len(), 9);
+    let catalogs = state.capture_catalogs();
+    assert_eq!(catalogs[0], ["read", "write"]);
+    assert_eq!(catalogs[1], ["read"]);
+    assert_eq!(catalogs[2], ["read"]);
+    assert_eq!(catalogs[3], ["read", "write"]);
+    assert_eq!(state.final_requests, [1, 4]);
+    assert!(catalogs[4..].iter().all(|tools| tools == &["read"]));
+    assert!(state.recorded_phases[3].enters_final_phase);
     assert!(
-        state.requests[5..]
+        state.recorded_phases[4..]
             .iter()
-            .all(|(phase, _)| phase.final_phase && !phase.enters_final_phase)
+            .all(|phase| phase.final_phase && !phase.enters_final_phase)
     );
     assert_eq!(state.completion_feedback.len(), 1);
     assert_eq!(
@@ -1221,21 +1459,25 @@ fn different_provider_implementations_share_the_same_states_tools_and_protocol()
         Ok(Outcome::Completed("core request".into()))
     );
     assert!(states.provider.replies.lock().unwrap().is_empty());
-    assert_eq!(states.requests.len(), 2);
+    assert_eq!(states.rendered_instructions.len(), 2);
 }
 
 #[test]
-fn state_preparation_receives_phase_and_provider_receives_advertised_tools() {
+fn core_selects_phase_and_estimates_the_exact_advertised_tools() {
     let mut states = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     states.maximum = 2;
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(states.requests.len(), 2);
-    assert!(!states.requests[0].0.final_phase);
-    assert!(states.requests[1].0.final_phase && states.requests[1].0.enters_final_phase);
+    assert_eq!(states.rendered_instructions.len(), 2);
+    assert!(!states.recorded_phases[0].final_phase);
+    assert_eq!(states.final_requests, [1]);
     let requests = states.provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), states.prepared_definitions.len());
-    for (request, definitions) in requests.iter().zip(&states.prepared_definitions) {
-        assert_eq!(&request.tools, definitions);
+    let estimates = states.capture_request_estimates();
+    assert_eq!(requests.len(), estimates.len());
+    for (request, estimate) in requests.iter().zip(&estimates) {
+        assert_eq!(request.tools, estimate.definitions);
+        assert_eq!(request.instructions, estimate.instructions);
+        assert_eq!(request.messages, estimate.messages);
+        assert_eq!(estimate.tokens, 0);
     }
     assert_eq!(
         requests[0]

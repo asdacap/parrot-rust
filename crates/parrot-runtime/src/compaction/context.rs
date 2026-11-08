@@ -4,6 +4,11 @@ use super::{
     ContextSnapshot, PlanningError, PlanningInput, ProviderTokenBudget,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
+use parrot_core::{
+    ContextCadence as CoreContextCadence,
+    ContextReminderCheckpoint as CoreContextReminderCheckpoint,
+    ContextSnapshot as CoreContextSnapshot, ContextState as CoreContextState,
+};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -159,7 +164,6 @@ pub struct ContextController {
     templates: Arc<PromptTemplateCatalog>,
     budget: ProviderTokenBudget,
     cadence: ContextCadence,
-    cadence_restored: bool,
     initial_status_pending: bool,
 }
 impl ContextController {
@@ -176,7 +180,6 @@ impl ContextController {
             templates,
             budget: ProviderTokenBudget::default(),
             cadence: ContextCadence::new(),
-            cadence_restored: false,
             initial_status_pending: true,
         }
     }
@@ -188,6 +191,63 @@ impl ContextController {
     }
     pub fn budget_mut(&mut self) -> &mut ProviderTokenBudget {
         &mut self.budget
+    }
+
+    pub(crate) fn capture_state(&self, selection: &ResolvedModelSelection) -> CoreContextState {
+        CoreContextState {
+            configuration: self
+                .compactor
+                .planner()
+                .capture_context_configuration(selection),
+            calibration: self.budget.capture_state(),
+            cadence: self.cadence.capture_state(),
+        }
+    }
+
+    pub(crate) fn write_context_cadence(&mut self, cadence: CoreContextCadence) {
+        self.cadence.apply_state(cadence);
+    }
+
+    pub(crate) async fn read_context_checkpoint(
+        &self,
+    ) -> ContextResult<Option<CoreContextReminderCheckpoint>> {
+        Ok(self.history.latest_context_reminder().await?.map(|value| {
+            CoreContextReminderCheckpoint {
+                canonical_model: value.canonical_model,
+                context_limit: value.context_limit,
+                percentage: value.percentage,
+            }
+        }))
+    }
+
+    pub(crate) async fn append_context_reminder(
+        &self,
+        conversation: &mut AgentConversation,
+        checkpoint: CoreContextReminderCheckpoint,
+        content: String,
+        observed_percentage: i32,
+    ) -> ContextResult<Option<Event>> {
+        let published = self.notice(
+            "context_reminder",
+            format!("Context reminder injected ({observed_percentage}% context used)"),
+        )?;
+        if !self
+            .history
+            .append_context_reminder(
+                published.clone(),
+                parrot_storage::conversation::ContextReminderCheckpoint {
+                    canonical_model: checkpoint.canonical_model,
+                    context_limit: checkpoint.context_limit,
+                    percentage: checkpoint.percentage,
+                },
+                content.clone(),
+            )
+            .await?
+        {
+            return Ok(None);
+        }
+        conversation.add(system_model_message(content));
+        Ok(Some(published))
     }
 
     pub async fn ensure_epoch(
@@ -363,14 +423,16 @@ impl ContextController {
         self.ensure_epoch(input.prompt, cancellation).await?;
         let mut instructions = input.prompt.build(input.selection, cancellation).await?;
         let mut context = self.estimate(&input, &instructions)?;
-        let calibrated = self.budget.estimate_input_tokens(
-            &input.selection.canonical_model.selector(),
-            context.estimated_tokens,
-        );
+        let configuration = self
+            .compactor
+            .planner()
+            .capture_context_configuration(input.selection);
+        let snapshot = CoreContextSnapshot::estimate(context.estimated_tokens, &configuration);
         let mut reduced = false;
-        if context.exceeds_trigger()
-            || (context.input_limit > 0 && context.exceeds_compaction_trigger(calibrated))
-        {
+        if snapshot.requires_compaction(
+            &self.budget.capture_state(),
+            &configuration.model.canonical_model,
+        ) {
             let compacted = self
                 .compact_epoch(reborrow(&mut input), None, cancellation)
                 .await?;
@@ -379,7 +441,7 @@ impl ContextController {
             context = self.estimate(&input, &instructions)?;
             ensure_request_fits(&context)?;
         }
-        if !self.cadence_restored {
+        if !self.cadence.is_restored() {
             self.cadence
                 .restore(self.history.latest_context_reminder().await?.map(|value| {
                     parrot_domain::values::context::ContextReminderCheckpoint {
@@ -388,7 +450,6 @@ impl ContextController {
                         percentage: value.percentage,
                     }
                 }));
-            self.cadence_restored = true;
         }
         let selector = input.selection.canonical_model.selector();
         if let Some(percentage) =
@@ -404,8 +465,10 @@ impl ContextController {
                 input.tools,
                 &candidate,
             )?;
-            if inserted.is_available() {
-                if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
+            let candidate =
+                CoreContextSnapshot::estimate(inserted.estimated_tokens, &configuration);
+            if candidate.is_available() {
+                if candidate.exceeds_input_limit() || candidate.exceeds_trigger() {
                     let compacted = self
                         .compact_epoch(reborrow(&mut input), None, cancellation)
                         .await?;
@@ -413,24 +476,20 @@ impl ContextController {
                     reduced |= compacted.reduced;
                     ensure_request_fits(&self.estimate(&input, &instructions)?)?;
                 } else {
-                    let published = self.notice(
-                        "context_reminder",
-                        format!(
-                            "Context reminder injected ({}% context used)",
-                            context.usage_percent.unwrap_or_default(),
-                        ),
-                    )?;
-                    let checkpoint = parrot_storage::conversation::ContextReminderCheckpoint {
+                    let checkpoint = CoreContextReminderCheckpoint {
                         canonical_model: selector.clone(),
                         context_limit: context.context_limit,
                         percentage,
                     };
-                    if self
-                        .history
-                        .append_context_reminder(published.clone(), checkpoint, reminder.clone())
+                    if let Some(published) = self
+                        .append_context_reminder(
+                            input.conversation,
+                            checkpoint,
+                            reminder,
+                            context.usage_percent.unwrap_or_default(),
+                        )
                         .await?
                     {
-                        input.conversation.add(system_model_message(reminder));
                         let persisted = self.estimate(&input, &instructions)?;
                         self.cadence.acknowledge(
                             &persisted,
@@ -597,11 +656,7 @@ impl ContextController {
             };
             let status = input.status.observe_fitted(&estimate, cancellation).await?;
             let rendered = estimate(&status)?;
-            if rendered.exceeds_input_limit() {
-                return Err(ContextError::InvalidOperation(
-                    "The compacted conversation exceeds the selected model input limit.".into(),
-                ));
-            }
+            ensure_request_fits(&rendered)?;
             let mut saving = self.event()?;
             saving.set_compaction_progress(CompactionProgressEvent {
                 phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
@@ -663,7 +718,11 @@ impl ContextController {
             &provider_messages(input.conversation),
         )?)
     }
-    fn render_reminder(&self, context: &ContextSnapshot, percentage: i32) -> ContextResult<String> {
+    pub(crate) fn render_reminder(
+        &self,
+        context: &ContextSnapshot,
+        percentage: i32,
+    ) -> ContextResult<String> {
         let mut arguments = vec![
             ("percentage".into(), percentage.to_string().into()),
             (
@@ -731,12 +790,17 @@ fn reborrow<'a>(input: &'a mut EpochInput<'_>) -> EpochInput<'a> {
     }
 }
 fn ensure_request_fits(context: &ContextSnapshot) -> ContextResult<()> {
-    if context.exceeds_input_limit() {
-        return Err(ContextError::InvalidOperation(
-            "The compacted conversation exceeds the selected model input limit.".into(),
-        ));
+    CoreContextSnapshot {
+        estimated_tokens: context.estimated_tokens,
+        context_limit: context.context_limit,
+        usage_percent: context.usage_percent,
+        trigger_percent: context.trigger_percent,
+        input_limit: context.input_limit,
+        trigger_tokens: context.trigger_tokens,
+        has_context_limit_override: context.has_context_limit_override,
     }
-    Ok(())
+    .ensure_input_fits()
+    .map_err(|error| ContextError::InvalidOperation(error.message))
 }
 fn replace_status(history: &[Message], content: &str) -> Vec<Message> {
     let mut history = history.to_vec();

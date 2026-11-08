@@ -1,4 +1,7 @@
 use super::{ContextCompactionPolicy, ContextSize, ContextSnapshot, PlanningError, TokenEstimator};
+use parrot_core::{
+    ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot as CoreContextSnapshot,
+};
 use parrot_domain::values::config::ModelProfiles;
 use parrot_provider::{
     routing::{aliases::ResolvedModelSelection, registry::ProviderModel},
@@ -166,31 +169,22 @@ impl CompactionPlanner {
         tools: &[Tool],
         history: &[Message],
     ) -> Result<ContextSnapshot, PlanningError> {
-        let estimated = Self::estimate_input_tokens(selected, instructions, tools, history)?;
-        let limit = selected.model.context_window;
-        let usage = if limit > 0 {
-            Some(if estimated >= i64::from(limit) {
-                100
-            } else {
-                ((i128::from(estimated) * 100 / i128::from(limit)).clamp(0, 100)) as i32
-            })
-        } else {
-            None
-        };
-        let mut snapshot =
-            ContextSnapshot::new(estimated, limit, usage, self.settings.trigger_percent);
-        snapshot.input_limit = selected.model.input_token_limit();
-        snapshot.trigger_tokens = ContextCompactionPolicy::resolve(
-            None,
-            None,
-            limit,
-            snapshot.input_limit,
-            self.settings.trigger_percent,
-            self.settings.target_percent,
-            selected.model.output_reserved_input_token_limit(),
+        Self::estimate_configuration(
+            selected,
+            instructions,
+            tools,
+            history,
+            &ContextConfiguration {
+                model: ContextModel {
+                    canonical_model: selected.selector(),
+                    context_window: selected.model.context_window,
+                    maximum_input_tokens: selected.model.max_input_tokens,
+                    maximum_output_tokens: selected.model.max_output_tokens,
+                },
+                trigger_percent: self.settings.trigger_percent,
+                context_limit: None,
+            },
         )
-        .trigger_tokens;
-        Ok(snapshot)
     }
 
     pub fn resolve_policy(
@@ -219,22 +213,55 @@ impl CompactionPlanner {
         tools: &[Tool],
         history: &[Message],
     ) -> Result<ContextSnapshot, PlanningError> {
-        let policy = self.resolve_policy(selected, None);
-        let mut snapshot =
-            self.estimate_context(&selected.canonical_model, instructions, tools, history)?;
-        if selected.context_limit().is_some() && snapshot.context_limit > 0 {
-            if let Some(trigger) = policy.trigger_tokens {
-                snapshot.trigger_percent = if trigger >= i64::from(snapshot.context_limit) {
-                    100
+        Self::estimate_configuration(
+            &selected.canonical_model,
+            instructions,
+            tools,
+            history,
+            &self.capture_context_configuration(selected),
+        )
+    }
+
+    pub(crate) fn capture_context_configuration(
+        &self,
+        selected: &ResolvedModelSelection,
+    ) -> ContextConfiguration {
+        ContextConfiguration {
+            model: ContextModel {
+                canonical_model: selected.canonical_model.selector(),
+                context_window: selected.canonical_model.model.context_window,
+                maximum_input_tokens: selected.canonical_model.model.max_input_tokens,
+                maximum_output_tokens: selected.canonical_model.model.max_output_tokens,
+            },
+            trigger_percent: self.settings.trigger_percent,
+            context_limit: selected.context_limit().map(|limit| {
+                if limit.is_percentage() {
+                    ContextLimit::Percentage(limit.value())
                 } else {
-                    ((i128::from(trigger) * 100 / i128::from(snapshot.context_limit)).clamp(0, 100))
-                        as i32
-                };
-            }
+                    ContextLimit::Tokens(limit.value())
+                }
+            }),
         }
-        snapshot.trigger_tokens = policy.trigger_tokens;
-        snapshot.has_context_limit_override = selected.context_limit().is_some();
-        Ok(snapshot)
+    }
+
+    fn estimate_configuration(
+        selected: &ProviderModel,
+        instructions: &str,
+        tools: &[Tool],
+        history: &[Message],
+        configuration: &ContextConfiguration,
+    ) -> Result<ContextSnapshot, PlanningError> {
+        let estimated = Self::estimate_input_tokens(selected, instructions, tools, history)?;
+        let snapshot = CoreContextSnapshot::estimate(estimated, configuration);
+        Ok(ContextSnapshot {
+            estimated_tokens: snapshot.estimated_tokens,
+            context_limit: snapshot.context_limit,
+            usage_percent: snapshot.usage_percent,
+            trigger_percent: snapshot.trigger_percent,
+            input_limit: snapshot.input_limit,
+            trigger_tokens: snapshot.trigger_tokens,
+            has_context_limit_override: snapshot.has_context_limit_override,
+        })
     }
 
     /// Estimate a real next summary request's message shape, without calling the provider.
