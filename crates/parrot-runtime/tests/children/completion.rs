@@ -1,4 +1,5 @@
 use super::{harness::Harness, support::*};
+use parrot_domain::protocol::messages::parrot::InputSource;
 use parrot_runtime::{agent_turn::lifecycle::ExecutionStatus, children::*};
 use parrot_storage::events::{ConversationPart, NeverCancelled};
 use std::sync::{Arc, atomic::Ordering};
@@ -45,6 +46,8 @@ async fn actual_foreground_child_completion_awaits_parent_admission_publication_
                 .any(
                     |event| event.agent_session_id == root.identity().session.session_id
                         && event.has_input_admitted()
+                        && event.input_admitted().source
+                            == InputSource::INPUT_SOURCE_NOTIFICATION.into()
                 )
         );
         gate.open();

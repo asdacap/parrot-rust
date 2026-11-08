@@ -12,7 +12,7 @@ use parrot_domain::{
         security::RestrictableAccessSnapshot,
         status::ProcessStatusSource,
     },
-    protocol::messages::parrot::Delivery,
+    protocol::messages::parrot::{Delivery, InputSource},
     values::{activity::AgentSessionActivity, identifiers::Identifier},
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -411,7 +411,10 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentAskDelivery for ScopedAgentRu
                     vec![ConversationPart::text(text)],
                     message_id,
                     Delivery::DELIVERY_STEER,
-                    IncomingActivity::default(),
+                    IncomingActivity {
+                        source: InputSource::INPUT_SOURCE_NOTIFICATION,
+                        ..IncomingActivity::default()
+                    },
                     Arc::new(Signal::new()),
                 )
                 .map_err(interaction_child)?
@@ -491,7 +494,12 @@ async fn send_text<S: RestrictableAccessSnapshot + 'static>(
     let id = Identifier::message_id()
         .map_err(|error| OperationError::Failed(AgentToolError::Service(error.to_string())))?;
     let operation = session
-        .send_and_select_execution(vec![ConversationPart::text(message)], id, caller.0.clone())
+        .send_and_select_execution(
+            vec![ConversationPart::text(message)],
+            id,
+            InputSource::INPUT_SOURCE_NOTIFICATION,
+            caller.0.clone(),
+        )
         .map_err(operation_lifecycle)?;
     operation
         .wait(cancellation)

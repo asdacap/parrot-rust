@@ -8,7 +8,7 @@ use parrot_domain::{
         async_ops::{BoxFuture, Cancellation},
         security::RestrictableAccessSnapshot,
     },
-    protocol::messages::parrot::Delivery,
+    protocol::messages::parrot::{Delivery, InputSource},
 };
 use parrot_storage::events::ConversationPart;
 use std::sync::{Arc, Weak};
@@ -210,7 +210,7 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentScope<S> {
             IncomingActivity {
                 name: identity.name.clone(),
                 cause: Some(format!("{} completion", identity.name)),
-                ..IncomingActivity::default()
+                source: InputSource::INPUT_SOURCE_NOTIFICATION,
             },
             Arc::new(NeverCancelled),
         )?;

@@ -622,6 +622,7 @@ async fn cold_duplicate_validates_saved_parts_before_admission_and_resumes_same_
             .send_and_select_execution(
                 vec![ConversationPart::text("original question")],
                 original.initial_message_id.clone(),
+                protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
                 Arc::new(NeverCancelled),
             )
             .unwrap()

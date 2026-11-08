@@ -859,6 +859,7 @@ impl<B: DrainBackend> AgentSession<B> {
         parts: Vec<ConversationPart>,
         message_id: String,
         delivery: Delivery,
+        source: InputSource,
         caller: Arc<dyn Cancellation>,
     ) -> Result<OperationHandle<Admission>, LifecycleError> {
         if message_id.trim().is_empty() {
@@ -875,14 +876,7 @@ impl<B: DrainBackend> AgentSession<B> {
         let backend = self.inner.backend.clone();
         spawn_tracked(&mut state, async move {
             let result = async {
-                let admission = backend
-                    .admit(
-                        parts,
-                        message_id,
-                        delivery,
-                        InputSource::INPUT_SOURCE_UNSPECIFIED,
-                    )
-                    .await?;
+                let admission = backend.admit(parts, message_id, delivery, source).await?;
                 backend
                     .publish_admission(&admission, caller.as_ref())
                     .await?;
@@ -900,9 +894,15 @@ impl<B: DrainBackend> AgentSession<B> {
         delivery: Delivery,
         caller: Arc<dyn Cancellation>,
     ) -> Result<Admission, LifecycleError> {
-        self.record_handle(parts, message_id, delivery, caller.clone())?
-            .wait(caller.as_ref())
-            .await
+        self.record_handle(
+            parts,
+            message_id,
+            delivery,
+            InputSource::INPUT_SOURCE_UNSPECIFIED,
+            caller.clone(),
+        )?
+        .wait(caller.as_ref())
+        .await
     }
 
     /// Selects the source public execution when idle; otherwise steers into the
@@ -911,6 +911,7 @@ impl<B: DrainBackend> AgentSession<B> {
         &self,
         parts: Vec<ConversationPart>,
         message_id: String,
+        source: InputSource,
         caller: Arc<dyn Cancellation>,
     ) -> Result<OperationHandle<SendResult>, LifecycleError> {
         check_message(&parts)?;
@@ -979,12 +980,7 @@ impl<B: DrainBackend> AgentSession<B> {
                             let admission = session
                                 .inner
                                 .backend
-                                .admit(
-                                    parts,
-                                    message_id,
-                                    Delivery::DELIVERY_STEER,
-                                    InputSource::INPUT_SOURCE_UNSPECIFIED,
-                                )
+                                .admit(parts, message_id, Delivery::DELIVERY_STEER, source)
                                 .await?;
                             result.finish(Ok(SendResult {
                                 admission,
@@ -1017,7 +1013,10 @@ impl<B: DrainBackend> AgentSession<B> {
                             parts,
                             message_id,
                             Delivery::DELIVERY_STEER,
-                            IncomingActivity::default(),
+                            IncomingActivity {
+                                source,
+                                ..IncomingActivity::default()
+                            },
                             publication,
                         )
                         .await?;
@@ -1076,7 +1075,10 @@ impl<B: DrainBackend> AgentSession<B> {
                 parts,
                 message_id,
                 Delivery::DELIVERY_STEER,
-                IncomingActivity::default(),
+                IncomingActivity {
+                    source,
+                    ..IncomingActivity::default()
+                },
                 caller,
             )
         }
@@ -1088,9 +1090,14 @@ impl<B: DrainBackend> AgentSession<B> {
     ) -> Result<SendResult, LifecycleError> {
         let id = parrot_domain::values::identifiers::Identifier::message_id()
             .map_err(|error| LifecycleError::Failed(error.to_string()))?;
-        self.send_and_select_execution(vec![ConversationPart::text(message)], id, caller.clone())?
-            .wait(caller.as_ref())
-            .await
+        self.send_and_select_execution(
+            vec![ConversationPart::text(message)],
+            id,
+            InputSource::INPUT_SOURCE_UNSPECIFIED,
+            caller.clone(),
+        )?
+        .wait(caller.as_ref())
+        .await
     }
 
     pub fn enqueue_execution(
