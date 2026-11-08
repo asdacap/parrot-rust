@@ -15,6 +15,359 @@ fn configured(columns: usize) -> EnhancedSessionPresenter {
     presenter.set_session("build", "provider/model").unwrap();
     presenter
 }
+fn summary(owner: &str, fragment: &str, completed: bool) -> wire::Event {
+    event(
+        owner,
+        Payload::ReasoningChunk(wire::ReasoningChunk {
+            fragment: fragment.into(),
+            kind: wire::ReasoningKind::REASONING_KIND_SUMMARY.into(),
+            completed,
+            ..Default::default()
+        }),
+    )
+}
+
+#[test]
+fn reasoning_rows_flush_before_streaming_answers_and_preserve_terminal_order() {
+    for complete in [false, true] {
+        let mut presenter = configured(80);
+        presenter.observe(&start("root")).unwrap();
+        let pending = presenter
+            .observe(&summary("root", "Planning", complete))
+            .unwrap();
+        assert!(pending.commits.is_empty());
+        assert!(live(&pending.live, 80).contains("✦ Planning"));
+        let answer = presenter.observe(&text("root", "answer\n")).unwrap();
+        let mut output = commits(&answer.commits, 80);
+        assert!(output.starts_with("✦ Planning\r\n"));
+        assert!(!live(&answer.live, 80).contains("✦ Planning"));
+        output.push_str(&commits(
+            &presenter.observe(&ended("root")).unwrap().commits,
+            80,
+        ));
+        assert_eq!(output.matches("✦ Planning").count(), 1);
+        assert_eq!(output.matches("● answer").count(), 1);
+        assert!(output.find("✦ Planning").unwrap() < output.find("● answer").unwrap());
+        assert!(output.find("● answer").unwrap() < output.find("agent finished").unwrap());
+    }
+}
+
+#[test]
+fn reasoning_rows_flush_before_foreground_notices_and_errors() {
+    for payload in [
+        Payload::AgentNotice(wire::AgentNotice {
+            notice: "notice".into(),
+            ..Default::default()
+        }),
+        Payload::RetryNotice(wire::RetryNotice {
+            reason: "retry".into(),
+            attempt: 1,
+            ..Default::default()
+        }),
+        Payload::SkillLoaded(wire::SkillLoadedEvent {
+            path: "skill".into(),
+            ..Default::default()
+        }),
+        Payload::TurnFailed(wire::TurnFailed {
+            message: "failure".into(),
+            provider_response_body: "provider body".into(),
+            ..Default::default()
+        }),
+    ] {
+        let mut presenter = configured(80);
+        presenter.observe(&start("root")).unwrap();
+        presenter
+            .observe(&summary("root", "Planning", false))
+            .unwrap();
+        let update = presenter.observe(&event("root", payload)).unwrap();
+        let output = commits(&update.commits, 80);
+        assert!(output.starts_with("✦ Planning\r\n"), "{output:?}");
+        assert_eq!(output.matches("✦ Planning").count(), 1);
+        assert!(!live(&update.live, 80).contains("✦ Planning"));
+        assert!(update.commits.len() > 1 || !update.errors.is_empty());
+    }
+}
+
+#[test]
+fn reasoning_rows_flush_before_explicit_and_promoted_user_commits() {
+    let mut presenter = configured(80);
+    presenter.observe(&start("root")).unwrap();
+    presenter
+        .observe(&summary("root", "Planning", false))
+        .unwrap();
+    let update = presenter
+        .commit(Arc::new(ImmediateScrollbackValue::trusted(vec![
+            "dialog output".into(),
+        ])))
+        .unwrap();
+    assert_eq!(
+        commits(&update.commits, 80),
+        "✦ Planning\r\ndialog output\r\n"
+    );
+    assert!(!live(&update.live, 80).contains("✦ Planning"));
+    presenter
+        .observe(&event(
+            "root",
+            Payload::InputAdmitted(wire::InputAdmitted {
+                input_id: "steer".into(),
+                content: "user input".into(),
+                delivery: wire::Delivery::DELIVERY_STEER.into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    presenter
+        .observe(&summary("root", "More planning", false))
+        .unwrap();
+    let update = presenter
+        .observe(&event(
+            "root",
+            Payload::InputPromoted(wire::InputPromoted {
+                input_id: "steer".into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    assert_eq!(
+        commits(&update.commits, 80),
+        "✦ More planning\r\n◆ user input\r\n"
+    );
+    assert!(!live(&update.live, 80).contains("✦ More planning"));
+}
+
+#[test]
+fn reasoning_rows_flush_once_on_root_and_child_terminal_boundaries() {
+    for owner in ["root", "child"] {
+        for payload in [
+            Payload::TurnEnded(wire::TurnEnded::default()),
+            Payload::TurnFailed(wire::TurnFailed::default()),
+            Payload::AgentFinished(wire::AgentFinished {
+                parent_agent_session_id: if owner == "child" { "root" } else { "" }.into(),
+                ..Default::default()
+            }),
+            Payload::AgentFailed(wire::AgentFailed {
+                parent_agent_session_id: if owner == "child" { "root" } else { "" }.into(),
+                ..Default::default()
+            }),
+            Payload::ModeTurnCompleted(wire::ModeTurnCompleted::default()),
+        ] {
+            let mut presenter = configured(80);
+            presenter.observe(&start("root")).unwrap();
+            presenter.observe(&child("root")).unwrap();
+            presenter.observe(&start("child")).unwrap();
+            presenter
+                .observe(&summary(owner, "Planning", false))
+                .unwrap();
+            let terminal = event(owner, payload);
+            let update = presenter.observe(&terminal).unwrap();
+            let output = commits(&update.commits, 80);
+            assert_eq!(output.matches("Planning").count(), 1, "{owner}: {output:?}");
+            assert!(!live(&update.live, 80).contains("Planning"));
+            assert!(
+                !commits(&presenter.observe(&terminal).unwrap().commits, 80).contains("Planning")
+            );
+            assert!(!commits(&presenter.finish().unwrap().commits, 80).contains("Planning"));
+        }
+    }
+}
+
+#[test]
+fn reasoning_cleanup_drains_unfinished_agents_in_order_and_is_idempotent() {
+    for cancel in [false, true] {
+        let mut presenter = configured(80);
+        presenter.observe(&start("root")).unwrap();
+        presenter.observe(&child("root")).unwrap();
+        presenter.observe(&start("child")).unwrap();
+        presenter
+            .observe(&summary("root", "Root planning", false))
+            .unwrap();
+        presenter
+            .observe(&summary("child", "Worker planning", false))
+            .unwrap();
+        let update = if cancel {
+            presenter.cancel().unwrap()
+        } else {
+            presenter.finish().unwrap()
+        };
+        assert_eq!(
+            commits(&update.commits, 80),
+            "✦ Root planning\r\n  ✦ [worker] Worker planning\r\n"
+        );
+        assert!(!live(&update.live, 80).contains("planning"));
+        assert!(presenter.finish().unwrap().commits.is_empty());
+        assert!(presenter.cancel().unwrap().commits.is_empty());
+    }
+}
+
+#[test]
+fn reasoning_rows_end_when_another_agent_begins_visible_reasoning() {
+    let mut presenter = configured(80);
+    presenter.observe(&start("root")).unwrap();
+    presenter.observe(&child("root")).unwrap();
+    presenter.observe(&start("child")).unwrap();
+    presenter
+        .observe(&summary("root", "Root planning", true))
+        .unwrap();
+    let update = presenter
+        .observe(&summary("child", "Worker planning", false))
+        .unwrap();
+    assert_eq!(commits(&update.commits, 80), "✦ Root planning\r\n");
+    assert!(!live(&update.live, 80).contains("Root planning"));
+    assert!(live(&update.live, 80).contains("✦ [worker] Worker planning"));
+    presenter.observe(&summary("child", "", true)).unwrap();
+    let update = presenter
+        .observe(&summary("root", "Next planning", true))
+        .unwrap();
+    assert_eq!(
+        commits(&update.commits, 80),
+        "  ✦ [worker] Worker planning\r\n"
+    );
+    assert!(live(&update.live, 80).contains("✦ Next planning"));
+}
+
+#[test]
+fn reasoning_rows_survive_silent_events_and_folded_tools() {
+    let mut presenter = configured(80);
+    presenter.observe(&start("root")).unwrap();
+    presenter.observe(&child("root")).unwrap();
+    presenter.observe(&start("child")).unwrap();
+    presenter
+        .observe(&summary("root", "Planning", true))
+        .unwrap();
+    for published in [
+        phase(
+            "root",
+            wire::ProviderRequestPhase::PROVIDER_REQUEST_PHASE_REQUESTING,
+            1,
+        ),
+        event(
+            "root",
+            Payload::ProviderCallUsage(wire::ProviderCallUsage::default()),
+        ),
+        event(
+            "root",
+            Payload::AgentStatisticsUpdated(wire::AgentStatisticsUpdatedEvent::default()),
+        ),
+        event(
+            "",
+            Payload::SessionUsageSnapshot(wire::SessionUsageSnapshot::default()),
+        ),
+        event(
+            "root",
+            Payload::ToolStarted(wire::ToolStarted {
+                tool_call_id: "wait".into(),
+                tool_name: "wait".into(),
+                ..Default::default()
+            }),
+        ),
+        summary("child", "", true),
+    ] {
+        let update = presenter.observe(&published).unwrap();
+        assert!(update.commits.is_empty());
+        assert!(live(&update.live, 80).contains("✦ Planning"));
+    }
+    let tick = presenter.tick(Duration::from_millis(80)).unwrap();
+    assert!(tick.commits.is_empty());
+    assert!(live(&tick.live, 80).contains("✦ Planning"));
+}
+
+#[test]
+fn reasoning_rows_resize_without_losing_entries_or_rewriting_committed_history() {
+    for tiny in [0, 1] {
+        let mut presenter = configured(7);
+        presenter.observe(&start("root")).unwrap();
+        presenter.observe(&summary("root", "A", true)).unwrap();
+        presenter.observe(&summary("root", "B", true)).unwrap();
+        let resized = presenter.resize(3).unwrap();
+        assert_eq!(commits(&resized.commits, 80), "✦ A\r\n");
+        assert!(live(&resized.live, 3).contains("✦ B\n"));
+        assert!(presenter.resize(7).unwrap().commits.is_empty());
+        let pending = presenter.observe(&summary("root", "C", true)).unwrap();
+        assert!(pending.commits.is_empty());
+        assert!(live(&pending.live, 7).contains("✦ B ✦ C\n"));
+        let resized = presenter.resize(tiny).unwrap();
+        assert_eq!(commits(&resized.commits, 80), "✦ B\r\n✦ C\r\n");
+        assert!(!live(&resized.live, 80).contains('✦'));
+        assert_eq!(resized.completion, None);
+        assert!(presenter.finish().unwrap().commits.is_empty());
+    }
+}
+
+#[test]
+fn reasoning_replay_and_deferred_publication_share_the_same_rows() {
+    let mut traces = Vec::new();
+    for deferred in [false, true] {
+        let mut presenter = EnhancedSessionPresenter::new(80, false, true);
+        let mut trace = Vec::new();
+        for published in [
+            start("root"),
+            summary("root", "A", true),
+            summary("root", "B", true),
+            event(
+                "",
+                Payload::SessionUsageSnapshot(wire::SessionUsageSnapshot::default()),
+            ),
+            summary("root", "C", true),
+            text("root", "answer"),
+            ended("root"),
+            completed("root"),
+        ] {
+            let update = if deferred {
+                presenter.apply_event(&published).unwrap()
+            } else {
+                presenter.observe(&published).unwrap()
+            };
+            if deferred {
+                assert!(update.live.is_empty());
+            }
+            trace.push((
+                commits(&update.commits, 80),
+                live(&presenter.snapshot().unwrap(), 80),
+            ));
+        }
+        assert!(trace[2].0.is_empty());
+        assert!(trace[2].1.contains("✦ A ✦ B\n"));
+        assert_eq!(trace[3].0, "✦ A ✦ B\r\n");
+        assert!(!trace[3].1.contains('✦'));
+        assert!(trace[4].1.contains("✦ C\n"));
+        assert_eq!(trace[5].0, "✦ C\r\n");
+        assert!(presenter.finish().unwrap().commits.is_empty());
+        traces.push(trace);
+    }
+    assert_eq!(traces[0], traces[1]);
+}
+
+#[test]
+fn reasoning_rows_precede_replayed_and_live_plan_output() {
+    for replaying in [false, true] {
+        let replay = Arc::new(Mutex::new(SessionReplayContext::new(replaying)));
+        let mut presenter = EnhancedSessionPresenter::with_replay_context(80, false, replay);
+        presenter.observe(&start("root")).unwrap();
+        presenter
+            .observe(&summary("root", "Planning", false))
+            .unwrap();
+        let planned = presenter
+            .observe(&event(
+                "root",
+                Payload::PlanCompleted(wire::PlanCompleted {
+                    markdown: "Plan body".into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        let output = if replaying {
+            commits(&planned.commits, 80)
+        } else {
+            assert!(planned.commits.is_empty());
+            commits(&presenter.observe(&completed("root")).unwrap().commits, 80)
+        };
+        assert!(output.starts_with("✦ Planning\r\n"));
+        assert!(output.contains("Plan body"));
+        assert_eq!(output.matches("Planning").count(), 1);
+        assert!(!live(&presenter.snapshot().unwrap(), 80).contains("Planning"));
+    }
+}
+
 #[test]
 fn steer_remains_pending_across_turn_boundaries_until_its_own_promotion() {
     let mut presenter = configured(120);
