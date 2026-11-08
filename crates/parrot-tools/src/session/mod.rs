@@ -4,6 +4,7 @@
 mod image;
 mod input;
 mod permission;
+mod progress;
 mod services;
 mod tools;
 

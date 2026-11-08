@@ -7,6 +7,7 @@ use parrot_domain::{
     },
     values::{
         context::{ContextCadence, ContextSize, ContextSnapshot},
+        progress::ProgressUpdate,
         tools::ConfiguredToolDefinition,
     },
 };
@@ -41,6 +42,7 @@ pub enum Kind {
     ClearExitReminder,
     Status,
     CompactContext,
+    Progress,
 }
 
 impl Kind {
@@ -51,6 +53,7 @@ impl Kind {
             Self::ClearExitReminder => "clear_exit_reminder",
             Self::Status => "status",
             Self::CompactContext => "compact_context",
+            Self::Progress => "progress",
         }
     }
 }
@@ -103,6 +106,7 @@ impl<S: SessionServices> SessionTool<S> {
             Kind::SetExitReminder | Kind::ClearExitReminder => {
                 self.catch(invocation, self.reminder(invocation, cancellation).await)
             }
+            Kind::Progress => self.catch(invocation, self.progress(invocation, cancellation).await),
             Kind::Status => {
                 if let Err(error) = input::object(&invocation.arguments_json, &[]) {
                     return error_output(invocation, &error.message);
@@ -169,6 +173,33 @@ impl<S: SessionServices> SessionTool<S> {
                 Ok(self.render_compaction(reduced, &context)?.into())
             }
         }
+    }
+
+    async fn progress(
+        &self,
+        invocation: &Invocation,
+        cancellation: &dyn Cancellation,
+    ) -> OperationResult<Output, Failure> {
+        let update = super::progress::Arguments::parse(&invocation.arguments_json)
+            .map_err(OperationError::Failed)?;
+        let arguments = match &update {
+            ProgressUpdate::Replace(progress) => vec![
+                ("steps", progress.steps.to_string()),
+                ("total_steps", progress.total_steps.to_string()),
+            ],
+            ProgressUpdate::Close => Vec::new(),
+        };
+        let closing = matches!(update, ProgressUpdate::Close);
+        let changed = self.services.update_progress(update, cancellation).await?;
+        let template = if !closing {
+            "progress-tool.updated"
+        } else if changed {
+            "progress-tool.closed"
+        } else {
+            "progress-tool.already-closed"
+        };
+        let text = render(&self.templates, template, &arguments)?;
+        text_output(invocation, &text)
     }
 
     async fn reminder(

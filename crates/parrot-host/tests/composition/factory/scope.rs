@@ -2824,6 +2824,8 @@ mod integrated_adapters;
 mod integrated_rpc;
 mod original_adapters_v8;
 mod original_rpc_v8;
+mod progress;
+mod progress_interrupt;
 mod resume_histories;
 mod session_resume;
 mod task_limit;

@@ -47,6 +47,13 @@ impl SessionServices for Ancillary {
     fn reminder_titles(&self) -> BoxFuture<'_, Vec<String>> {
         panic!("not exercised by compact")
     }
+    fn update_progress<'a>(
+        &'a self,
+        _: parrot_domain::values::progress::ProgressUpdate,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, OperationError<Failure>>> {
+        panic!("not exercised by compact")
+    }
     fn runtime_status<'a>(
         &'a self,
         _: &'a Self::Selection,
@@ -535,6 +542,13 @@ impl SessionServices for StatusAncillary {
     }
     fn reminder_titles(&self) -> BoxFuture<'_, Vec<String>> {
         self.other.reminder_titles()
+    }
+    fn update_progress<'a>(
+        &'a self,
+        update: parrot_domain::values::progress::ProgressUpdate,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, OperationError<Failure>>> {
+        self.other.update_progress(update, cancellation)
     }
     fn runtime_status<'a>(
         &'a self,

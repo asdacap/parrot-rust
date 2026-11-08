@@ -42,7 +42,7 @@ use crate::{
     },
 };
 
-pub const BUILTIN_NAMES: [&str; 31] = [
+pub const BUILTIN_NAMES: [&str; 32] = [
     "exec_command",
     "write_stdin",
     "interrupt_process",
@@ -74,6 +74,7 @@ pub const BUILTIN_NAMES: [&str; 31] = [
     "queue_push",
     "queue_take",
     "request_write_permission",
+    "progress",
 ];
 
 /// Converts the actual Foundation-loaded definitions without rewriting schemas.
@@ -630,6 +631,7 @@ pub struct SessionFactories<S, T> {
     status: Factory<S, T>,
     compact: Factory<S, T>,
     permission: Factory<S, T>,
+    progress: Factory<S, T>,
 }
 pub struct SessionBindings<C, I, P, F> {
     pub control: Arc<C>,
@@ -681,6 +683,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
             clear_reminder: create(session::Kind::ClearExitReminder)?,
             status: create(session::Kind::Status)?,
             compact: create(session::Kind::CompactContext)?,
+            progress: create(session::Kind::Progress)?,
             permission: bind(
                 "request_write_permission",
                 &[],
@@ -850,6 +853,7 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
                 queue_push,
                 queue_take,
                 session.permission,
+                session.progress,
             ],
         }
     }

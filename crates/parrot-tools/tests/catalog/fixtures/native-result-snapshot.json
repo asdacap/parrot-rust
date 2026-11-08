@@ -29,5 +29,6 @@
   "queue_info": "{\"path\":\"catalog/work\",\"name\":\"work\",\"size\":0}",
   "queue_push": "{\"path\":\"catalog/work\",\"name\":\"work\",\"size\":1}",
   "queue_take": "{\"path\":\"catalog/work\",\"name\":\"work\",\"size\":0,\"closed\":false,\"items\":[\"item\"]}",
-  "request_write_permission": "The agent session security profile now allows writing: target.txt"
+  "request_write_permission": "The agent session security profile now allows writing: target.txt",
+  "progress": "Progress updated: 0/2."
 }

@@ -1,4 +1,5 @@
 mod binding;
+mod progress;
 mod support;
 
 use binding::Fixture;
@@ -27,10 +28,11 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
                 "answer" => vec!["ask", "reply"],
                 name => vec![name],
             })
+            .chain(std::iter::once("progress"))
             .collect::<Vec<_>>(),
         BUILTIN_NAMES
     );
-    assert_eq!(definitions.definitions().len(), 31);
+    assert_eq!(definitions.definitions().len(), 32);
     assert_eq!(
         fixture
             .catalog
@@ -138,9 +140,9 @@ async fn exact_t26_native_configuration_actual_read_glob_catalog_to_real_provide
 async fn source_support_send_definition_and_interruption_flags_are_bound_without_recreating_tools()
 {
     let fixture = Fixture::new("", false, 1);
-    assert_eq!(fixture.catalog.factories().len(), 31);
+    assert_eq!(fixture.catalog.factories().len(), 32);
     let snapshot = fixture.catalog.snapshot().unwrap();
-    assert_eq!(snapshot.factories().len(), 29);
+    assert_eq!(snapshot.factories().len(), 30);
     assert!(snapshot.find("request_write_permission").is_none());
     assert!(snapshot.find("question").is_none());
     assert!(snapshot.find("answer").is_none());
@@ -178,7 +180,7 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
             "wait"
         ]
     );
-    assert_eq!(snapshot.factories().len(), 29);
+    assert_eq!(snapshot.factories().len(), 30);
     for factory in surviving.factories() {
         assert!(Arc::ptr_eq(
             &factory.create(),
@@ -294,6 +296,7 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
             "request_write_permission",
             json!({"paths":["target.txt"],"reason":"Write output"}),
         ),
+        ("progress", json!({"steps":0,"total_steps":2})),
     ];
     assert_eq!(cases.iter().map(|c| c.0).collect::<Vec<_>>(), BUILTIN_NAMES);
     let mut observed = serde_json::Map::new();
@@ -395,6 +398,7 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         "queue_take",
         "permission_request",
         "process_launch",
+        "progress",
     ] {
         assert!(
             calls.iter().any(|call| call.operation == operation),

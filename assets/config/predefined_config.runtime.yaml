@@ -671,6 +671,27 @@ tools:
       - paths
       - reason
       additionalProperties: false
+  progress:
+    description: Report completed steps out of a declared total for this agent. Each update replaces its one progress report and optional current-step label. Active progress blocks normal completion, even at 100%; explicitly close it before finishing. Progress survives interruption and restart. Closing may occur below the total and does not claim success.
+    parameters:
+      type: object
+      properties:
+        steps:
+          type: integer
+          minimum: 0
+          description: Completed step count. Required with total_steps for an update; may decrease when replanning.
+        total_steps:
+          type: integer
+          minimum: 1
+          description: Positive total step count, at least steps. Required with steps for an update; may change when replanning.
+        current_step:
+          type: string
+          description: Optional description of current work. Omitting it clears the previous label on updates.
+        close:
+          type: boolean
+          default: false
+          description: Explicitly close this agent's progress. A close-only call needs no counts; any supplied counts must form a valid pair. Repeated closes are harmless.
+      additionalProperties: false
   set_checkpoint:
     description: Save a named checkpoint of this agent's conversation for a future child-agent fork.
     parameters:

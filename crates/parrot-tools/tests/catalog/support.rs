@@ -30,6 +30,7 @@ use parrot_domain::{
         activity::{AgentSessionActivitySnapshot, DrainState},
         agent_tasks::Task,
         context::{ContextSize, ContextSnapshot},
+        progress::{ProgressSnapshot, ProgressUpdate},
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -130,6 +131,7 @@ pub struct State {
     pub task_boundary: Option<(i64, String)>,
     pub checkpoints: Vec<(String, i64, String)>,
     pub reminders: BTreeMap<String, String>,
+    pub progress: ProgressSnapshot,
     pub queues: BTreeMap<String, QueueState>,
     pub diagnostics: Vec<QueueDiagnostic>,
     pub launches: Vec<(CommandRequest, i32)>,
@@ -150,6 +152,7 @@ impl Default for State {
             task_boundary: None,
             checkpoints: Vec::new(),
             reminders: BTreeMap::new(),
+            progress: ProgressSnapshot::new("catalog-agent".into()),
             queues: BTreeMap::new(),
             diagnostics: Vec::new(),
             launches: Vec::new(),
@@ -555,6 +558,27 @@ impl SessionServices for Services {
             cancelled(cancellation)?;
             self.record("clear_reminder", title, None, None);
             Ok(self.state.lock().unwrap().reminders.remove(title).is_some())
+        })
+    }
+    fn update_progress<'a>(
+        &'a self,
+        update: ProgressUpdate,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<bool, Failure>> {
+        Box::pin(async move {
+            cancelled(cancellation)?;
+            self.record("progress", format!("{update:?}"), None, None);
+            self.state
+                .lock()
+                .unwrap()
+                .progress
+                .apply(update)
+                .map_err(|error| {
+                    OperationError::Failed(Failure::new(
+                        parrot_tools::session::FailureKind::Argument,
+                        error.to_string(),
+                    ))
+                })
         })
     }
     fn reminder_titles(&self) -> BoxFuture<'_, Vec<String>> {

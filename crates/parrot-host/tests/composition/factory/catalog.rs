@@ -141,6 +141,7 @@ mod fixture_support {
         pub task_boundary: Option<(i64, String)>,
         pub checkpoints: Vec<(String, i64, String)>,
         pub reminders: BTreeMap<String, String>,
+        pub progress: parrot_domain::values::progress::ProgressSnapshot,
         pub queues: BTreeMap<String, QueueState>,
         pub diagnostics: Vec<QueueDiagnostic>,
         pub launches: Vec<(CommandRequest, i32)>,
@@ -161,6 +162,7 @@ mod fixture_support {
                 task_boundary: None,
                 checkpoints: Vec::new(),
                 reminders: BTreeMap::new(),
+                progress: parrot_domain::values::progress::ProgressSnapshot::new("catalog".into()),
                 queues: BTreeMap::new(),
                 diagnostics: Vec::new(),
                 launches: Vec::new(),
@@ -566,6 +568,27 @@ mod fixture_support {
                 cancelled(cancellation)?;
                 self.record("clear_reminder", title, None, None);
                 Ok(self.state.lock().unwrap().reminders.remove(title).is_some())
+            })
+        }
+        fn update_progress<'a>(
+            &'a self,
+            update: parrot_domain::values::progress::ProgressUpdate,
+            cancellation: &'a dyn Cancellation,
+        ) -> BoxFuture<'a, OperationResult<bool, Failure>> {
+            Box::pin(async move {
+                cancelled(cancellation)?;
+                self.record("progress", format!("{update:?}"), None, None);
+                self.state
+                    .lock()
+                    .unwrap()
+                    .progress
+                    .apply(update)
+                    .map_err(|error| {
+                        OperationError::Failed(Failure::new(
+                            parrot_tools::session::FailureKind::Argument,
+                            error.to_string(),
+                        ))
+                    })
             })
         }
         fn reminder_titles(&self) -> BoxFuture<'_, Vec<String>> {
@@ -1426,8 +1449,8 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
             .collect::<Vec<_>>(),
         parrot_tools::catalog::BUILTIN_NAMES
     );
-    assert_eq!(first.tools.len(), 31);
-    assert_eq!(first.supported.iter().filter(|value| **value).count(), 30);
+    assert_eq!(first.tools.len(), 32);
+    assert_eq!(first.supported.iter().filter(|value| **value).count(), 31);
     for (index, (left, right)) in first.tools.iter().zip(&second.tools).enumerate() {
         match (left, right) {
             (ToolHandle::Ordinary(left), ToolHandle::Ordinary(right)) => {

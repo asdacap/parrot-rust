@@ -2,6 +2,7 @@ mod checkpoint;
 mod compact;
 mod image;
 mod permission;
+mod progress;
 mod reminders;
 mod status;
 mod support;
@@ -26,6 +27,7 @@ fn injected_definitions_are_unchanged_and_all_session_tools_default_to_sequentia
         Kind::ClearExitReminder,
         Kind::Status,
         Kind::CompactContext,
+        Kind::Progress,
     ] {
         let tool = fixture.tool(kind);
         assert_eq!(Tool::definition(&tool), &definition());
