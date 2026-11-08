@@ -95,11 +95,18 @@ pub trait States: Send {
     ) -> BoxFuture<'a, Result<ContextSnapshot, Error>>;
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
-    /// Attempts to reduce context after a provider rejects an oversized request.
-    fn compact_request<'a>(
+    /// Prepares a safe-prefix plan and scoped native effects after an oversized request.
+    /// Core constructs and invokes every summary request before recording the outcome.
+    fn prepare_compaction<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<bool, Error>>;
+    ) -> BoxFuture<'a, Result<crate::compaction::PreparedCompaction<'a>, Error>>;
+    /// Applies the completed compaction and awaits terminal lifecycle effects on success
+    /// or failure. Returns whether the provider-visible context was reduced.
+    fn record_compaction(
+        &mut self,
+        result: Result<Option<crate::compaction::CompactionResult>, Error>,
+    ) -> BoxFuture<'_, Result<bool, Error>>;
     /// Records why a malformed or truncated tool response must be retried.
     fn record_retry(
         &mut self,

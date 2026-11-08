@@ -1,6 +1,8 @@
 //! Provider budgets, causal summary execution and awaited durable context epochs.
 mod budget;
 mod execution;
+pub(crate) use context::CompactionCheckpoint;
+pub(crate) use execution::{CompactionEffectsAdapter, SummaryProviderAdapter};
 pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
 mod context;
 pub use context::{

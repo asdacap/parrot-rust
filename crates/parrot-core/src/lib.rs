@@ -1,6 +1,7 @@
 //! Turn orchestration with core-owned provider, tool, and state contracts.
 
 pub mod budget;
+pub mod compaction;
 mod protocol;
 pub use protocol::*;
 
@@ -83,7 +84,12 @@ pub async fn run_turn<'a>(
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !states.compact_request(definitions).await? {
+                let compacted = states
+                    .prepare_compaction(definitions)
+                    .await?
+                    .run(cancellation)
+                    .await;
+                if !states.record_compaction(compacted).await? {
                     return Err(error);
                 }
                 continue;

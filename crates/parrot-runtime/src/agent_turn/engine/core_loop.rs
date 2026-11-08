@@ -14,6 +14,12 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     request_tools: Option<T::Snapshot>,
     exit_blocker_sources: Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>,
     persistence_key: Option<TurnKey>,
+    pending_compaction: Option<PendingCompaction>,
+}
+
+struct PendingCompaction {
+    checkpoint: crate::compaction::CompactionCheckpoint,
+    definitions: Vec<sessions::Tool>,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -114,6 +120,12 @@ fn adapt_operation<'a, T: Send + 'a>(
     Box::pin(async move { operation.await.map_err(Into::into) })
 }
 
+impl From<crate::compaction::CompactionError> for CoreError {
+    fn from(error: crate::compaction::CompactionError) -> Self {
+        TurnError::Context(ContextError::Compaction(error)).into()
+    }
+}
+
 impl From<TurnError> for CoreError {
     fn from(error: TurnError) -> Self {
         match error {
@@ -172,6 +184,7 @@ where
             request_tools: None,
             exit_blocker_sources: Vec::new(),
             persistence_key: None,
+            pending_compaction: None,
         }
     }
 }
@@ -522,31 +535,28 @@ where
                 .collect())
         })
     }
-    fn compact_request<'a>(
+    fn prepare_compaction<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<bool, CoreError>> {
+    ) -> BoxFuture<'a, Result<parrot_core::compaction::PreparedCompaction<'a>, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
             let selection = self.binding.capture_selection()?;
-            let selection = &selection;
-            let cancellation = self.cancellation;
             let definitions: Vec<sessions::Tool> =
                 definitions.iter().cloned().map(Into::into).collect();
-            let definitions = definitions.as_slice();
             let events = ContextEmitter { backend };
             let status = state
                 .request_status
-                .as_ref()
+                .clone()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            let compacted = state
+            let prepared = state
                 .context
-                .compact_epoch(
-                    EpochInput {
+                .prepare_epoch_compaction(
+                    &mut EpochInput {
                         selection: &selection.model,
-                        tools: definitions,
+                        tools: &definitions,
                         conversation: &mut state.conversation,
                         prompt: &backend.prompt,
                         sessions: &backend.sessions,
@@ -554,10 +564,79 @@ where
                         events: &events,
                     },
                     None,
-                    cancellation,
+                    self.cancellation,
                 )
                 .await?;
-            Ok(compacted.reduced)
+            self.pending_compaction = Some(PendingCompaction {
+                checkpoint: prepared.checkpoint,
+                definitions,
+            });
+            let blobs = tokio::sync::MutexGuard::map(guard, |state| state.context.borrow_blobs());
+            Ok(parrot_core::compaction::PreparedCompaction {
+                plan: prepared.plan,
+                effects: Box::new(crate::compaction::CompactionEffectsAdapter::new(
+                    prepared.estimates,
+                    blobs,
+                    ContextEmitter { backend },
+                )),
+                provider: Box::new(crate::compaction::SummaryProviderAdapter::new(
+                    selection.model.canonical_model,
+                    &backend.sessions,
+                    ContextEmitter { backend },
+                )),
+            })
+        })
+    }
+    fn record_compaction(
+        &mut self,
+        result: Result<Option<parrot_core::compaction::CompactionResult>, CoreError>,
+    ) -> BoxFuture<'_, Result<bool, CoreError>> {
+        Box::pin(async move {
+            let pending = self
+                .pending_compaction
+                .take()
+                .ok_or_else(|| CoreError::failed("compaction preparation is unavailable"))?;
+            let backend = self.backend;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let events = ContextEmitter { backend };
+            let compacted = match result {
+                Ok(compacted) => compacted,
+                Err(error) => {
+                    state
+                        .context
+                        .fail_epoch_compaction(error.to_string(), &events)
+                        .await
+                        .map_err(TurnError::from)
+                        .map_err(CoreError::from)?;
+                    return Err(error);
+                }
+            };
+            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
+            let status = state
+                .request_status
+                .clone()
+                .ok_or_else(|| CoreError::failed("request status is unavailable"))?;
+            let result = state
+                .context
+                .record_epoch_compaction(
+                    &mut EpochInput {
+                        selection: &selection.model,
+                        tools: &pending.definitions,
+                        conversation: &mut state.conversation,
+                        prompt: &backend.prompt,
+                        sessions: &backend.sessions,
+                        status: status.as_ref(),
+                        events: &events,
+                    },
+                    pending.checkpoint,
+                    Ok(compacted.map(Into::into)),
+                    self.cancellation,
+                )
+                .await
+                .map_err(TurnError::from)
+                .map_err(CoreError::from)?;
+            Ok(result.reduced)
         })
     }
     fn record_retry(

@@ -28,7 +28,8 @@ ported from the .NET repository. Repository contributor guidance is in
 
 ## Core and runtime
 
-`parrot-core` owns the agent turn protocol and loop, with exactly three traits:
+`parrot-core` owns the agent turn protocol, loop, and shared compaction algorithm.
+Its turn contracts are:
 
 - `States`: factual conversation turns and pending-message headers, prepared
   context, explicit messages, result recording, observed completion context,
@@ -36,9 +37,16 @@ ported from the .NET repository. Repository contributor guidance is in
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
+Compaction uses two additional contracts: `CompactionEffects` supplies model-aware
+estimates, actual blob notices, and awaited progress; `SummaryProvider` invokes
+private summary requests and joins their streams. Its typed summary/no-summary
+outcome preserves diagnostics without exposing provider stream representations.
+
 Requests, responses, tool execution results, messages, tool definitions, and errors
 are concrete core-owned types. Adapters implement the same interface; they do not
-choose their own associated payload types. `Provider` accepts a complete request;
+choose their own associated payload types. Shared compaction permits native error
+types so standalone callers preserve their concrete failures; payloads remain
+core-owned. `Provider` accepts a complete request;
 `Tools` accepts explicit calls and the caller's cancellation token. Core assembles
 each provider request from caller-supplied turn settings, prepared context values,
 an explicit message read, and its selected tool definitions. States never returns
@@ -53,11 +61,22 @@ The core specifies and implements:
   catalog selection, and bounded tool-settlement extensions.
 - Truncated tool-call detection and JSON-argument validation before recording or
   executing calls.
+- Shared compaction request assembly, ordered first-pass and summary-dependent
+  spill decisions, bounded atomic-group chunking, and recursive empty-summary
+  fallback. Automatic, explicit, and oversized-request compaction use this algorithm.
 - The one-compaction retry guard for oversized requests, exit blocking from state
   messages, candidate retention, retry continuation, and request-budget resets.
 - Conversation readiness and input-admission decisions from actual turn/message
   state, recording assistant calls before execution, and completion ordering before
   closing a turn.
+
+For oversized recovery, `States::prepare_compaction` returns a safe-prefix plan
+and explicitly scoped compaction-effect/provider adapters, not a ready provider
+request. Core constructs and invokes the summary requests, then awaits
+`record_compaction` on success or failure before retrying or propagating the error.
+Native state owns lifecycle events, summary/watermark persistence, status fitting,
+and conversation reload. The native automatic and explicit paths retain the same
+lifecycle/persistence boundary around the shared core algorithm.
 
 `States` exposes the latest visible conversation segment and its result, not a
 precomputed work flag. A no-tool assistant candidate can be present while durable
@@ -104,9 +123,10 @@ failure before pass cleanup. Tool-restoration prompts also stay native: turn
 catalog preparation restores that context after capturing executable snapshots
 and before input promotion, without a separate core state operation.
 
-`parrot-runtime` implements the three traits with private adapters. Persistence,
-prompt preparation, compaction, security, streaming, accounting, cancellation,
-events, and session lifecycle stay outside the core. Provider representations are
+`parrot-runtime` implements the turn and compaction contracts with private adapters.
+Persistence, prompt rendering, compaction planning and token estimates, blobs,
+security, streaming, accounting, cancellation, events, and session lifecycle stay
+outside the core. Provider representations are
 translated losslessly at the interface, including raw provider extensions and
 multimodal content. Runtime bindings retain the actual selected model and executable
 tool snapshots; tools are never reconstructed from advertised definitions.

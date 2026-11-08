@@ -230,3 +230,157 @@ async fn actual_context_summary_retry_publication_cancellation_retains_cancel_ki
     );
     runtime.close().await;
 }
+
+#[tokio::test]
+async fn oversized_recovery_uses_the_shared_core_summary_without_publishing_private_deltas() {
+    let fixture = Fixture::new();
+    fixture.seed().await;
+    let mut oversized = Step::complete("rejected");
+    oversized.completion = Err(Error::Http(
+        parrot_provider::http_stream::HttpError::RequestTooLarge(1),
+    ));
+    let mut summary = Step::complete("oversized durable summary");
+    summary
+        .events
+        .push_back(sessions::Event::TextDelta("private summary delta".into()));
+    summary.events.push_back(sessions::Event::ReasoningDelta {
+        text: "private summary reasoning".into(),
+        kind: sessions::ReasoningKind::Raw,
+        part_id: "reasoning".into(),
+        completed: false,
+    });
+    let provider = Scripted::new(vec![oversized, summary, Step::complete("final answer")]);
+    let runtime = fixture
+        .runtime(
+            provider.clone(),
+            Arc::new(Tools::default()),
+            vec![],
+            Arc::new(Signal::new()),
+            0,
+        )
+        .await;
+    let sent = runtime
+        .send("current question", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].instructions.is_empty());
+    assert!(requests[1].tools.is_empty());
+    assert_eq!(requests[1].max_output_tokens, 1024);
+    assert!(
+        requests[2]
+            .messages
+            .iter()
+            .any(|message| message.content().contains("oversized durable summary"))
+    );
+    assert!(
+        !requests[2]
+            .messages
+            .iter()
+            .any(|message| message.content().starts_with("seed-0-"))
+    );
+    let snapshot = fixture.history.compaction_history().await.unwrap().unwrap();
+    assert!(
+        snapshot
+            .snapshot
+            .summary
+            .contains("oversized durable summary")
+    );
+    assert!(
+        !runtime
+            .output
+            .text
+            .lock()
+            .unwrap()
+            .contains("private summary")
+    );
+    assert!(!fixture.jsonl().contains("private summary"));
+    let events = fixture.events().await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_compaction_started())
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_compaction_finished())
+            .count(),
+        1
+    );
+    assert!(!events.iter().any(|event| event.has_compaction_failed()));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_request_usage_recorded())
+            .count(),
+        1
+    );
+    assert_eq!(provider.stream_closes.load(Ordering::SeqCst), 3);
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn oversized_recovery_summary_cancellation_records_failure_after_joining_the_stream() {
+    let fixture = Fixture::new();
+    fixture.seed().await;
+    let mut oversized = Step::complete("rejected");
+    oversized.completion = Err(Error::Http(
+        parrot_provider::http_stream::HttpError::RequestTooLarge(1),
+    ));
+    let mut summary = Step::complete("must not persist");
+    summary.completion = Err(Error::Cancellation("summary transport canceled".into()));
+    let provider = Scripted::new(vec![oversized, summary]);
+    let runtime = fixture
+        .runtime(
+            provider.clone(),
+            Arc::new(Tools::default()),
+            vec![],
+            Arc::new(Signal::new()),
+            0,
+        )
+        .await;
+    let sent = runtime
+        .send("question", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Canceled
+    );
+    assert_eq!(provider.stream_closes.load(Ordering::SeqCst), 2);
+    assert_eq!(provider.requests.lock().unwrap().len(), 2);
+    assert!(
+        fixture
+            .history
+            .compaction_history()
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let events = fixture.events().await;
+    assert_interrupted(&events);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_compaction_started())
+            .count(),
+        1
+    );
+    let failed: Vec<_> = events
+        .iter()
+        .filter(|event| event.has_compaction_failed())
+        .collect();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        failed[0].compaction_failed().message,
+        "summary transport canceled"
+    );
+    assert!(!events.iter().any(|event| event.has_compaction_finished()));
+    runtime.close().await;
+}

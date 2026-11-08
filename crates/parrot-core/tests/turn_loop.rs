@@ -29,6 +29,9 @@ mod tool_execution;
 #[path = "turn_loop/turn_state.rs"]
 mod turn_state;
 
+#[path = "compaction/support.rs"]
+mod compaction_support;
+
 use cancellation::CancellationSource;
 
 struct ThreadWake(thread::Thread);
@@ -226,6 +229,9 @@ struct MemoryState {
     unlimited: bool,
     maximum: i32,
     reduced: bool,
+    compaction_plan: Option<parrot_core::compaction::CompactionPlan>,
+    summary_provider: compaction_support::Provider,
+    recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
@@ -272,6 +278,9 @@ impl MemoryState {
             unlimited: false,
             maximum: 10,
             reduced: true,
+            compaction_plan: None,
+            summary_provider: compaction_support::Provider::new([]),
+            recorded_compactions: Vec::new(),
             fail_at: None,
         };
         state.enqueue_message(Delivery::Queue, "question");
@@ -457,12 +466,27 @@ impl States for MemoryState {
             Ok(self.messages.clone())
         })
     }
-    fn compact_request<'a>(
+    fn prepare_compaction<'a>(
         &'a mut self,
         _definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<bool, Error>> {
+    ) -> BoxFuture<'a, Result<parrot_core::compaction::PreparedCompaction<'a>, Error>> {
+        Box::pin(async move {
+            self.step("prepare_compaction")?;
+            Ok(parrot_core::compaction::PreparedCompaction {
+                plan: self.compaction_plan.clone(),
+                effects: Box::new(compaction_support::Effects::default()),
+                provider: Box::new(self.summary_provider.clone()),
+            })
+        })
+    }
+    fn record_compaction(
+        &mut self,
+        result: Result<Option<parrot_core::compaction::CompactionResult>, Error>,
+    ) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async move {
             self.step("compact")?;
+            self.recorded_compactions.push(result.clone());
+            result?;
             Ok(self.reduced)
         })
     }
@@ -1344,4 +1368,69 @@ fn fixed_error_metadata_and_original_oversized_error_survive_core_recovery() {
     assert_eq!(cancelled.kind, ErrorKind::Cancelled);
     assert_eq!(cancelled.code.code(), "cancelled");
     assert_eq!(states.trace.values().last().unwrap(), "invoke");
+}
+
+#[test]
+fn oversized_recovery_invokes_core_summary_requests_and_records_the_result_before_retrying() {
+    let mut state = MemoryState::new([
+        Reply::TooLarge("oversized"),
+        Reply::final_response("answer"),
+    ]);
+    state.compaction_plan = Some(compaction_support::plan(&[
+        "original group",
+        "retained tail",
+    ]));
+    state.summary_provider.replies.lock().unwrap().push_back(Ok(
+        parrot_core::compaction::SummaryResponse::Summary("core summary".into()),
+    ));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    let requests = state.summary_provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].model, "summary-model");
+    assert_eq!(
+        requests[0].messages[1],
+        compaction_support::message("original group")
+    );
+    assert!(requests[0].tools.is_empty());
+    let result = state.recorded_compactions[0]
+        .as_ref()
+        .unwrap()
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        result.summary.contents,
+        [Content::Text("prefix:core summary".into())]
+    );
+    assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
+    let trace = state.trace.values();
+    let recorded = trace.iter().position(|step| step == "compact").unwrap();
+    assert_eq!(
+        trace[recorded + 1..]
+            .iter()
+            .filter(|step| *step == "invoke")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn failed_core_summary_is_recorded_before_propagation_without_retrying_the_turn_request() {
+    let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
+    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
+    let error = Error {
+        kind: ErrorKind::Failed,
+        code: ErrorCode::Http,
+        message: "summary provider failed".into(),
+        response_body: "opaque response body".into(),
+    };
+    state
+        .summary_provider
+        .replies
+        .lock()
+        .unwrap()
+        .push_back(Err(error.clone()));
+    assert_eq!(state.run(), Err(error.clone()));
+    assert_eq!(state.recorded_compactions, [Err(error)]);
+    assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
+    assert_eq!(state.trace.values().last().unwrap(), "compact");
 }
