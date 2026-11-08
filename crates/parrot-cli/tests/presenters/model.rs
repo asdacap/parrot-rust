@@ -4,6 +4,64 @@ use parrot_cli::presenters::*;
 use parrot_domain::protocol::messages::parrot::{ArtifactReference, YieldedShellProcess};
 
 #[test]
+fn path_display_uses_the_longest_server_prefix_without_changing_arguments() {
+    let mut call =
+        ToolCallPresentation::new("read", r#"{"path":"/server/session/agent/blobs/log.dat"}"#);
+    call.path_variables = [
+        ("WORKDIR", "/server"),
+        ("SCRATCH_DIR", "/server/session/scratch"),
+        ("AGENT_HISTORY_DIR", "/server/session/agent"),
+        ("AGENT_SCRATCH_DIR", "/server/session/agent/scratch"),
+        ("INVALID", "relative"),
+    ]
+    .into_iter()
+    .map(|(name, root)| (name.into(), root.into()))
+    .collect();
+    let original = call.arguments_json.clone();
+    for (path, expected) in [
+        (
+            "/server/session/agent/blobs/log.dat",
+            "$AGENT_HISTORY_DIR/blobs/log.dat",
+        ),
+        (
+            "/server/session/agent/scratch/整理.md",
+            "$AGENT_SCRATCH_DIR/整理.md",
+        ),
+        ("/server/session/scratch/plan.md", "$SCRATCH_DIR/plan.md"),
+        ("/server/src/main.rs", "$WORKDIR/src/main.rs"),
+        ("/server/session/agent/", "$AGENT_HISTORY_DIR"),
+        (
+            "/server/session/agent/./blobs/../history.jsonl",
+            "$AGENT_HISTORY_DIR/history.jsonl",
+        ),
+        (
+            "/server/session/agent-other/file",
+            "$WORKDIR/session/agent-other/file",
+        ),
+        (
+            "/server/session/agent/../../../outside",
+            "/server/session/agent/../../../outside",
+        ),
+        ("/server-other/file", "/server-other/file"),
+        ("/SERVER/file", "/SERVER/file"),
+        ("relative/file", "relative/file"),
+        (
+            "$AGENT_HISTORY_DIR/history.jsonl",
+            "$AGENT_HISTORY_DIR/history.jsonl",
+        ),
+        ("", ""),
+    ] {
+        assert_eq!(call.shorten_path(path), expected, "{path}");
+    }
+    assert_eq!(call.arguments_json, original);
+    call.path_variables.clear();
+    assert_eq!(
+        call.shorten_path("/server/session/agent/blobs/log.dat"),
+        "/server/session/agent/blobs/log.dat"
+    );
+}
+
+#[test]
 fn redactor_conceals_non_string_fields_invalid_json_and_non_objects() {
     let metadata = ToolPresentationMetadata {
         redacted_input_fields: vec!["input".into()],

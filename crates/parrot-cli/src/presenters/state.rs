@@ -23,6 +23,7 @@ pub const TOOL_ACTIVITY_PREFIX: &str = "tool:";
 struct ToolCallState {
     name: String,
     arguments: String,
+    path_variables: BTreeMap<String, String>,
 }
 
 /// Durable-stream state is scoped to one agent identity, never to the input UI.
@@ -280,6 +281,7 @@ impl AgentSessionState {
         if !tool.tool_name.is_empty() {
             call.name.clone_from(&tool.tool_name);
         }
+        call.path_variables = tool.path_variables.clone().into_iter().collect();
         self.tool_live
             .get_mut()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -319,7 +321,11 @@ impl AgentSessionState {
     ) -> ToolCallPresentation {
         let mut call = self.tool_calls.get(id).map_or_else(
             || ToolCallPresentation::new("", ""),
-            |tool| ToolCallPresentation::new(&tool.name, &tool.arguments),
+            |tool| {
+                let mut call = ToolCallPresentation::new(&tool.name, &tool.arguments);
+                call.path_variables.clone_from(&tool.path_variables);
+                call
+            },
         );
         call.agent_reference_resolver = resolver;
         call
@@ -385,6 +391,7 @@ impl AgentSessionState {
             },
             tool.arguments,
         );
+        call.path_variables = tool.path_variables;
         call.agent_reference_resolver = resolver;
         terminal.start_omitted = start_omitted;
         Ok((call, terminal))

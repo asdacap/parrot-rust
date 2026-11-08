@@ -925,7 +925,7 @@ async fn yielded_completion_is_delivered_once_with_original_prefix() {
     );
     assert_eq!(
         calls[0].input_source,
-        parrot_domain::protocol::messages::parrot::InputSource::INPUT_SOURCE_UNSPECIFIED
+        parrot_domain::protocol::messages::parrot::InputSource::INPUT_SOURCE_PROCESS
     );
     drop(calls);
     owner.dispose().await.unwrap();

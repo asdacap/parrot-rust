@@ -520,7 +520,7 @@ impl<S: RestrictableAccessSnapshot + 'static> CompletionSink for ScopeLink<S> {
                     IncomingActivity {
                         name: message.process_name.clone(),
                         cause: Some(message.activity_description.clone()),
-                        source: InputSource::INPUT_SOURCE_UNSPECIFIED,
+                        source: message.input_source,
                     },
                     Arc::new(NeverCancelled),
                 )
@@ -1624,6 +1624,7 @@ where
                 let bound_catalog = Arc::new(BoundCatalog::new());
                 let settlement = Arc::new(
                     ToolSettlement::new(ToolSettlementConfig {
+                        path_variables: environment.materialize().clone(),
                         factory: bound_catalog.clone(),
                         templates: self.user.templates.clone(),
                         output_blobs: blobs.clone(),

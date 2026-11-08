@@ -184,6 +184,7 @@ pub(super) async fn runtime_with_publisher(
     let tracker = Arc::new(AgentSessionActivity::new(Arc::new(TestClock)));
     let tools = Arc::new(
         ToolSettlement::new(ToolSettlementConfig {
+            path_variables: Default::default(),
             factory: factory.clone(),
             templates: templates.clone(),
             output_blobs: Arc::new(

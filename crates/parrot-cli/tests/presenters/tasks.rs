@@ -42,17 +42,17 @@ fn row_text(
 }
 
 #[test]
-fn format_stays_byte_identical_while_rows_carry_the_same_text() {
+fn enhanced_format_matches_rows_with_two_cell_nesting() {
     let snapshot = snapshot();
     let formatted = AgentTaskProgressFormatter::format(&snapshot).join("\n");
     assert_eq!(
         formatted,
-        "Agent tasks:\n◐ root description\n└── ○ child description\n    └── ✓ 日本語 説明\n✗ last root"
+        "Agent tasks:\n◐ root description\n└ ○ child description\n  └ ✓ 日本語 説明\n✗ last root"
     );
     assert_eq!(row_text(&snapshot, None, None), formatted);
     assert_eq!(
         parrot_cli::dispatch::task_format::ProgressFormatter::format(&snapshot).join("\n"),
-        formatted
+        "Agent tasks:\n◐ root description\n└── ○ child description\n    └── ✓ 日本語 説明\n✗ last root"
     );
 }
 
@@ -90,7 +90,7 @@ fn known_child_graphs_nest_without_changing_the_original() {
     let nested = AgentTaskProgressFormatter::nest(&owner, &trees);
     assert_eq!(
         AgentTaskProgressFormatter::format(&nested).join("\n"),
-        "Agent tasks:\n◐ composite\n├── ◐ inner\n│   └── ✓ deepest\n└── ○ after\n○ leaf"
+        "Agent tasks:\n◐ composite\n├ ◐ inner\n│ └ ✓ deepest\n└ ○ after\n○ leaf"
     );
     assert_eq!(nested.revision, 3);
     assert_eq!(owner, before);
@@ -202,7 +202,7 @@ fn hidden_terminal_parent_still_follows_activity_without_showing_its_children() 
 #[test]
 fn rows_hang_at_description_start_for_all_four_source_cases() {
     let rows = AgentTaskProgressFormatter::format_rows(&snapshot(), None, None);
-    for (index, indent) in ["", "  ", "      ", "          "].into_iter().enumerate() {
+    for (index, indent) in ["", "  ", "    ", "      "].into_iter().enumerate() {
         assert_eq!(
             rows[index].hanging_indent, indent,
             "source argument {index}"
@@ -255,7 +255,7 @@ fn descriptions_follow_running_agent_lines_with_source_indentation() {
         .join("\n");
     assert_eq!(
         actual,
-        "0:Agent tasks:\n0:⠋ [root] root description\n4:├── ⠋ [first] first description\n6:├── ◐ unseen description\n4:└── ⠋ [done] done description"
+        "0:Agent tasks:\n0:⠋ [root] root description\n2:├ ⠋ [first] first description\n4:├ ◐ unseen description\n2:└ ⠋ [done] done description"
     );
     assert_eq!(rows[1].status.unwrap().value(), 2);
     assert_eq!(rows[4].status.unwrap().value(), 3);
@@ -279,7 +279,7 @@ fn hidden_branches_keep_active_paths_without_mutating_flags() {
     )]);
     assert_eq!(
         row_text(&snapshot, Some(&lines), Some(&active)),
-        "Agent tasks:\n◐ root description\n└── ○ child description\n    └── working grandchild 日本語 説明\n✗ last root"
+        "Agent tasks:\n◐ root description\n└ ○ child description\n  └ working grandchild 日本語 説明\n✗ last root"
     );
     assert_eq!(snapshot, original);
     assert_eq!(
@@ -315,7 +315,7 @@ fn hidden_running_nodes_require_activity_and_filtered_connectors_are_correct() {
     root.children.push(omitted);
     assert_eq!(
         AgentTaskProgressFormatter::format(&snapshot).join("\n"),
-        "Agent tasks:\n◐ root description\n└── ○ kept"
+        "Agent tasks:\n◐ root description\n└ ○ kept"
     );
     snapshot.root_nodes[0].hidden = true;
     snapshot.root_nodes[0].agent_session_id = "worker".into();
@@ -348,7 +348,7 @@ fn nested_hidden_child_graphs_wait_for_child_worker_activity() {
     );
     assert_eq!(
         row_text(&nested, None, Some(&BTreeSet::from(["child-agent".into()]))),
-        "Agent tasks:\n○ parent\n└── ✓ finished child"
+        "Agent tasks:\n○ parent\n└ ✓ finished child"
     );
     assert!(children.root_nodes[0].hidden);
 }
@@ -434,12 +434,7 @@ fn nesting_cycle_is_bounded_without_mutating_source_graphs() {
     let before = trees.clone();
     assert_eq!(
         AgentTaskProgressFormatter::format(&AgentTaskProgressFormatter::nest(&owner, &trees)),
-        [
-            "Agent tasks:",
-            "◐ owner",
-            "└── ◐ a-child",
-            "    └── ◐ b-child"
-        ]
+        ["Agent tasks:", "◐ owner", "└ ◐ a-child", "  └ ◐ b-child"]
     );
     assert_eq!(trees, before);
 }
@@ -467,8 +462,8 @@ fn embedded_icon_metadata_preserves_utf16_offsets_and_known_colors() {
         None,
     );
     assert_eq!(rows[2].model_alias_icon, Some(converted));
-    assert_eq!(rows[2].glyph_start_index, 4 + line.glyph_start_index);
-    assert_eq!(rows[2].hanging_indent, "    ");
+    assert_eq!(rows[2].glyph_start_index, 2 + line.glyph_start_index);
+    assert_eq!(rows[2].hanging_indent, "  ");
     assert!(LiveModelAliasIcon::convert(None).unwrap().is_none());
     let invalid = wire::TurnModelAliasIcon {
         color: EnumOrUnknown::from_i32(999),

@@ -633,6 +633,7 @@ mod fixture {
             let waiting = Arc::new(Semaphore::new(0));
             let tools = Arc::new(
                 ToolSettlement::new(ToolSettlementConfig {
+                    path_variables: Default::default(),
                     factory: Arc::new(RetainedFactory::new(
                         bridge.clone(),
                         provider.router(),
