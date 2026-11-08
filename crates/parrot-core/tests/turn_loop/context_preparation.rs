@@ -94,6 +94,51 @@ fn raw_and_calibrated_triggers_compact_before_checkpoint_restore_and_use_returne
 }
 
 #[test]
+fn separate_context_reads_use_compaction_configuration_calibration_and_cadence() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.context.configuration.model.context_window = 1000;
+    state.context.configuration.model.maximum_output_tokens = 100;
+    state.estimated_input_tokens = 100;
+    state
+        .context
+        .calibration
+        .observe_usage("memory/model", 0, 950);
+    let mut compacted = state.context.clone();
+    compacted.configuration.model.context_window = 2000;
+    compacted.configuration.model.maximum_output_tokens = 200;
+    compacted.calibration.reset();
+    compacted.cadence.restore(None);
+    compacted
+        .cadence
+        .acknowledge(
+            &ContextSnapshot::estimate(100, &compacted.configuration),
+            "memory/model",
+            1,
+        )
+        .unwrap();
+    let cadence = compacted.cadence.clone();
+    state.compactions.push_back(CompactedContext {
+        instructions: "compacted instructions".into(),
+        messages: vec![Message {
+            role: Role::System,
+            contents: vec![Content::Text("compacted history".into())],
+            ..Message::default()
+        }],
+        state: compacted,
+        reduced: true,
+    });
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.compacted_definitions.len(), 1);
+    assert_eq!(state.cadence_writes, [cadence]);
+    assert!(!state.trace.values().iter().any(|step| step == "checkpoint"));
+    assert_eq!(
+        state.provider.requests.lock().unwrap()[0].max_output_tokens,
+        200
+    );
+}
+
+#[test]
 fn automatic_summary_failure_is_recorded_before_context_preparation_stops() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.prime_context(490);
@@ -353,7 +398,9 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
 #[test]
 fn context_primitive_failures_stop_at_the_effect_without_invoking_provider_or_tools() {
     for stage in [
-        "context",
+        "context_configuration",
+        "token_calibration",
+        "context_cadence",
         "estimate",
         "checkpoint",
         "cadence",

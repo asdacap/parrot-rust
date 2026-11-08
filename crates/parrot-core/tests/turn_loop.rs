@@ -1,6 +1,6 @@
 use parrot_core::{
     BoxFuture, CancellationToken, CompletionFeedback, Content, ContextCadence, ContextCompaction,
-    ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot, ContextState,
+    ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
     ConversationTurn, Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message,
     Outcome, PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason,
     Role, States, TokenCalibration, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult,
@@ -219,10 +219,17 @@ struct InputEstimate {
     tokens: i64,
 }
 
+#[derive(Clone)]
+struct MemoryContext {
+    configuration: ContextConfiguration,
+    calibration: TokenCalibration,
+    cadence: ContextCadence,
+}
+
 struct CompactedContext {
     instructions: String,
     messages: Vec<Message>,
-    state: ContextState,
+    state: MemoryContext,
     reduced: bool,
 }
 
@@ -246,7 +253,7 @@ struct MemoryState {
     reasoning: Option<Reasoning>,
     provider_preferences: String,
     include_router_metadata: bool,
-    context: ContextState,
+    context: MemoryContext,
     instructions: String,
     messages: Vec<Message>,
     renderings: VecDeque<RenderedContext>,
@@ -306,7 +313,7 @@ impl MemoryState {
             reasoning: None,
             provider_preferences: String::new(),
             include_router_metadata: false,
-            context: ContextState {
+            context: MemoryContext {
                 configuration: ContextConfiguration {
                     model: ContextModel {
                         canonical_model: "memory/model".into(),
@@ -543,10 +550,22 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn read_context_state(&self) -> BoxFuture<'_, Result<ContextState, Error>> {
+    fn read_context_configuration(&self) -> BoxFuture<'_, Result<ContextConfiguration, Error>> {
         Box::pin(async move {
-            self.trace.step("context", self.fail_at)?;
-            Ok(self.context.clone())
+            self.trace.step("context_configuration", self.fail_at)?;
+            Ok(self.context.configuration.clone())
+        })
+    }
+    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
+        Box::pin(async move {
+            self.trace.step("token_calibration", self.fail_at)?;
+            Ok(self.context.calibration.clone())
+        })
+    }
+    fn read_context_cadence(&self) -> BoxFuture<'_, Result<ContextCadence, Error>> {
+        Box::pin(async move {
+            self.trace.step("context_cadence", self.fail_at)?;
+            Ok(self.context.cadence.clone())
         })
     }
     fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>> {
@@ -780,12 +799,15 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "promote",
             "render",
             "messages",
-            "context",
+            "context_configuration",
+            "token_calibration",
             "estimate",
+            "context_cadence",
             "checkpoint",
             "cadence",
             "messages",
-            "context",
+            "context_configuration",
+            "token_calibration",
             "estimate",
             "invoke",
             "record_tools",
@@ -794,11 +816,14 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "promote",
             "render",
             "messages",
-            "context",
+            "context_configuration",
+            "token_calibration",
             "estimate",
+            "context_cadence",
             "cadence",
             "messages",
-            "context",
+            "context_configuration",
+            "token_calibration",
             "estimate",
             "invoke",
             "exit_blockers",

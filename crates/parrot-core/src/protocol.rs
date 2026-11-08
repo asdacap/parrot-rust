@@ -1,6 +1,6 @@
 use crate::{
-    ContextCadence, ContextCompaction, ContextReminderCheckpoint, ContextSnapshot, ContextState,
-    budget,
+    ContextCadence, ContextCompaction, ContextConfiguration, ContextReminderCheckpoint,
+    ContextSnapshot, TokenCalibration, budget,
 };
 use std::{fmt, future::Future, pin::Pin};
 
@@ -89,9 +89,12 @@ pub trait States: Send {
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and batching its content effects.
     fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>>;
-    /// Reads raw context configuration and current calibration/cadence state without
-    /// deciding whether to compact or emit reminders.
-    fn read_context_state(&self) -> BoxFuture<'_, Result<ContextState, Error>>;
+    /// Reads raw model limits and context overrides without deciding whether to compact.
+    fn read_context_configuration(&self) -> BoxFuture<'_, Result<ContextConfiguration, Error>>;
+    /// Reads the current token calibration without choosing context or output limits.
+    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>>;
+    /// Reads the current reminder cadence without restoring or advancing it.
+    fn read_context_cadence(&self) -> BoxFuture<'_, Result<ContextCadence, Error>>;
     /// Renders current instructions while retaining native request-scoped bindings.
     fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
     /// Estimates exactly the supplied request content using native tokenizer and

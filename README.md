@@ -88,8 +88,10 @@ delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch.
 
-There is no `States::prepare_context` workflow hook. Core reads raw model limits,
-context overrides, calibration, and cadence, then directs explicit native effects.
+There is no `States::prepare_context` workflow hook. Core reads raw model limits
+and context overrides through `read_context_configuration`, token calibration
+through `read_token_calibration`, and reminder cadence through `read_context_cadence`,
+then directs explicit native effects.
 It restores reminder checkpoints lazily, acknowledges inserted or duplicate
 reminders before publication, and calculates the output budget from the final
 messages and tool definitions. Prompt/template rendering, exact token estimates,
