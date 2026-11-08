@@ -260,7 +260,6 @@ fn error_to_runtime(error: catalog::Error) -> ToolFailure {
             | tasks_queues::FailureKind::Format
             | tasks_queues::FailureKind::Argument => FailureKind::Argument,
             tasks_queues::FailureKind::Registry
-            | tasks_queues::FailureKind::Queue
             | tasks_queues::FailureKind::InvalidOperation => FailureKind::InvalidOperation,
             tasks_queues::FailureKind::Io => FailureKind::Io,
             tasks_queues::FailureKind::Denied => FailureKind::AccessDenied,

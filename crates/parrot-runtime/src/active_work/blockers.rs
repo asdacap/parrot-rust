@@ -1,6 +1,6 @@
 //! Source-compatible observations of owned work. Observation never settles or cancels it.
 use crate::{
-    agent_queues::AgentQueues, agent_turn::services::TurnError, children::ChildRegistry,
+    agent_turn::services::TurnError, children::ChildRegistry,
     task_scheduler::TaskScheduler,
 };
 use parrot_domain::{
@@ -182,43 +182,6 @@ impl ActiveWorkBlocker for TaskBlocker {
             Ok(Some(BlockerResult {
                 work_section: Some(format_section(&heading, &unresolved)),
                 reminder: None,
-            }))
-        })
-    }
-}
-
-pub struct QueueBlocker<S: RestrictableAccessSnapshot + 'static> {
-    pub queues: Arc<AgentQueues<S>>,
-    pub templates: Arc<PromptTemplateCatalog>,
-}
-impl<S: RestrictableAccessSnapshot + 'static> ActiveWorkBlocker for QueueBlocker<S> {
-    fn observe(&self) -> BoxFuture<'_, Result<Option<BlockerResult>, TurnError>> {
-        Box::pin(async move {
-            let mut queues = self
-                .queues
-                .snapshot()
-                .map_err(|error| TurnError::Service(error.to_string()))?
-                .queues;
-            queues.retain(|queue| queue.size > 0);
-            queues.sort_by(|a, b| a.name.cmp(&b.name));
-            if queues.is_empty() {
-                return Ok(None);
-            }
-            let queues = queues
-                .into_iter()
-                .map(|queue| serde_json::json!({ "name": queue.name, "size": queue.size }))
-                .collect::<Vec<_>>();
-            let reminder = self
-                .templates
-                .render(
-                    "agent-session.nonempty-queues-reminder",
-                    &[("queues".into(), queues.into())],
-                    &NeverCancelled,
-                )
-                .map_err(|error| TurnError::Service(error.to_string()))?;
-            Ok(Some(BlockerResult {
-                work_section: None,
-                reminder: Some(reminder),
             }))
         })
     }

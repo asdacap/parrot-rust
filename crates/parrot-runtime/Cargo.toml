@@ -23,10 +23,6 @@ name = "active_work"
 path = "tests/active_work/main.rs"
 
 [[test]]
-name = "agent_queues"
-path = "tests/agent_queues/main.rs"
-
-[[test]]
 name = "agent_turn"
 path = "tests/agent_turn/main.rs"
 

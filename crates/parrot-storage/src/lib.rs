@@ -9,4 +9,3 @@ pub mod events;
 pub mod history_files;
 pub mod ownership;
 pub mod progress;
-pub mod queue_files;

@@ -5,7 +5,7 @@ use std::{collections::HashSet, fmt, marker::PhantomData, sync::Arc};
 
 use parrot_domain::{
     contracts::{
-        async_ops::{BoxFuture, Clock, OperationError},
+        async_ops::{BoxFuture, OperationError},
         filesystem::{AuthorizedMutationService, AuthorizedReadService},
         interactions::{AgentCommunication, QuestionRequester},
         runtime::{AgentRuntime, TaskController},
@@ -37,12 +37,11 @@ use crate::{
     },
     tasks_queues::{
         self, ToolFailure,
-        queues::{QueueDiagnostics, QueueTool, QueueToolBackend, QueueToolKind},
         tasks::{TaskQuery, TaskSnapshot, TaskTool, TaskToolKind, TaskUpdate},
     },
 };
 
-pub const BUILTIN_NAMES: [&str; 32] = [
+pub const BUILTIN_NAMES: [&str; 28] = [
     "exec_command",
     "write_stdin",
     "interrupt_process",
@@ -69,10 +68,6 @@ pub const BUILTIN_NAMES: [&str; 32] = [
     "wait",
     "status",
     "compact_context",
-    "queue_create",
-    "queue_info",
-    "queue_push",
-    "queue_take",
     "request_write_permission",
     "progress",
 ];
@@ -701,21 +696,17 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
 pub struct TaskQueueFactories<S, T> {
     set: Factory<S, T>,
     get: Factory<S, T>,
-    queues: [Factory<S, T>; 4],
 }
-pub struct TaskQueueServices<C, F, B, K, D> {
+pub struct TaskQueueServices<C, F> {
     pub tasks: Arc<C>,
     pub filesystem: Arc<F>,
     pub templates: Arc<PromptTemplateCatalog>,
-    pub queues: Arc<B>,
-    pub clock: Arc<K>,
-    pub diagnostics: Arc<D>,
 }
 impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
     TaskQueueFactories<S, T>
 {
-    pub fn new<C, F, B, K, D, Target>(
-        services: TaskQueueServices<C, F, B, K, D>,
+    pub fn new<C, F>(
+        services: TaskQueueServices<C, F>,
         definitions: &ToolDefinitionCatalog,
     ) -> Result<Self, MissingToolDefinition>
     where
@@ -726,10 +717,6 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
                 Error = ToolFailure,
             > + 'static,
         F: AuthorizedReadService<Security = S> + 'static,
-        B: QueueToolBackend<Target> + 'static,
-        K: Clock + 'static,
-        D: QueueDiagnostics + 'static,
-        Target: Clone + Send + Sync + 'static,
     {
         let render_accepted = Arc::new(move |count: usize| {
             services
@@ -758,31 +745,9 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
                 scoped,
             ))
         };
-        let queue = |kind| {
-            Ok(bind(
-                QueueToolKind::name(kind),
-                &[],
-                true,
-                QueueTool::<_, _, _, _, Target, T>::new(
-                    kind,
-                    definitions,
-                    services.queues.clone(),
-                    services.filesystem.clone(),
-                    services.clock.clone(),
-                    services.diagnostics.clone(),
-                )?,
-                scoped,
-            ))
-        };
         Ok(Self {
             set: task(TaskToolKind::Set)?,
             get: task(TaskToolKind::Get)?,
-            queues: [
-                queue(QueueToolKind::Create)?,
-                queue(QueueToolKind::Info)?,
-                queue(QueueToolKind::Push)?,
-                queue(QueueToolKind::Take)?,
-            ],
         })
     }
 }
@@ -819,7 +784,6 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
         web: WebFetchFactory<S, T>,
     ) -> Self {
         let [exec, stdin, interrupt_process, monitor] = process.0;
-        let [queue_create, queue_info, queue_push, queue_take] = tasks.queues;
         Self {
             factories: vec![
                 exec,
@@ -848,10 +812,6 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
                 agents.wait,
                 session.status,
                 session.compact,
-                queue_create,
-                queue_info,
-                queue_push,
-                queue_take,
                 session.permission,
                 session.progress,
             ],

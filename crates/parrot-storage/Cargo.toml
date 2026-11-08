@@ -28,10 +28,6 @@ name = "database"
 path = "tests/database/main.rs"
 
 [[test]]
-name = "queue_files"
-path = "tests/queue_files/main.rs"
-
-[[test]]
 name = "diagnostics"
 path = "tests/diagnostics/main.rs"
 

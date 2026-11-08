@@ -1,6 +1,5 @@
-//! Task and queue tool contracts over injected scoped runtime services.
+//! Task tool contracts over injected scoped runtime services.
 
-pub mod queues;
 pub mod tasks;
 
 use std::{collections::BTreeMap, fmt};
@@ -34,7 +33,6 @@ pub enum FailureKind {
     Json,
     Format,
     Registry,
-    Queue,
     Argument,
     InvalidOperation,
     Io,
@@ -59,13 +57,6 @@ impl ToolFailure {
 
     pub(crate) fn format(message: impl Into<String>) -> Self {
         Self::new(FailureKind::Format, message)
-    }
-
-    pub(crate) fn queue_caught(&self) -> bool {
-        matches!(
-            self.kind,
-            FailureKind::Json | FailureKind::Format | FailureKind::Registry | FailureKind::Queue
-        )
     }
 
     pub(crate) fn task_caught(&self) -> bool {

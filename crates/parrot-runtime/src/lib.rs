@@ -1,7 +1,6 @@
 //! Scoped agent sessions, context assembly, scheduling, and lifecycle.
 
 pub mod active_work;
-pub mod agent_queues;
 pub mod agent_turn;
 pub mod children;
 pub mod compaction;
