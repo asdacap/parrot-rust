@@ -145,7 +145,7 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.pending_messages.len(), 1);
-    assert!(state.requests[0].0.enters_final_phase);
+    assert_eq!(state.final_requests, [0]);
     assert_eq!(
         finish(run_turn(
             &mut state,
@@ -159,8 +159,8 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert!(state.pending_messages.is_empty());
-    assert!(state.requests[1].0.final_phase);
-    assert!(!state.requests[1].0.enters_final_phase);
+    assert_eq!(state.capture_catalogs()[1], ["read"]);
+    assert_eq!(state.final_requests, [0]);
     assert_eq!(
         finish(run(
             &mut state,

@@ -1,4 +1,7 @@
-use crate::budget;
+use crate::{
+    ContextCadence, ContextCompaction, ContextReminderCheckpoint, ContextSnapshot, ContextState,
+    budget,
+};
 use std::{fmt, future::Future, pin::Pin};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -86,37 +89,73 @@ pub trait States: Send {
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and batching its content effects.
     fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>>;
-    /// Prepares context using exactly the supplied definitions and core-selected phase.
-    /// Returns rendered instructions and the resulting output-token budget.
-    fn prepare_context<'a>(
-        &'a mut self,
+    /// Reads raw context configuration and current calibration/cadence state without
+    /// deciding whether to compact or emit reminders.
+    fn read_context_state(&self) -> BoxFuture<'_, Result<ContextState, Error>>;
+    /// Renders current instructions while retaining native request-scoped bindings.
+    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
+    /// Estimates exactly the supplied request content using native tokenizer and
+    /// provider-specific costs, without choosing context or output limits.
+    fn estimate_input_tokens<'a>(
+        &'a self,
+        instructions: &'a str,
         definitions: &'a [ToolDefinition],
-        phase: budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<ContextSnapshot, Error>>;
+        messages: &'a [Message],
+    ) -> BoxFuture<'a, Result<i64, Error>>;
+    /// Records and publishes the configured final-request context before preparation.
+    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Reads the latest durable reminder checkpoint without changing cadence state.
+    fn read_context_checkpoint(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>>;
+    /// Applies the core's cadence state before later context effects or publication.
+    fn write_context_cadence(
+        &mut self,
+        cadence: ContextCadence,
+    ) -> BoxFuture<'_, Result<(), Error>>;
+    /// Renders configured reminder text for the supplied observed context and band.
+    fn render_context_reminder<'a>(
+        &'a self,
+        context: &'a ContextSnapshot,
+        percentage: i32,
+    ) -> BoxFuture<'a, Result<String, Error>>;
+    /// Durably appends a reminder idempotently, updating conversation only when
+    /// inserted and retaining its native receipt without publishing it yet. The
+    /// observed percentage is unrounded pre-candidate usage, not the checkpoint band.
+    fn append_context_reminder(
+        &mut self,
+        checkpoint: ContextReminderCheckpoint,
+        content: String,
+        observed_percentage: i32,
+    ) -> BoxFuture<'_, Result<bool, Error>>;
+    /// Publishes the retained reminder receipt uncancelled after cadence is written.
+    fn publish_context_reminder(&mut self) -> BoxFuture<'_, Result<(), Error>>;
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
-    /// Prepares a safe-prefix plan and scoped native effects after an oversized request.
+    /// Prepares a safe-prefix plan and scoped native effects for core-selected compaction.
     /// Core constructs and invokes every summary request before recording the outcome.
     fn prepare_compaction<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
     ) -> BoxFuture<'a, Result<crate::compaction::PreparedCompaction<'a>, Error>>;
     /// Applies the completed compaction and awaits terminal lifecycle effects on success
-    /// or failure. Returns whether the provider-visible context was reduced.
+    /// or failure, returning the sampled instructions and whether context was reduced.
     fn record_compaction(
         &mut self,
         result: Result<Option<crate::compaction::CompactionResult>, Error>,
-    ) -> BoxFuture<'_, Result<bool, Error>>;
+    ) -> BoxFuture<'_, Result<ContextCompaction, Error>>;
     /// Records why a malformed or truncated tool response must be retried.
     fn record_retry(
         &mut self,
         reason: RetryReason,
         attempt: i32,
     ) -> BoxFuture<'_, Result<(), Error>>;
-    /// Durably records the assistant's tool calls before execution begins.
+    /// Durably records the assistant's tool calls before execution begins, retaining
+    /// the actual executable bindings for the supplied core-selected phase.
     fn record_tool_calls<'a>(
         &'a mut self,
         response: &'a ProviderResponse,
+        phase: budget::TurnRequestPhase,
     ) -> BoxFuture<'a, Result<(), Error>>;
     /// Reads ordered exit-blocker messages after accepted mutations have settled.
     /// Any nonempty list blocks completion, even when its messages are empty strings.
@@ -319,12 +358,6 @@ pub struct TurnOptions {
     pub reasoning: Option<Reasoning>,
     pub provider_preferences: String,
     pub include_router_metadata: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextSnapshot {
-    pub instructions: String,
-    pub max_output_tokens: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -31,9 +31,9 @@ ported from the .NET repository. Repository contributor guidance is in
 `parrot-core` owns the agent turn protocol, loop, and shared compaction algorithm.
 Its turn contracts are:
 
-- `States`: factual conversation turns and pending-message headers, prepared
-  context, explicit messages, result recording, observed completion context,
-  and explicit feedback and completion effects.
+- `States`: factual conversation turns and pending-message headers, context
+  configuration/calibration/cadence, explicit messages, estimates, result recording,
+  observed completion context, and explicit persistence/rendering effects.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
@@ -48,17 +48,19 @@ choose their own associated payload types. Shared compaction permits native erro
 types so standalone callers preserve their concrete failures; payloads remain
 core-owned. `Provider` accepts a complete request;
 `Tools` accepts explicit calls and the caller's cancellation token. Core assembles
-each provider request from caller-supplied turn settings, prepared context values,
-an explicit message read, and its selected tool definitions. States never returns
-a provider request. Native initialization binds the final model/profile selection;
-execution receives no workflow phase or adapter-specific callbacks.
-Attempts and request phases stay in the core loop, and input estimates stay in
-runtime state.
+each provider request from caller-supplied turn settings, exposed context state,
+explicit messages, and its selected tool definitions. States never returns a
+provider request or a prepared output-token budget. Native initialization binds
+the final model/profile selection; execution receives no workflow phase or
+adapter-specific callbacks. Attempts, request phases, and context decisions stay
+in core. Native tokenization and provider-specific image costing supply estimates.
 
 The core specifies and implements:
 
 - Provider-request assembly, request admission/counting, limit-triggered final-phase
   catalog selection, and bounded tool-settlement extensions.
+- Context preparation: strict raw/calibrated compaction triggers, reminder cadence
+  and candidate-fit decisions, final-request notices, and output-token capacity.
 - Truncated tool-call detection and JSON-argument validation before recording or
   executing calls.
 - Shared compaction request assembly, ordered first-pass and summary-dependent
@@ -70,13 +72,14 @@ The core specifies and implements:
   state, recording assistant calls before execution, and completion ordering before
   closing a turn.
 
-For oversized recovery, `States::prepare_compaction` returns a safe-prefix plan
-and explicitly scoped compaction-effect/provider adapters, not a ready provider
-request. Core constructs and invokes the summary requests, then awaits
-`record_compaction` on success or failure before retrying or propagating the error.
-Native state owns lifecycle events, summary/watermark persistence, status fitting,
-and conversation reload. The native automatic and explicit paths retain the same
-lifecycle/persistence boundary around the shared core algorithm.
+For core-selected automatic compaction and oversized recovery,
+`States::prepare_compaction` returns a safe-prefix plan and explicitly scoped
+compaction-effect/provider adapters, not a ready provider request. Core constructs
+and invokes the summary requests, then awaits `record_compaction` on success or
+failure before continuing or propagating the error. Settlement returns refreshed
+instructions and whether context was reduced. Native state owns lifecycle events,
+summary/watermark persistence, status fitting, and conversation reload. Inline and
+explicit native paths retain that same boundary around the shared core algorithm.
 
 `States` exposes the latest visible conversation segment and its result, not a
 precomputed work flag. A no-tool assistant candidate can be present while durable
@@ -84,6 +87,15 @@ turn closure is still pending. Pending-message peeks return stable identities an
 delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch.
+
+There is no `States::prepare_context` workflow hook. Core reads raw model limits,
+context overrides, calibration, and cadence, then directs explicit native effects.
+It restores reminder checkpoints lazily, acknowledges inserted or duplicate
+reminders before publication, and calculates the output budget from the final
+messages and tool definitions. Prompt/template rendering, exact token estimates,
+idempotent persistence, and uncancelled post-commit notice publication remain native.
+Calibration survives later stream/publication failures and resets only after
+successful compaction persistence.
 
 After a no-tool response, core calls `get_exit_blockers` for an ordered list of
 message strings. An empty list permits completion; any nonempty list, including
@@ -126,10 +138,10 @@ and before input promotion, without a separate core state operation.
 `parrot-runtime` implements the turn and compaction contracts with private adapters.
 Persistence, prompt rendering, compaction planning and token estimates, blobs,
 security, streaming, accounting, cancellation, events, and session lifecycle stay
-outside the core. Provider representations are
-translated losslessly at the interface, including raw provider extensions and
-multimodal content. Runtime bindings retain the actual selected model and executable
-tool snapshots; tools are never reconstructed from advertised definitions.
+outside the core. Provider representations are translated losslessly at the
+interface, including raw provider extensions and multimodal content. Runtime
+bindings retain the actual selected model and executable tool snapshots; tools
+are never reconstructed from advertised definitions.
 
 Native state initialization reconciles historical tool results before entering the
 core, without invoking tools. Any historical call without a saved result receives

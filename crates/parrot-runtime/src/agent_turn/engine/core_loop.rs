@@ -1,9 +1,11 @@
 use super::*;
 use parrot_core::{
-    CompletionFeedback as CoreCompletionFeedback, ContextSnapshot as CoreContextSnapshot,
-    Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse, RetryReason,
-    States as CoreStates, ToolCall, ToolCatalog, ToolDefinition, ToolResult, ToolStatus,
-    TurnOptions,
+    CompletionFeedback as CoreCompletionFeedback, ContextCadence as CoreContextCadence,
+    ContextCompaction as CoreContextCompaction,
+    ContextReminderCheckpoint as CoreContextReminderCheckpoint,
+    ContextSnapshot as CoreContextSnapshot, ContextState as CoreContextState, Error as CoreError,
+    ErrorCode, ErrorKind, ProviderRequest, ProviderResponse, RetryReason, States as CoreStates,
+    ToolCall, ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -11,7 +13,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     binding: &'a TurnBinding<S, T>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
-    request_tools: Option<T::Snapshot>,
+    pending_context_reminder: Option<Event>,
     exit_blocker_sources: Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>,
     persistence_key: Option<TurnKey>,
     pending_compaction: Option<PendingCompaction>,
@@ -181,7 +183,7 @@ where
             binding,
             cancellation,
             work,
-            request_tools: None,
+            pending_context_reminder: None,
             exit_blocker_sources: Vec::new(),
             persistence_key: None,
             pending_compaction: None,
@@ -446,81 +448,147 @@ where
                 .await
         })
     }
-    fn prepare_context<'a>(
-        &'a mut self,
-        definitions: &'a [ToolDefinition],
-        phase: parrot_core::budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<CoreContextSnapshot, CoreError>> {
+    fn read_context_state(&self) -> BoxFuture<'_, Result<CoreContextState, CoreError>> {
+        adapt_operation(async move {
+            let state = self.backend.state.lock().await;
+            let selection = self.binding.capture_selection()?;
+            Ok(state.context.capture_state(&selection.model))
+        })
+    }
+    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
             let selection = self.binding.capture_selection()?;
-            let selection = &selection;
+            state.request_status = Some(backend.status.bind(&selection));
             let cancellation = self.cancellation;
+            cancellation.check().map_err(|_| ContextError::Cancelled)?;
+            state
+                .context
+                .ensure_epoch(&backend.prompt, cancellation)
+                .await?;
+            Ok(backend
+                .prompt
+                .build(&selection.model, cancellation)
+                .await
+                .map_err(ContextError::from)?)
+        })
+    }
+    fn estimate_input_tokens<'a>(
+        &'a self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
+        messages: &'a [parrot_core::Message],
+    ) -> BoxFuture<'a, Result<i64, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
             let definitions: Vec<sessions::Tool> =
                 definitions.iter().cloned().map(Into::into).collect();
-            let definitions = definitions.as_slice();
-            let events = ContextEmitter { backend };
-            if phase.enters_final_phase {
-                state
-                    .context
-                    .inject_final_provider_request_prompt(
-                        &mut state.conversation,
-                        &backend.notices.final_request,
-                        &events,
-                        cancellation,
-                    )
-                    .await?;
-            }
-            let status = backend.status.bind(selection);
-            state.request_status = Some(status.clone());
-            let epoch = state
-                .context
-                .prepare_epoch(
-                    EpochInput {
-                        selection: &selection.model,
-                        tools: definitions,
-                        conversation: &mut state.conversation,
-                        prompt: &backend.prompt,
-                        sessions: &backend.sessions,
-                        status: status.as_ref(),
-                        events: &events,
-                    },
-                    cancellation,
-                )
-                .await?;
-            let messages: Vec<_> = state
-                .conversation
-                .messages()
-                .iter()
-                .map(provider_message)
-                .collect();
-            let estimate = crate::compaction::CompactionPlanner::estimate_input_tokens(
+            let messages: Vec<sessions::Message> =
+                messages.iter().cloned().map(Into::into).collect();
+            crate::compaction::CompactionPlanner::estimate_input_tokens(
                 &selection.model.canonical_model,
-                &epoch.instructions,
-                definitions,
+                instructions,
+                &definitions,
                 &messages,
             )
-            .map_err(TurnError::Planning)?;
-            let maximum = state
+            .map_err(TurnError::Planning)
+        })
+    }
+    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let backend = self.backend;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let events = ContextEmitter { backend };
+            state
                 .context
-                .budget()
-                .calculate_maximum_output_tokens(
-                    &selection.model.canonical_model.selector(),
-                    estimate,
-                    &selection.model.canonical_model.model,
+                .inject_final_provider_request_prompt(
+                    &mut state.conversation,
+                    &backend.notices.final_request,
+                    &events,
+                    self.cancellation,
                 )
-                .map_err(TurnError::Planning)?;
-            state.request_accounting = Some(RequestAccounting {
-                selected: selection.model.canonical_model.clone(),
-                estimated_input_tokens: estimate,
-            });
-            self.request_tools = Some(self.binding.capture_tools(phase.final_phase)?);
-            Ok(CoreContextSnapshot {
-                instructions: epoch.instructions,
-                max_output_tokens: maximum,
-            })
+                .await?;
+            Ok(())
+        })
+    }
+    fn read_context_checkpoint(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<CoreContextReminderCheckpoint>, CoreError>> {
+        adapt_operation(async move {
+            let state = self.backend.state.lock().await;
+            Ok(state.context.read_context_checkpoint().await?)
+        })
+    }
+    fn write_context_cadence(
+        &mut self,
+        cadence: CoreContextCadence,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .write_context_cadence(cadence);
+            Ok(())
+        })
+    }
+    fn render_context_reminder<'a>(
+        &'a self,
+        context: &'a CoreContextSnapshot,
+        percentage: i32,
+    ) -> BoxFuture<'a, Result<String, CoreError>> {
+        adapt_operation(async move {
+            let state = self.backend.state.lock().await;
+            Ok(state.context.render_reminder(
+                &crate::compaction::ContextSnapshot {
+                    estimated_tokens: context.estimated_tokens,
+                    context_limit: context.context_limit,
+                    usage_percent: context.usage_percent,
+                    trigger_percent: context.trigger_percent,
+                    input_limit: context.input_limit,
+                    trigger_tokens: context.trigger_tokens,
+                    has_context_limit_override: context.has_context_limit_override,
+                },
+                percentage,
+            )?)
+        })
+    }
+    fn append_context_reminder(
+        &mut self,
+        checkpoint: CoreContextReminderCheckpoint,
+        content: String,
+        observed_percentage: i32,
+    ) -> BoxFuture<'_, Result<bool, CoreError>> {
+        adapt_operation(async move {
+            let mut guard = self.backend.state.lock().await;
+            let state = &mut *guard;
+            self.pending_context_reminder = state
+                .context
+                .append_context_reminder(
+                    &mut state.conversation,
+                    checkpoint,
+                    content,
+                    observed_percentage,
+                )
+                .await?;
+            Ok(self.pending_context_reminder.is_some())
+        })
+    }
+    fn publish_context_reminder(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let published = self.pending_context_reminder.take().ok_or_else(|| {
+                TurnError::Service("context reminder publication is unavailable".into())
+            })?;
+            ContextEmitter {
+                backend: self.backend,
+            }
+            .publish(published, &NeverCancelled)
+            .await?;
+            Ok(())
         })
     }
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
@@ -590,7 +658,7 @@ where
     fn record_compaction(
         &mut self,
         result: Result<Option<parrot_core::compaction::CompactionResult>, CoreError>,
-    ) -> BoxFuture<'_, Result<bool, CoreError>> {
+    ) -> BoxFuture<'_, Result<CoreContextCompaction, CoreError>> {
         Box::pin(async move {
             let pending = self
                 .pending_compaction
@@ -636,7 +704,10 @@ where
                 .await
                 .map_err(TurnError::from)
                 .map_err(CoreError::from)?;
-            Ok(result.reduced)
+            Ok(CoreContextCompaction {
+                instructions: result.instructions,
+                reduced: result.reduced,
+            })
         })
     }
     fn record_retry(
@@ -658,6 +729,7 @@ where
     fn record_tool_calls<'a>(
         &'a mut self,
         completed: &'a ProviderResponse,
+        phase: parrot_core::budget::TurnRequestPhase,
     ) -> BoxFuture<'a, Result<(), CoreError>> {
         adapt_operation(async move {
             let completed: sessions::Completion = completed.clone().into();
@@ -691,10 +763,7 @@ where
                     .map(Into::into)
                     .collect(),
             )?;
-            let tools = self
-                .request_tools
-                .take()
-                .ok_or_else(|| TurnError::Service("request tools are unavailable".into()))?;
+            let tools = self.binding.capture_tools(phase.final_phase)?;
             let selection = self.binding.capture_selection()?;
             let status = state
                 .request_status
@@ -939,6 +1008,18 @@ where
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
             let selected = &selection.model.canonical_model;
             let mut state = backend.state.lock().await;
+            let request: sessions::Request = request.into();
+            let estimate = crate::compaction::CompactionPlanner::estimate_input_tokens(
+                selected,
+                &request.instructions,
+                &request.tools,
+                &request.messages,
+            )
+            .map_err(|error| CoreError::from(TurnError::Planning(error)))?;
+            state.request_accounting = Some(RequestAccounting {
+                selected: selected.clone(),
+                estimated_input_tokens: estimate,
+            });
             let session = backend
                 .sessions
                 .get(selected.provider.clone())
@@ -955,7 +1036,7 @@ where
                 usage: &mut *state,
             };
             let event = match call
-                .stream(session.as_ref(), request.into(), self.cancellation)
+                .stream(session.as_ref(), request, self.cancellation)
                 .await
             {
                 Ok(event) => event,

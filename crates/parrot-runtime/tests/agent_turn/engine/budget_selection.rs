@@ -757,3 +757,101 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     );
     runtime.close().await;
 }
+
+#[tokio::test]
+async fn core_context_preparation_persists_one_reminder_across_later_native_invocations() {
+    let fixture = Fixture::new();
+    let provider = Scripted::new(vec![
+        Step::complete("first answer"),
+        Step::complete("second answer"),
+        Step::complete("third answer"),
+    ]);
+    let runtime = BudgetRuntime::new(
+        &fixture,
+        &provider,
+        10_000,
+        0,
+        2_048,
+        profile(),
+        BudgetTools::new(&[]),
+    )
+    .await;
+    let first = runtime
+        .send("first prompt", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    assert_eq!(
+        bounded(first.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    assert!(
+        fixture
+            .history
+            .latest_context_reminder()
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let second = runtime
+        .send(&"x ".repeat(5_500), protocol::Delivery::DELIVERY_STEER)
+        .await;
+    assert_eq!(
+        bounded(second.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let checkpoint = fixture
+        .history
+        .latest_context_reminder()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.percentage, 50);
+    assert_eq!(checkpoint.context_limit, 10_000);
+    let reminder = {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        let message = requests[1].messages.last().unwrap();
+        assert_eq!(message.role, sessions::Role::System);
+        assert!(!message.content().is_empty());
+        message.content().to_owned()
+    };
+
+    let third = runtime
+        .send("third prompt", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    assert_eq!(
+        bounded(third.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[2]
+                .messages
+                .iter()
+                .filter(|message| message.role == sessions::Role::System
+                    && message.content() == reminder)
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        fixture
+            .history
+            .latest_context_reminder()
+            .await
+            .unwrap()
+            .map(|value| value.percentage),
+        Some(50)
+    );
+    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 3);
+    assert!(
+        !fixture
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_compaction_started() || event.has_turn_failed())
+    );
+    runtime.close().await;
+}

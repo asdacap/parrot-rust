@@ -2,7 +2,9 @@
 
 pub mod budget;
 pub mod compaction;
+mod context;
 mod protocol;
+pub use context::*;
 pub use protocol::*;
 
 /// Runs admission, response validation, retry, and completion using the caller-owned budget.
@@ -67,29 +69,17 @@ pub async fn run_turn<'a>(
         } else {
             &catalog.normal
         };
-        let context = states.prepare_context(definitions, phase).await?;
-        let messages = states.read_messages().await?;
-        let request = ProviderRequest {
-            model: options.model.clone(),
-            instructions: context.instructions,
-            messages,
-            tools: definitions.to_vec(),
-            max_output_tokens: context.max_output_tokens,
-            reasoning: options.reasoning.clone(),
-            provider_preferences: options.provider_preferences.clone(),
-            include_router_metadata: options.include_router_metadata,
-        };
+        let request =
+            context::prepare_request(states, definitions, phase, options, cancellation).await?;
         let attempt = budget.count_request();
         let response = match provider.invoke(request).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                let compacted = states
-                    .prepare_compaction(definitions)
+                if !context::compact_context(states, definitions, cancellation)
                     .await?
-                    .run(cancellation)
-                    .await;
-                if !states.record_compaction(compacted).await? {
+                    .reduced
+                {
                     return Err(error);
                 }
                 continue;
@@ -114,7 +104,7 @@ pub async fn run_turn<'a>(
             continue;
         }
         if !response.tool_calls.is_empty() {
-            states.record_tool_calls(&response).await?;
+            states.record_tool_calls(&response, phase).await?;
             let results = tools
                 .execute(response.tool_calls.clone(), cancellation)
                 .await?;

@@ -44,13 +44,12 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
             ..Message::default()
         },
     ];
-    let context = ContextSnapshot {
-        instructions: "prepared instructions \n\tunchanged".into(),
-        max_output_tokens: 1379,
-    };
-    state
-        .preparations
-        .push_back((context.clone(), messages.clone()));
+    let instructions = "prepared instructions \n\tunchanged".to_owned();
+    state.renderings.push_back(RenderedContext {
+        instructions: instructions.clone(),
+        maximum_output_tokens: 1379,
+        messages: messages.clone(),
+    });
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     let requests = state.provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
@@ -58,10 +57,10 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
         requests[0],
         ProviderRequest {
             model: state.model.clone(),
-            instructions: context.instructions,
+            instructions,
             messages,
-            tools: state.prepared_definitions[0].clone(),
-            max_output_tokens: context.max_output_tokens,
+            tools: state.capture_request_estimates()[0].definitions.clone(),
+            max_output_tokens: 1379,
             reasoning: state.reasoning.clone(),
             provider_preferences: state.provider_preferences.clone(),
             include_router_metadata: true,
@@ -72,9 +71,9 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
             .trace
             .values()
             .into_iter()
-            .filter(|step| matches!(step.as_str(), "prepare" | "messages" | "invoke"))
+            .filter(|step| matches!(step.as_str(), "render" | "messages" | "invoke"))
             .collect::<Vec<_>>(),
-        ["prepare", "messages", "invoke"]
+        ["render", "messages", "messages", "invoke"]
     );
 }
 
@@ -93,21 +92,17 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
         contents: vec![Content::Text("compacted summary".into())],
         ..Message::default()
     }];
-    state.preparations = [
-        (
-            ContextSnapshot {
-                instructions: "before compaction".into(),
-                max_output_tokens: 91,
-            },
-            before.clone(),
-        ),
-        (
-            ContextSnapshot {
-                instructions: "after compaction".into(),
-                max_output_tokens: 4093,
-            },
-            after.clone(),
-        ),
+    state.renderings = [
+        RenderedContext {
+            instructions: "before compaction".into(),
+            maximum_output_tokens: 91,
+            messages: before.clone(),
+        },
+        RenderedContext {
+            instructions: "after compaction".into(),
+            maximum_output_tokens: 4093,
+            messages: after.clone(),
+        },
     ]
     .into();
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
@@ -119,18 +114,21 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
     assert_eq!(requests[1].instructions, "after compaction");
     assert_eq!(requests[1].max_output_tokens, 4093);
     assert_eq!(requests[1].messages, after);
-    for (request, definitions) in requests.iter().zip(&state.prepared_definitions) {
-        assert_eq!(&request.tools, definitions);
+    for (request, estimate) in requests.iter().zip(state.capture_request_estimates()) {
+        assert_eq!(request.tools, estimate.definitions);
+        assert_eq!(request.messages, estimate.messages);
+        assert_eq!(request.instructions, estimate.instructions);
     }
     assert_eq!(
         state
             .trace
             .values()
             .into_iter()
-            .filter(|step| matches!(step.as_str(), "prepare" | "messages" | "invoke" | "compact"))
+            .filter(|step| matches!(step.as_str(), "render" | "messages" | "invoke" | "compact"))
             .collect::<Vec<_>>(),
         [
-            "prepare", "messages", "invoke", "compact", "prepare", "messages", "invoke"
+            "render", "messages", "messages", "invoke", "compact", "render", "messages",
+            "messages", "invoke"
         ]
     );
 }
@@ -144,21 +142,17 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
         tool_call_id: "call-1".into(),
         ..Message::default()
     }];
-    state.preparations = [
-        (
-            ContextSnapshot {
-                instructions: "initial".into(),
-                max_output_tokens: 83,
-            },
-            Vec::new(),
-        ),
-        (
-            ContextSnapshot {
-                instructions: "followup".into(),
-                max_output_tokens: 41,
-            },
-            messages.clone(),
-        ),
+    state.renderings = [
+        RenderedContext {
+            instructions: "initial".into(),
+            maximum_output_tokens: 83,
+            messages: vec![],
+        },
+        RenderedContext {
+            instructions: "followup".into(),
+            maximum_output_tokens: 41,
+            messages: messages.clone(),
+        },
     ]
     .into();
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
@@ -176,15 +170,17 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
             .into_iter()
             .filter(|step| matches!(
                 step.as_str(),
-                "record_results" | "prepare" | "messages" | "invoke"
+                "record_results" | "render" | "messages" | "invoke"
             ))
             .collect::<Vec<_>>(),
         [
-            "prepare",
+            "render",
+            "messages",
             "messages",
             "invoke",
             "record_results",
-            "prepare",
+            "render",
+            "messages",
             "messages",
             "invoke"
         ]
@@ -193,7 +189,7 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
 
 #[test]
 fn context_preparation_and_message_read_errors_stop_before_provider_invocation() {
-    for stage in ["prepare", "messages"] {
+    for stage in ["render", "messages"] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
         state.fail_at = Some(stage);
         assert_eq!(state.run(), Err(Error::failed(stage)));
