@@ -326,3 +326,66 @@ fn fresh_body_publication_refreshes_time_dependent_item_even_with_the_same_arc()
     assert_eq!(body.rendered.load(Ordering::SeqCst), 2);
     assert!(output.text().contains("tick-1"));
 }
+
+#[test]
+fn progress_snapshot_redraw_preserves_modeline_and_owned_input_without_a_key() {
+    use parrot_domain::values::progress::{PROGRESS_INVENTORY_KIND, Progress, ProgressSnapshot};
+    let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 2)]);
+    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    view.apply(presenter.set_session("build", "provider/model").unwrap())
+        .unwrap();
+    view.apply(
+        presenter
+            .observe(&wire::Event {
+                agent_session_id: "root".into(),
+                payload: Some(wire::event::Payload::AgentStarted(wire::AgentStarted {
+                    name: "main".into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
+            .unwrap(),
+    )
+    .unwrap();
+    let mut snapshot = ProgressSnapshot {
+        revision: 1,
+        progress: Some(Progress {
+            steps: 2,
+            total_steps: 5,
+            current_step: Some("Running tests".into()),
+        }),
+        ..ProgressSnapshot::new("root".into())
+    };
+    for closed in [false, true] {
+        if closed {
+            snapshot.revision = 2;
+            snapshot.progress = None;
+        }
+        let before = output.text().len();
+        view.apply(
+            presenter
+                .observe(&wire::Event {
+                    agent_session_id: "root".into(),
+                    payload: Some(wire::event::Payload::ToolSnapshot(wire::ToolSnapshot {
+                        kind: PROGRESS_INVENTORY_KIND.into(),
+                        owner_agent_session_id: "root".into(),
+                        inventory_instance_id: "scope".into(),
+                        revision: snapshot.revision,
+                        final_chunk: true,
+                        data: serde_json::to_vec(&snapshot).unwrap(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        let rendered = output.text();
+        let redraw = &rendered[before..];
+        assert!(redraw.contains("mode: build"));
+        assert!(redraw.contains("> draft"));
+        assert_eq!(redraw.contains("2/5"), !closed);
+        assert_eq!(redraw.contains("40% Running tests"), !closed);
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+}

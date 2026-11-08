@@ -12,6 +12,7 @@ pub mod get_agent_tasks;
 pub mod glob;
 pub mod image_generation;
 pub mod interrupt_process;
+pub mod progress;
 pub mod question;
 pub mod queue_push;
 pub mod queue_take;
