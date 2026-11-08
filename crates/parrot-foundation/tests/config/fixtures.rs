@@ -67,6 +67,14 @@ pub const AGENT_COMMUNICATION_IDS: [&str; 8] = [
     "agent-session.final-request-interrupted",
 ];
 
+pub const NATIVE_SCALAR_IDS: [&str; 5] = [
+    "agent-session.crashed-tool-result",
+    "agent-session.progress-reminder",
+    "progress-tool.already-closed",
+    "progress-tool.closed",
+    "progress-tool.updated",
+];
+
 fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
     let root = yaml::parse_root(&source_predefined_content()?)?;
     let actual = templates::read_templates(&root, &mut |_| Ok(()))?;
@@ -87,6 +95,7 @@ fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
     for id in AGENT_COMMUNICATION_IDS
         .into_iter()
         .chain(["session.legacy-resume-warning"])
+        .chain(NATIVE_SCALAR_IDS)
     {
         let spec = actual
             .get(id)
