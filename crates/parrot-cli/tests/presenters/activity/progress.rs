@@ -31,6 +31,97 @@ fn publish(
 }
 
 #[test]
+fn progress_animates_with_the_running_bash_spinner() {
+    let mut fixture = Processes::new();
+    fixture.yield_process("call", "sleep 20", "shell", "shell", "processes", 1);
+    publish(
+        &mut fixture.view,
+        "main",
+        "scope",
+        1,
+        Some(Progress {
+            steps: 1,
+            total_steps: 2,
+            current_step: Some("Testing".into()),
+        }),
+    );
+    for (elapsed, marker) in [(0, '⠋'), (80, '⠙'), (720, '⠏'), (800, '⠋')] {
+        fixture.view.tick(Duration::from_millis(elapsed)).unwrap();
+        let rendered = live(&fixture.view);
+        let rows: Vec<_> = rendered.split('|').collect();
+        assert_eq!(rows.len(), 2, "{rendered}");
+        assert!(rows[0].starts_with(&format!("{marker} $")), "{rendered}");
+        assert!(
+            rows[1].starts_with(&format!("{marker} 1/2 [")),
+            "{rendered}"
+        );
+    }
+}
+
+#[test]
+fn progress_appears_below_running_bash_subagents_and_agent_tasks() {
+    let mut fixture = Processes::new();
+    fixture.yield_process("call", "sleep 20", "shell", "shell", "processes", 1);
+    fixture.start("running", "cargo test");
+    for owner in ["worker", "sibling"] {
+        fixture.view.observe(&child(owner, owner, "main")).unwrap();
+        fixture.view.observe(&turn(owner)).unwrap();
+    }
+    fixture
+        .view
+        .observe(&super::progress(
+            "main",
+            1,
+            vec![task(
+                "implementation",
+                "worker",
+                false,
+                wire::AgentTaskProgressStatus::AGENT_TASK_PROGRESS_STATUS_RUNNING,
+            )],
+        ))
+        .unwrap();
+    for owner in ["main", "worker", "sibling"] {
+        publish(
+            &mut fixture.view,
+            owner,
+            owner,
+            1,
+            Some(Progress {
+                steps: 1,
+                total_steps: 4,
+                current_step: Some(format!("{owner} progress")),
+            }),
+        );
+    }
+    let rendered = live(&fixture.view);
+    let rows: Vec<_> = rendered.split('|').collect();
+    let first_progress = rows.iter().position(|row| row.contains("1/4 [")).unwrap();
+    for label in [
+        "$ sleep 20",
+        "$ cargo test",
+        "[sibling]",
+        "[worker]",
+        "implementation",
+    ] {
+        let activity = rows.iter().position(|row| row.contains(label)).unwrap();
+        assert!(activity < first_progress, "{label}: {rendered}");
+    }
+    assert_eq!(rows.len() - first_progress, 3, "{rendered}");
+    assert!(
+        rows[first_progress].ends_with("sibling progress"),
+        "{rendered}"
+    );
+    assert!(
+        rows[first_progress + 1].ends_with("worker progress"),
+        "{rendered}"
+    );
+    assert!(
+        rows[first_progress + 2].ends_with("main progress"),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn main_and_child_progress_replace_close_and_reopen_independently() {
     let mut view = view();
     view.observe(&turn("root")).unwrap();
@@ -354,7 +445,7 @@ fn progress_adapts_to_width_color_unicode_and_large_counts() {
                 .collect();
             assert_eq!(rows.len(), 1);
             let row = &rows[0];
-            assert!(row.text().trim_start().starts_with("2/5"), "{}", row.text());
+            assert!(row.text().starts_with("⠋ 2/5"), "{}", row.text());
             assert!(row.text().contains("40%"));
             assert!(
                 parrot_cli::terminal_layout::TerminalText::width(row.text()) <= columns,
