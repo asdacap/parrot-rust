@@ -670,10 +670,12 @@ fn process_completions_use_distinct_icons_in_live_output_and_replay() {
                 ))
                 .unwrap();
             assert!(admitted.commits.is_empty());
-            assert!(
-                live(&admitted.live, 120)
-                    .contains(&format!("{pending_icon} {}", content.replace('\n', "\n  ")))
-            );
+            let preview = if source == wire::InputSource::INPUT_SOURCE_PROCESS {
+                content.lines().next().unwrap().to_owned()
+            } else {
+                content.replace('\n', "\n  ")
+            };
+            assert!(live(&admitted.live, 120).contains(&format!("{pending_icon} {preview}")));
             let promotion = event(
                 "root",
                 Payload::InputPromoted(wire::InputPromoted {
@@ -690,6 +692,126 @@ fn process_completions_use_distinct_icons_in_live_output_and_replay() {
             assert!(presenter.observe(&promotion).unwrap().commits.is_empty());
         }
     }
+}
+
+#[test]
+fn pending_notifications_show_only_the_headline_and_promote_the_full_content() {
+    for replaying in [false, true] {
+        for (source, icon, headline) in [
+            (
+                wire::InputSource::INPUT_SOURCE_NOTIFICATION,
+                "◇",
+                "Child agent worker completed.",
+            ),
+            (
+                wire::InputSource::INPUT_SOURCE_PROCESS,
+                "⚙",
+                "Shell process 'work' completed.",
+            ),
+        ] {
+            let mut presenter = EnhancedSessionPresenter::new(120, false, replaying);
+            let content =
+                format!("\n\n{headline}\nDetails that should not fill the pending buffer.");
+            let admitted = presenter
+                .observe(&event(
+                    "root",
+                    Payload::InputAdmitted(wire::InputAdmitted {
+                        input_id: "notification".into(),
+                        content: content.clone(),
+                        delivery: wire::Delivery::DELIVERY_STEER.into(),
+                        source: source.into(),
+                        ..Default::default()
+                    }),
+                ))
+                .unwrap();
+            let pending = live(&admitted.live, 120);
+            assert!(pending.contains(&format!("{icon} {headline} (steer pending)")));
+            assert!(!pending.contains("Details that should not fill"));
+            assert!(admitted.commits.is_empty());
+            let promoted = presenter
+                .observe(&event(
+                    "root",
+                    Payload::InputPromoted(wire::InputPromoted {
+                        input_id: "notification".into(),
+                        ..Default::default()
+                    }),
+                ))
+                .unwrap();
+            let committed = commits(&promoted.commits, 120);
+            assert!(committed.contains(headline));
+            assert!(committed.contains("Details that should not fill the pending buffer."));
+            assert!(!live(&promoted.live, 120).contains(headline));
+        }
+    }
+}
+
+#[test]
+fn pending_notification_previews_stay_on_one_line_when_resized() {
+    let mut presenter = configured(120);
+    let headline = format!("\u{1b}[31m通知 {}", "wide界e\u{301} ".repeat(30));
+    presenter
+        .observe(&event(
+            "root",
+            Payload::InputAdmitted(wire::InputAdmitted {
+                input_id: "notification".into(),
+                content: format!("{headline}\nHidden details"),
+                delivery: wire::Delivery::DELIVERY_STEER.into(),
+                source: wire::InputSource::INPUT_SOURCE_NOTIFICATION.into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    for columns in [120, 40, 24, 16, 8, 1] {
+        let resized = presenter.resize(columns).unwrap();
+        let pending = live(&resized.live, columns);
+        assert_eq!(pending.lines().count(), 2, "{pending:?}");
+        let preview = pending.lines().next().unwrap();
+        assert!(parrot_cli::terminal_layout::TerminalText::width(preview) <= columns);
+        assert!(!preview.contains('\u{1b}'));
+        assert!(!pending.contains("Hidden details"));
+        if columns >= 24 {
+            assert!(preview.ends_with("… (steer pending)"), "{preview:?}");
+        }
+    }
+}
+
+#[test]
+fn pending_user_messages_keep_their_full_multiline_content() {
+    let mut presenter = configured(120);
+    let content = "Child agent worker completed.\nThis is user input, not a notification.";
+    let admitted = presenter
+        .observe(&event(
+            "root",
+            Payload::InputAdmitted(wire::InputAdmitted {
+                input_id: "user".into(),
+                content: content.into(),
+                delivery: wire::Delivery::DELIVERY_STEER.into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    assert!(live(&admitted.live, 120).contains(&format!(
+        "◇ {} (steer pending)",
+        content.replace('\n', "\n  ")
+    )));
+}
+
+#[test]
+fn empty_pending_notifications_have_a_readable_preview() {
+    let mut presenter = configured(80);
+    let admitted = presenter
+        .observe(&event(
+            "root",
+            Payload::InputAdmitted(wire::InputAdmitted {
+                input_id: "empty".into(),
+                content: " \n\t".into(),
+                delivery: wire::Delivery::DELIVERY_STEER.into(),
+                source: wire::InputSource::INPUT_SOURCE_NOTIFICATION.into(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+    assert!(live(&admitted.live, 80).contains("◇ Notification received (steer pending)"));
 }
 
 #[test]

@@ -50,7 +50,10 @@ pub(crate) enum ActivityValue {
     Final(String),
     NeutralAgent(String),
     Queue(queue::QueueState),
-    Progress(parrot_domain::values::progress::Progress),
+    Progress {
+        progress: parrot_domain::values::progress::Progress,
+        frame: usize,
+    },
     Process {
         process: process::ActiveShellProcess,
         elapsed: Duration,
@@ -239,8 +242,8 @@ impl ActivityValue {
                 LiveBufferRetention::Fixed,
                 muted_style,
             ),
-            Self::Progress(progress) => (
-                String::new(),
+            Self::Progress { progress, frame } => (
+                SPINNERS[frame % 10].to_string(),
                 vec![super::progress::format_progress(progress, columns)],
                 LiveBufferRetention::Fixed,
                 marker_style,
@@ -1990,14 +1993,16 @@ impl RawActivityView {
             if let Some(progress) = &state.agent_progress.progress {
                 rows.push((
                     owner.clone(),
-                    0,
+                    4,
                     "progress".to_owned(),
-                    Arc::new(HierarchicalLiveValue {
-                        value: ActivityValue::Progress(progress.clone()).into(),
-                        depth: self.hierarchy.get_depth(owner),
-                        label: Some(self.hierarchy.resolve_agent_reference(owner, owner)),
-                        icon: None,
-                    }),
+                    self.wrap_live(
+                        owner,
+                        ActivityValue::Progress {
+                            progress: progress.clone(),
+                            frame: self.frame,
+                        },
+                        None,
+                    ),
                 ));
             }
             if state.has_reasoning() && self.hierarchy.is_child(owner) {
@@ -2080,8 +2085,9 @@ impl RawActivityView {
             }
         }
         rows.sort_by(|a, b| {
-            owner_order(&order, &a.0)
-                .cmp(&owner_order(&order, &b.0))
+            (a.1 == 4)
+                .cmp(&(b.1 == 4))
+                .then_with(|| owner_order(&order, &a.0).cmp(&owner_order(&order, &b.0)))
                 .then_with(|| a.1.cmp(&b.1))
                 .then_with(|| a.2.encode_utf16().cmp(b.2.encode_utf16()))
         });

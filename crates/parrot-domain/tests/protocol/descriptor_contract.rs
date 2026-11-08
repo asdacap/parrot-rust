@@ -148,6 +148,22 @@ fn descriptor_contract(bytes: &[u8]) -> Vec<FileContract> {
     files
 }
 
+fn assert_additive_enums(expected: &[EnumContract], actual: &[EnumContract], path: &str) {
+    for expected in expected {
+        let actual = actual
+            .iter()
+            .find(|value| value.name == expected.name)
+            .expect("existing enum remains present");
+        for expected_value in &expected.values {
+            assert!(
+                actual.values.contains(expected_value),
+                "enum value at {path}.{}: {expected_value:?}",
+                expected.name
+            );
+        }
+    }
+}
+
 fn assert_additive_messages(expected: &[MessageContract], actual: &[MessageContract], path: &str) {
     for expected in expected {
         let actual = actual
@@ -156,7 +172,7 @@ fn assert_additive_messages(expected: &[MessageContract], actual: &[MessageContr
             .expect("existing message remains present");
         let current = format!("{path}.{}", expected.name);
         assert_eq!(actual.oneofs, expected.oneofs, "oneofs at {current}");
-        assert_eq!(actual.enums, expected.enums, "enums at {current}");
+        assert_additive_enums(&expected.enums, &actual.enums, &current);
         for expected_field in &expected.fields {
             let actual_field = actual
                 .fields
@@ -167,6 +183,30 @@ fn assert_additive_messages(expected: &[MessageContract], actual: &[MessageContr
         }
         assert_additive_messages(&expected.nested, &actual.nested, &current);
     }
+}
+
+#[test]
+fn additive_enum_contract_preserves_existing_names_and_numbers() {
+    let expected = [EnumContract {
+        name: "Existing".into(),
+        values: vec![("VALUE".into(), 1)],
+    }];
+    let mut actual = [EnumContract {
+        name: "Existing".into(),
+        values: vec![("VALUE".into(), 1), ("ADDED".into(), 2)],
+    }];
+    assert_additive_enums(&expected, &actual, "test");
+    for values in [
+        vec![],
+        vec![("RENAMED".into(), 1)],
+        vec![("VALUE".into(), 2)],
+    ] {
+        actual[0].values = values;
+        assert!(
+            std::panic::catch_unwind(|| assert_additive_enums(&expected, &actual, "test")).is_err()
+        );
+    }
+    assert!(std::panic::catch_unwind(|| assert_additive_enums(&expected, &[], "test")).is_err());
 }
 
 #[test]
@@ -185,7 +225,7 @@ fn skill_root_extension_preserves_existing_wire_fields_and_rpc_methods() {
         assert_eq!(actual.package, expected.package);
         assert_eq!(actual.syntax, expected.syntax);
         assert_eq!(actual.dependencies, expected.dependencies);
-        assert_eq!(actual.enums, expected.enums);
+        assert_additive_enums(&expected.enums, &actual.enums, &expected.name);
         assert_eq!(actual.services, expected.services);
         assert_additive_messages(&expected.messages, &actual.messages, &expected.name);
     }

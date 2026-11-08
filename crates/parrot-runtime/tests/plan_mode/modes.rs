@@ -48,7 +48,10 @@ fn registry_defaults_flags_case_sensitivity_and_ordinal_order_are_effective_conf
     let profiles = profiles();
     let registry = registry(policy("raw"));
     assert_eq!(registry.default(), COORDINATOR);
-    assert_eq!(registry.list(), [BUILD, COORDINATOR, PLAN, QUERY]);
+    assert_eq!(
+        registry.list(),
+        [BUILD, COORDINATOR, "general", PLAN, QUERY]
+    );
     assert_eq!(registry.resolve("").unwrap().id(), COORDINATOR);
     for unknown in ["missing", "Plan", "worker", " "] {
         assert!(registry.resolve(unknown).is_err());
@@ -246,7 +249,10 @@ fn independent_user_flags_and_copied_configuration_do_not_change_the_other_parti
     disabled.clear();
     configs.get_mut(BUILD).unwrap().allowed_tools = Some(vec!["later mutation".into()]);
     configs.get_mut(BUILD).unwrap().prompt = "later mutation".into();
-    assert_eq!(registry.list(), [BUILD, COORDINATOR, PLAN, QUERY, "worker"]);
+    assert_eq!(
+        registry.list(),
+        [BUILD, COORDINATOR, "general", PLAN, QUERY, "worker"]
+    );
     assert!(registry.resolve("review").is_err());
     assert_eq!(registry.resolve("worker").unwrap().id(), "worker");
     let build = registry.resolve(BUILD).unwrap();

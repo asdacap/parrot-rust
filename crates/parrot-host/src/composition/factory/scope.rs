@@ -1260,7 +1260,13 @@ impl<S: RestrictableAccessSnapshot + 'static> TaskSession for ScopedTaskSession<
         Box::pin(async move {
             self.link
                 .session()?
-                .record_handle(parts, message_id, delivery, Arc::new(NeverCancelled))?
+                .record_handle(
+                    parts,
+                    message_id,
+                    delivery,
+                    InputSource::INPUT_SOURCE_NOTIFICATION,
+                    Arc::new(NeverCancelled),
+                )?
                 .join()
                 .await?;
             Ok(())

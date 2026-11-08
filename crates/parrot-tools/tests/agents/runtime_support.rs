@@ -687,6 +687,7 @@ impl RuntimeBridge {
             .send_and_select_execution(
                 vec![ConversationPart::text(text)],
                 support::id(),
+                parrot_domain::protocol::messages::parrot::InputSource::INPUT_SOURCE_NOTIFICATION,
                 signal.clone(),
             )
             .map_err(lifecycle)?;
