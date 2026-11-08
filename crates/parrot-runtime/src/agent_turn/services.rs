@@ -116,7 +116,21 @@ pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
     ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, TurnError>>;
 }
 
-/// Observes one agent's completion context and records feedback selected by core.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompletionFeedbackKind {
+    PendingAsks,
+    ActiveWork,
+    ExitReminders,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletionFeedback {
+    pub kind: CompletionFeedbackKind,
+    pub message: String,
+    pub candidate: Option<parrot_core::ProviderResponse>,
+}
+
+/// Observes native completion context and records one message from a core-selected batch.
 pub trait CompletionStateSource: Send + Sync {
     /// Reads context for pending asks without deciding whether the turn may finish.
     fn get_pending_ask_reminder<'a>(
@@ -128,15 +142,15 @@ pub trait CompletionStateSource: Send + Sync {
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
-    /// Renders current exit reminders only when core reaches this observation.
+    /// Renders context for the currently uncleared native exit reminders.
     fn get_exit_reminder<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
-    /// Records exactly the feedback and optional candidate supplied by core.
+    /// Records one message, retaining the batch candidate only on its first recording.
     fn record_completion_feedback<'a>(
         &'a self,
-        feedback: &'a parrot_core::CompletionFeedback,
+        feedback: &'a CompletionFeedback,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>>;
 }

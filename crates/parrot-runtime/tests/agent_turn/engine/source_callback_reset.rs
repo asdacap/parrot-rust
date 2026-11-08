@@ -28,7 +28,7 @@ impl CompletionStateSource for RetryOnce {
         Box::pin(async move {
             assert_eq!(feedback.kind, CompletionFeedbackKind::ActiveWork);
             assert_eq!(feedback.message, "source retry");
-            assert!(feedback.candidate.is_none());
+            assert!(feedback.candidate.is_some());
             assert!(self.0.swap(false, Ordering::SeqCst));
             Ok(())
         })

@@ -1,11 +1,12 @@
 //! Completion context observations and recording, with completion policy owned by core.
 use super::{blockers::ActiveWorkReminder, exit_reminders::ExitReminders};
 use crate::{
-    agent_turn::services::{CompletionStateSource, TurnError},
+    agent_turn::services::{
+        CompletionFeedback, CompletionFeedbackKind, CompletionStateSource, TurnError,
+    },
     event_broker::{BrokerError, EventBroker},
     interactions::AgentAsks,
 };
-use parrot_core::{CompletionFeedback, CompletionFeedbackKind};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -23,7 +24,7 @@ use parrot_storage::{
 use std::sync::Arc;
 
 /// Supply the same reminder Arc to this source and `RuntimeConfig.reminders`.
-/// Core selects which observation to use and whether to retain its candidate.
+/// Native state orders these observations; core retains its candidate for any blockers.
 pub struct SessionCompletion<P: EventPublisher<Event = Event, Error = BrokerError> + ?Sized> {
     pub asks: Option<Arc<AgentAsks>>,
     pub active_work: Arc<ActiveWorkReminder>,

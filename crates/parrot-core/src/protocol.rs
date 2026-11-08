@@ -42,19 +42,10 @@ pub enum RetryReason {
     InvalidToolCalls,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CompletionFeedbackKind {
-    PendingAsks,
-    ActiveWork,
-    ExitReminders,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionFeedback {
-    pub kind: CompletionFeedbackKind,
-    pub message: String,
-    /// The assistant response to retain; absent when only context should be added.
-    pub candidate: Option<ProviderResponse>,
+    pub messages: Vec<String>,
+    pub candidate: ProviderResponse,
 }
 
 /// Invokes models using the core protocol while owning transport and stream cleanup.
@@ -126,16 +117,10 @@ pub trait States: Send {
         &'a mut self,
         response: &'a ProviderResponse,
     ) -> BoxFuture<'a, Result<(), Error>>;
-    /// Reads context for outstanding asks after accepted mutations have settled.
-    /// Some context, including an empty string, means asks remain outstanding.
-    fn get_pending_ask_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>>;
-    /// Reads context for observed active work without selecting completion policy.
-    /// Some context, including an empty string, means active work remains.
-    fn get_active_work_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>>;
-    /// Reads context for currently uncleared exit reminders, materializing it only
-    /// when requested. Some context, including an empty string, means reminders remain.
-    fn get_exit_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>>;
-    /// Records the core-selected context and optional retained assistant candidate
+    /// Reads ordered exit-blocker messages after accepted mutations have settled.
+    /// Any nonempty list blocks completion, even when its messages are empty strings.
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>>;
+    /// Records the retained candidate once and all blocker messages in supplied order
     /// before applying them to the conversation. Returns no completion decision.
     fn record_completion_feedback(
         &mut self,

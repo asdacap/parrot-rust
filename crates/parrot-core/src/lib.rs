@@ -121,37 +121,20 @@ pub async fn run_turn<'a>(
             }
             continue;
         }
-        let feedback = if let Some(message) = states.get_pending_ask_reminder().await? {
-            Some(CompletionFeedback {
-                kind: CompletionFeedbackKind::PendingAsks,
-                message,
-                candidate: Some(response.clone()),
-            })
-        } else if let Some(message) = states.get_active_work_reminder().await? {
-            Some(CompletionFeedback {
-                kind: CompletionFeedbackKind::ActiveWork,
-                message,
-                candidate: None,
-            })
-        } else {
-            states
-                .get_exit_reminder()
-                .await?
-                .map(|message| CompletionFeedback {
-                    kind: CompletionFeedbackKind::ExitReminders,
-                    message,
-                    candidate: Some(response.clone()),
-                })
-        };
-        if let Some(feedback) = feedback {
-            retry_pending |= feedback.candidate.is_some();
-            states.record_completion_feedback(feedback).await?;
-            budget.restart();
-        } else {
+        let messages = states.get_exit_blockers().await?;
+        if messages.is_empty() {
             return Ok(Some(Outcome::Completed(
                 states.complete_turn(&response).await?,
             )));
         }
+        states
+            .record_completion_feedback(CompletionFeedback {
+                messages,
+                candidate: response,
+            })
+            .await?;
+        retry_pending = true;
+        budget.restart();
     }
 }
 

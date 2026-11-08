@@ -2,7 +2,7 @@
 //! The synthetic process observer is a domain port, not production OS-adapter proof.
 use super::support;
 
-use parrot_core::{CompletionFeedback, CompletionFeedbackKind, ProviderResponse};
+use parrot_core::ProviderResponse;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -823,20 +823,24 @@ async fn owned_queues_block_only_when_populated_for_all_four_closed_empty_combin
                                 .contains("owned-work (remaining items: 1)")
                             && message.content().contains("even when asked to stop")
                     }));
-                    assert!(
-                        !requests[1]
+                    assert_eq!(
+                        requests[1]
                             .messages
                             .iter()
-                            .any(|message| message.role == sessions::Role::Assistant)
+                            .filter(|message| message.role == sessions::Role::Assistant)
+                            .count(),
+                        1
                     );
                 }
-                assert!(
+                assert_eq!(
                     built
                         .events()
                         .await
                         .iter()
-                        .all(|event| !event.has_agent_notice()
-                            || event.agent_notice().kind != "active_work_reminder")
+                        .filter(|event| event.has_agent_notice()
+                            && event.agent_notice().kind == "active_work_reminder")
+                        .count(),
+                    1
                 );
                 built
                     .queues
@@ -866,7 +870,7 @@ async fn owned_queues_block_only_when_populated_for_all_four_closed_empty_combin
                     .iter()
                     .filter(|entry| entry.message.role == MessageRole::Assistant)
                     .count(),
-                1
+                if populated { 2 } else { 1 }
             );
             let jsonl = std::fs::read_to_string(
                 h.histories
@@ -1064,7 +1068,7 @@ async fn automatic_direct_child_completion_restarts_parent_once_with_one_active_
             .iter()
             .filter(|entry| entry.message.role == MessageRole::Assistant)
             .count(),
-        2
+        3
     );
     h.close().await;
 }
@@ -1265,7 +1269,7 @@ async fn reminder_changed_after_construction_retains_candidate_and_clearing_perm
 }
 
 #[tokio::test]
-async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidate() {
+async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with_one_candidate() {
     let h = Harness::new();
     let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
@@ -1300,17 +1304,33 @@ async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidat
     gates[0].open();
     gates[1].entered().await;
     assert_eq!(root.endings().await, 0);
-    assert_eq!(root.tasks.observations.load(Ordering::SeqCst), 0);
+    assert_eq!(root.tasks.observations.load(Ordering::SeqCst), 1);
     {
         let requests = root.provider.requests.lock().unwrap();
-        assert!(
-            requests[1]
-                .messages
-                .iter()
-                .any(|message| message.role == sessions::Role::System
+        let messages = &requests[1].messages;
+        let ask = messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::System
                     && message.content()
-                        == "Pending asks:\n- alpha\n- zeta\nReply before finishing.")
-        );
+                        == "Pending asks:\n- alpha\n- zeta\nReply before finishing."
+            })
+            .unwrap();
+        let work = messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::System
+                    && message.content().contains("remaining (remaining items: 1)")
+            })
+            .unwrap();
+        let exit = messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::System
+                    && message.content().contains("do not finish")
+            })
+            .unwrap();
+        assert!(ask < work && work < exit);
         assert_eq!(
             requests[1]
                 .messages
@@ -1330,9 +1350,25 @@ async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidat
         1
     );
     assert_eq!(events.iter().filter(|event| event.has_agent_notice() && event.agent_notice().kind == "exit_reminder").count(), 0);
+    let mut notice_kinds = Vec::new();
     while let Some(event) = subscription.try_next() {
-        assert!(!event.has_agent_notice() || event.agent_notice().kind != "active_work_reminder");
+        if event.has_agent_notice()
+            && matches!(
+                event.agent_notice().kind.as_str(),
+                "pending_ask_reminder" | "active_work_reminder" | "exit_reminder"
+            )
+        {
+            notice_kinds.push(event.agent_notice().kind.clone());
+        }
     }
+    assert_eq!(
+        notice_kinds,
+        [
+            "pending_ask_reminder",
+            "active_work_reminder",
+            "exit_reminder"
+        ]
+    );
     let reply = " yes\nplain-text reply ";
     for request in root.asks.pending() {
         assert_eq!(request.message, "Choose");

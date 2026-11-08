@@ -1,9 +1,9 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionFeedback, CompletionFeedbackKind, Content,
-    ContextSnapshot, ConversationTurn, Delivery, Error, ErrorCode, ErrorKind, FinishReason,
-    InputAdmission, Message, Outcome, PendingMessage, Provider, ProviderRequest, ProviderResponse,
-    Reasoning, RetryReason, Role, States, ToolCall, ToolCatalog, ToolDefinition, ToolImage,
-    ToolResult, ToolStatus, Tools, TurnOptions,
+    BoxFuture, CancellationToken, CompletionFeedback, Content, ContextSnapshot, ConversationTurn,
+    Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message, Outcome,
+    PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role,
+    States, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools,
+    TurnOptions,
     budget::{TurnBudget, TurnRequestPhase},
     run, run_turn,
 };
@@ -202,9 +202,7 @@ struct MemoryState {
     trace: Trace,
     tools: MemoryTools,
     provider: MemoryProvider,
-    pending_ask_reminders: VecDeque<Option<String>>,
-    active_work_reminders: VecDeque<Option<String>>,
-    exit_reminders: VecDeque<Option<String>>,
+    exit_blockers: VecDeque<Vec<String>>,
     completion_feedback: Vec<CompletionFeedback>,
     requests: Vec<(TurnRequestPhase, Vec<String>)>,
     prepared_definitions: Vec<Vec<ToolDefinition>>,
@@ -249,9 +247,7 @@ impl MemoryState {
                 fail_at: Arc::default(),
                 requests: Arc::default(),
             },
-            pending_ask_reminders: VecDeque::new(),
-            active_work_reminders: VecDeque::new(),
-            exit_reminders: VecDeque::new(),
+            exit_blockers: VecDeque::new(),
             completion_feedback: Vec::new(),
             requests: Vec::new(),
             prepared_definitions: Vec::new(),
@@ -513,22 +509,10 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn get_pending_ask_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async move {
-            self.step("pending_asks")?;
-            Ok(self.pending_ask_reminders.pop_front().flatten())
-        })
-    }
-    fn get_active_work_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async move {
-            self.step("active_work")?;
-            Ok(self.active_work_reminders.pop_front().flatten())
-        })
-    }
-    fn get_exit_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async move {
-            self.step("exit_reminders")?;
-            Ok(self.exit_reminders.pop_front().flatten())
+            self.step("exit_blockers")?;
+            Ok(self.exit_blockers.pop_front().unwrap_or_default())
         })
     }
     fn record_completion_feedback(
@@ -537,14 +521,14 @@ impl States for MemoryState {
     ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.step("completion_feedback")?;
-            if let Some(candidate) = &feedback.candidate {
-                self.append_response(candidate);
+            self.append_response(&feedback.candidate);
+            for message in &feedback.messages {
+                self.append_turn_message(Message {
+                    role: Role::System,
+                    contents: vec![Content::Text(message.clone())],
+                    ..Message::default()
+                });
             }
-            self.append_turn_message(Message {
-                role: Role::System,
-                contents: vec![Content::Text(feedback.message.clone())],
-                ..Message::default()
-            });
             self.completion_feedback.push(feedback);
             Ok(())
         })
@@ -582,9 +566,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "prepare",
             "messages",
             "invoke",
-            "pending_asks",
-            "active_work",
-            "exit_reminders",
+            "exit_blockers",
             "complete",
         ]
     );
@@ -746,8 +728,8 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
     ]);
     state.maximum = 2;
     state
-        .exit_reminders
-        .push_back(Some("unfinished goal".into()));
+        .exit_blockers
+        .push_back(vec!["unfinished goal".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
     assert_eq!(
@@ -778,18 +760,12 @@ fn cleared_completion_blockers_close_only_the_final_candidate() {
         Reply::final_response("candidate"),
         Reply::final_response("candidate2"),
     ]);
-    state
-        .pending_ask_reminders
-        .push_back(Some("answer the ask".into()));
+    state.exit_blockers.push_back(vec!["answer the ask".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("candidate2".into())));
     assert_eq!(state.requests.len(), 2);
     assert_eq!(state.completion_feedback.len(), 1);
     assert_eq!(
-        state.completion_feedback[0]
-            .candidate
-            .as_ref()
-            .unwrap()
-            .assistant_text,
+        state.completion_feedback[0].candidate.assistant_text,
         "candidate"
     );
     assert_eq!(
@@ -806,27 +782,27 @@ fn cleared_completion_blockers_close_only_the_final_candidate() {
 }
 
 #[test]
-fn active_work_preserves_continuation_after_a_retained_ask_candidate() {
+fn successive_blocker_lists_retain_each_candidate_and_preserve_continuation() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("candidate2"),
         Reply::final_response("answer"),
     ]);
-    state
-        .pending_ask_reminders
-        .push_back(Some("answer the ask".into()));
-    state
-        .active_work_reminders
-        .push_back(Some("work remains".into()));
+    state.exit_blockers.push_back(vec!["answer the ask".into()]);
+    state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.requests.len(), 3);
     assert_eq!(state.completion_feedback.len(), 2);
-    assert!(state.completion_feedback[0].candidate.is_some());
     assert_eq!(
-        state.completion_feedback[1].kind,
-        CompletionFeedbackKind::ActiveWork
+        state.completion_feedback[0].candidate.assistant_text,
+        "candidate"
     );
-    assert!(state.completion_feedback[1].candidate.is_none());
+    assert_eq!(
+        state.completion_feedback[1].candidate.assistant_text,
+        "candidate2"
+    );
+    assert_eq!(state.completion_feedback[0].messages, ["answer the ask"]);
+    assert_eq!(state.completion_feedback[1].messages, ["work remains"]);
 }
 
 #[test]
@@ -916,18 +892,14 @@ fn adapter_errors_stop_at_the_failing_effect() {
         ("record_tools", Reply::tools("response")),
         ("execute", Reply::tools("response")),
         ("record_results", Reply::tools("response")),
-        ("pending_asks", Reply::final_response("response")),
-        ("active_work", Reply::final_response("response")),
-        ("exit_reminders", Reply::final_response("response")),
+        ("exit_blockers", Reply::final_response("response")),
         ("completion_feedback", Reply::final_response("response")),
         ("complete", Reply::final_response("response")),
     ] {
         let mut state = MemoryState::new([reply]);
         state.fail_at = Some(stage);
         if stage == "completion_feedback" {
-            state
-                .pending_ask_reminders
-                .push_back(Some("answer the ask".into()));
+            state.exit_blockers.push_back(vec!["answer the ask".into()]);
         }
         assert_eq!(state.run(), Err(Error::failed(stage)), "{stage}");
         assert_eq!(state.trace.values().last().unwrap(), stage);
@@ -992,9 +964,7 @@ fn completion_retry_resets_interruption_final_phase_and_settlement_extensions() 
     ]);
     state.maximum = 2;
     state.interrupted = true;
-    state
-        .active_work_reminders
-        .push_back(Some("work remains".into()));
+    state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert!(!state.requests[2].0.final_phase);
     assert!(!state.requests[2].0.interrupted);

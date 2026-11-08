@@ -245,7 +245,7 @@ impl CompletionStateSource for GatedRetryCompletion {
         Box::pin(async move {
             assert_eq!(feedback.kind, CompletionFeedbackKind::ActiveWork);
             assert_eq!(feedback.message, "retry first turn");
-            assert!(feedback.candidate.is_none());
+            assert!(feedback.candidate.is_some());
             Ok(())
         })
     }

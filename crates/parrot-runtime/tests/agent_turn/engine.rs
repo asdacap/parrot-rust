@@ -1,5 +1,4 @@
 //! T46 integration: the actual session drain, SQLite/JSONL history, context and provider pool.
-use parrot_core::{CompletionFeedback, CompletionFeedbackKind};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},

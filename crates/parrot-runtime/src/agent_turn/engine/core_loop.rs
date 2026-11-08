@@ -1,8 +1,9 @@
 use super::*;
 use parrot_core::{
-    CompletionFeedback, ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorCode,
-    ErrorKind, ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, ToolCall,
-    ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
+    CompletionFeedback as CoreCompletionFeedback, ContextSnapshot as CoreContextSnapshot,
+    Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse, RetryReason,
+    States as CoreStates, ToolCall, ToolCatalog, ToolDefinition, ToolResult, ToolStatus,
+    TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -11,7 +12,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
     request_tools: Option<T::Snapshot>,
-    completion_source: Option<Arc<dyn CompletionStateSource>>,
+    exit_blocker_sources: Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -179,7 +180,7 @@ where
             cancellation,
             work,
             request_tools: None,
-            completion_source: None,
+            exit_blocker_sources: Vec::new(),
         })
     }
 }
@@ -616,74 +617,72 @@ where
             Ok(())
         })
     }
-    fn get_pending_ask_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
         adapt_operation(async move {
             let _guard = self.backend.state.lock().await;
-            self.completion_source = None;
+            self.exit_blocker_sources.clear();
             self.work
                 .join_mutations()
                 .await
                 .map_err(|error| TurnError::Service(error.to_string()))?;
+            let mut blockers = Vec::new();
             for source in &self.backend.completion_sources {
                 if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
-                    self.completion_source = Some(source.clone());
-                    return Ok(Some(reminder));
+                    blockers.push(reminder);
+                    self.exit_blocker_sources
+                        .push((source.clone(), CompletionFeedbackKind::PendingAsks));
                 }
             }
-            Ok(None)
-        })
-    }
-    fn get_active_work_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
-        adapt_operation(async move {
-            let _guard = self.backend.state.lock().await;
-            self.completion_source = None;
             for source in &self.backend.completion_sources {
                 if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
-                    self.completion_source = Some(source.clone());
-                    return Ok(Some(reminder));
+                    blockers.push(reminder);
+                    self.exit_blocker_sources
+                        .push((source.clone(), CompletionFeedbackKind::ActiveWork));
                 }
             }
-            Ok(None)
-        })
-    }
-    fn get_exit_reminder(&mut self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
-        adapt_operation(async move {
-            let _guard = self.backend.state.lock().await;
-            self.completion_source = None;
             for source in &self.backend.completion_sources {
                 if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
-                    self.completion_source = Some(source.clone());
-                    return Ok(Some(reminder));
+                    blockers.push(reminder);
+                    self.exit_blocker_sources
+                        .push((source.clone(), CompletionFeedbackKind::ExitReminders));
                 }
             }
-            Ok(None)
+            Ok(blockers)
         })
     }
     fn record_completion_feedback(
         &mut self,
-        feedback: CompletionFeedback,
+        feedback: CoreCompletionFeedback,
     ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            let source = self
-                .completion_source
-                .take()
-                .ok_or_else(|| TurnError::Service("completion source is unavailable".into()))?;
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
-            source
-                .record_completion_feedback(&feedback, self.cancellation)
-                .await?;
-            if let Some(candidate) = feedback.candidate {
-                let completed: sessions::Completion = candidate.into();
-                state.conversation.add(model_assistant(&completed));
-                backend
-                    .activity
-                    .assistant_message(&completed.assistant_text);
+            let mut candidate = Some(feedback.candidate.clone());
+            for ((source, kind), message) in
+                self.exit_blocker_sources.drain(..).zip(&feedback.messages)
+            {
+                source
+                    .record_completion_feedback(
+                        &CompletionFeedback {
+                            kind,
+                            message: message.clone(),
+                            candidate: candidate.take(),
+                        },
+                        self.cancellation,
+                    )
+                    .await?;
             }
-            state
-                .conversation
-                .add(text_message(MessageRole::System, feedback.message));
+            let completed: sessions::Completion = feedback.candidate.into();
+            state.conversation.add(model_assistant(&completed));
+            backend
+                .activity
+                .assistant_message(&completed.assistant_text);
+            for message in feedback.messages {
+                state
+                    .conversation
+                    .add(text_message(MessageRole::System, message));
+            }
             Ok(())
         })
     }

@@ -258,16 +258,20 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
 }
 
 #[test]
-fn active_work_without_a_retained_candidate_continues_from_the_actual_user_tail() {
+fn exit_blockers_retain_the_candidate_and_continue_without_pending_input() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("answer"),
     ]);
-    state
-        .active_work_reminders
-        .push_back(Some("work remains".into()));
+    state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
+    assert_eq!(state.completion_feedback.len(), 1);
+    assert_eq!(
+        state.completion_feedback[0].candidate.assistant_text,
+        "candidate"
+    );
+    assert!(state.pending_messages.is_empty());
     assert_eq!(
         state
             .trace
