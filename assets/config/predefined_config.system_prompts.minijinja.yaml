@@ -87,8 +87,7 @@ prompt_templates:
     engine: minijinja
     template: |-
       {% if section == "tree" %}Runtime:{% for agent in agents %}
-      {{ agent.indent }}- agent: {{ agent.name }}{% if agent.status != "" %} ({{ agent.status }}){% endif %}{% for queue in agent.queues %}
-      {{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items{% if queue.description != "" %}, description: {{ queue.description }}{% endif %}){% endfor %}{% for process in agent.processes %}
+      {{ agent.indent }}- agent: {{ agent.name }}{% if agent.status != "" %} ({{ agent.status }}){% endif %}{% for process in agent.processes %}
       {{ agent.indent }}  - process: {{ process.id }} (shell, {{ process.state }}, name: {{ process.name }}){% endfor %}{% endfor %}{% else %}{% for run in runs %}{% if not loop.first %}
       {% endif %}- AgentTask graph: {{ run.run_id }} (name: {{ run.display_name }}, owner: {{ run.owner_session_id }}, revision: {{ run.revision }}){% for node in run.nodes %}
       {{ node.indent }}- task: {{ node.name }} ({{ node.status }}, description: {{ node.description }}){% endfor %}{% endfor %}{% endif %}
@@ -124,14 +123,6 @@ prompt_templates:
       Use the wait tool until no direct subagent, AgentTask graph, or process remains. To interrupt a direct subagent, use agent_send to instruct it to complete. To interrupt a process, use interrupt_process. Do not finish this turn until all listed work has completed or been interrupted.
     allowed_arguments: [active_work]
     required_arguments: [active_work]
-  agent-session.nonempty-queues-reminder:
-    engine: minijinja
-    template: |-
-      This turn must not exit while queues owned by this agent contain items.
-      {% for queue in queues %}- {{ queue.name }} (remaining items: {{ queue.size }})
-      {% endfor %}Drain every listed queue before finishing, even when asked to stop. Use queue_take to consume items or coordinate consumers and wait until all owned queues are empty. Closing a queue does not drain it. There is no waiver or abandon action. Parent-owned queues do not block completion; an empty open queue does not block completion.
-    allowed_arguments: [queues]
-    required_arguments: [queues]
   agent-session.active-work-agent-tasks-heading:
     template: 'Running AgentTask graphs'
     allowed_arguments: []
@@ -359,7 +350,7 @@ prompt_templates:
       Shell path environment (defaults; references below describe absolute runtime values):
       {% for entry in entries %}{% if not loop.first %}
       {% endif %}{{ entry.name }} = {{ entry.path }}{% endfor %}
-      WORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.
+      WORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_DIR contains this agent's history.jsonl.
       exec_command supports normal shell expansion, for example "$SCRATCH_DIR/somefile.txt" or "${AGENT_SCRATCH_DIR}/somefile.txt". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand "$NAME" and "${NAME}" references to these defaults only; other tools' path arguments do not expand environment variables.
     allowed_arguments: [entries]
     required_arguments: [entries]
@@ -368,7 +359,7 @@ prompt_templates:
     allowed_arguments: [path]
     required_arguments: [path]
   context.agent-history:
-    template: 'Your durable message and compaction history is projected to this JSONL file: "$AGENT_HISTORY_DIR/history.jsonl". SQLite remains authoritative, so Parrot may replace this file when the history changes.'
+    template: 'Your durable message and compaction history is projected to this JSONL file: "$AGENT_DIR/history.jsonl". SQLite remains authoritative, so Parrot may replace this file when the history changes.'
     allowed_arguments: [path]
     required_arguments: [path]
   context.standing-instruction:

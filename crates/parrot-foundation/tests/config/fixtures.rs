@@ -44,9 +44,8 @@ pub const CONSOLIDATED_SOURCE_IDS: [&str; 13] = [
     "compact-context-tool.no-op-with-limit",
     "compact-context-tool.unavailable-with-limit",
 ];
-pub const CONSOLIDATED_IDS: [&str; 3] = [
+pub const CONSOLIDATED_IDS: [&str; 2] = [
     "agent-task.assignment-context",
-    "agent-session.nonempty-queues-reminder",
     "compact-context-tool.result",
 ];
 
@@ -66,6 +65,14 @@ pub const AGENT_COMMUNICATION_IDS: [&str; 8] = [
     "tool-result.ask-replied",
     "agent-session.final-request",
     "agent-session.final-request-interrupted",
+];
+
+pub const NATIVE_SCALAR_IDS: [&str; 5] = [
+    "agent-session.crashed-tool-result",
+    "agent-session.progress-reminder",
+    "progress-tool.already-closed",
+    "progress-tool.closed",
+    "progress-tool.updated",
 ];
 
 fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
@@ -88,6 +95,7 @@ fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
     for id in AGENT_COMMUNICATION_IDS
         .into_iter()
         .chain(["session.legacy-resume-warning"])
+        .chain(NATIVE_SCALAR_IDS)
     {
         let spec = actual
             .get(id)

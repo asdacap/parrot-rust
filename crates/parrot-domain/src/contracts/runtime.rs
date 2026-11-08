@@ -73,43 +73,6 @@ pub trait TaskController: Send + Sync {
     fn snapshot(&self, query: Self::Query) -> BoxFuture<'_, Result<Self::Snapshot, Self::Error>>;
 }
 
-/// Distinct queue operations preserve their own typed requests and results.
-pub trait AgentQueues: Send + Sync {
-    type CreateRequest: Send + 'static;
-    type CreateResult: Send + 'static;
-    type InfoRequest: Send + 'static;
-    type InfoResult: Send + 'static;
-    type PushRequest: Send + 'static;
-    type PushResult: Send + 'static;
-    type TakeRequest: Send + 'static;
-    type TakeResult: Send + 'static;
-    type Error: Send + Sync + 'static;
-
-    fn create<'a>(
-        &'a self,
-        request: Self::CreateRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::CreateResult, OperationError<Self::Error>>>;
-
-    fn info<'a>(
-        &'a self,
-        request: Self::InfoRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::InfoResult, OperationError<Self::Error>>>;
-
-    fn push<'a>(
-        &'a self,
-        request: Self::PushRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::PushResult, OperationError<Self::Error>>>;
-
-    fn take<'a>(
-        &'a self,
-        request: Self::TakeRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::TakeResult, OperationError<Self::Error>>>;
-}
-
 pub trait SessionControl: Send + Sync {
     type CheckpointRequest: Send + 'static;
     type CheckpointResult: Send + 'static;

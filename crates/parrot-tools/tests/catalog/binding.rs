@@ -164,9 +164,6 @@ impl Fixture {
                 tasks: shared.clone(),
                 filesystem: shared.clone(),
                 templates: templates.clone(),
-                queues: shared.clone(),
-                clock: shared.clone(),
-                diagnostics: shared,
             },
             &definitions,
         )

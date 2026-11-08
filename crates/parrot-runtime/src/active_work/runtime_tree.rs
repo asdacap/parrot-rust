@@ -3,7 +3,6 @@ use super::status::{
     StatusError, StatusObservation, StatusProvider, StatusQuery, StatusResult, ordinal, render,
 };
 use crate::{
-    agent_queues::{AgentQueues, QueueOwnerSnapshot},
     agent_turn::services::SessionIdentity,
     children::{AgentRegistry, Scope},
 };
@@ -15,10 +14,7 @@ use parrot_domain::{
     },
     values::activity::DrainState,
 };
-use parrot_foundation::{
-    config::opaque_json::json_string, template_catalog::PromptTemplateCatalog,
-};
-use parrot_storage::queue_files::QueueInfo;
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
@@ -27,7 +23,7 @@ use std::{
 
 #[derive(Default)]
 pub struct RuntimeTreeSnapshot {
-    pub queue_owners: Vec<QueueOwnerSnapshot>,
+    pub agents: Vec<SessionIdentity>,
     pub active_agents: Vec<SessionIdentity>,
     pub processes: Vec<ProcessStatusSnapshot>,
     pub activity: Vec<(String, DrainState)>,
@@ -53,17 +49,6 @@ impl<S: RestrictableAccessSnapshot + 'static> RuntimeTreeSnapshotSource
 {
     fn capture(&self) -> Result<RuntimeTreeSnapshot, StatusError> {
         let scopes = self.registry.snapshot_scopes();
-        let mut queue_owners = Vec::with_capacity(scopes.len());
-        for scope in &scopes {
-            let queues = scope
-                .get_service::<AgentQueues<S>>()
-                .map_err(|error| StatusError::caused_by(error.to_string(), error))?;
-            queue_owners.push(
-                queues
-                    .snapshot()
-                    .map_err(|error| StatusError::caused_by(error.to_string(), error))?,
-            );
-        }
         let active_agents = self.registry.active_snapshot();
         let mut processes = Vec::new();
         for scope in &scopes {
@@ -80,7 +65,10 @@ impl<S: RestrictableAccessSnapshot + 'static> RuntimeTreeSnapshotSource
             ));
         }
         Ok(RuntimeTreeSnapshot {
-            queue_owners,
+            agents: scopes
+                .iter()
+                .map(|scope| scope.identity().session.clone())
+                .collect(),
             active_agents,
             processes,
             activity,
@@ -132,7 +120,6 @@ struct Node {
     parent_session_id: String,
     name: String,
     status: &'static str,
-    queues: Vec<QueueInfo>,
     processes: Vec<ProcessStatusSnapshot>,
     children: Vec<String>,
 }
@@ -147,7 +134,6 @@ fn add<'a>(
         parent_session_id: parent_session_id.into(),
         name: if name.is_empty() { session_id } else { name }.into(),
         status: "",
-        queues: Vec::new(),
         processes: Vec::new(),
         children: Vec::new(),
     });
@@ -162,16 +148,13 @@ fn add<'a>(
 fn build_nodes(root: &str, snapshot: RuntimeTreeSnapshot) -> HashMap<String, Node> {
     let mut nodes = HashMap::new();
     add(&mut nodes, root, "", root);
-    for owner in snapshot.queue_owners {
-        let identity = &owner.identity.session;
+    for identity in snapshot.agents {
         add(
             &mut nodes,
             &identity.session_id,
             &identity.parent_session_id,
             &identity.name,
-        )
-        .queues
-        .extend(owner.queues);
+        );
     }
     for agent in snapshot.active_agents {
         add(
@@ -225,19 +208,13 @@ fn append(
     let Some(node) = nodes.get(session_id) else {
         return;
     };
-    let mut queues: Vec<_> = node.queues.iter().collect();
-    queues.sort_by(|left, right| ordinal(&left.name, &right.name));
-    let queues: Vec<_> = queues.into_iter().map(|queue| json!({
-        "name": queue.name, "size": queue.size.to_string(),
-        "description": if queue.description.is_empty() { String::new() } else { json_string(&queue.description) },
-    })).collect();
     let mut processes: Vec<_> = node.processes.iter().collect();
     processes.sort_by(|left, right| ordinal(&left.process_id, &right.process_id));
     let processes: Vec<_> = processes
         .into_iter()
         .map(|process| json!({"id": process.id(), "state": "running", "name": process.name}))
         .collect();
-    output.push(json!({"indent": " ".repeat(depth * 2), "name": node.name, "status": node.status, "session_id": node.session_id, "queues": queues, "processes": processes}));
+    output.push(json!({"indent": " ".repeat(depth * 2), "name": node.name, "status": node.status, "session_id": node.session_id, "processes": processes}));
     let mut children: Vec<_> = node.children.iter().collect();
     children.sort_by(|left, right| ordinal(left, right));
     for child in children {

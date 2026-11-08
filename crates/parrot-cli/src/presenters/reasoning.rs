@@ -58,18 +58,16 @@ impl ReasoningRow {
         let decoration =
             ActivityDecoration::describe(columns, self.depth, self.label.as_deref(), "");
         let rendered = entry.render(columns, &decoration);
+        let continuation = entry.render(columns, &ActivityDecoration::default());
         let current = self.render(columns);
         let fits = rendered.len() == 1
             && TerminalText::width(&rendered[0]) <= columns
             && (current.is_empty()
                 || (current.len() == 1
+                    && continuation.len() == 1
                     && TerminalText::width(&current[0])
                         + 1
-                        + TerminalText::width(
-                            rendered[0]
-                                .strip_prefix(&decoration.indentation)
-                                .unwrap_or(&rendered[0]),
-                        )
+                        + TerminalText::width(&continuation[0])
                         <= columns));
         if !fits && !self.is_empty() {
             flushed.push(self.drain());
@@ -108,13 +106,14 @@ impl ReasoningRow {
             let rendered = entry.render(columns, &decoration);
             if rendered.len() == 1 && TerminalText::width(&rendered[0]) <= columns {
                 let next = &rendered[0];
-                let continuation = next.strip_prefix(&decoration.indentation).unwrap_or(next);
+                let continuation = entry.render(columns, &ActivityDecoration::default());
                 if !pending.is_empty()
-                    && TerminalText::width(&pending) + 1 + TerminalText::width(continuation)
+                    && continuation.len() == 1
+                    && TerminalText::width(&pending) + 1 + TerminalText::width(&continuation[0])
                         <= columns
                 {
                     pending.push(' ');
-                    pending.push_str(continuation);
+                    pending.push_str(&continuation[0]);
                 } else {
                     if !pending.is_empty() {
                         lines.push(std::mem::take(&mut pending));

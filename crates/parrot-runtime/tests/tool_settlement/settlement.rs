@@ -57,10 +57,7 @@ async fn tool_start_persists_and_publishes_its_agent_path_variables() {
             .find(|event| event.has_tool_started())
             .unwrap();
         assert_eq!(
-            started
-                .tool_started()
-                .path_variables
-                .get("AGENT_HISTORY_DIR"),
+            started.tool_started().path_variables.get("AGENT_DIR"),
             Some(&fixture.path.display().to_string())
         );
     }

@@ -1,7 +1,42 @@
-//! Exact post-source changes: monitor 796d57f and composite 3f4782c/d641aa5.
+//! Exact post-source changes: monitor 796d57f, composite 3f4782c/d641aa5,
+//! and native queue removal.
 //! Pinned independent fixtures stay unchanged.
 
 pub fn align_product_text(id: &str, text: &str) -> String {
+    if id == "status.runtime" {
+        const MINIJINJA_QUEUE: &str = concat!(
+            "{% for queue in agent.queues %}\n",
+            "{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items",
+            "{% if queue.description != \"\" %}, description: {{ queue.description }}",
+            "{% endif %}){% endfor %}"
+        );
+        const SCRIBAN_QUEUE: &str = concat!(
+            "{{ for queue in agent.queues }}\n",
+            "{{ agent.indent }}  - queue: {{ queue.name }} ({{ queue.size }} items",
+            "{{ if queue.description != \"\" }}, description: {{ queue.description }}",
+            "{{ end }}){{ end }}"
+        );
+        let occurrences =
+            text.matches(MINIJINJA_QUEUE).count() + text.matches(SCRIBAN_QUEUE).count();
+        if occurrences == 0 {
+            assert!(
+                text.is_empty()
+                    || text.starts_with("Runtime:")
+                    || text.starts_with("- AgentTask graph:"),
+                "source text changed: {id}"
+            );
+            return if text.starts_with("Runtime:") {
+                text.lines()
+                    .filter(|line| !line.trim_start().starts_with("- queue: "))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                text.to_owned()
+            };
+        }
+        assert_eq!(occurrences, 1, "source text changed: {id}");
+        return text.replace(MINIJINJA_QUEUE, "").replace(SCRIBAN_QUEUE, "");
+    }
     let (original, current) = match id {
         "monitor.started" => (
             "a running monitor does not keep this turn open",
@@ -22,6 +57,9 @@ pub fn align_product_text(id: &str, text: &str) -> String {
                 "satisfy the task’s scope and acceptance criteria."
             ),
         ),
+        "context.agent-path-environment" | "context.agent-history" => {
+            ("AGENT_HISTORY_DIR", "AGENT_DIR")
+        }
         _ => return text.to_owned(),
     };
     assert_eq!(

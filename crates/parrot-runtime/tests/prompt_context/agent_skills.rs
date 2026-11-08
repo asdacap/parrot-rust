@@ -373,7 +373,7 @@ async fn full_runtime_prompt_joins_real_agents_skills_model_scope_and_configured
         "Review only.",
         "/work",
         "$AGENT_SCRATCH_DIR",
-        "$AGENT_HISTORY_DIR/history.jsonl",
+        "$AGENT_DIR/history.jsonl",
     ] {
         assert!(result.contains(text), "missing {text}");
     }

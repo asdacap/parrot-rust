@@ -92,6 +92,8 @@ assembly/runtime, source-reference runner or development SDK is permitted in the
 native runtime output/closure. Build tools and Cargo metadata are not runtime
 linked-library evidence. Retained skill `.py` source files are inert resources,
 not a Python runtime dependency and are never executed by this recipe.
+Executing the packaged `queue` skill requires Python 3 in the agent's command
+environment; the native package does not supply the interpreter.
 
 ## Native Apple Silicon recipe
 

@@ -458,10 +458,11 @@ fn encrypted_reasoning_keeps_one_hierarchical_entry_per_event_in_the_live_row() 
             view.observe(&child("child", "worker", "root")).unwrap();
             view.observe(&turn("child")).unwrap();
         }
-        let entry = if owner == "root" {
-            "✦ Reasoning received (encrypted)"
+        let entry = "✦ Reasoning received (encrypted)";
+        let first_entry = if owner == "root" {
+            entry
         } else {
-            "✦ [worker] Reasoning received (encrypted)"
+            "  ✦ [worker] Reasoning received (encrypted)"
         };
         for count in 1..=2 {
             let update = view
@@ -473,19 +474,19 @@ fn encrypted_reasoning_keeps_one_hierarchical_entry_per_event_in_the_live_row() 
                 ))
                 .unwrap();
             assert!(commits(&update).is_empty());
-            let expected = format!(
-                "{}{}",
-                if owner == "root" { "" } else { "  " },
-                vec![entry; count].join(" ")
-            );
+            let expected = format!("{first_entry}{}", format!(" {entry}").repeat(count - 1));
             assert!(live(&view).starts_with(&expected));
-            assert_eq!(live(&view).matches(entry).count(), count);
+            assert_eq!(
+                live(&view)
+                    .matches("Reasoning received (encrypted)")
+                    .count(),
+                count
+            );
             assert!(!live(&view).contains("Thinking ("));
         }
         let flushed = view.finish().unwrap();
-        assert_eq!(commits(&flushed).len(), 1);
-        assert_eq!(commits(&flushed)[0].matches(entry).count(), 2);
-        assert!(!live(&view).contains(entry));
+        assert_eq!(commits(&flushed), [format!("{first_entry} {entry}")]);
+        assert!(!live(&view).contains("Reasoning received (encrypted)"));
         assert!(commits(&view.finish().unwrap()).is_empty());
     }
 }
@@ -676,6 +677,85 @@ fn reasoning_rows_pack_whole_entries_at_exact_terminal_width() {
         assert!(live_at(&view, columns).is_empty());
         assert!(commits(&view.finish().unwrap()).is_empty());
     }
+}
+
+#[test]
+fn child_reasoning_rows_label_each_row_once_at_exact_terminal_width() {
+    for columns in [17, 18] {
+        let mut view = view_at(columns);
+        view.observe(&turn("root")).unwrap();
+        view.observe(&child("child", "worker", "root")).unwrap();
+        view.observe(&turn("child")).unwrap();
+        view.observe(&reasoning("child", "A", true, true)).unwrap();
+        assert!(live_at(&view, columns).starts_with("  ✦ [worker] A|"));
+        let update = view.observe(&reasoning("child", "B", true, true)).unwrap();
+        if columns == 18 {
+            assert!(commits(&update).is_empty());
+            assert!(live_at(&view, columns).starts_with("  ✦ [worker] A ✦ B|"));
+            let snapshot = view.snapshot().unwrap();
+            let narrower = snapshot[0]
+                .render(LiveBufferRenderContext {
+                    columns: 17,
+                    color: false,
+                })
+                .unwrap();
+            assert_eq!(
+                narrower
+                    .lines
+                    .iter()
+                    .map(|line| line.text())
+                    .collect::<Vec<_>>(),
+                ["  ✦ [worker] A", "  ✦ [worker] B"]
+            );
+            let finished = view.finish().unwrap();
+            assert_eq!(commits_at(&finished, columns), ["  ✦ [worker] A ✦ B"]);
+            assert_eq!(commits_at(&finished, 17), ["  ✦ [worker] A|  ✦ [worker] B"]);
+        } else {
+            assert_eq!(commits_at(&update, columns), ["  ✦ [worker] A"]);
+            assert!(live_at(&view, columns).starts_with("  ✦ [worker] B|"));
+            assert_eq!(
+                commits_at(&view.finish().unwrap(), columns),
+                ["  ✦ [worker] B"]
+            );
+        }
+    }
+}
+
+#[test]
+fn child_reasoning_rows_pack_mixed_entries_and_relabel_after_resize() {
+    let mut view = view();
+    view.observe(&turn("root")).unwrap();
+    view.observe(&child("child", "verify-queue-replacement", "root"))
+        .unwrap();
+    view.observe(&turn("child")).unwrap();
+    for published in [
+        event(
+            "child",
+            wire::event::Payload::EncryptedReasoningReceived(
+                wire::EncryptedReasoningReceivedEvent::default(),
+            ),
+        ),
+        reasoning("child", "Investigating workspace test failures", true, true),
+        reasoning("child", "first reasoning", false, true),
+    ] {
+        assert!(commits(&view.observe(&published).unwrap()).is_empty());
+    }
+    let expected = "  ✦ [verify-queue-replacement] Reasoning received (encrypted) ✦ Investigating workspace test failures ✦ Reasoned for 2 tokens…";
+    assert!(live(&view).starts_with(&format!("{expected}|")));
+    assert_eq!(
+        commits_at(&view.resize(80).unwrap(), 80),
+        [
+            "  ✦ [verify-queue-replacement] Reasoning received (encrypted)",
+            "  ✦ [verify-queue-replacement] Investigating workspace test failures",
+        ]
+    );
+    assert!(
+        live_at(&view, 80).starts_with("  ✦ [verify-queue-replacement] Reasoned for 2 tokens…|")
+    );
+    assert_eq!(
+        commits_at(&view.finish().unwrap(), 80),
+        ["  ✦ [verify-queue-replacement] Reasoned for 2 tokens…"]
+    );
 }
 
 #[test]

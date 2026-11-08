@@ -262,31 +262,11 @@ async fn selected_legacy_resources_and_writes_remain_in_place_after_duplicate_an
     index.publish(&meta).unwrap();
     let scratch = resources.agent_scratch(&["main"]).unwrap();
     fs::write(scratch.blob_directory().join("owned.txt"), b"legacy-only").unwrap();
-    let queues = parrot_storage::queue_files::QueueStore::for_session(
-        &selected,
-        scratch
-            .queue_directory()
-            .strip_prefix(selected.path())
-            .unwrap(),
-    )
-    .unwrap();
-    queues.create("in-place", "selected legacy queue").unwrap();
-    queues
-        .push(
-            "in-place",
-            &["legacy-item".into()],
-            parrot_storage::queue_files::Direction::Back,
-            false,
-        )
-        .unwrap();
-    assert_eq!(queues.directory(), scratch.queue_directory());
+    fs::create_dir_all(scratch.queue_directory()).unwrap();
+    let queue_path = scratch.queue_directory().join("in-place.jsonl");
+    fs::write(&queue_path, b"legacy-item\n").unwrap();
     assert!(!resources.root().join("queues").exists());
-    assert!(
-        fs::read_to_string(queues.directory().join("in-place.jsonl"))
-            .unwrap()
-            .contains("legacy-item")
-    );
-    queues.dispose().unwrap();
+    assert_eq!(fs::read(&queue_path).unwrap(), b"legacy-item\n");
     let history = parrot_storage::history_files::AgentHistoryFile::new(
         selected.clone(),
         scratch.history_path(),

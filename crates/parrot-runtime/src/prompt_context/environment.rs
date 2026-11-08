@@ -30,7 +30,7 @@ impl AgentPathEnvironment {
                 ),
                 ("SCRATCH_DIR".into(), text(&resources.scratch_directory())?),
                 ("AGENT_SCRATCH_DIR".into(), text(&scratch.scratch_path())?),
-                ("AGENT_HISTORY_DIR".into(), text(scratch.root())?),
+                ("AGENT_DIR".into(), text(scratch.root())?),
             ]),
         })
     }

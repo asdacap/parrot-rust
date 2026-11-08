@@ -36,10 +36,7 @@ fn actual_selected_resources_render_compressed_environment_and_literal_overrides
             values["AGENT_SCRATCH_DIR"],
             scratch.scratch_path().to_str().unwrap()
         );
-        assert_eq!(
-            values["AGENT_HISTORY_DIR"],
-            scratch.root().to_str().unwrap()
-        );
+        assert_eq!(values["AGENT_DIR"], scratch.root().to_str().unwrap());
         let provider = environment.prompt_provider(templates(""));
         let (_, router) = route(Vec::new());
         let selection = router.resolve("unused/vendor/model").unwrap();
@@ -63,7 +60,7 @@ fn actual_selected_resources_render_compressed_environment_and_literal_overrides
         );
         assert_eq!(
             lines[4],
-            format!("AGENT_HISTORY_DIR = $WORKDIR/state/sessions/{session}/root-agents/{agent}")
+            format!("AGENT_DIR = $WORKDIR/state/sessions/{session}/root-agents/{agent}")
         );
         let overrides = BTreeMap::from([
             ("AGENT_SCRATCH_DIR".into(), String::new()),

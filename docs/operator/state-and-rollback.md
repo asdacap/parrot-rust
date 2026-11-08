@@ -214,12 +214,10 @@ the local production-creation limitations noted above.
   Explicit task cancellation or user interruption is still terminal, not a
   request to suspend. A crash can resume unfinished work too, but does not imply
   that the last uncommitted write survived.
-- Each agent stores queues in its own directory:
-  `root-agents/<root-name>/<child-name>/.../queues/`. The root uses
-  `root-agents/<root-name>/queues/`. Queue files survive close/reopen and reattach
-  to restored owners. Leftover queue files alone do not authorize or restore an
-  obsolete agent. Older session-level `queues/` files are not automatically moved
-  or used as a fallback.
+- Work queues use the packaged `queue` skill and files beneath each owner's
+  `scratch/queues/` directory. The runtime no longer attaches a native queue
+  service to restored agents. Old queue files remain untouched and unused;
+  see [File-based work queues](#file-based-work-queues).
 
 An existing session **without a root snapshot** uses root-only legacy recovery
 and emits a visible `legacy_root_only_resume` notice (text configured by
@@ -238,13 +236,54 @@ recoverable state. No repair/migration command is provided.
 
 SQLite `session.db` remains authoritative for conversation/event history and
 settlements; agent `history.jsonl` files remain projections. Back up the whole
-selected session after closing its owner, including snapshots, DB and queues,
-not just a graph file. Snapshot replacement is atomic within its agent directory,
+selected session after closing its owner, including snapshots, DB and agent scratch
+files, not just a graph file. Snapshot replacement is atomic within its agent directory,
 **not a transaction with SQLite**. Stable input/result/notification identities
 reconcile the file/DB handoffs and avoid resubmitting an already admitted initial
 assignment. They do not promise exactly-once external tool effects: if a process
 dies after an effect but before its terminal settlement commits, unresolved-tool
 recovery may invoke it again. Do not treat resume as a rollback of external work.
+
+## File-based work queues
+
+Use the packaged [`queue` skill](../../assets/skills/queue/SKILL.md) for shared
+producer/consumer work. Its standard-library helper requires Python 3 on Linux
+or macOS and ordinary authorized command execution. The native package does not
+bundle Python or grant additional file access.
+
+Queue files live at `$AGENT_SCRATCH_DIR/queues/<name>.json`, beneath the owning
+agent's `scratch/` directory. Give workers explicit absolute paths to those files;
+a child's environment points to its own scratch directory, not its parent's.
+Use the helper for reads and mutations so cooperating processes share its stable
+file lock and atomic state replacement. Queue files survive close/reopen without
+a native runtime queue service or file watcher. The owner or designated final
+closer waits for all producers before closing a shared queue. An open empty queue
+can still receive work; a closed empty queue is drained.
+
+The owner refreshes one aggregate `progress` report from its selected queue files.
+Set `steps` to items taken and `total_steps` to all items added, with the waiting
+count in `current_step`. For ten items with seven taken, report `7/10` and
+`3 waiting`, even if those seven items are still in flight. Multiple queues share
+that owner's one report. Refresh after seeding or changing work, during normal
+coordination waits, and before closing; counts are snapshots, not live file
+subscriptions. If the total is zero, omit the update rather than send `0/0` or
+invent a step. Keep coordinating an open empty queue.
+
+After all selected queues close and drain, publish final counts and explicitly
+close progress. Reaching 100% does not close it. Still join workers and check their
+outcomes before declaring their work complete. On intentional stop, report the
+remaining items, close progress explicitly, and leave queue files intact. Queue
+files have no separate completion blocker; existing progress, child, task,
+process, and reminder checks remain in force.
+
+Old native queue files under an agent root's `queues/`, or an older session-level
+`queues/`, stay untouched and unused. There is no automatic conversion or
+reattachment. That agent-root directory may still hold process sandbox resources;
+it is not the skill's queue directory. Historical queue tool results and snapshot
+records remain readable, but the removed tools cannot execute and unresolved old
+queue calls do not become skill operations. A take removes waiting items before
+their work runs; there is no acknowledgement or automatic recovery of taken items.
+Inspect an interrupted mutation and worker outcomes before retrying it.
 
 ## Agent progress
 

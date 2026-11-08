@@ -13,7 +13,6 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     let user = fixture.user();
     let id = UserSessionId::parse(&user.id).unwrap();
     let registry = user.registry().unwrap();
-    let queues = root.get_service::<AgentQueues<Security>>().unwrap();
     let source = root
         .get_service::<dyn parrot_domain::contracts::status::ProcessStatusSource>()
         .unwrap();
@@ -156,7 +155,6 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     })
     .await;
     let child_id = child.identity().session.session_id.clone();
-    let child_queues = child.get_service::<AgentQueues<Security>>().unwrap();
     let forked = child.history().compaction_history().await.unwrap();
     let child_prefix = child.history().conversation().await.unwrap();
     let registered = registry.contains(&child);
@@ -218,7 +216,6 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     let old_root_inactive = !root.session().is_active();
     let old_child_inactive = !child.session().is_active();
     let old_processes_settled = source.active().is_empty() && source.snapshot().is_empty();
-    let old_queues_disposed = queues.is_disposed() && child_queues.is_disposed();
 
     let opened = bounded(fixture.store.resume(&id, true, false))
         .await
@@ -237,7 +234,6 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     let resumed_source = resumed_root
         .get_service::<dyn parrot_domain::contracts::status::ProcessStatusSource>()
         .unwrap();
-    let resumed_queues = resumed_root.get_service::<AgentQueues<Security>>().unwrap();
     let resumed_id = resumed.snapshot().id;
     let resumed_selected_root = resumed_user.resources.root().to_owned();
     let new_scope = !Arc::ptr_eq(&root, &resumed_root);
@@ -251,7 +247,6 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     assert_eq!(resumed_selected_root, selected_root);
     assert!(old_root_inactive && old_child_inactive && old_child_removed);
     assert!(old_processes_settled && resumed_processes_empty);
-    assert!(old_queues_disposed && resumed_queues.is_disposed());
     assert_eq!(process_before.len(), 1);
     assert_eq!(process_before[0].name, "t76-combined-process");
     assert_eq!(process_after_compaction.len(), 1);

@@ -14,9 +14,9 @@ Note: These are advisory
    - Agent A starts another round by sending a message to every subagent again, restarting them, but pointing at the current scratch file for more context.
 - Agent A then compile the final subagent reports and form a conclusion. - Use different scratch file for different round. - Use for very-very delicate reasoning.
 ## Work Queue
-- Agent A creates a work-item queue and spawns N equivalent agents. - Each subagent is instructed to keep taking work items from its direct parent's queue. - Agent A waits until all agents are finished. - This is useful for many work items and unnecessary for a small task.
+- Agent A uses the `$queue` skill to create a work-item queue and spawns N equivalent agents. - Each subagent receives the absolute queue file path and a shared consumer assignment. - Agent A reports the remaining waiting items through `progress` and waits until all agents are finished. - This is useful for many work items and unnecessary for a small task.
 ## Pipeline graph
-- Agent A creates a graph whose edges are queues and whose nodes are groups of parallel agents. - For example:
+- Agent A uses the `$queue` skill to create a graph whose edges are queues and whose nodes are groups of parallel agents. - For example:
   - Agent A creates three queues:
     - request queue
     - verify queue
@@ -25,4 +25,4 @@ Note: These are advisory
     - request spawners create requests
     - workers take requests and push them to the verify queue, or skip directly to the result queue
     - verifiers take items from the verify queue and send them to results or back to requests for more work
-  - Agent A takes from the result queue.
+  - Agent A takes from the result queue and reports aggregate waiting-item counts through `progress`.
