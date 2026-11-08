@@ -172,10 +172,7 @@ async fn actual_owner_monitor_blocks_turn_until_terminal_delivery() {
     let completed = sink.completed.lock().unwrap();
     assert_eq!(completed.len(), 1);
     assert_eq!(completed[0].delivery, Delivery::DELIVERY_STEER);
-    assert_eq!(
-        completed[0].input_source,
-        InputSource::INPUT_SOURCE_UNSPECIFIED
-    );
+    assert_eq!(completed[0].input_source, InputSource::INPUT_SOURCE_PROCESS);
     assert!(sink.failures.lock().unwrap().is_empty());
     assert!(owner.capture_inventory().removed);
     assert!(owner.capture_inventory().processes.is_empty());

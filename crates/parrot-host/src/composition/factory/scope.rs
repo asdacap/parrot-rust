@@ -520,7 +520,7 @@ impl<S: RestrictableAccessSnapshot + 'static> CompletionSink for ScopeLink<S> {
                     IncomingActivity {
                         name: message.process_name.clone(),
                         cause: Some(message.activity_description.clone()),
-                        source: InputSource::INPUT_SOURCE_UNSPECIFIED,
+                        source: message.input_source,
                     },
                     Arc::new(NeverCancelled),
                 )

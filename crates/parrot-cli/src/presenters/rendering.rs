@@ -61,21 +61,6 @@ impl ActivityDecoration {
         columns.saturating_sub(self.width()).max(1)
     }
     pub fn apply(&self, marker: &str, content: impl IntoIterator<Item = String>) -> Vec<String> {
-        self.apply_with_continuation(marker, "  ", content)
-    }
-    pub(crate) fn apply_without_marker_indent(
-        &self,
-        marker: &str,
-        content: impl IntoIterator<Item = String>,
-    ) -> Vec<String> {
-        self.apply_with_continuation(marker, "", content)
-    }
-    fn apply_with_continuation(
-        &self,
-        marker: &str,
-        continuation_marker: &str,
-        content: impl IntoIterator<Item = String>,
-    ) -> Vec<String> {
         let marker = if marker.is_empty() {
             "  ".to_owned()
         } else {
@@ -86,7 +71,7 @@ impl ActivityDecoration {
             self.indentation, self.label_field, self.adornment_field
         );
         let continuation = format!(
-            "{}{continuation_marker}{}{}",
+            "{}  {}{}",
             self.indentation,
             self.label_field,
             " ".repeat(TerminalText::width(&self.adornment_field))

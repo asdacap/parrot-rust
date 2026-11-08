@@ -647,6 +647,51 @@ fn replay_restores_pending_steers_and_commits_only_promoted_ones() {
 }
 
 #[test]
+fn process_completions_use_distinct_icons_in_live_output_and_replay() {
+    let content = "Shell process 'work' completed.\nProcess exited with code 0\n[stdout]\npayload";
+    for replaying in [false, true] {
+        for (source, pending_icon, committed_icon) in [
+            (wire::InputSource::INPUT_SOURCE_PROCESS, "⚙", "⚙"),
+            (wire::InputSource::INPUT_SOURCE_UNSPECIFIED, "◇", "◆"),
+        ] {
+            let mut presenter = EnhancedSessionPresenter::new(120, false, replaying);
+            presenter.observe(&start("root")).unwrap();
+            let admitted = presenter
+                .observe(&event(
+                    "root",
+                    Payload::InputAdmitted(wire::InputAdmitted {
+                        input_id: "completion".into(),
+                        content: content.into(),
+                        delivery: wire::Delivery::DELIVERY_STEER.into(),
+                        source: source.into(),
+                        ..Default::default()
+                    }),
+                ))
+                .unwrap();
+            assert!(admitted.commits.is_empty());
+            assert!(
+                live(&admitted.live, 120)
+                    .contains(&format!("{pending_icon} {}", content.replace('\n', "\n  ")))
+            );
+            let promotion = event(
+                "root",
+                Payload::InputPromoted(wire::InputPromoted {
+                    input_id: "completion".into(),
+                    ..Default::default()
+                }),
+            );
+            let promoted = presenter.observe(&promotion).unwrap();
+            assert_eq!(
+                commits(&promoted.commits, 120),
+                format!("{committed_icon} {}\r\n", content.replace('\n', "\r\n  "))
+            );
+            assert!(!live(&promoted.live, 120).contains("Shell process"));
+            assert!(presenter.observe(&promotion).unwrap().commits.is_empty());
+        }
+    }
+}
+
+#[test]
 fn deferred_events_preserve_text_and_completion_without_live_materialization() {
     let mut presenter = configured(2048);
     let started = presenter.apply_event(&start("root")).unwrap();

@@ -337,16 +337,11 @@ impl ActivityValue {
                 active,
             } => {
                 let mut rows = Vec::new();
-                for (row_index, row) in AgentTaskProgressFormatter::format_rows(
+                for row in AgentTaskProgressFormatter::format_rows(
                     snapshot,
                     Some(agent_lines),
                     Some(active),
-                )
-                .into_iter()
-                .enumerate()
-                {
-                    let prefix_width = decoration.width() - if row_index == 0 { 0 } else { 2 };
-                    let columns = context.columns.saturating_sub(prefix_width).max(1);
+                ) {
                     let wrapped =
                         TerminalText::layout_words_hanging(&row.text, columns, &row.hanging_indent);
                     let mut source_offset = 0;
@@ -374,7 +369,7 @@ impl ActivityValue {
                                 if overlap_end > overlap_start {
                                     let start = indent + overlap_start - source_start;
                                     spans.push(TerminalCellStyleSpan::new(
-                                        prefix_width + TerminalText::width(&text[..start]),
+                                        decoration.width() + TerminalText::width(&text[..start]),
                                         TerminalText::width(
                                             &text[start..start + overlap_end - overlap_start],
                                         ),
@@ -397,8 +392,7 @@ impl ActivityValue {
                         ));
                     }
                 }
-                let text = decoration
-                    .apply_without_marker_indent("•", rows.iter().map(|row| row.text().to_owned()));
+                let text = decoration.apply("•", rows.iter().map(|row| row.text().to_owned()));
                 let lines = text
                     .into_iter()
                     .zip(rows)
@@ -495,13 +489,7 @@ impl ActivityValue {
             Self::Tasks { snapshot, .. } => {
                 let mut rows = Vec::new();
                 let mut styles = Vec::new();
-                for (row_index, row) in
-                    AgentTaskProgressFormatter::format_rows(snapshot, None, None)
-                        .into_iter()
-                        .enumerate()
-                {
-                    let prefix_width = decoration.width() - if row_index == 0 { 0 } else { 2 };
-                    let columns = context.columns.saturating_sub(prefix_width).max(1);
+                for row in AgentTaskProgressFormatter::format_rows(snapshot, None, None) {
                     let wrapped =
                         TerminalText::layout_words_hanging(&row.text, columns, &row.hanging_indent);
                     styles.extend(std::iter::repeat_n(
@@ -517,7 +505,7 @@ impl ActivityValue {
                     rows.extend(wrapped);
                 }
                 return Ok(decoration
-                    .apply_without_marker_indent("•", rows)
+                    .apply("•", rows)
                     .into_iter()
                     .zip(styles)
                     .map(|(line, style)| style.apply(&line))
