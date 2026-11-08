@@ -75,15 +75,24 @@ category-specific retention policy. Native state owns observation order, configu
 prompt rendering, source identity, and per-message persistence/publication. It
 joins accepted mutations before observing blockers and before final closure.
 
-`run_turn` handles at most one conversation turn; `run` is the multi-turn
-convenience entry point. Both accept a caller-owned core `TurnBudget`, initialized
-from run configuration rather than queried through `States`. Native orchestration
-checks its scheduled-operation queue between `run_turn` calls. Unscheduled turns
-share the existing budget scope; a native scheduled-work boundary ends that scope
-before processing queued operations. Scheduler priority never changes what the
-state getters report, and core has no scheduler-query method. Provider-request
-limits are the only final-phase trigger; cancellation uses the separate live token,
-not a state-polled wrap-up signal.
+Each active `run_turn` invocation owns one execution turn. Core checks readiness
+before initialization, then captures settings and tools once into local values and
+continues until completion, exhaustion, or error. `None` means initialization never
+started. There is no runtime open-turn flag or core state query for one. Native
+start-event identities are invocation-scoped persistence metadata for terminal
+arbitration and error cleanup; they never control whether core initializes. Turn
+activity finishes after the core invocation returns, while accepted-response
+persistence remains its final awaited effect to preserve commit/publication order.
+
+`run` is the multi-turn convenience entry point. Both entry points accept a
+caller-owned core `TurnBudget`, initialized from run configuration rather than
+queried through `States`. Native orchestration checks its scheduled-operation
+queue between `run_turn` calls. Unscheduled turns share the existing budget scope;
+a native scheduled-work boundary ends that scope before processing queued
+operations. Scheduler priority never changes what the state getters report, and
+core has no scheduler-query method. Provider-request limits are the only
+final-phase trigger; cancellation uses the separate live token, not a state-polled
+wrap-up signal.
 
 Core returns a typed `BudgetExhausted` outcome when request or settlement limits
 are reached. Native orchestration renders, records, and publishes the configured

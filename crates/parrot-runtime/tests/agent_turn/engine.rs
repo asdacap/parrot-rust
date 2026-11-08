@@ -935,6 +935,31 @@ async fn terminal_commit_precedes_cancellable_publication_without_second_interru
         assert_eq!(assistants.len(), 1);
         assert_eq!(assistants[0].content(), "normal durable answer");
         assert!(!fixture.jsonl().contains("interrupted"));
+        let interrupted_note = templates()
+            .render("agent-session.interrupted-note", &[], &NeverCancelled)
+            .unwrap();
+        assert!(
+            runtime
+                .activity
+                .live
+                .tracker()
+                .capture()
+                .recent
+                .iter()
+                .all(|entry| entry.content != interrupted_note)
+        );
+        let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
+        let started: Vec<_> = diagnostic
+            .iter()
+            .filter_map(|entry| entry.strip_prefix("started:"))
+            .collect();
+        let finished: Vec<_> = diagnostic
+            .iter()
+            .filter(|entry| entry.starts_with("finished:"))
+            .collect();
+        assert_eq!(started.len(), 1);
+        assert_eq!(finished.len(), 1);
+        assert!(finished[0].starts_with(&format!("finished:{}:", started[0])));
         runtime.close().await;
     }
 }

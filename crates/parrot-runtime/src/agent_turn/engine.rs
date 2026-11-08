@@ -83,8 +83,6 @@ struct State {
     conversation: AgentConversation,
     tool_conversation: ToolConversation,
     context: ContextController,
-    turn: Option<TurnKey>,
-    diagnostic_turn: Option<String>,
     request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
     request_accounting: Option<RequestAccounting>,
     usage: Arc<SessionUsageRecorder>,
@@ -233,8 +231,6 @@ where
                 conversation,
                 tool_conversation,
                 context: config.context,
-                turn: None,
-                diagnostic_turn: None,
                 request_status: None,
                 request_accounting: None,
                 usage,
@@ -507,12 +503,10 @@ where
     async fn close_turn(
         &self,
         state: &mut State,
+        key: &TurnKey,
         completion: &sessions::Completion,
         cancellation: &dyn Cancellation,
-    ) -> Result<(), TurnError> {
-        let Some(key) = state.turn.clone() else {
-            return Ok(());
-        };
+    ) -> Result<TurnClosure, TurnError> {
         let totals = self.usage.capture().own.totals;
         let mut event = self.event();
         event.set_turn_ended(protocol::TurnEnded {
@@ -523,7 +517,6 @@ where
         });
         let message = conversation_message(completion);
         let model = model_assistant(completion);
-        let active = &mut state.turn;
         let conversation = &mut state.conversation;
         let publisher = PublisherRef(self.publisher.as_ref());
         let result = self
@@ -538,9 +531,6 @@ where
                 cancellation,
                 |receipt| {
                     // This callback runs after durable commit and BEFORE publication.
-                    if active.as_ref() == Some(&receipt.key) {
-                        *active = None;
-                    }
                     if receipt.closure == TurnClosure::NewlyClosed {
                         conversation.add(model);
                     }
@@ -559,7 +549,7 @@ where
             }
         }
         match result {
-            Ok(_) => Ok(()),
+            Ok(receipt) => Ok(receipt.closure),
             Err(CloseTurnError::AdmissionCancelled) => Err(TurnError::Cancelled),
             Err(CloseTurnError::Repository(error)) => Err(error.into()),
             Err(CloseTurnError::Publication { error, .. }) => Err(TurnError::Publication(error)),
@@ -1133,43 +1123,49 @@ where
         work: &'a dyn DrainWork,
     ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
-            let result = core_loop::run(self, cancellation, work).await;
+            let (result, failed_key) = core_loop::run(self, cancellation, work).await;
             let mut state = self.state.lock().await;
             let outcome = async {
                 match result {
                     Ok(execution) => {
                         if execution.status == ExecutionStatus::Failed {
-                            if let Some(turn) = state.diagnostic_turn.take() {
-                                self.activity
-                                    .turn_finished(&turn, "failed", Some("runaway"));
+                            if let Some(key) = &failed_key {
+                                self.activity.turn_finished(
+                                    &key.start_event_id,
+                                    "failed",
+                                    Some("runaway"),
+                                );
                             }
                         }
                         Ok(execution)
                     }
                     Err(error) if error.is_cancelled() => {
                         work.join_mutations().await?;
-                        if let Some(turn) = state.diagnostic_turn.take() {
-                            self.activity.turn_finished(&turn, "cancelled", None);
-                        }
-                        if state.turn.is_some() && !self.suspending.load(Ordering::Acquire) {
-                            let completed = sessions::Completion {
-                                assistant_text: self.notices.interrupted.clone(),
-                                finish_reason: "interrupted".into(),
-                                ..Default::default()
-                            };
-                            self.close_turn(&mut state, &completed, &NeverCancelled)
-                                .await
-                                .map_err(|e| e.lifecycle_error())?;
-                            self.activity.assistant_message(&self.notices.interrupted);
+                        if let Some(key) = &failed_key {
+                            self.activity
+                                .turn_finished(&key.start_event_id, "cancelled", None);
+                            if !self.suspending.load(Ordering::Acquire) {
+                                let completed = sessions::Completion {
+                                    assistant_text: self.notices.interrupted.clone(),
+                                    finish_reason: "interrupted".into(),
+                                    ..Default::default()
+                                };
+                                let closure = self
+                                    .close_turn(&mut state, key, &completed, &NeverCancelled)
+                                    .await
+                                    .map_err(|e| e.lifecycle_error())?;
+                                if closure == TurnClosure::NewlyClosed {
+                                    self.activity.assistant_message(&self.notices.interrupted);
+                                }
+                            }
                         }
                         Ok(Execution::canceled())
                     }
                     Err(error) => {
                         work.join_mutations().await?;
-                        state.turn = None;
-                        if let Some(turn) = state.diagnostic_turn.take() {
+                        if let Some(key) = &failed_key {
                             self.activity.turn_finished(
-                                &turn,
+                                &key.start_event_id,
                                 "failed",
                                 Some(error.diagnostic_code()),
                             );
@@ -1183,8 +1179,6 @@ where
             }
             .await;
             self.skills.end_turn().await;
-            state.turn = None;
-            state.diagnostic_turn = None;
             let execution = outcome?;
             let result_reference = if execution.status == ExecutionStatus::Succeeded {
                 self.history
