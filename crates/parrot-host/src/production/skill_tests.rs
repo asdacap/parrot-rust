@@ -328,6 +328,18 @@ async fn production_installed_queue_helper_distributes_work_and_reports_waiting_
     assert_eq!(summary["drained"], false);
     run(&["take", "--count", "3"]);
     assert_eq!(run(&["info"])["drained"], true);
+    let output = std::process::Command::new("python3")
+        .args(["-B", "-m", "unittest", "discover", "-s"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/skills/queue"))
+        .args(["-p", "test_*.py"])
+        .env("PARROT_QUEUE_HELPER", &script)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     bounded(host.close()).await.unwrap();
     drop(host);
     let root = fixture.root.clone();

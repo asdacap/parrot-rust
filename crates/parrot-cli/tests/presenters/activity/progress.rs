@@ -441,10 +441,7 @@ fn task_embedded_worker_keeps_exactly_one_independent_progress_bar() {
 
 #[test]
 fn tool_arguments_and_terminal_success_do_not_drive_the_progress_bar() {
-    let mut view = RawActivityView::new(
-        160,
-        Arc::new(ToolPresenterRegistry::standard(Vec::new())),
-    );
+    let mut view = RawActivityView::new(160, Arc::new(ToolPresenterRegistry::standard(Vec::new())));
     view.observe(&turn("root")).unwrap();
     view.observe(&event(
         "root",

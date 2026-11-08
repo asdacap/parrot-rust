@@ -1,11 +1,8 @@
 use std::fmt;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
 const CAMPAIGN: &str = include_str!("../fixtures/regressions/T77/campaign.json");
-static ROOT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub fn manifest() -> Value {
     serde_json::from_str(CAMPAIGN).expect("committed T77 campaign manifest must parse")
@@ -79,19 +76,6 @@ pub fn for_cases(domain: &'static str, mut exercise: impl FnMut(Case, &mut Gener
         }
         println!("T77_END domain={domain} seed=0x{seed:016x} completed={count}");
     }
-}
-
-pub fn fixture_root(label: &str) -> PathBuf {
-    let parent = std::env::var_os("PARROT_T77_TEST_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let root = parent.join(format!(
-        "parrot-t77-{label}-{}-{}",
-        std::process::id(),
-        ROOT_ID.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&root).unwrap();
-    root
 }
 
 pub fn hex(input: &str) -> Vec<u8> {

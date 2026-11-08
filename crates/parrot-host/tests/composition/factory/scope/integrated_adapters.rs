@@ -3,7 +3,10 @@
 use super::*;
 use parrot_domain::contracts::runtime::TaskController;
 use parrot_domain::protocol::messages::parrot::Delivery;
-use parrot_domain::values::agent_tasks::ExecutionStatus;
+use parrot_domain::values::{
+    agent_tasks::ExecutionStatus,
+    progress::{Progress, ProgressUpdate},
+};
 use parrot_host::composition::agents::ScopedAgentRuntime;
 use parrot_runtime::agent_turn::services::TurnProfile;
 use parrot_runtime::tool_settlement::SharedSecurity;
@@ -577,6 +580,19 @@ async fn retained_wait_timeout_lists_actual_child_process_and_task() {
     failed["state"] = "failed".into();
     failed["failure"] = "synthetic retained failure".into();
     set_tasks(&fixture, &root, json!([failed, {"name":"waiting-task","dependencies":["unresolved-dependency"],"description":"blocked actual task","payload":"not executed","acceptance_criteria":"unused"}])).await;
+    let progress = root
+        .get_service::<parrot_runtime::active_work::progress::AgentProgress>()
+        .unwrap();
+    progress
+        .update(ProgressUpdate::Replace(Progress {
+            steps: 1,
+            total_steps: 1,
+            current_step: Some("queue review: 0 waiting".into()),
+        }))
+        .await
+        .unwrap();
+    progress.update(ProgressUpdate::Close).await.unwrap();
+    assert!(progress.capture_snapshot().unwrap().progress.is_none());
     let mut completion = reply("");
     completion
         .tool_calls
@@ -717,9 +733,30 @@ async fn production_catalog_dispatches_write_tools_without_advertising_removed_q
             .contains("synthetic fixture authorizes no filesystem operations")
     );
     assert!(!outside.exists());
+    script(
+        &fixture,
+        "child-catalog-marker",
+        reply("child catalog observed"),
+        None,
+    );
+    agent_invoke(
+        &agent_tool(&fixture, &root, AgentToolKind::Spawn),
+        json!({"name":"catalog-worker","agent":"adapter","prompt":"child-catalog-marker","fork":"empty"}),
+        &NeverCancelled,
+    )
+    .await
+    .unwrap();
+    idle(&root.children().find("catalog-worker").unwrap()).await;
     assert!(fixture.scripts.lock().unwrap().is_empty());
     {
         let requests = fixture.requests.lock().unwrap();
+        assert!(requests.iter().any(|request| {
+            request
+                .messages
+                .iter()
+                .any(|message| message.content().contains("child-catalog-marker"))
+                && request.tools.iter().any(|tool| tool.name == "progress")
+        }));
         assert!(
             requests
                 .iter()
