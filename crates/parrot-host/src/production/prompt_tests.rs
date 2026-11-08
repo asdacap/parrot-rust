@@ -1,4 +1,5 @@
 use super::*;
+use parrot_provider::sessions::Role;
 use std::sync::atomic::AtomicBool;
 
 #[derive(Clone, Default)]
@@ -195,6 +196,7 @@ async fn production_requests_include_host_context_and_explicit_or_inherited_scop
         assert!(prompt.contains(&static_sections));
         assert!(prompt.contains("## Agent Tasks"));
         assert!(!prompt.contains("@builtin:system-prompts/"));
+        assert!(!prompt.contains("@builtin:profile-prompts/"));
         for marker in [
             "PROMPT-GLOBAL-INSTRUCTION",
             "PROMPT-ANCESTOR-INSTRUCTION",
@@ -237,6 +239,24 @@ async fn production_requests_include_host_context_and_explicit_or_inherited_scop
             "{prompt}"
         );
     }
+    for (request, profile) in [(root, "build"), (child, "worker"), (grandchild, "worker")] {
+        let status = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| {
+                message.role == Role::System && message.content().contains("Active profile: ")
+            })
+            .unwrap()
+            .content();
+        assert_eq!(
+            status
+                .matches(&fixture.configuration.runtime.profiles[profile].prompt)
+                .count(),
+            1
+        );
+        assert!(!status.contains("@builtin:profile-prompts/"));
+    }
     assert!(!root.instructions.contains("PROMPT-EXPLICIT-SCOPE"));
     assert!(child.instructions.contains("Child agent depth: 1"));
     assert!(
@@ -258,10 +278,11 @@ async fn production_requests_include_host_context_and_explicit_or_inherited_scop
 async fn production_requests_use_loaded_inline_prompt_overrides() {
     let mut fixture = Fixture::new();
     let inherited = fixture.configuration.system_prompts.clone();
+    let inherited_profiles = fixture.configuration.runtime.profiles.clone();
     let path = fixture.root.join("config.yaml");
     std::fs::write(
         &path,
-        "model: local/test\nskills:\n  enabled: false\nsystem_prompts:\n  runtime:system-context:01-base: PROMPT-CUSTOM-BASE\n",
+        "model: local/test\nskills:\n  enabled: false\nsystem_prompts:\n  runtime:system-context:01-base: PROMPT-CUSTOM-BASE\nprofiles:\n  build:\n    prompt: PROMPT-CUSTOM-BUILD\n",
     )
     .unwrap();
     let environment = BTreeMap::from([(
@@ -273,10 +294,11 @@ async fn production_requests_use_loaded_inline_prompt_overrides() {
             .unwrap();
     fixture.configuration = configuration;
     fixture.templates = Arc::new(templates);
-    let capture = CaptureProvider {
-        root_spawned: Arc::new(AtomicBool::new(true)),
-        ..Default::default()
-    };
+    assert_eq!(
+        fixture.configuration.runtime.profiles["worker"],
+        inherited_profiles["worker"]
+    );
+    let capture = CaptureProvider::default();
     let host = fixture.host_with(Arc::new(capture.clone()));
     let session = bounded(host.service().create_session(
         &wire::CreateSessionRequest {
@@ -300,7 +322,11 @@ async fn production_requests_use_loaded_inline_prompt_overrides() {
     .await
     .unwrap();
     bounded(async {
-        while capture.requests.lock().unwrap().is_empty() {
+        while !capture.requests.lock().unwrap().iter().any(|request| {
+            request
+                .instructions
+                .contains("Child agent name: prompt-grandchild\n")
+        }) {
             tokio::task::yield_now().await;
         }
     })
@@ -309,8 +335,29 @@ async fn production_requests_use_loaded_inline_prompt_overrides() {
     let requests = capture.requests.lock().unwrap();
     for request in requests.iter() {
         let prompt = &request.instructions;
+        let status = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| {
+                message.role == Role::System && message.content().contains("Active profile: ")
+            })
+            .unwrap()
+            .content();
         assert_eq!(prompt.matches("PROMPT-CUSTOM-BASE").count(), 1);
+        if prompt.contains("Child agent session:") {
+            assert!(!status.contains("PROMPT-CUSTOM-BUILD"));
+            assert_eq!(
+                status.matches(&inherited_profiles["worker"].prompt).count(),
+                1
+            );
+        } else {
+            assert_eq!(status.matches("PROMPT-CUSTOM-BUILD").count(), 1);
+            assert!(!status.contains(&inherited_profiles["build"].prompt));
+        }
+        assert!(!status.contains("@builtin:profile-prompts/"));
         assert!(!prompt.contains("@builtin:system-prompts/"));
+        assert!(!prompt.contains("@builtin:profile-prompts/"));
         for (key, text) in &inherited {
             if key == "runtime:system-context:01-base" {
                 assert!(!prompt.contains(text));
