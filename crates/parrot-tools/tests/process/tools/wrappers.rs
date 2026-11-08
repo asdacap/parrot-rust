@@ -378,7 +378,7 @@ impl Fixture {
                     .into_owned(),
             ),
             (
-                "AGENT_HISTORY_DIR".into(),
+                "AGENT_DIR".into(),
                 directory.0.join("history").to_string_lossy().into_owned(),
             ),
         ]);
@@ -596,20 +596,16 @@ async fn real_completion_environment_and_owned_security_capture_reach_the_launch
         0,
         &format!("s\n[stdout]\n{}", std::env::var("PATH").unwrap()),
     );
-    let command = "printf '<%s>' \"$WORKDIR\" \"${SCRATCH_DIR}\" \"$AGENT_SCRATCH_DIR\" \"${AGENT_HISTORY_DIR}\"";
-    let expected = [
-        "WORKDIR",
-        "SCRATCH_DIR",
-        "AGENT_SCRATCH_DIR",
-        "AGENT_HISTORY_DIR",
-    ]
-    .map(|key| format!("<{}>", fixture.launcher.environment[key]))
-    .concat();
+    let command =
+        "printf '<%s>' \"$WORKDIR\" \"${SCRATCH_DIR}\" \"$AGENT_SCRATCH_DIR\" \"${AGENT_DIR}\"";
+    let expected = ["WORKDIR", "SCRATCH_DIR", "AGENT_SCRATCH_DIR", "AGENT_DIR"]
+        .map(|key| format!("<{}>", fixture.launcher.environment[key]))
+        .concat();
     let original = fixture.exec(json!({"command":command})).await;
     completed(&original.text, 0, &format!("s\n[stdout]\n{expected}"));
-    let empty = fixture.exec(json!({"command":command,"env":{"WORKDIR":"","SCRATCH_DIR":"","AGENT_SCRATCH_DIR":"","AGENT_HISTORY_DIR":""}})).await;
+    let empty = fixture.exec(json!({"command":command,"env":{"WORKDIR":"","SCRATCH_DIR":"","AGENT_SCRATCH_DIR":"","AGENT_DIR":""}})).await;
     completed(&empty.text, 0, "s\n[stdout]\n<><><><>");
-    let literal = fixture.exec(json!({"command":command,"env":{"WORKDIR":"$SCRATCH_DIR","SCRATCH_DIR":"${WORKDIR}/literal path","AGENT_SCRATCH_DIR":"$(printf injected); * ' quoted","AGENT_HISTORY_DIR":"`printf injected`"}})).await;
+    let literal = fixture.exec(json!({"command":command,"env":{"WORKDIR":"$SCRATCH_DIR","SCRATCH_DIR":"${WORKDIR}/literal path","AGENT_SCRATCH_DIR":"$(printf injected); * ' quoted","AGENT_DIR":"`printf injected`"}})).await;
     completed(
         &literal.text,
         0,

@@ -22,6 +22,9 @@ pub fn align_product_text(id: &str, text: &str) -> String {
                 "satisfy the task’s scope and acceptance criteria."
             ),
         ),
+        "context.agent-path-environment" | "context.agent-history" => {
+            ("AGENT_HISTORY_DIR", "AGENT_DIR")
+        }
         _ => return text.to_owned(),
     };
     assert_eq!(

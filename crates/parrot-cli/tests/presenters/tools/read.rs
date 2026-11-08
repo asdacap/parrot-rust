@@ -699,15 +699,12 @@ fn runtime_paths_are_shortened_in_read_labels_but_not_failure_details() {
         r#"{"path":"/remote/session/agent/blobs/output.dat","offset":1,"limit":90}"#,
     );
     call.path_variables
-        .insert("AGENT_HISTORY_DIR".into(), "/remote/session/agent".into());
+        .insert("AGENT_DIR".into(), "/remote/session/agent".into());
     let presenter = ReadToolPresenter::default();
     let Presentation::Tool(live) = presenter.present_live(&call, 0).unwrap() else {
         panic!("tool")
     };
-    assert_eq!(
-        live.label,
-        "read L1-L90 $AGENT_HISTORY_DIR/blobs/output.dat"
-    );
+    assert_eq!(live.label, "read L1-L90 $AGENT_DIR/blobs/output.dat");
     assert_eq!(live.metadata.style, ToolPresentationStyle::Muted);
     let Presentation::Tool(failed) = presenter
         .present_terminal(

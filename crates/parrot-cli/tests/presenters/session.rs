@@ -54,7 +54,7 @@ fn tool_path_aliases_flow_from_events_to_live_and_replayed_labels_per_agent() {
                         Payload::ToolStarted(wire::ToolStarted {
                             tool_call_id: name.into(),
                             tool_name: name.into(),
-                            path_variables: [("AGENT_HISTORY_DIR".into(), root.into())]
+                            path_variables: [("AGENT_DIR".into(), root.into())]
                                 .into_iter()
                                 .collect(),
                             ..Default::default()
@@ -65,7 +65,7 @@ fn tool_path_aliases_flow_from_events_to_live_and_replayed_labels_per_agent() {
                 if !replaying {
                     let output = live(&started.live, 200);
                     assert!(
-                        output.contains(&format!("{label} $AGENT_HISTORY_DIR/blobs/output.dat")),
+                        output.contains(&format!("{label} $AGENT_DIR/blobs/output.dat")),
                         "{output}"
                     );
                     assert!(!output.contains(root), "{output}");
@@ -83,7 +83,7 @@ fn tool_path_aliases_flow_from_events_to_live_and_replayed_labels_per_agent() {
                     .unwrap();
                 let output = commits(&finished.commits, 200);
                 assert!(
-                    output.contains(&format!("{label} $AGENT_HISTORY_DIR/blobs/output.dat")),
+                    output.contains(&format!("{label} $AGENT_DIR/blobs/output.dat")),
                     "{output}"
                 );
                 assert!(!output.contains(root), "{output}");

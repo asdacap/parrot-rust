@@ -332,10 +332,7 @@ mod tests {
         let mut request = command("printf '%s|%s' \"$PWD\" \"$MARKER\"");
         request.environment = vec![
             ("MARKER".into(), "literal-value".into()),
-            (
-                "AGENT_HISTORY_DIR".into(),
-                "/not-an-authorized-resource".into(),
-            ),
+            ("AGENT_DIR".into(), "/not-an-authorized-resource".into()),
         ];
         let execution = launcher
             .launch(

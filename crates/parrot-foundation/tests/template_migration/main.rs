@@ -155,8 +155,16 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
                     .iter()
                     .find(|row| row["id"] == id)
                     .unwrap();
-                assert_eq!(scalar(old_value), row["old"]["text"].as_str(), "{id}");
-                assert_eq!(scalar(new_value), row["new"]["text"].as_str(), "{id}");
+                assert_eq!(
+                    scalar(old_value).unwrap(),
+                    product_changes::align_product_text(id, row["old"]["text"].as_str().unwrap()),
+                    "{id}"
+                );
+                assert_eq!(
+                    scalar(new_value).unwrap(),
+                    product_changes::align_product_text(id, row["new"]["text"].as_str().unwrap()),
+                    "{id}"
+                );
             } else {
                 assert_eq!(
                     old_value, new_value,

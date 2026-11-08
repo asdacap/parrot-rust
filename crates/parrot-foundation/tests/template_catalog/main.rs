@@ -120,7 +120,10 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
                 .find(|row| row["id"] == *id)
                 .unwrap();
             assert_eq!(spec.engine, "minijinja");
-            assert_eq!(spec.text, mapped["new"]["text"].as_str().unwrap());
+            assert_eq!(
+                spec.text,
+                product_changes::align_product_text(id, mapped["new"]["text"].as_str().unwrap())
+            );
         }
     }
     let goldens = fixture(&(A.to_owned() + "catalog-render-goldens.json"));
@@ -176,7 +179,7 @@ fn m2_all_ten_templates_thirty_empty_multiple_nested_cases_use_real_catalog() {
             catalog
                 .render(id, &arguments(&input["arguments"]), &CancelAt::never())
                 .unwrap(),
-            result["output"]["value"].as_str().unwrap(),
+            product_changes::align_product_text(id, result["output"]["value"].as_str().unwrap()),
             "{}",
             input["id"]
         );

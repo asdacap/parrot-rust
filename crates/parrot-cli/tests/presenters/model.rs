@@ -10,7 +10,7 @@ fn path_display_uses_the_longest_server_prefix_without_changing_arguments() {
     call.path_variables = [
         ("WORKDIR", "/server"),
         ("SCRATCH_DIR", "/server/session/scratch"),
-        ("AGENT_HISTORY_DIR", "/server/session/agent"),
+        ("AGENT_DIR", "/server/session/agent"),
         ("AGENT_SCRATCH_DIR", "/server/session/agent/scratch"),
         ("INVALID", "relative"),
     ]
@@ -21,7 +21,7 @@ fn path_display_uses_the_longest_server_prefix_without_changing_arguments() {
     for (path, expected) in [
         (
             "/server/session/agent/blobs/log.dat",
-            "$AGENT_HISTORY_DIR/blobs/log.dat",
+            "$AGENT_DIR/blobs/log.dat",
         ),
         (
             "/server/session/agent/scratch/整理.md",
@@ -29,10 +29,10 @@ fn path_display_uses_the_longest_server_prefix_without_changing_arguments() {
         ),
         ("/server/session/scratch/plan.md", "$SCRATCH_DIR/plan.md"),
         ("/server/src/main.rs", "$WORKDIR/src/main.rs"),
-        ("/server/session/agent/", "$AGENT_HISTORY_DIR"),
+        ("/server/session/agent/", "$AGENT_DIR"),
         (
             "/server/session/agent/./blobs/../history.jsonl",
-            "$AGENT_HISTORY_DIR/history.jsonl",
+            "$AGENT_DIR/history.jsonl",
         ),
         (
             "/server/session/agent-other/file",
@@ -45,10 +45,7 @@ fn path_display_uses_the_longest_server_prefix_without_changing_arguments() {
         ("/server-other/file", "/server-other/file"),
         ("/SERVER/file", "/SERVER/file"),
         ("relative/file", "relative/file"),
-        (
-            "$AGENT_HISTORY_DIR/history.jsonl",
-            "$AGENT_HISTORY_DIR/history.jsonl",
-        ),
+        ("$AGENT_DIR/history.jsonl", "$AGENT_DIR/history.jsonl"),
         ("", ""),
     ] {
         assert_eq!(call.shorten_path(path), expected, "{path}");

@@ -515,7 +515,7 @@ prompt_templates:
       Shell path environment (defaults; references below describe absolute runtime values):
       {{ for entry in entries }}{{ if !for.first }}
       {{ end }}{{ entry.name }} = {{ entry.path }}{{ end }}
-      WORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_HISTORY_DIR contains this agent's history.jsonl.
+      WORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_DIR contains this agent's history.jsonl.
       exec_command supports normal shell expansion, for example "$SCRATCH_DIR/somefile.txt" or "${AGENT_SCRATCH_DIR}/somefile.txt". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand "$NAME" and "${NAME}" references to these defaults only; other tools' path arguments do not expand environment variables.
     allowed_arguments: [entries]
     required_arguments: [entries]
@@ -524,7 +524,7 @@ prompt_templates:
     allowed_arguments: [path]
     required_arguments: [path]
   context.agent-history:
-    template: 'Your durable message and compaction history is projected to this JSONL file: "$AGENT_HISTORY_DIR/history.jsonl". SQLite remains authoritative, so Parrot may replace this file when the history changes.'
+    template: 'Your durable message and compaction history is projected to this JSONL file: "$AGENT_DIR/history.jsonl". SQLite remains authoritative, so Parrot may replace this file when the history changes.'
     allowed_arguments: [path]
     required_arguments: [path]
   context.standing-instruction:
