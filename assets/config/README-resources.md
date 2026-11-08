@@ -53,8 +53,46 @@ Remove the override to restore the built-in default. The generated
 `predefined_config.yaml` retains references and is regenerated; do not edit it
 for customization. Editing installed Markdown does not change the built binary,
 and source Markdown changes require a rebuild. Neither is hot-reloaded.
-Dynamic `prompt_templates` and profile/model guidance have not moved to these
-Markdown files.
+Dynamic `prompt_templates`, model-specific `system_prompt` values, and model
+alias augmentation remain in configuration.
+
+## Built-in profile prompts
+
+The ten agent-profile prompt bodies live in `assets/config/profile-prompts/`:
+
+- [`general.md`](profile-prompts/general.md)
+- [`coordinator.md`](profile-prompts/coordinator.md)
+- [`build.md`](profile-prompts/build.md)
+- [`plan.md`](profile-prompts/plan.md)
+- [`query.md`](profile-prompts/query.md)
+- [`explorer.md`](profile-prompts/explorer.md)
+- [`review.md`](profile-prompts/review.md)
+- [`worker.md`](profile-prompts/worker.md)
+- [`thinker.md`](profile-prompts/thinker.md)
+- [`agent-task-payload.md`](profile-prompts/agent-task-payload.md)
+
+Predefined configuration selects each file with a value such as
+`@builtin:profile-prompts/build.md` in `profiles.build.prompt`. These Markdown
+files are embedded at compile time. References resolve after user configuration
+is merged. A value beginning with the exact, case-sensitive `@builtin:` prefix
+must select a known built-in asset; an empty or unknown reference reports an
+error at `profiles.<id>.prompt`. Other nonempty text is literal, and resolved
+Markdown is not recursively interpreted as another reference. References do not
+load arbitrary filesystem paths or hot-reload installed files.
+
+To replace a profile prompt, put inline text in `config.yaml`:
+
+```yaml
+profiles:
+  build:
+    prompt: |-
+      Your replacement instructions.
+```
+
+Remove `profiles.build.prompt` to restore the built-in default. Profile usage,
+allowed tools, flags, and limits are unchanged unless explicitly overridden.
+The generated `predefined_config.yaml` retains the reference values and is
+regenerated; source Markdown changes require rebuilding the binary.
 
 ## Consolidated message templates
 

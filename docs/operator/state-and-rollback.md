@@ -102,9 +102,40 @@ filesystem paths.
 The generated `predefined_config.yaml` retains the references and is regenerated;
 put overrides in `config.yaml` rather than editing it. Editing installed Markdown
 does not change the built binary, and source Markdown changes require a rebuild.
-Neither is hot-reloaded. Dynamic `prompt_templates` and profile/model guidance
-remain in configuration; the historical `predefined_config.system_prompts.yaml`
-remains a reference resource.
+Neither is hot-reloaded. Dynamic `prompt_templates`, model-specific
+`system_prompt` values, and model alias augmentation remain in configuration;
+the historical `predefined_config.system_prompts.yaml` remains a reference
+resource.
+
+## Profile prompt overrides
+
+Use inline text in `config.yaml` to replace an inherited agent-profile prompt:
+
+```yaml
+profiles:
+  build:
+    prompt: |-
+      Your replacement instructions.
+```
+
+Add or replace `prompt` within an existing `profiles.build` mapping if present.
+Removing that field restores the built-in default. Other profile fields, such as
+usage, allowed tools, flags, and limits, remain unchanged unless overridden.
+
+The ten built-in agent-profile prompts are Markdown files under
+`assets/config/profile-prompts/`, embedded into the binary at compile time. The
+[resource reference](../../assets/config/README-resources.md#built-in-profile-prompts)
+links all ten files. Predefined configuration selects them using values such as
+`@builtin:profile-prompts/build.md`. References resolve after user configuration
+is merged. A value beginning with the exact, case-sensitive `@builtin:` prefix
+must select a known built-in asset. An empty or unknown reference reports an
+error at `profiles.<id>.prompt`. Other nonempty text remains literal, and
+resolved Markdown is not recursively interpreted as another reference.
+
+References do not load arbitrary filesystem paths. The generated
+`predefined_config.yaml` retains the references and is regenerated, so put
+overrides in `config.yaml`. Editing installed Markdown does not change the
+binary; source Markdown changes require rebuilding and are not hot-reloaded.
 
 ## Default setting and disabling compatibility
 
