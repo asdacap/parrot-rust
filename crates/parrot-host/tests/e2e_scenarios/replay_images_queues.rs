@@ -1,8 +1,7 @@
 use super::*;
-use parrot_storage::queue_files::Direction;
 
 #[tokio::test]
-async fn long_history_listener_reconnect_image_identity_and_closed_queue_survive_resume() {
+async fn long_history_listener_reconnect_image_identity_and_legacy_queue_files_survive_resume() {
     let fixture = fixture().await;
     let hosted = fixture.open().await.unwrap();
     let root = fixture.root();
@@ -48,20 +47,15 @@ async fn long_history_listener_reconnect_image_identity_and_closed_queue_survive
     }
     let cursor = prefix.last().unwrap().id.clone();
     drop(stream);
-    let queues = root.get_service::<AgentQueues<Security>>().unwrap();
-    queues
-        .create("resume-work", "durable root queue across host reopen")
-        .unwrap();
-    queues
-        .push(
-            "resume-work",
-            &["first".into(), "second".into()],
-            Direction::Back,
-            true,
-            &NeverCancelled,
-        )
-        .unwrap();
-    let old_queue_path = queues.get("resume-work").unwrap().path;
+    let directory = user
+        .resources
+        .agents_directory()
+        .join(&root.identity().session.name)
+        .join("queues");
+    std::fs::create_dir_all(&directory).unwrap();
+    let old_queue_path = directory.join("resume-work.jsonl");
+    let old_queue_contents = b"nonempty malformed legacy queue";
+    std::fs::write(&old_queue_path, old_queue_contents).unwrap();
     let selected = user.resources.root().to_owned();
     bounded(hosted.close()).await.unwrap();
     assert_database_closed(&user);
@@ -72,14 +66,6 @@ async fn long_history_listener_reconnect_image_identity_and_closed_queue_survive
     let resumed = bounded(fixture.factory.bind_opened(opened)).await.unwrap();
     let resumed_root = fixture.root();
     let resumed_user = fixture.user();
-    let resumed_queues = resumed_root.get_service::<AgentQueues<Security>>().unwrap();
-    let queue_before_drain = resumed_queues.get("resume-work").unwrap();
-    let drained = resumed_queues
-        .try_take("resume-work", 2, Direction::Front)
-        .unwrap();
-    let exhausted = resumed_queues
-        .try_take("resume-work", 1, Direction::Front)
-        .unwrap();
     let resolved = bounded(resumed.resolve_image(&image.artifact_id))
         .await
         .unwrap();
@@ -152,22 +138,6 @@ async fn long_history_listener_reconnect_image_identity_and_closed_queue_survive
     assert!(Path::new(&image_paths[0]).starts_with(selected.join("artifacts")));
     assert_eq!(selected, resumed_selected);
     assert!(selected.starts_with(fixture.root.join("new/sessions")));
-    assert_eq!(queue_before_drain.path, old_queue_path);
-    assert_eq!(
-        old_queue_path.parent().unwrap(),
-        selected
-            .join("root-agents")
-            .join(&root.identity().session.name)
-            .join("queues")
-    );
+    assert_eq!(std::fs::read(old_queue_path).unwrap(), old_queue_contents);
     assert!(!selected.join("queues").exists());
-    assert_eq!(
-        (queue_before_drain.size, queue_before_drain.closed),
-        (2, true)
-    );
-    assert_eq!(drained.items, vec!["first", "second"]);
-    assert!(exhausted.items.is_empty());
-    assert!(exhausted.info.unwrap().closed);
-    assert!(queues.is_disposed());
-    assert!(resumed_queues.is_disposed());
 }

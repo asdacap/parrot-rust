@@ -153,42 +153,6 @@ pub(super) async fn agent_invoke(
     )
     .await
 }
-fn queue_tool(
-    fixture: &Fixture,
-    root: &Arc<Scope<Security>>,
-    kind: QueueToolKind,
-) -> impl Tool<
-    Invocation = ToolInvocation,
-    Selection = (),
-    Security = Security,
-    Output = parrot_tools::tasks_queues::ToolOutput,
-    Error = parrot_tools::tasks_queues::ToolFailure,
-> {
-    QueueTool::new(
-        kind,
-        &catalog::configured_definitions(&fixture.configuration),
-        Arc::new(
-            ScopedQueueBackend::new(root.clone(), fixture.user().registry().unwrap()).unwrap(),
-        ),
-        Arc::new(Files::<Security>(PhantomData)),
-        fixture.clock.clone(),
-        Arc::new(Diagnostics),
-    )
-    .unwrap()
-}
-async fn queue(fixture: &Fixture, root: &Arc<Scope<Security>>, kind: QueueToolKind, args: Value) {
-    queue_tool(fixture, root, kind)
-        .invoke(
-            ToolInvocation {
-                call_id: "adapter-queue-call".into(),
-                arguments_json: args.to_string(),
-                assistant_sequence: 1,
-            },
-            InvocationContext::new(Security, (), &NeverCancelled),
-        )
-        .await
-        .unwrap();
-}
 async fn set_tasks(fixture: &Fixture, root: &Arc<Scope<Security>>, tasks: Value) {
     let controller = root
         .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
@@ -593,7 +557,7 @@ async fn retained_wait_uses_actual_process_completion_and_live_scoped_status() {
 }
 
 #[tokio::test]
-async fn retained_wait_timeout_lists_actual_child_process_and_task_but_not_queue_only_reminder() {
+async fn retained_wait_timeout_lists_actual_child_process_and_task() {
     let fixture = fixture().await;
     let hosted = fixture.open().await.unwrap();
     let root = fixture.root();
@@ -607,20 +571,6 @@ async fn retained_wait_timeout_lists_actual_child_process_and_task_but_not_queue
     let spawn = agent_tool(&fixture, &root, AgentToolKind::Spawn);
     agent_invoke(&spawn, json!({"name":"timeout-child","agent":"adapter","prompt":"timeout-child-marker","fork":"empty"}), &NeverCancelled).await.unwrap();
     let process = start_process(&root, "timeout-process").await;
-    queue(
-        &fixture,
-        &root,
-        QueueToolKind::Create,
-        json!({"name":"queue-only"}),
-    )
-    .await;
-    queue(
-        &fixture,
-        &root,
-        QueueToolKind::Push,
-        json!({"name":"queue-only","items":["queued payload"]}),
-    )
-    .await;
     // A failed dependency and its pending successor are real scheduler state,
     // without admitting an unwanted worker or synthesizing notification input.
     let mut failed = task("unresolved-dependency", "not executed", None);
@@ -683,10 +633,6 @@ async fn retained_wait_timeout_lists_actual_child_process_and_task_but_not_queue
             && result.contains("unresolved-dependency [failed]"),
         "{result}"
     );
-    assert!(
-        !result.contains("queue-only") && !result.contains("queued payload"),
-        "{result}"
-    );
     process.finish();
     gate.add_permits(1);
     root_gate.add_permits(1);
@@ -698,13 +644,6 @@ async fn retained_wait_timeout_lists_actual_child_process_and_task_but_not_queue
             task("unresolved-dependency", "not executed", Some("resolved")),
             task("waiting-task", "not executed", Some("resolved"))
         ]),
-    )
-    .await;
-    queue(
-        &fixture,
-        &root,
-        QueueToolKind::Take,
-        json!({"name":"queue-only","yield_after_ms":0}),
     )
     .await;
     bounded(async {
@@ -722,48 +661,24 @@ async fn retained_wait_timeout_lists_actual_child_process_and_task_but_not_queue
 }
 
 #[tokio::test]
-async fn actual_registered_queue_arc_is_retained_during_and_after_host_close_and_is_disposed() {
+async fn actual_host_close_waits_for_inflight_skill_refresh() {
     let barrier = Arc::new(RefreshBarrier::default());
     let fixture = Fixture::with_refresh_barrier(false, false, Some(barrier.clone())).await;
     let hosted = fixture.open().await.unwrap();
-    let root = fixture.root();
-    let queues = root.get_service::<AgentQueues<Security>>().unwrap();
-    queue(
-        &fixture,
-        &root,
-        QueueToolKind::Create,
-        json!({"name":"identity-queue"}),
-    )
-    .await;
-    assert!(Arc::ptr_eq(
-        &queues,
-        &root.get_service::<AgentQueues<Security>>().unwrap()
-    ));
     let refresh = hosted.refresh_skills(&NeverCancelled);
     tokio::pin!(refresh);
     tokio::select! { result = &mut refresh => panic!("refresh did not hold close: {result:?}"), _ = barrier.entered.notified() => {} }
     let closing = hosted.close();
     tokio::pin!(closing);
     tokio::select! { result = &mut closing => panic!("close bypassed actual refresh producer: {result:?}"), _ = tokio::task::yield_now() => {} }
-    assert!(Arc::ptr_eq(
-        &queues,
-        &root.get_service::<AgentQueues<Security>>().unwrap()
-    ));
-    assert!(!queues.is_disposed());
     barrier.release.notify_one();
     let _ = bounded(refresh).await;
     bounded(closing).await.unwrap();
-    assert!(Arc::ptr_eq(
-        &queues,
-        &root.get_service::<AgentQueues<Security>>().unwrap()
-    ));
-    assert!(queues.is_disposed());
-    assert!(queues.snapshot().unwrap().queues.is_empty());
-    assert!(queues.create("after-close", "must fail").is_err());
+    assert!(fixture.user().lease.is_cancelled());
 }
 
 #[tokio::test]
-async fn production_catalog_dispatches_queue_and_write_tools_and_settles_actual_tool_results() {
+async fn production_catalog_dispatches_write_tools_without_advertising_removed_queues() {
     let fixture = fixture().await;
     let hosted = fixture.open().await.unwrap();
     let root = fixture.root();
@@ -772,38 +687,16 @@ async fn production_catalog_dispatches_queue_and_write_tools_and_settles_actual_
         .resources
         .root()
         .join("must-not-be-written.txt");
-    for (id, name, arguments) in [
-        (
-            "catalog-create",
-            "queue_create",
-            json!({"name":"catalog-queue"}),
-        ),
-        (
-            "catalog-push",
-            "queue_push",
-            json!({"name":"catalog-queue","items":["real retained payload"]}),
-        ),
-        (
-            "catalog-take",
-            "queue_take",
-            json!({"name":"catalog-queue","yield_after_ms":0}),
-        ),
-        (
-            "catalog-write",
-            "write",
-            json!({"path":outside,"content":"denied fixture capability"}),
-        ),
-    ] {
-        let mut completion = reply("");
-        completion
-            .tool_calls
-            .push(parrot_provider::sessions::ToolCall {
-                id: id.into(),
-                name: name.into(),
-                arguments_json: arguments.to_string(),
-            });
-        script(&fixture, "catalog-dispatch-marker", completion, None);
-    }
+    let mut completion = reply("");
+    completion
+        .tool_calls
+        .push(parrot_provider::sessions::ToolCall {
+            id: "catalog-write".into(),
+            name: "write".into(),
+            arguments_json: json!({"path":outside,"content":"denied fixture capability"})
+                .to_string(),
+        });
+    script(&fixture, "catalog-dispatch-marker", completion, None);
     hosted
         .send(
             vec![ConversationPart::text("catalog-dispatch-marker")],
@@ -815,39 +708,15 @@ async fn production_catalog_dispatches_queue_and_write_tools_and_settles_actual_
         .unwrap();
     idle(&root).await;
     let history = root.history().conversation().await.unwrap();
-    for id in [
-        "catalog-create",
-        "catalog-push",
-        "catalog-take",
-        "catalog-write",
-    ] {
-        let result = history
-            .iter()
-            .find(|message| message.message.tool_call_id == id)
-            .unwrap_or_else(|| panic!("missing actual catalog result for {id}: {history:?}"));
-        if id == "catalog-take" {
-            assert!(
-                parrot_storage::events::content(&result.message.parts)
-                    .contains("real retained payload")
-            );
-        }
-        if id == "catalog-write" {
-            assert!(
-                parrot_storage::events::content(&result.message.parts)
-                    .contains("synthetic fixture authorizes no filesystem operations")
-            );
-        }
-    }
-    assert!(!outside.exists());
+    let result = history
+        .iter()
+        .find(|message| message.message.tool_call_id == "catalog-write")
+        .unwrap_or_else(|| panic!("missing actual catalog write result: {history:?}"));
     assert!(
-        root.get_service::<AgentQueues<Security>>()
-            .unwrap()
-            .snapshot()
-            .unwrap()
-            .queues
-            .iter()
-            .any(|queue| queue.name == "catalog-queue" && queue.size == 0)
+        parrot_storage::events::content(&result.message.parts)
+            .contains("synthetic fixture authorizes no filesystem operations")
     );
+    assert!(!outside.exists());
     assert!(fixture.scripts.lock().unwrap().is_empty());
     {
         let requests = fixture.requests.lock().unwrap();
@@ -855,6 +724,17 @@ async fn production_catalog_dispatches_queue_and_write_tools_and_settles_actual_
             requests
                 .iter()
                 .any(|request| request.tools.iter().any(|tool| tool.name == "write"))
+        );
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.tools.iter().all(|tool| ![
+                    "queue_create",
+                    "queue_info",
+                    "queue_push",
+                    "queue_take"
+                ]
+                .contains(&tool.name.as_str())))
         );
     }
     bounded(hosted.close()).await.unwrap();

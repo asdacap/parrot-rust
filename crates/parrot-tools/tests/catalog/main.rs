@@ -10,7 +10,10 @@ use parrot_tools::{
     files::{FileToolOutcome, ImageBudget},
 };
 use serde_json::{Value, json};
-use std::sync::{Arc, atomic::Ordering};
+use std::{
+    fmt::Write,
+    sync::{Arc, atomic::Ordering},
+};
 
 const REMOVED_QUEUE_TOOLS: [&str; 4] = ["queue_create", "queue_info", "queue_push", "queue_take"];
 
@@ -87,11 +90,14 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
 
 #[tokio::test]
 async fn legacy_queue_definitions_do_not_restore_retired_tools() {
-    let overrides = "tools:\n".to_owned()
-        + &REMOVED_QUEUE_TOOLS
-            .iter()
-            .map(|name| format!("  {name}:\n    description: Legacy queue tool.\n    parameters:\n      type: object\n"))
-            .collect::<String>();
+    let mut overrides = String::from("tools:\n");
+    for name in REMOVED_QUEUE_TOOLS {
+        writeln!(
+            overrides,
+            "  {name}:\n    description: Legacy queue tool.\n    parameters:\n      type: object"
+        )
+        .unwrap();
+    }
     let fixture = Fixture::new(&overrides, true, 0);
     let snapshot = fixture.catalog.snapshot().unwrap();
     assert_eq!(snapshot.factories().len(), 28);

@@ -217,56 +217,56 @@ fn io_kind(error: &std::io::Error) -> FailureKind {
 }
 fn error_to_runtime(error: catalog::Error) -> ToolFailure {
     use parrot_tools::{agents::AgentToolError, session, tasks_queues};
-    let kind = match &error {
-        catalog::Error::File(files::FileToolError::File(error)) => match error.kind {
-            FileReadErrorKind::Denied => FailureKind::AccessDenied,
-            FileReadErrorKind::InvalidPath => FailureKind::Argument,
-            FileReadErrorKind::InvalidOperation => FailureKind::InvalidOperation,
-            FileReadErrorKind::NotSupported => FailureKind::Unexpected,
-            _ => FailureKind::Io,
-        },
-        catalog::Error::File(files::FileToolError::GlobTimeout) => FailureKind::Timeout,
-        catalog::Error::File(files::FileToolError::Template(_)) | catalog::Error::Definition(_) => {
-            FailureKind::Argument
-        }
-        catalog::Error::File(files::FileToolError::Artifact(_)) => FailureKind::Io,
-        catalog::Error::Process(error)
-        | catalog::Error::WebFetch(parrot_tools::web_fetch::FetchError::Io(error)) => {
-            io_kind(error)
-        }
-        catalog::Error::Agent(error) => match error {
-            AgentToolError::Argument(_) => FailureKind::Argument,
-            AgentToolError::Registry(_) | AgentToolError::QuestionRejected(_) => {
-                FailureKind::InvalidOperation
+    let kind =
+        match &error {
+            catalog::Error::File(files::FileToolError::File(error)) => match error.kind {
+                FileReadErrorKind::Denied => FailureKind::AccessDenied,
+                FileReadErrorKind::InvalidPath => FailureKind::Argument,
+                FileReadErrorKind::InvalidOperation => FailureKind::InvalidOperation,
+                FileReadErrorKind::NotSupported => FailureKind::Unexpected,
+                _ => FailureKind::Io,
+            },
+            catalog::Error::File(files::FileToolError::GlobTimeout) => FailureKind::Timeout,
+            catalog::Error::File(files::FileToolError::Template(_))
+            | catalog::Error::Definition(_) => FailureKind::Argument,
+            catalog::Error::File(files::FileToolError::Artifact(_)) => FailureKind::Io,
+            catalog::Error::Process(error)
+            | catalog::Error::WebFetch(parrot_tools::web_fetch::FetchError::Io(error)) => {
+                io_kind(error)
             }
-            _ => FailureKind::Unexpected,
-        },
-        catalog::Error::Session(error) => match error.kind {
-            session::FailureKind::Json
-            | session::FailureKind::Format
-            | session::FailureKind::Argument => FailureKind::Argument,
-            session::FailureKind::Unauthorized | session::FailureKind::Permission => {
-                FailureKind::AccessDenied
-            }
-            session::FailureKind::Io => FailureKind::Io,
-            session::FailureKind::InvalidOperation | session::FailureKind::InputConflict => {
-                FailureKind::InvalidOperation
-            }
-            session::FailureKind::Network => FailureKind::Http,
-            _ => FailureKind::Unexpected,
-        },
-        catalog::Error::TaskQueue(error) => match error.kind {
-            tasks_queues::FailureKind::Json
-            | tasks_queues::FailureKind::Format
-            | tasks_queues::FailureKind::Argument => FailureKind::Argument,
-            tasks_queues::FailureKind::Registry
-            | tasks_queues::FailureKind::InvalidOperation => FailureKind::InvalidOperation,
-            tasks_queues::FailureKind::Io => FailureKind::Io,
-            tasks_queues::FailureKind::Denied => FailureKind::AccessDenied,
-            _ => FailureKind::Unexpected,
-        },
-        catalog::Error::WebFetch(_) => FailureKind::Argument,
-    };
+            catalog::Error::Agent(error) => match error {
+                AgentToolError::Argument(_) => FailureKind::Argument,
+                AgentToolError::Registry(_) | AgentToolError::QuestionRejected(_) => {
+                    FailureKind::InvalidOperation
+                }
+                _ => FailureKind::Unexpected,
+            },
+            catalog::Error::Session(error) => match error.kind {
+                session::FailureKind::Json
+                | session::FailureKind::Format
+                | session::FailureKind::Argument => FailureKind::Argument,
+                session::FailureKind::Unauthorized | session::FailureKind::Permission => {
+                    FailureKind::AccessDenied
+                }
+                session::FailureKind::Io => FailureKind::Io,
+                session::FailureKind::InvalidOperation | session::FailureKind::InputConflict => {
+                    FailureKind::InvalidOperation
+                }
+                session::FailureKind::Network => FailureKind::Http,
+                _ => FailureKind::Unexpected,
+            },
+            catalog::Error::TaskQueue(error) => match error.kind {
+                tasks_queues::FailureKind::Json
+                | tasks_queues::FailureKind::Format
+                | tasks_queues::FailureKind::Argument => FailureKind::Argument,
+                tasks_queues::FailureKind::Registry
+                | tasks_queues::FailureKind::InvalidOperation => FailureKind::InvalidOperation,
+                tasks_queues::FailureKind::Io => FailureKind::Io,
+                tasks_queues::FailureKind::Denied => FailureKind::AccessDenied,
+                _ => FailureKind::Unexpected,
+            },
+            catalog::Error::WebFetch(_) => FailureKind::Argument,
+        };
     ToolFailure::new(error.to_string(), kind)
 }
 

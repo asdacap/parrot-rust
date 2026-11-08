@@ -548,7 +548,7 @@ impl Harness {
             diagnostics: Arc::new(support::Diagnostics::default()),
             retained: RetainedAgentBudget::new(32),
             lifetime: Arc::new(Signal::new()),
-            validate_child: Arc::new(|_, _| Ok(())),
+            validate_child: Arc::new(|_| Ok(())),
         });
         Self {
             histories,

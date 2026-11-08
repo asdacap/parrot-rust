@@ -1,7 +1,6 @@
 //! Source-compatible observations of owned work. Observation never settles or cancels it.
 use crate::{
-    agent_turn::services::TurnError, children::ChildRegistry,
-    task_scheduler::TaskScheduler,
+    agent_turn::services::TurnError, children::ChildRegistry, task_scheduler::TaskScheduler,
 };
 use parrot_domain::{
     contracts::{

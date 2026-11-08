@@ -65,7 +65,10 @@ impl<S: RestrictableAccessSnapshot + 'static> RuntimeTreeSnapshotSource
             ));
         }
         Ok(RuntimeTreeSnapshot {
-            agents: scopes.iter().map(|scope| scope.identity().session.clone()).collect(),
+            agents: scopes
+                .iter()
+                .map(|scope| scope.identity().session.clone())
+                .collect(),
             active_agents,
             processes,
             activity,

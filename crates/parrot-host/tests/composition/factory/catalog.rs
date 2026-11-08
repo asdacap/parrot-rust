@@ -9,7 +9,7 @@ mod fixture_support {
     // Deterministic catalog-binding fixtures, not filesystem policy or host adapters.
 
     use std::{
-        collections::{BTreeMap, VecDeque},
+        collections::BTreeMap,
         io,
         path::{Path, PathBuf},
         sync::{
@@ -34,7 +34,7 @@ mod fixture_support {
                 QuestionRequester,
             },
             paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
-            runtime::{AgentQueues, AgentRuntime, TaskController},
+            runtime::{AgentRuntime, TaskController},
             security::AccessSnapshot,
         },
         values::{
@@ -72,12 +72,7 @@ mod fixture_support {
             SessionServices, WriteTarget, WriteTargetKind,
         },
         tasks_queues::{
-            FailureKind, ToolFailure,
-            queues::{
-                CreateRequest, Direction, InfoRequest, PushRequest, QueueDiagnostic,
-                QueueDiagnostics, QueueInfo, QueueTarget, QueueToolBackend, ResolvedQueue,
-                TakeRequest, TakeResult,
-            },
+            ToolFailure,
             tasks::{TaskDetail, TaskQuery, TaskSnapshot, TaskUpdate},
         },
     };
@@ -128,12 +123,6 @@ mod fixture_support {
         pub security_id: Option<i32>,
         pub selection_id: Option<i32>,
     }
-    #[derive(Clone, Debug, Default)]
-    pub struct QueueState {
-        pub description: String,
-        pub items: VecDeque<String>,
-        pub closed: bool,
-    }
     pub struct State {
         pub calls: Vec<Call>,
         pub files: BTreeMap<PathBuf, Vec<u8>>,
@@ -142,8 +131,6 @@ mod fixture_support {
         pub checkpoints: Vec<(String, i64, String)>,
         pub reminders: BTreeMap<String, String>,
         pub progress: parrot_domain::values::progress::ProgressSnapshot,
-        pub queues: BTreeMap<String, QueueState>,
-        pub diagnostics: Vec<QueueDiagnostic>,
         pub launches: Vec<(CommandRequest, i32)>,
         pub now: Instant,
         pub image_bytes: Vec<u8>,
@@ -163,8 +150,6 @@ mod fixture_support {
                 checkpoints: Vec::new(),
                 reminders: BTreeMap::new(),
                 progress: parrot_domain::values::progress::ProgressSnapshot::new("catalog".into()),
-                queues: BTreeMap::new(),
-                diagnostics: Vec::new(),
                 launches: Vec::new(),
                 now: Instant::now(),
                 image_bytes: PNG.to_vec(),
@@ -197,21 +182,6 @@ mod fixture_support {
             MutationTarget {
                 physical_path: request.requested.clone(),
                 display_path: request.requested.to_string_lossy().into(),
-            }
-        }
-        fn queue_key(target: &QueueTarget<String>) -> String {
-            match target {
-                QueueTarget::Invoking(name) => name.clone(),
-                QueueTarget::Local(target) => target.name.clone(),
-            }
-        }
-        fn queue_info(name: &str, queue: &QueueState) -> QueueInfo {
-            QueueInfo {
-                path: format!("catalog/{name}"),
-                name: name.into(),
-                description: queue.description.clone(),
-                size: i32::try_from(queue.items.len()).unwrap(),
-                closed: queue.closed,
             }
         }
     }
@@ -799,136 +769,6 @@ mod fixture_support {
             })
         }
     }
-    impl AgentQueues for Services {
-        type CreateRequest = CreateRequest;
-        type CreateResult = QueueInfo;
-        type InfoRequest = InfoRequest<String>;
-        type InfoResult = QueueInfo;
-        type PushRequest = PushRequest<String>;
-        type PushResult = QueueInfo;
-        type TakeRequest = TakeRequest<String>;
-        type TakeResult = TakeResult;
-        type Error = ToolFailure;
-        fn create<'a>(
-            &'a self,
-            request: CreateRequest,
-            cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<QueueInfo, ToolFailure>> {
-            Box::pin(async move {
-                cancelled(cancellation)?;
-                self.record("queue_create", format!("{request:?}"), None, None);
-                let mut state = self.state.lock().unwrap();
-                let queue =
-                    state
-                        .queues
-                        .entry(request.name.clone())
-                        .or_insert_with(|| QueueState {
-                            description: request.description,
-                            ..QueueState::default()
-                        });
-                Ok(Self::queue_info(&request.name, queue))
-            })
-        }
-        fn info<'a>(
-            &'a self,
-            request: InfoRequest<String>,
-            cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<QueueInfo, ToolFailure>> {
-            Box::pin(async move {
-                cancelled(cancellation)?;
-                self.record("queue_info", format!("{request:?}"), None, None);
-                let name = Self::queue_key(&request.target);
-                let state = self.state.lock().unwrap();
-                let queue = state.queues.get(&name).ok_or_else(queue_missing)?;
-                Ok(Self::queue_info(&name, queue))
-            })
-        }
-        fn push<'a>(
-            &'a self,
-            request: PushRequest<String>,
-            cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<QueueInfo, ToolFailure>> {
-            Box::pin(async move {
-                cancelled(cancellation)?;
-                self.record("queue_push", format!("{request:?}"), None, None);
-                let name = Self::queue_key(&request.target);
-                let mut state = self.state.lock().unwrap();
-                let queue = state.queues.get_mut(&name).ok_or_else(queue_missing)?;
-                for item in request.items.into_iter().flatten() {
-                    if request.direction == Direction::Front {
-                        queue.items.push_front(item);
-                    } else {
-                        queue.items.push_back(item);
-                    }
-                }
-                queue.closed |= request.close;
-                Ok(Self::queue_info(&name, queue))
-            })
-        }
-        fn take<'a>(
-            &'a self,
-            request: TakeRequest<String>,
-            cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<TakeResult, ToolFailure>> {
-            Box::pin(async move {
-                cancelled(cancellation)?;
-                self.record("queue_take", format!("{request:?}"), None, None);
-                let name = Self::queue_key(&request.target);
-                let mut state = self.state.lock().unwrap();
-                let queue = state.queues.get_mut(&name).ok_or_else(queue_missing)?;
-                let mut items = Vec::new();
-                for _ in 0..request.count {
-                    let item = if request.direction == Direction::Back {
-                        queue.items.pop_back()
-                    } else {
-                        queue.items.pop_front()
-                    };
-                    if let Some(item) = item {
-                        items.push(item);
-                    } else {
-                        break;
-                    }
-                }
-                Ok(TakeResult {
-                    acquired: true,
-                    info: Some(Self::queue_info(&name, queue)),
-                    items,
-                })
-            })
-        }
-    }
-    fn queue_missing() -> OperationError<ToolFailure> {
-        OperationError::Failed(ToolFailure::new(
-            FailureKind::Queue,
-            "catalog queue missing",
-        ))
-    }
-    impl QueueToolBackend<String> for Services {
-        fn resolve(&self, address: &str) -> Result<ResolvedQueue<String>, ToolFailure> {
-            self.record("queue_resolve", address, None, None);
-            let (owner, name) = address.rsplit_once('/').ok_or_else(|| {
-                ToolFailure::new(
-                    FailureKind::Registry,
-                    "catalog qualified queue missing owner",
-                )
-            })?;
-            Ok(ResolvedQueue {
-                owner: owner.into(),
-                name: name.into(),
-            })
-        }
-        fn session_id(&self) -> &str {
-            "catalog-session"
-        }
-        fn resolved_session_id<'a>(&self, _: &'a String) -> &'a str {
-            "catalog-session"
-        }
-    }
-    impl QueueDiagnostics for Services {
-        fn record(&self, event: QueueDiagnostic) {
-            self.state.lock().unwrap().diagnostics.push(event);
-        }
-    }
     impl Clock for Services {
         fn now(&self) -> Instant {
             self.state.lock().unwrap().now
@@ -1297,9 +1137,6 @@ mod fixture_binding {
                     tasks: shared.clone(),
                     filesystem: shared.clone(),
                     templates: templates.clone(),
-                    queues: shared.clone(),
-                    clock: shared.clone(),
-                    diagnostics: shared,
                 },
                 &definitions,
             )
@@ -1449,8 +1286,8 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
             .collect::<Vec<_>>(),
         parrot_tools::catalog::BUILTIN_NAMES
     );
-    assert_eq!(first.tools.len(), 32);
-    assert_eq!(first.supported.iter().filter(|value| **value).count(), 31);
+    assert_eq!(first.tools.len(), 28);
+    assert_eq!(first.supported.iter().filter(|value| **value).count(), 27);
     for (index, (left, right)) in first.tools.iter().zip(&second.tools).enumerate() {
         match (left, right) {
             (ToolHandle::Ordinary(left), ToolHandle::Ordinary(right)) => {

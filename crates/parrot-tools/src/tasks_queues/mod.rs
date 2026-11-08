@@ -109,40 +109,4 @@ impl InputObject {
                 .map_err(|error| ToolFailure::new(FailureKind::Json, error.to_string())),
         }
     }
-
-    pub(crate) fn boolean(&self, name: &str) -> Result<Option<bool>, ToolFailure> {
-        match self.raw(name) {
-            None | Some("null") => Ok(None),
-            Some(value) => serde_json::from_str(value)
-                .map(Some)
-                .map_err(|error| ToolFailure::new(FailureKind::Json, error.to_string())),
-        }
-    }
-
-    pub(crate) fn integer(&self, name: &str) -> Result<Option<i64>, ToolFailure> {
-        match self.raw(name) {
-            None | Some("null") => Ok(None),
-            Some(value) => serde_json::from_str(value)
-                .map(Some)
-                .map_err(|error| ToolFailure::new(FailureKind::Json, error.to_string())),
-        }
-    }
-
-    pub(crate) fn integer32(&self, name: &str) -> Result<Option<i32>, ToolFailure> {
-        match self.raw(name) {
-            None | Some("null") => Ok(None),
-            Some(value) => serde_json::from_str(value)
-                .map(Some)
-                .map_err(|error| ToolFailure::new(FailureKind::Json, error.to_string())),
-        }
-    }
-
-    pub(crate) fn strings(&self, name: &str) -> Result<Option<Vec<Option<String>>>, ToolFailure> {
-        match self.raw(name) {
-            None | Some("null") => Ok(None),
-            Some(value) => serde_json::from_str(value)
-                .map(Some)
-                .map_err(|error| ToolFailure::new(FailureKind::Json, error.to_string())),
-        }
-    }
 }

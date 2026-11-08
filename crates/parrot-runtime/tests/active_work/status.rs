@@ -1269,7 +1269,7 @@ async fn real_root(
         diagnostics: Arc::new(support::Diagnostics::default()),
         retained: parrot_domain::values::accounting::RetainedAgentBudget::new(8),
         lifetime: Arc::new(Signal::new()),
-        validate_child: Arc::new(|_, _| Ok(())),
+        validate_child: Arc::new(|_| Ok(())),
     });
     let identity = AgentIdentity::root(support::id(), "root".into(), catalog(""));
     let history = histories.history(&identity);
