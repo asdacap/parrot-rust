@@ -687,6 +687,10 @@ async fn source_monitor() {
     source_preserved(InputSource::INPUT_SOURCE_MONITOR).await;
 }
 #[tokio::test]
+async fn source_process() {
+    source_preserved(InputSource::INPUT_SOURCE_PROCESS).await;
+}
+#[tokio::test]
 async fn legacy_source_default_decode() {
     let admitted = InputAdmitted::parse_from_bytes(&[0x20, 0x01]).unwrap();
     // source-assertion-line: 285

@@ -28,6 +28,71 @@ fn summary(owner: &str, fragment: &str, completed: bool) -> wire::Event {
 }
 
 #[test]
+fn tool_path_aliases_flow_from_events_to_live_and_replayed_labels_per_agent() {
+    for replaying in [false, true] {
+        let mut presenter = EnhancedSessionPresenter::new(200, false, replaying);
+        presenter.set_session("build", "provider/model").unwrap();
+        presenter.observe(&start("root")).unwrap();
+        presenter.observe(&child("root")).unwrap();
+        for (agent, root) in [("root", "/remote/main"), ("child", "/remote/worker")] {
+            for name in ["read", "write", "edit"] {
+                let arguments = serde_json::json!({"path": format!("{root}/blobs/output.dat"), "offset":1, "limit":90}).to_string();
+                presenter
+                    .observe(&event(
+                        agent,
+                        Payload::ToolCallChunk(wire::ToolCallChunk {
+                            tool_call_id: name.into(),
+                            tool_name: name.into(),
+                            arguments_fragment: arguments,
+                            ..Default::default()
+                        }),
+                    ))
+                    .unwrap();
+                let started = presenter
+                    .observe(&event(
+                        agent,
+                        Payload::ToolStarted(wire::ToolStarted {
+                            tool_call_id: name.into(),
+                            tool_name: name.into(),
+                            path_variables: [("AGENT_HISTORY_DIR".into(), root.into())]
+                                .into_iter()
+                                .collect(),
+                            ..Default::default()
+                        }),
+                    ))
+                    .unwrap();
+                let label = if name == "read" { "read L1-L90" } else { name };
+                if !replaying {
+                    let output = live(&started.live, 200);
+                    assert!(
+                        output.contains(&format!("{label} $AGENT_HISTORY_DIR/blobs/output.dat")),
+                        "{output}"
+                    );
+                    assert!(!output.contains(root), "{output}");
+                }
+                let finished = presenter
+                    .observe(&event(
+                        agent,
+                        Payload::ToolFinished(wire::ToolFinished {
+                            tool_call_id: name.into(),
+                            tool_name: name.into(),
+                            result: Some(String::new()),
+                            ..Default::default()
+                        }),
+                    ))
+                    .unwrap();
+                let output = commits(&finished.commits, 200);
+                assert!(
+                    output.contains(&format!("{label} $AGENT_HISTORY_DIR/blobs/output.dat")),
+                    "{output}"
+                );
+                assert!(!output.contains(root), "{output}");
+            }
+        }
+    }
+}
+
+#[test]
 fn reasoning_rows_flush_before_streaming_answers_and_preserve_terminal_order() {
     for complete in [false, true] {
         let mut presenter = configured(80);
@@ -388,6 +453,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
             scope: wire::ListedSkillScope::SKILL_SCOPE_USER.into(),
             ..Default::default()
         }],
+        &[],
     ));
     let presenters: Vec<Arc<dyn ToolPresenter>> = vec![
         Arc::new(ReadToolPresenter::new(paths.clone())),
@@ -458,7 +524,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
         .unwrap();
     assert_eq!(read.style().start(), "\x1b[48;5;236m\x1b[36m");
     clock.store(12, Ordering::Release);
-    paths.replace_root_locations(Vec::new());
+    paths.replace_context(Vec::new(), &[]);
     let after = presenter.snapshot().unwrap();
     assert!(
         live(&after, 200).contains("running 12s"),
@@ -579,6 +645,51 @@ fn replay_restores_pending_steers_and_commits_only_promoted_ones() {
     assert!(live(&promoted.live, 120).contains("◇ pending steer"));
     let resized = presenter.resize(20).unwrap();
     assert!(live(&resized.live, 20).contains("pending steer"));
+}
+
+#[test]
+fn process_completions_use_distinct_icons_in_live_output_and_replay() {
+    let content = "Shell process 'work' completed.\nProcess exited with code 0\n[stdout]\npayload";
+    for replaying in [false, true] {
+        for (source, pending_icon, committed_icon) in [
+            (wire::InputSource::INPUT_SOURCE_PROCESS, "⚙", "⚙"),
+            (wire::InputSource::INPUT_SOURCE_UNSPECIFIED, "◇", "◆"),
+        ] {
+            let mut presenter = EnhancedSessionPresenter::new(120, false, replaying);
+            presenter.observe(&start("root")).unwrap();
+            let admitted = presenter
+                .observe(&event(
+                    "root",
+                    Payload::InputAdmitted(wire::InputAdmitted {
+                        input_id: "completion".into(),
+                        content: content.into(),
+                        delivery: wire::Delivery::DELIVERY_STEER.into(),
+                        source: source.into(),
+                        ..Default::default()
+                    }),
+                ))
+                .unwrap();
+            assert!(admitted.commits.is_empty());
+            assert!(
+                live(&admitted.live, 120)
+                    .contains(&format!("{pending_icon} {}", content.replace('\n', "\n  ")))
+            );
+            let promotion = event(
+                "root",
+                Payload::InputPromoted(wire::InputPromoted {
+                    input_id: "completion".into(),
+                    ..Default::default()
+                }),
+            );
+            let promoted = presenter.observe(&promotion).unwrap();
+            assert_eq!(
+                commits(&promoted.commits, 120),
+                format!("{committed_icon} {}\r\n", content.replace('\n', "\r\n  "))
+            );
+            assert!(!live(&promoted.live, 120).contains("Shell process"));
+            assert!(presenter.observe(&promotion).unwrap().commits.is_empty());
+        }
+    }
 }
 
 #[test]

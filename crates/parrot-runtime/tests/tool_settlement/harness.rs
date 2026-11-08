@@ -234,6 +234,12 @@ impl Harness {
         );
         let tools = Arc::new(
             ToolSettlement::new(ToolSettlementConfig {
+                path_variables: [(
+                    "AGENT_HISTORY_DIR".into(),
+                    fixture.path.display().to_string(),
+                )]
+                .into_iter()
+                .collect(),
                 factory: factory.clone(),
                 templates: templates.clone(),
                 output_blobs: blobs,

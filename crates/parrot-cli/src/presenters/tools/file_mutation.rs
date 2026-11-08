@@ -21,7 +21,7 @@ impl ToolPresenter for FileMutationToolPresenter {
         frame: usize,
     ) -> PresenterResult<Presentation> {
         Ok(Presentation::Tool(ToolReport::live(
-            format!("{} {}", self.tool_name, path(&call.arguments_json)?),
+            format!("{} {}", self.tool_name, format_path(call)?),
             ToolBlock::empty(),
             self.metadata(),
             frame,
@@ -33,7 +33,7 @@ impl ToolPresenter for FileMutationToolPresenter {
         terminal: &ToolTerminalPresentation,
     ) -> PresenterResult<Option<Presentation>> {
         let status = terminal.resolve_status();
-        let path = path(&call.arguments_json)?;
+        let path = format_path(call)?;
         let block = if matches!(
             status,
             ToolTerminalStatus::Errored | ToolTerminalStatus::ReportedFailure
@@ -71,11 +71,12 @@ impl ToolPresenter for FileMutationToolPresenter {
         }))
     }
 }
-fn path(json: &str) -> PresenterResult<String> {
-    let value: Value = serde_json::from_str(json)?;
-    Ok(value
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .into())
+fn format_path(call: &ToolCallPresentation) -> PresenterResult<String> {
+    let value: Value = serde_json::from_str(&call.arguments_json)?;
+    Ok(call.shorten_path(
+        value
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    ))
 }

@@ -26,7 +26,7 @@ pub struct CompletionMessage {
     pub input_source: InputSource,
 }
 
-/// A completion is a steer input with unspecified input source, not a monitor event.
+/// A completion is a process-sourced steer input, not a monitor event.
 pub trait CompletionSink: Send + Sync {
     fn send<'a>(
         &'a self,
@@ -515,7 +515,7 @@ impl ManagedShellProcess {
                 text,
                 activity_description: format!("process {} completion", self.name()),
                 delivery: Delivery::DELIVERY_STEER,
-                input_source: InputSource::INPUT_SOURCE_UNSPECIFIED,
+                input_source: InputSource::INPUT_SOURCE_PROCESS,
             };
             if self
                 .sink

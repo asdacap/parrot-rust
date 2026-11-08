@@ -198,10 +198,10 @@ fn append_children(
 ) {
     for (index, node) in nodes.iter().enumerate() {
         let last = index + 1 == nodes.len();
-        let descendants = format!("{ancestors}{}", if last { "    " } else { "│   " });
+        let descendants = format!("{ancestors}{}", if last { "  " } else { "│ " });
         append_node(
             node,
-            &format!("{ancestors}{} ", if last { "└──" } else { "├──" }),
+            &format!("{ancestors}{} ", if last { "└" } else { "├" }),
             agent_lines,
             rows,
         );

@@ -259,9 +259,13 @@ impl EnhancedSessionPresenter {
                 {
                     let pending = self.pending_steers.remove(index);
                     self.flush_reasoning_before_output(&published.agent_session_id, &mut update)?;
-                    update
-                        .commits
-                        .push(Arc::new(ImmediateScrollbackValue::user(&pending.content)));
+                    let value = if pending.source == wire::InputSource::INPUT_SOURCE_PROCESS.into()
+                    {
+                        ImmediateScrollbackValue::process(&pending.content)
+                    } else {
+                        ImmediateScrollbackValue::user(&pending.content)
+                    };
+                    update.commits.push(Arc::new(value));
                 }
             }
             Some(Payload::InputCanceled(input)) if foreground => {
@@ -398,9 +402,17 @@ impl EnhancedSessionPresenter {
         let mut items = self.turn.snapshot();
         items.extend(self.activity.snapshot()?);
         for pending in &self.pending_steers {
+            let icon = if pending.source == wire::InputSource::INPUT_SOURCE_PROCESS.into() {
+                "⚙"
+            } else {
+                "◇"
+            };
             items.push(Arc::new(Presentation::Lines {
                 lines: TerminalText::layout_words_hanging(
-                    &format!("◇ {} (pending)", TerminalText::sanitize(&pending.content)),
+                    &format!(
+                        "{icon} {} (pending)",
+                        TerminalText::sanitize(&pending.content)
+                    ),
                     self.columns,
                     "  ",
                 ),

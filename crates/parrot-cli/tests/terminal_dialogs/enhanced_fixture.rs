@@ -511,6 +511,10 @@ impl Fixture {
         .await;
     }
     pub async fn finish_read(&self, session: &str, id: &str) {
+        self.finish_read_with_result(session, id, "1: fixture")
+            .await;
+    }
+    pub async fn finish_read_with_result(&self, session: &str, id: &str, result: &str) {
         self.publish(
             session,
             event(
@@ -518,7 +522,7 @@ impl Fixture {
                 wire::event::Payload::ToolFinished(wire::ToolFinished {
                     tool_call_id: id.into(),
                     tool_name: "read".into(),
-                    result: Some("1: fixture".into()),
+                    result: Some(result.into()),
                     ..Default::default()
                 }),
             ),

@@ -1,9 +1,10 @@
 use crate::presenters::*;
 use crate::terminal_layout::ToolYamlFormatter;
-use parrot_domain::protocol::messages::parrot::{ListedSkillScope, SkillRootLocation};
+use parrot_domain::protocol::messages::parrot::{ListedSkillScope, Skill, SkillRootLocation};
 use parrot_runtime::prompt_context::normalize_skill_path;
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     path::Path,
     sync::{Arc, RwLock},
 };
@@ -11,29 +12,90 @@ use std::{
 #[derive(Default)]
 pub struct SkillReadPathFormatter {
     working_directory: String,
-    root_locations: RwLock<Vec<SkillRootLocation>>,
+    context: RwLock<SkillReadContext>,
 }
 impl SkillReadPathFormatter {
-    pub fn new(working_directory: String, root_locations: Vec<SkillRootLocation>) -> Self {
+    pub fn new(
+        working_directory: String,
+        root_locations: Vec<SkillRootLocation>,
+        skills: &[Skill],
+    ) -> Self {
         Self {
             working_directory,
-            root_locations: RwLock::new(root_locations),
+            context: RwLock::new(SkillReadContext::new(root_locations, skills)),
         }
     }
-    pub fn replace_root_locations(&self, root_locations: Vec<SkillRootLocation>) {
+    pub fn replace_context(&self, root_locations: Vec<SkillRootLocation>, skills: &[Skill]) {
         *self
-            .root_locations
+            .context
             .write()
-            .unwrap_or_else(|error| error.into_inner()) = root_locations;
+            .unwrap_or_else(|error| error.into_inner()) =
+            SkillReadContext::new(root_locations, skills);
     }
     fn shorten(&self, path: &str) -> Option<String> {
         let path = normalize_skill_path(path, Some(&self.working_directory)).ok()?;
-        let locations = self
-            .root_locations
+        self.context
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .shorten(&path)
+    }
+    fn format_skill_read(&self, path: &str, result: &str) -> Option<String> {
+        let normalized = normalize_skill_path(path, Some(&self.working_directory)).ok()?;
+        let context = self
+            .context
             .read()
             .unwrap_or_else(|error| error.into_inner());
+        let name = context.names.get(&normalized)?;
+        let display_path = context.shorten(&normalized).unwrap_or_else(|| path.into());
+        let mut range = None;
+        for line in result.lines() {
+            let Some(number) = line
+                .split_once(": ")
+                .and_then(|(number, _)| number.parse::<u64>().ok())
+                .filter(|number| *number > 0)
+            else {
+                break;
+            };
+            match &mut range {
+                None => range = Some((number, number)),
+                Some((_, last)) if last.checked_add(1) == Some(number) => *last = number,
+                Some(_) => break,
+            }
+        }
+        Some(match range {
+            Some((first, last)) => {
+                format!("read skill {name} ({display_path} L{first}-L{last})")
+            }
+            None => format!("read skill {name} ({display_path})"),
+        })
+    }
+}
+
+#[derive(Default)]
+struct SkillReadContext {
+    root_locations: Vec<SkillRootLocation>,
+    names: HashMap<String, String>,
+}
+impl SkillReadContext {
+    fn new(root_locations: Vec<SkillRootLocation>, skills: &[Skill]) -> Self {
+        let names = skills
+            .iter()
+            .filter_map(|skill| {
+                let path = normalize_skill_path(&skill.path, None).ok()?;
+                (Path::new(&path)
+                    .file_name()
+                    .is_some_and(|name| name == "SKILL.md"))
+                .then(|| (path, skill.name.clone()))
+            })
+            .collect();
+        Self {
+            root_locations,
+            names,
+        }
+    }
+    fn shorten(&self, path: &str) -> Option<String> {
         let mut matched: Option<(usize, String)> = None;
-        for location in locations.iter() {
+        for location in &self.root_locations {
             let alias = match location.scope.enum_value() {
                 Ok(ListedSkillScope::SKILL_SCOPE_REPO) => "$REPO_SKILLS",
                 Ok(ListedSkillScope::SKILL_SCOPE_USER) => "$USER_SKILLS",
@@ -43,7 +105,7 @@ impl SkillReadPathFormatter {
             let Ok(root) = normalize_skill_path(&location.path, None) else {
                 continue;
             };
-            let Ok(suffix) = Path::new(&path).strip_prefix(&root) else {
+            let Ok(suffix) = Path::new(path).strip_prefix(&root) else {
                 continue;
             };
             if matched
@@ -81,7 +143,9 @@ impl ReadToolPresenter {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let skill_path = self.skill_paths.shorten(path);
-        let display_path = skill_path.as_deref().unwrap_or(path);
+        let display_path = skill_path
+            .as_deref()
+            .map_or_else(|| call.shorten_path(path), str::to_owned);
         let offset = value.get("offset").and_then(Value::as_i64);
         let limit = value.get("limit").and_then(Value::as_i64);
         let label = if offset.is_some() || limit.is_some() {
@@ -136,6 +200,16 @@ impl ToolPresenter for ReadToolPresenter {
     ) -> PresenterResult<Option<Presentation>> {
         let (mut label, metadata) = self.describe_call(call)?;
         let status = terminal.resolve_status();
+        if status == ToolTerminalStatus::Succeeded && terminal.result_present {
+            let value: Value = serde_json::from_str(&call.arguments_json)?;
+            let path = value
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if let Some(summary) = self.skill_paths.format_skill_read(path, &terminal.result) {
+                label = summary;
+            }
+        }
         let block = if matches!(
             status,
             ToolTerminalStatus::Errored | ToolTerminalStatus::ReportedFailure

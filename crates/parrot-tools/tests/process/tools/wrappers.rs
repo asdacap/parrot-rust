@@ -1025,7 +1025,7 @@ async fn yielded_exec_delivers_real_completion_and_generates_an_omitted_name() {
         format!("process {} completion", yielded.name)
     );
     assert_eq!(message.delivery, Delivery::DELIVERY_STEER);
-    assert_eq!(message.input_source, InputSource::INPUT_SOURCE_UNSPECIFIED);
+    assert_eq!(message.input_source, InputSource::INPUT_SOURCE_PROCESS);
     assert!(message.text.starts_with(&format!(
         "Shell process '{}' completed.\nProcess exited with code 7 after ",
         yielded.name
@@ -1466,10 +1466,7 @@ async fn monitor_case(arguments: Value, interrupt: bool, expected: &[&str]) {
         panic!("monitor terminal row was not ordinary completion")
     };
     assert_eq!(completion.delivery, Delivery::DELIVERY_STEER);
-    assert_eq!(
-        completion.input_source,
-        InputSource::INPUT_SOURCE_UNSPECIFIED
-    );
+    assert_eq!(completion.input_source, InputSource::INPUT_SOURCE_PROCESS);
     assert_eq!(completion.process_name, "watch");
     assert!(fixture.sink.failures.lock().unwrap().is_empty());
     assert!(fixture.owner.active().await.is_empty());

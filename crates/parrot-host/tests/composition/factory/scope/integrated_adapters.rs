@@ -2,7 +2,7 @@
 //! a naturally completing in-memory execution are synthetic, not OS/security proof.
 use super::*;
 use parrot_domain::contracts::runtime::TaskController;
-use parrot_domain::protocol::messages::parrot::Delivery;
+use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
 use parrot_domain::values::{
     agent_tasks::ExecutionStatus,
     progress::{Progress, ProgressUpdate},
@@ -555,6 +555,19 @@ async fn retained_wait_uses_actual_process_completion_and_live_scoped_status() {
         }
     })
     .await;
+    let events = fixture.user().lease.events.replay().await.unwrap();
+    let completion = events
+        .iter()
+        .find(|event| {
+            event.has_input_admitted()
+                && event
+                    .input_admitted()
+                    .content
+                    .starts_with("Shell process 'natural-shell' completed.")
+        })
+        .unwrap()
+        .input_admitted();
+    assert_eq!(completion.source, InputSource::INPUT_SOURCE_PROCESS.into());
     bounded(hosted.close()).await.unwrap();
     assert!(source.active().is_empty());
 }

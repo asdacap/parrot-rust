@@ -97,6 +97,7 @@ impl SlashCommandCompletion {
 pub struct SkillCompletion {
     client: WebClient,
     state: SkillCompletionState,
+    catalog: Vec<Skill>,
     root_locations: Vec<SkillRootLocation>,
 }
 
@@ -105,12 +106,17 @@ impl SkillCompletion {
         Self {
             client,
             state: SkillCompletionState::default(),
+            catalog: Vec::new(),
             root_locations: Vec::new(),
         }
     }
 
     pub fn root_locations(&self) -> &[SkillRootLocation] {
         &self.root_locations
+    }
+
+    pub fn list_catalog_skills(&self) -> &[Skill] {
+        &self.catalog
     }
 
     pub fn skills(&self) -> &[Skill] {
@@ -146,10 +152,12 @@ impl SkillCompletion {
         match response {
             Ok(listed) => {
                 self.state.replace_catalog(&listed.skills);
+                self.catalog = listed.skills;
                 self.root_locations = listed.root_locations;
             }
             Err(SlashFailure::Rpc(_)) => {
                 self.state.replace_catalog(&[]);
+                self.catalog.clear();
                 self.root_locations.clear();
             }
             Err(failure) => return Err(failure),

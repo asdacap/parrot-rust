@@ -34,6 +34,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
             started.set_tool_started(ToolStarted {
                 tool_call_id: call.id.clone(),
                 tool_name: call.name.clone(),
+                path_variables: self.config.path_variables.clone().into_iter().collect(),
                 ..ToolStarted::new()
             });
             history
