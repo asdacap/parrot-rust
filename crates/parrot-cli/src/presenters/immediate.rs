@@ -10,6 +10,7 @@ pub struct ImmediateScrollbackValue {
     lines: Vec<String>,
     muted: bool,
     layout: ScrollbackLayout,
+    prefix: &'static str,
 }
 
 impl ImmediateScrollbackValue {
@@ -18,6 +19,7 @@ impl ImmediateScrollbackValue {
             lines,
             muted: false,
             layout: ScrollbackLayout::Compact,
+            prefix: "",
         }
     }
     pub fn muted(lines: Vec<String>) -> Self {
@@ -25,6 +27,7 @@ impl ImmediateScrollbackValue {
             lines,
             muted: true,
             layout: ScrollbackLayout::Compact,
+            prefix: "",
         }
     }
     pub fn user(text: &str) -> Self {
@@ -34,6 +37,15 @@ impl ImmediateScrollbackValue {
             lines: vec![text],
             muted: false,
             layout: ScrollbackLayout::User,
+            prefix: "◆ ",
+        }
+    }
+    pub(crate) fn process(text: &str) -> Self {
+        Self {
+            lines: vec![text.into()],
+            muted: false,
+            layout: ScrollbackLayout::User,
+            prefix: "⚙ ",
         }
     }
     pub fn assistant(text: &str) -> Self {
@@ -41,6 +53,7 @@ impl ImmediateScrollbackValue {
             lines: vec![text.into()],
             muted: false,
             layout: ScrollbackLayout::Assistant,
+            prefix: "● ",
         }
     }
 }
@@ -59,7 +72,7 @@ impl ScrollbackItem for ImmediateScrollbackValue {
         match self.layout {
             ScrollbackLayout::User | ScrollbackLayout::Assistant => {
                 let user = self.layout == ScrollbackLayout::User;
-                let prefix = if user { "◆ " } else { "● " };
+                let prefix = self.prefix;
                 let clean = TerminalText::sanitize(&self.lines[0]);
                 let clean = clean.trim_end_matches(['\r', '\n']);
                 let style = TerminalStyle::new(if !context.color {
