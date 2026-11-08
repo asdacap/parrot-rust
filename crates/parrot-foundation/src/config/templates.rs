@@ -2,6 +2,37 @@ use super::node::{Node, Style, mapping, validate_keys};
 use super::{ConfigError, Result};
 use std::collections::BTreeMap;
 
+const BUILTIN_SYSTEM_PROMPTS: [(&str, &str); 7] = [
+    (
+        "system-prompts/base.md",
+        include_str!("../../../../assets/config/system-prompts/base.md"),
+    ),
+    (
+        "system-prompts/delegation.md",
+        include_str!("../../../../assets/config/system-prompts/delegation.md"),
+    ),
+    (
+        "system-prompts/agent-tasks.md",
+        include_str!("../../../../assets/config/system-prompts/agent-tasks.md"),
+    ),
+    (
+        "system-prompts/subagent-patterns.md",
+        include_str!("../../../../assets/config/system-prompts/subagent-patterns.md"),
+    ),
+    (
+        "system-prompts/behavior-guidelines.md",
+        include_str!("../../../../assets/config/system-prompts/behavior-guidelines.md"),
+    ),
+    (
+        "system-prompts/markdown-reading.md",
+        include_str!("../../../../assets/config/system-prompts/markdown-reading.md"),
+    ),
+    (
+        "system-prompts/git-ethics.md",
+        include_str!("../../../../assets/config/system-prompts/git-ethics.md"),
+    ),
+];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TemplateSpec {
     pub path: String,
@@ -47,7 +78,26 @@ pub fn read_system_prompts(root: &Node) -> Result<BTreeMap<String, String>> {
             })?;
         let path = format!("system_prompts.{key}");
         let wrapper = Node::mapping(vec![(Node::scalar("value"), value.clone())]);
-        prompts.insert(key.to_owned(), nonempty_scalar(&wrapper, "value", &path)?);
+        let text = nonempty_scalar(&wrapper, "value", &path)?;
+        let text = if let Some(reference) = text.strip_prefix("@builtin:") {
+            let resolved = BUILTIN_SYSTEM_PROMPTS
+                .iter()
+                .find_map(|(name, text)| (*name == reference).then_some(*text))
+                .ok_or_else(|| {
+                    ConfigError::invalid_data(format!(
+                        "{path}: unknown built-in system prompt reference {text:?}"
+                    ))
+                })?;
+            if resolved.trim().is_empty() {
+                return Err(ConfigError::invalid_data(format!(
+                    "{path} must be a non-empty string"
+                )));
+            }
+            resolved.to_owned()
+        } else {
+            text
+        };
+        prompts.insert(key.to_owned(), text);
     }
     Ok(prompts)
 }
