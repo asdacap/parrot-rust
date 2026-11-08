@@ -410,7 +410,7 @@ impl EnhancedSessionPresenter {
             let lines = if pending.source == wire::InputSource::INPUT_SOURCE_UNSPECIFIED.into() {
                 TerminalText::layout_words_hanging(
                     &format!(
-                        "{icon} {} (pending)",
+                        "{icon} {} (steer pending)",
                         TerminalText::sanitize(&pending.content)
                     ),
                     self.columns,
@@ -424,7 +424,7 @@ impl EnhancedSessionPresenter {
                     .find(|line| !line.is_empty())
                     .unwrap_or("Notification received");
                 let summary = TerminalText::sanitize(summary);
-                let suffix = " (pending)";
+                let suffix = " (steer pending)";
                 let width = self
                     .columns
                     .saturating_sub(TerminalText::width(icon) + 1 + suffix.len());

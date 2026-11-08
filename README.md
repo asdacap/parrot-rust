@@ -183,7 +183,7 @@ listed in [.github/workflows/check.yml](.github/workflows/check.yml).
 ### Steering a running agent
 
 In interactive chat, messages submitted while the agent is busy stay in the live
-buffer as `◇ … (pending)`. They move to scrollback as `◆ …` only when the agent
+buffer as `◇ … (steer pending)`. They move to scrollback as `◆ …` only when the agent
 takes them into its conversation at the next turn boundary. A new response or a
 turn ending alone does not mark a pending steer as consumed.
 
