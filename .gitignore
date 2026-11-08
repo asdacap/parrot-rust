@@ -1,4 +1,5 @@
 .worktrees
+.tmp
 /web/dist/
 /web/node_modules/
 .tmp

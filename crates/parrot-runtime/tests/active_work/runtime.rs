@@ -2,6 +2,7 @@
 //! The synthetic process observer is a domain port, not production OS-adapter proof.
 use super::support;
 
+use parrot_core::ProviderResponse;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -235,21 +236,65 @@ impl AgentAskTemplates for AskTemplates {
     }
 }
 #[derive(Default)]
-struct CallbackBinding(Mutex<Option<Arc<SessionCompletion<Publisher>>>>);
-impl TurnCompletion<Security> for CallbackBinding {
-    fn complete<'a>(
+struct CallbackBinding(Mutex<Option<Arc<dyn CompletionStateSource>>>);
+impl CompletionStateSource for CallbackBinding {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        candidate: &'a CompletionCandidate<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
-            let callback = self
+            let source = self
                 .0
                 .lock()
                 .unwrap()
                 .clone()
-                .expect("fixture callback must bind before admission");
-            callback.complete(candidate, cancellation).await
+                .expect("fixture completion source must bind before admission");
+            source.get_pending_ask_reminder(cancellation).await
+        })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            let source = self
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("fixture completion source must bind before admission");
+            source.get_active_work_reminder(cancellation).await
+        })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            let source = self
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("fixture completion source must bind before admission");
+            source.get_exit_reminder(cancellation).await
+        })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            let source = self
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("fixture completion source must bind before admission");
+            source
+                .record_completion_feedback(feedback, cancellation)
+                .await
         })
     }
 }
@@ -457,7 +502,7 @@ impl ScopeFactory<Security> for Factory {
                 skills: Arc::new(Skills),
                 context: self.histories.controller(history.clone()),
                 status: Arc::new(Status),
-                completions: vec![callback.clone()],
+                completion_sources: vec![callback.clone()],
                 templates: templates(),
                 reminders,
                 output: Arc::new(support::Output::default()),
@@ -778,20 +823,24 @@ async fn owned_queues_block_only_when_populated_for_all_four_closed_empty_combin
                                 .contains("owned-work (remaining items: 1)")
                             && message.content().contains("even when asked to stop")
                     }));
-                    assert!(
-                        !requests[1]
+                    assert_eq!(
+                        requests[1]
                             .messages
                             .iter()
-                            .any(|message| message.role == sessions::Role::Assistant)
+                            .filter(|message| message.role == sessions::Role::Assistant)
+                            .count(),
+                        1
                     );
                 }
-                assert!(
+                assert_eq!(
                     built
                         .events()
                         .await
                         .iter()
-                        .all(|event| !event.has_agent_notice()
-                            || event.agent_notice().kind != "active_work_reminder")
+                        .filter(|event| event.has_agent_notice()
+                            && event.agent_notice().kind == "active_work_reminder")
+                        .count(),
+                    1
                 );
                 built
                     .queues
@@ -821,7 +870,7 @@ async fn owned_queues_block_only_when_populated_for_all_four_closed_empty_combin
                     .iter()
                     .filter(|entry| entry.message.role == MessageRole::Assistant)
                     .count(),
-                1
+                if populated { 2 } else { 1 }
             );
             let jsonl = std::fs::read_to_string(
                 h.histories
@@ -1019,7 +1068,7 @@ async fn automatic_direct_child_completion_restarts_parent_once_with_one_active_
             .iter()
             .filter(|entry| entry.message.role == MessageRole::Assistant)
             .count(),
-        2
+        3
     );
     h.close().await;
 }
@@ -1220,7 +1269,7 @@ async fn reminder_changed_after_construction_retains_candidate_and_clearing_perm
 }
 
 #[tokio::test]
-async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidate() {
+async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with_one_candidate() {
     let h = Harness::new();
     let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
@@ -1255,17 +1304,33 @@ async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidat
     gates[0].open();
     gates[1].entered().await;
     assert_eq!(root.endings().await, 0);
-    assert_eq!(root.tasks.observations.load(Ordering::SeqCst), 0);
+    assert_eq!(root.tasks.observations.load(Ordering::SeqCst), 1);
     {
         let requests = root.provider.requests.lock().unwrap();
-        assert!(
-            requests[1]
-                .messages
-                .iter()
-                .any(|message| message.role == sessions::Role::System
+        let messages = &requests[1].messages;
+        let ask = messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::System
                     && message.content()
-                        == "Pending asks:\n- alpha\n- zeta\nReply before finishing.")
-        );
+                        == "Pending asks:\n- alpha\n- zeta\nReply before finishing."
+            })
+            .unwrap();
+        let work = messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::System
+                    && message.content().contains("remaining (remaining items: 1)")
+            })
+            .unwrap();
+        let exit = messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::System
+                    && message.content().contains("do not finish")
+            })
+            .unwrap();
+        assert!(ask < work && work < exit);
         assert_eq!(
             requests[1]
                 .messages
@@ -1285,9 +1350,25 @@ async fn pending_asks_precede_active_work_and_exit_reminders_and_retain_candidat
         1
     );
     assert_eq!(events.iter().filter(|event| event.has_agent_notice() && event.agent_notice().kind == "exit_reminder").count(), 0);
+    let mut notice_kinds = Vec::new();
     while let Some(event) = subscription.try_next() {
-        assert!(!event.has_agent_notice() || event.agent_notice().kind != "active_work_reminder");
+        if event.has_agent_notice()
+            && matches!(
+                event.agent_notice().kind.as_str(),
+                "pending_ask_reminder" | "active_work_reminder" | "exit_reminder"
+            )
+        {
+            notice_kinds.push(event.agent_notice().kind.clone());
+        }
     }
+    assert_eq!(
+        notice_kinds,
+        [
+            "pending_ask_reminder",
+            "active_work_reminder",
+            "exit_reminder"
+        ]
+    );
     let reply = " yes\nplain-text reply ";
     for request in root.asks.pending() {
         assert_eq!(request.message, "Choose");
@@ -1507,14 +1588,6 @@ async fn duplicate_input_does_not_wake_wait_but_new_input_wakes_and_promotes_onc
     h.close().await;
 }
 
-fn candidate(root: &Built) -> CompletionCandidate<Security> {
-    CompletionCandidate {
-        session_id: root.history.agent_session_id().into(),
-        message_id: id(),
-        assistant: sessions::Message::assistant("candidate assistant", vec![]),
-        selection: support::selection(&root.provider, "first", "build", 0xff),
-    }
-}
 struct RejectPublication {
     history: AgentHistoryView,
     cancel: bool,
@@ -1556,7 +1629,7 @@ impl EventPublisher for RejectPublication {
 }
 
 #[tokio::test]
-async fn retained_callback_publication_failure_or_cancellation_preserves_committed_notice_candidate_and_prompt()
+async fn retained_feedback_publication_failure_or_cancellation_preserves_committed_notice_candidate_and_prompt()
  {
     for cancel in [false, true] {
         let h = Harness::new();
@@ -1581,7 +1654,21 @@ async fn retained_callback_publication_failure_or_cancellation_preserves_committ
             broker: root.broker.clone(),
             publisher: publisher.clone() as Arc<Publisher>,
         };
-        let result = callback.complete(&candidate(&root), &NeverCancelled).await;
+        let feedback = CompletionFeedback {
+            kind: CompletionFeedbackKind::ExitReminders,
+            message: callback
+                .get_exit_reminder(&NeverCancelled)
+                .await
+                .unwrap()
+                .unwrap(),
+            candidate: Some(ProviderResponse {
+                assistant_text: "candidate assistant".into(),
+                ..Default::default()
+            }),
+        };
+        let result = callback
+            .record_completion_feedback(&feedback, &NeverCancelled)
+            .await;
         assert!(match result {
             Err(TurnError::Publication(OperationError::Cancelled)) => cancel,
             Err(TurnError::Publication(OperationError::Failed(BrokerError::InvalidCapacity))) =>
@@ -1617,7 +1704,7 @@ async fn retained_callback_publication_failure_or_cancellation_preserves_committ
 }
 
 #[tokio::test]
-async fn real_append_failure_prevents_active_and_retained_callback_publication() {
+async fn real_append_failure_prevents_active_and_retained_feedback_publication() {
     for retained in [false, true] {
         let h = Harness::new();
         let _scope = h.scope(None, "root").await;
@@ -1641,8 +1728,28 @@ async fn real_append_failure_prevents_active_and_retained_callback_publication()
             .await
             .unwrap();
         let callback = root.callback.0.lock().unwrap().clone().unwrap();
+        let feedback = CompletionFeedback {
+            kind: if retained {
+                CompletionFeedbackKind::ExitReminders
+            } else {
+                CompletionFeedbackKind::ActiveWork
+            },
+            message: if retained {
+                callback.get_exit_reminder(&NeverCancelled).await
+            } else {
+                callback.get_active_work_reminder(&NeverCancelled).await
+            }
+            .unwrap()
+            .unwrap(),
+            candidate: retained.then(|| ProviderResponse {
+                assistant_text: "candidate assistant".into(),
+                ..Default::default()
+            }),
+        };
         assert!(matches!(
-            callback.complete(&candidate(&root), &NeverCancelled).await,
+            callback
+                .record_completion_feedback(&feedback, &NeverCancelled)
+                .await,
             Err(TurnError::Storage(_))
         ));
         assert!(subscription.try_next().is_none());
@@ -1658,7 +1765,8 @@ async fn real_append_failure_prevents_active_and_retained_callback_publication()
 }
 
 #[tokio::test]
-async fn callback_pre_cancel_precedes_blocker_observation_and_reminder_render_count() {
+async fn pending_ask_observation_pre_cancel_precedes_blocker_observation_and_reminder_render_count()
+{
     let h = Harness::new();
     let _scope = h.scope(None, "root").await;
     let root = h.factory.get("root");
@@ -1672,7 +1780,7 @@ async fn callback_pre_cancel_precedes_blocker_observation_and_reminder_render_co
     cancel.cancel();
     let callback = root.callback.0.lock().unwrap().clone().unwrap();
     assert!(matches!(
-        callback.complete(&candidate(&root), &cancel).await,
+        callback.get_pending_ask_reminder(&cancel).await,
         Err(TurnError::Cancelled)
     ));
     assert_eq!(root.tasks.observations.load(Ordering::SeqCst), 0);

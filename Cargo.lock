@@ -1413,6 +1413,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "parrot-core"
+version = "0.0.0-dev"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "parrot-domain"
 version = "0.0.0-dev"
 dependencies = [
@@ -1482,6 +1489,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libc",
+ "parrot-core",
  "parrot-domain",
  "parrot-foundation",
  "parrot-provider",
@@ -1506,6 +1514,7 @@ dependencies = [
  "chrono",
  "getrandom 0.2.17",
  "hmac",
+ "parrot-core",
  "parrot-domain",
  "parrot-foundation",
  "reqwest",
@@ -1523,6 +1532,7 @@ dependencies = [
 name = "parrot-runtime"
 version = "0.0.0-dev"
 dependencies = [
+ "parrot-core",
  "parrot-domain",
  "parrot-foundation",
  "parrot-provider",
@@ -1559,6 +1569,7 @@ dependencies = [
  "cookie_store",
  "libc",
  "mime",
+ "parrot-core",
  "parrot-domain",
  "parrot-foundation",
  "parrot-provider",

@@ -77,6 +77,19 @@ pub struct TurnResources<'a> {
     pub usage: &'a super::usage::SessionUsageRecorder,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ToolExecutionChunk {
+    pub assistant_sequence: i64,
+    pub starts_batch: bool,
+    pub calls: Vec<parrot_core::ToolCall>,
+    pub cancel_remaining: bool,
+}
+
+pub struct ToolExecutionResult {
+    pub result: parrot_core::ToolResult,
+    pub yielded_process: Option<parrot_domain::protocol::messages::parrot::YieldedShellProcess>,
+}
+
 /// The snapshot retains the concrete factory/tool identity in its owner-chosen
 /// type. Runtime cannot replace it with a names-only reconstructed catalog.
 pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
@@ -89,36 +102,57 @@ pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
     ) -> Result<Self::Snapshot, TurnError>;
     fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool];
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot;
-    fn reconcile<'a>(
+    /// Executes the first sequential call or parallel-safe run from the supplied
+    /// calls, joining admitted work before returning an ordered result prefix.
+    /// Conversation recovery and terminal persistence/publication belong to state.
+    fn execute<'a>(
         &'a self,
+        request: ToolExecutionChunk,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<S>,
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<S>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>>;
+    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, TurnError>>;
 }
 
-pub struct CompletionCandidate<S: AccessSnapshot> {
-    pub session_id: String,
-    pub message_id: String,
-    pub assistant: sessions::Message,
-    pub selection: TurnSelection<S>,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompletionFeedbackKind {
+    PendingAsks,
+    ActiveWork,
+    ExitReminders,
 }
-pub enum CompletionDecision {
-    Complete,
-    Retry {
-        system_message: String,
-        retain_candidate_assistant: bool,
-        completion_retry_pending: Option<bool>,
-    },
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletionFeedback {
+    pub kind: CompletionFeedbackKind,
+    pub message: String,
+    pub candidate: Option<parrot_core::ProviderResponse>,
 }
-pub trait TurnCompletion<S: AccessSnapshot>: Send + Sync {
-    fn complete<'a>(
+
+/// Observes native completion context and records one message from a core-selected batch.
+pub trait CompletionStateSource: Send + Sync {
+    /// Reads context for pending asks without deciding whether the turn may finish.
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        candidate: &'a CompletionCandidate<S>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>>;
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
+    /// Reads context for active work, retaining present observations with empty text.
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
+    /// Renders context for the currently uncleared native exit reminders.
+    fn get_exit_reminder<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
+    /// Records one message, retaining the batch candidate only on its first recording.
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>>;
 }
 
 pub trait TurnSkills: Send + Sync {
@@ -203,6 +237,7 @@ pub trait ParentCompletion: Send + Sync {
 
 #[derive(Debug)]
 pub enum TurnError {
+    Core(parrot_core::Error),
     Storage(EventError),
     ProviderCall(ProviderCallError),
     Provider(sessions::Error),
@@ -216,6 +251,7 @@ pub enum TurnError {
 impl TurnError {
     pub fn response_body(&self) -> &str {
         match self {
+            Self::Core(error) => &error.response_body,
             Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) => {
                 error.response_body()
             }
@@ -238,6 +274,7 @@ impl TurnError {
             return "cancelled";
         }
         match self {
+            Self::Core(error) => error.code.code(),
             Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) => {
                 failure_kind(error).code()
             }
@@ -278,6 +315,9 @@ impl TurnError {
         }
     }
     pub fn is_cancelled(&self) -> bool {
+        if let Self::Core(error) = self {
+            return error.kind == parrot_core::ErrorKind::Cancelled;
+        }
         if let Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) = self
         {
             return provider_cancelled(error);
@@ -357,6 +397,7 @@ fn provider_cancelled(error: &sessions::Error) -> bool {
 impl fmt::Display for TurnError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Core(error) => error.fmt(f),
             Self::Storage(error) => error.fmt(f),
             Self::ProviderCall(error) => error.fmt(f),
             Self::Provider(error) => error.fmt(f),

@@ -50,8 +50,7 @@ impl TurnSkills for ScriptedSkills {
     }
 }
 
-/// The injected settlement port uses the real durable conversation APIs. Its
-/// fixed result matches the original test's SettledTool; T47 owns real tools.
+/// The injected executor returns the original test's fixed SettledTool result.
 struct SettledTools;
 impl TurnTools<Security> for SettledTools {
     type Snapshot = Vec<sessions::Tool>;
@@ -71,64 +70,43 @@ impl TurnTools<Security> for SettledTools {
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
         snapshot.clone()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
         resources: TurnResources<'a>,
         _: &'a TurnSelection<Security>,
         _: &'a Self::Snapshot,
         _: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
+    > {
         Box::pin(async move {
-            for assistant in resources.history.conversation().await? {
-                for call in assistant.message.tool_calls {
-                    if !resources
-                        .history
-                        .tool_terminals_of_calls(vec![call.id.clone()])
-                        .await?
-                        .is_empty()
-                    {
-                        continue;
-                    }
-                    let mut started = Event::new();
-                    started.id = id();
-                    started.agent_session_id = "agent".into();
-                    started.set_tool_started(protocol::ToolStarted {
-                        tool_call_id: call.id.clone(),
-                        tool_name: call.name.clone(),
-                        ..Default::default()
-                    });
-                    resources.events.emit(started, cancellation).await?;
-                    let mut finished = Event::new();
-                    finished.id = id();
-                    finished.agent_session_id = "agent".into();
-                    finished.set_tool_finished(protocol::ToolFinished {
-                        tool_call_id: call.id.clone(),
-                        tool_name: call.name.clone(),
-                        result: Some("settled".into()),
-                        ..Default::default()
-                    });
-                    if let Some(item) = resources
-                        .history
-                        .append_tool_settlement(
-                            finished,
-                            assistant.sequence,
-                            parrot_storage::events::ToolExecutionTerminal {
-                                tool_call_id: call.id,
-                                tool_name: call.name,
-                                status: parrot_storage::events::ToolExecutionStatus::Finished,
-                                result_parts: vec![ConversationPart::text("settled")],
-                                message: "settled".into(),
-                            },
-                        )
-                        .await?
-                    {
-                        let message = resources.conversation.materialize(item).await?;
-                        resources.conversation.add(message);
-                    }
-                }
+            let mut results = Vec::new();
+            for call in request.calls {
+                let mut started = Event::new();
+                started.id = id();
+                started.agent_session_id = "agent".into();
+                started.set_tool_started(protocol::ToolStarted {
+                    tool_call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    ..Default::default()
+                });
+                resources.events.emit(started, cancellation).await?;
+                results.push(parrot_runtime::agent_turn::services::ToolExecutionResult {
+                    result: parrot_core::ToolResult {
+                        call_id: call.id,
+                        tool_name: call.name,
+                        status: parrot_core::ToolStatus::Finished,
+                        text: "settled".into(),
+                        error_message: String::new(),
+                        images: Vec::new(),
+                    },
+                    yielded_process: None,
+                });
             }
-            Ok(())
+            Ok(results)
         })
     }
 }
@@ -195,7 +173,7 @@ async fn skill_session(
         skills,
         context: fixture.controller(),
         status: Arc::new(Status(trace.clone())),
-        completions: vec![],
+        completion_sources: vec![],
         templates,
         reminders,
         output: Arc::new(Output::default()),

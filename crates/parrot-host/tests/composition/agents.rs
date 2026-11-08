@@ -687,7 +687,7 @@ mod fixture {
                 skills: Arc::new(Skills),
                 context: self.histories.controller(prepared.history.clone()),
                 status: Arc::new(Status),
-                completions: vec![Arc::new(SessionCompletion {
+                completion_sources: vec![Arc::new(SessionCompletion {
                     asks: Some(asks.clone()),
                     active_work: active_work.clone(),
                     reminders: reminders.clone(),

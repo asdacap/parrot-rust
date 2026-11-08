@@ -26,6 +26,102 @@ on bounded agent scope, delegation, parent attention and model-tier selection,
 ported from the .NET repository. Repository contributor guidance is in
 [AGENTS.md](AGENTS.md).
 
+## Core and runtime
+
+`parrot-core` owns the agent turn protocol and loop, with exactly three traits:
+
+- `States`: factual conversation turns and pending-message headers, turn effects,
+  frozen model settings, prepared context, explicit messages, result recording,
+  observed completion context, and explicit feedback effects.
+- `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
+- `Provider`: model invocation and awaited stream cleanup.
+
+Requests, responses, tool execution results, messages, tool definitions, and errors
+are concrete core-owned types. Adapters implement the same interface; they do not
+choose their own associated payload types. `Provider` accepts a complete request;
+`Tools` accepts explicit calls and the caller's cancellation token. Core assembles
+each provider request from turn settings, prepared context values, an explicit
+message read, and its selected tool definitions. States never returns a provider
+request. Runtime state privately binds the executable selection during context
+preparation; execution receives no workflow phase or adapter-specific callbacks.
+Attempts and request phases stay in the core loop, and input estimates stay in
+runtime state.
+
+The core specifies and implements:
+
+- Provider-request assembly, request admission/counting, limit-triggered final-phase
+  catalog selection, and bounded tool-settlement extensions.
+- Truncated tool-call detection and JSON-argument validation before recording or
+  executing calls.
+- The one-compaction retry guard for oversized requests, exit blocking from state
+  messages, candidate retention, retry continuation, and request-budget resets.
+- Conversation readiness and input-admission decisions from actual turn/message
+  state, recording assistant calls before execution, and completion ordering before
+  closing a turn.
+
+`States` exposes the latest visible conversation segment and its result, not a
+precomputed work flag. A no-tool assistant candidate can be present while durable
+turn closure is still pending. Pending-message peeks return stable identities and
+delivery mode without reserving, promoting, or materializing their bodies. Core
+chooses whether admission allows only steers or also the next queued message;
+native promotion rechecks the queue and keeps all steers in one batch.
+
+After a no-tool response, core calls `get_exit_blockers` for an ordered list of
+message strings. An empty list permits completion; any nonempty list, including
+one containing empty strings, blocks it. Core retains the candidate once, adds
+all messages in state-provided order, forces continuation, and restarts the request
+budget after feedback recording succeeds. Core has no blocker categories or
+category-specific retention policy. Native state owns observation order, configured
+prompt rendering, source identity, and per-message persistence/publication. It
+joins accepted mutations before observing blockers and before final closure.
+
+`run_turn` handles at most one conversation turn; `run` is the multi-turn
+convenience entry point. Both accept a caller-owned core `TurnBudget`, initialized
+from run configuration rather than queried through `States`. Native orchestration
+checks its scheduled-operation queue between `run_turn` calls. Unscheduled turns
+share the existing budget scope; a native scheduled-work boundary ends that scope
+before processing queued operations. Scheduler priority never changes what the
+state getters report, and core has no scheduler-query method. Provider-request
+limits are the only final-phase trigger; cancellation uses the separate live token,
+not a state-polled wrap-up signal.
+
+Core returns a typed `BudgetExhausted` outcome when request or settlement limits
+are reached. Native orchestration renders, records, and publishes the configured
+failure before pass cleanup. Tool-restoration prompts also stay native: turn
+catalog preparation restores that context after capturing executable snapshots
+and before input promotion, without a separate core state operation.
+
+`parrot-runtime` implements the three traits with private adapters. Persistence,
+prompt preparation, compaction, security, streaming, accounting, cancellation,
+events, and session lifecycle stay outside the core. Provider representations are
+translated losslessly at the interface, including raw provider extensions and
+multimodal content. Runtime bindings retain the actual selected model and executable
+tool snapshots; tools are never reconstructed from advertised definitions.
+
+Native state initialization reconciles historical tool results before entering the
+core, without invoking tools. Any historical call without a saved result receives
+a durable error saying that the process crashed before the tool completed; it is
+never automatically executed again. Existing results are restored without
+modification or republication. The core has no history-recovery hook.
+
+Only calls from a new model response enter execution. The core passes the whole
+explicit batch and the caller's live cancellation token to tools once, then asks
+state to record the complete returned results. Tools observe cancellation and join
+admitted work before returning results or an error; core does not race or drop the
+execution future. State owns conversation projection and synthetic image messages.
+The native tools adapter coordinates execution chunks internally, recording each group's
+results through native conversation state before starting the next group. Tools
+retain parallel-safe grouping, tool-specific budgets, cancellation propagation, and
+execution-local state; they do not discover work by scanning conversation history.
+A crash error does not assert that the tool made no external changes.
+
+The session drain serializes operations. Each adapter borrows the existing runtime
+state lock only for its operation, including borrowed-resource tool execution.
+Runtime state observes every streamed completion through the existing usage hook,
+calibrates its token budget, then awaits durable usage recording—even if the stream
+later fails. The provider adapter does not own estimates or calibration. The core
+depends on neither runtime, storage, nor provider implementations.
+
 ## Compiler cache
 
 `nix develop` provides `sccache` and sets `RUSTC_WRAPPER` to use it. The compiler

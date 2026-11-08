@@ -141,6 +141,7 @@ provider implementation or settlement engine.
 | --- | --- |
 | `lifecycle.rs` | One owned drain, admission/wake, FIFO executions, incoming-input wait, scheduled work, retained mutation lifetimes, interrupt/resume and joined shutdown; domain execution/status/drain-state types. |
 | `engine.rs` | Actual durable conversation and provider-session orchestration, awaited T44 prompt/skills and T45 controller, supplied completion callbacks. |
+| `tool_conversation.rs` | State-owned stored-result restoration, crash errors for unfinished historical calls, explicit fresh-call staging, ordered result projection/publication and synthetic image messages. |
 | `provider_call.rs` | Consume the genuine injected stream to EOF, batch fragments, record completions, phases/retries and awaited close. |
 | `budget.rs` | Request/final-phase budget and four settlement extensions, separate from T45 token budgeting. |
 | `usage.rs` | Actual repository request/tool facts, replay-seeded live statistics and retained notifications. |
@@ -165,6 +166,21 @@ turn, injected survivor-only final tools and current selection/restoration on
 the next queued turn. Their inert `Security` and cloned definitions are not
 production tool-object identity or fresh per-invocation authority proof.
 
+### Tool results after interruption or process death
+
+Historical tool calls are never scheduled for execution again. State restores saved
+terminals and their conversation results. For every call without a saved terminal,
+state records a normal tool error using `agent-session.crashed-tool-result` (by
+default, `The process crashed before the tool completed.`), with the existing
+`tool-result.error` formatting. Persistence precedes publication, and repeating
+restoration neither replaces completed results nor republishes their terminals.
+
+Only a newly recorded model response can stage a live execution batch. Interrupted
+or failed batches lose that live execution context; any missing results are closed
+as crash errors when conversation processing resumes. External effects may already
+have happened before the missing result, so the error does not imply a rollback.
+This policy supersedes earlier tool-replay behavior described in historical reports.
+
 ### External versus inline context operations
 
 External `AgentSession::compact_context` schedules on the same drain and prepares
@@ -181,7 +197,10 @@ turn substitution. All six external scenarios PASS; the existing queued-shutdown
 assertion is now tightened to `unwrap_err().is_cancelled()` and passes focused
 verification; no additional shutdown scenario was needed (R13).
 
-Inside `TurnTools::reconcile`, `TurnResources<'_>` borrows the already-owned
+`TurnTools::execute` receives explicit calls and returns an ordered execution
+chunk; it does not discover pending calls or project their conversation results.
+State records each returned chunk before the next starts, so borrowed tools see
+earlier settled results. `TurnResources<'_>` lends inline tools the already-owned
 conversation, controller, prompt, provider sessions, history, status, events and
 usage recorder. Inline tools must use those borrows: **never self-queue and wait,
 call the external wrapper, or relock backend state**. The passing real-controller

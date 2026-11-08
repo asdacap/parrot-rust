@@ -89,6 +89,15 @@ pub fn has_pending(tx: &Transaction<'_>, agent: &str) -> Result<bool, EventError
         |row| row.get(0),
     )?)
 }
+pub fn peek_pending_input(
+    tx: &Transaction<'_>,
+    agent: &str,
+) -> Result<Option<AdmittedInput>, EventError> {
+    if let Some(input) = pending(tx, agent, Delivery::DELIVERY_STEER, 1)?.pop() {
+        return Ok(Some(input));
+    }
+    Ok(pending(tx, agent, Delivery::DELIVERY_QUEUE, 1)?.pop())
+}
 pub fn inputs_for_next_promotion(
     tx: &Transaction<'_>,
     agent: &str,

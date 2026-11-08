@@ -7,4 +7,5 @@ pub mod lifecycle;
 pub mod observation;
 pub mod provider_call;
 pub mod services;
+pub mod tool_conversation;
 pub mod usage;

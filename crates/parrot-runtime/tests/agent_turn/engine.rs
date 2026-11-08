@@ -210,7 +210,7 @@ impl Fixture {
         &self,
         provider: Scripted,
         tools: Arc<Tools>,
-        callbacks: Vec<Arc<dyn TurnCompletion<Security>>>,
+        callbacks: Vec<Arc<dyn CompletionStateSource>>,
         lifetime: Arc<dyn Cancellation>,
         terminal_failure: usize,
     ) -> Runtime {
@@ -228,7 +228,7 @@ impl Fixture {
         &self,
         provider: Scripted,
         tools: Arc<Tools>,
-        callbacks: Vec<Arc<dyn TurnCompletion<Security>>>,
+        callbacks: Vec<Arc<dyn CompletionStateSource>>,
         lifetime: Arc<dyn Cancellation>,
         terminal_failure: usize,
         overrides: RuntimeOverrides,
@@ -292,7 +292,7 @@ impl Fixture {
             status: overrides
                 .status
                 .unwrap_or_else(|| Arc::new(Status(trace.clone()))),
-            completions: callbacks,
+            completion_sources: callbacks,
             templates,
             reminders,
             output: output.clone(),
@@ -458,10 +458,10 @@ struct Tools {
     inline_prepare: AtomicBool,
     inline_compact: AtomicBool,
     prompt_cancelled: AtomicBool,
-    reconciliations: AtomicUsize,
+    executions: AtomicUsize,
     definitions: Vec<sessions::Tool>,
     materializations: AtomicUsize,
-    reconcile_gate: Mutex<Option<Arc<Gate>>>,
+    execution_gate: Mutex<Option<Arc<Gate>>>,
 }
 impl TurnTools<Security> for Tools {
     type Snapshot = Vec<sessions::Tool>;
@@ -486,65 +486,25 @@ impl TurnTools<Security> for Tools {
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
         snapshot.clone()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<Security>,
         _: &'a Self::Snapshot,
         _: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
+    > {
         Box::pin(async move {
-            self.reconciliations.fetch_add(1, Ordering::SeqCst);
-            let gate = self.reconcile_gate.lock().unwrap().take();
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            let gate = self.execution_gate.lock().unwrap().take();
             if let Some(gate) = gate {
                 gate.wait(cancellation).await.map_err(TurnError::Provider)?;
             }
-            for assistant in resources
-                .history
-                .conversation()
-                .await?
-                .into_iter()
-                .filter(|item| !item.message.tool_calls.is_empty())
-            {
-                for call in assistant.message.tool_calls {
-                    if resources
-                        .history
-                        .tool_terminals_of_calls(vec![call.id.clone()])
-                        .await?
-                        .is_empty()
-                    {
-                        let mut event = Event::new();
-                        event.id = id();
-                        event.agent_session_id = "agent".into();
-                        if let Some(item) = resources
-                            .history
-                            .append_tool_settlement(
-                                event,
-                                assistant.sequence,
-                                parrot_storage::events::ToolExecutionTerminal {
-                                    tool_call_id: call.id,
-                                    tool_name: call.name,
-                                    status: parrot_storage::events::ToolExecutionStatus::Finished,
-                                    result_parts: vec![ConversationPart::text("fake tool result")],
-                                    message: "fake tool result".into(),
-                                },
-                            )
-                            .await?
-                        {
-                            let message = resources.conversation.materialize(item).await?;
-                            resources.conversation.add(message);
-                        }
-                    }
-                }
-            }
-            if resources
-                .conversation
-                .messages()
-                .iter()
-                .any(|message| !message.tool_calls.is_empty())
-                && self.inline_compact.swap(false, Ordering::SeqCst)
-            {
+            if self.inline_compact.swap(false, Ordering::SeqCst) {
                 let result = resources
                     .context
                     .compact(
@@ -582,7 +542,23 @@ impl TurnTools<Security> for Tools {
                     .await?;
                 self.trace.push(format!("inline:{}", epoch.instructions));
             }
-            Ok(())
+            Ok(request
+                .calls
+                .into_iter()
+                .map(
+                    |call| parrot_runtime::agent_turn::services::ToolExecutionResult {
+                        result: parrot_core::ToolResult {
+                            call_id: call.id,
+                            tool_name: call.name,
+                            status: parrot_core::ToolStatus::Finished,
+                            text: "fake tool result".into(),
+                            error_message: String::new(),
+                            images: Vec::new(),
+                        },
+                        yielded_process: None,
+                    },
+                )
+                .collect())
         })
     }
 }
@@ -1006,7 +982,18 @@ async fn borrowed_tool_context_prepare_runs_inline_and_is_used_by_the_next_provi
     let tools = Arc::new(Tools::default());
     tools.inline_prepare.store(true, Ordering::SeqCst);
     let trace = tools.trace.clone();
-    let provider = Scripted::new(vec![Step::complete("inline result")]);
+    let mut first = Step::complete("");
+    first
+        .completion
+        .as_mut()
+        .unwrap()
+        .tool_calls
+        .push(sessions::ToolCall {
+            id: "prepare-context".into(),
+            name: "prepare_context".into(),
+            arguments_json: "{}".into(),
+        });
+    let provider = Scripted::new(vec![first, Step::complete("inline result")]);
     let runtime = fixture
         .runtime(provider.clone(), tools, vec![], Arc::new(Signal::new()), 0)
         .await;
@@ -1023,9 +1010,15 @@ async fn borrowed_tool_context_prepare_runs_inline_and_is_used_by_the_next_provi
             .iter()
             .any(|entry| entry == "inline:sampled epoch instructions")
     );
-    assert_eq!(
-        provider.requests.lock().unwrap()[0].instructions,
-        "sampled epoch instructions"
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].instructions, "sampled epoch instructions");
+    assert!(
+        requests[1]
+            .messages
+            .iter()
+            .any(|message| message.role == sessions::Role::Tool
+                && message.content() == "fake tool result")
     );
     assert_eq!(
         fixture

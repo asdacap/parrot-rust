@@ -1,9 +1,7 @@
 use super::*;
 use parrot_domain::{
     contracts::{async_ops::OperationError, security::InvocationContext},
-    protocol::messages::parrot::{
-        ArtifactReference, ToolCancelled, ToolError, ToolFinished, ToolStarted,
-    },
+    protocol::messages::parrot::ToolStarted,
 };
 use parrot_storage::{
     artifacts::output_blobs::is_tool_output_oversized,
@@ -12,21 +10,23 @@ use parrot_storage::{
 use std::time::Instant;
 
 impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn invoke<'a>(
         &'a self,
-        history: &'a AgentHistoryView,
-        usage: &'a SessionUsageRecorder,
+        resources: InvocationResources<'a, S>,
         borrowed: Option<TurnResources<'a>>,
-        selection: &'a TurnSelection<S>,
-        snapshot: &'a ToolSnapshot<S>,
-        capture: &'a dyn SelectionSource<S>,
-        assistant_sequence: i64,
         call: &'a ToolCall,
-        image_budget: Arc<ToolCycleImageBudget>,
-        cancellation: &'a dyn Cancellation,
         launched: Option<Arc<AtomicBool>>,
-    ) -> BoxFuture<'a, Result<Settlement, TurnError>> {
+    ) -> BoxFuture<'a, Result<ToolExecutionResult, TurnError>> {
+        let InvocationResources {
+            history,
+            usage,
+            selection,
+            snapshot,
+            capture,
+            assistant_sequence,
+            image_budget,
+            cancellation,
+        } = resources;
         Box::pin(async move {
             // The durable start/publication boundary is deliberately outside the
             // tool catch boundary, before policy capture, usage and activity.
@@ -64,7 +64,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                     None,
                     Some(began),
                 );
-                return self.fail(history, call, format!("unknown tool {}", call.name));
+                return self.fail(call, format!("unknown tool {}", call.name));
             };
             let result: Result<ToolOutput, OperationError<ToolFailure>> = async {
                 // Retain the original turn's model/profile. Only security comes
@@ -132,10 +132,8 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
             let rendered = async {
                 let result = result?;
                 if result.outcome == ToolOutcome::ImageBudgetExceeded {
-                    let mut settlement = self
-                        .fail(history, call, result.text)
-                        .map_err(turn_failure)?;
-                    settlement.terminal.status = ToolExecutionStatus::ImageBudgetExceeded;
+                    let mut settlement = self.fail(call, result.text).map_err(turn_failure)?;
+                    settlement.result.status = ToolStatus::ImageBudgetExceeded;
                     return Ok(settlement);
                 }
                 let mut text = self
@@ -171,35 +169,23 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                             })?;
                 }
                 let yielded = result.yielded_process.is_some();
-                let mut finished = self.event(history).map_err(turn_failure)?;
-                finished.set_tool_finished(ToolFinished {
-                    tool_call_id: call.id.clone(),
-                    tool_name: call.name.clone(),
-                    result: Some(text.clone()),
-                    yielded_process: result.yielded_process.into(),
-                    artifacts: result
-                        .image_artifacts
-                        .iter()
-                        .map(|image| ArtifactReference {
-                            artifact_id: image.artifact_id.clone(),
-                            sha256: image.sha256.clone(),
-                            media_type: image.media_type.clone(),
-                            byte_length: image.byte_length,
-                            width: image.width as i32,
-                            height: image.height as i32,
-                            frame_count: image.frame_count as i32,
-                            aggregate_pixels: image.aggregate_pixels,
-                            display_name: image.display_name.clone(),
-                            origin: image.origin.clone(),
-                            ..ArtifactReference::new()
-                        })
-                        .collect(),
-                    ..ToolFinished::new()
-                });
-                let mut parts = vec![ConversationPart::text(&text)];
-                parts.extend(result.image_artifacts.into_iter().map(|image| {
-                    ConversationPart::image(image.artifact_id, image.media_type, image.display_name)
-                }));
+                let images = result
+                    .image_artifacts
+                    .into_iter()
+                    .map(|image| ToolImage {
+                        artifact_id: image.artifact_id,
+                        sha256: image.sha256,
+                        media_type: image.media_type,
+                        byte_length: image.byte_length,
+                        width: image.width,
+                        height: image.height,
+                        frame_count: image.frame_count,
+                        aggregate_pixels: image.aggregate_pixels,
+                        display_name: image.display_name,
+                        origin: image.origin,
+                    })
+                    .collect();
+                let yielded_process = result.yielded_process;
                 self.diagnostic(
                     history,
                     call,
@@ -210,15 +196,16 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                     None,
                     Some(began),
                 );
-                Ok(Settlement {
-                    published: finished,
-                    terminal: ToolExecutionTerminal {
-                        tool_call_id: call.id.clone(),
+                Ok(ToolExecutionResult {
+                    result: ToolResult {
+                        call_id: call.id.clone(),
                         tool_name: call.name.clone(),
-                        status: ToolExecutionStatus::Finished,
-                        result_parts: parts,
-                        message: text,
+                        status: ToolStatus::Finished,
+                        text,
+                        error_message: String::new(),
+                        images,
                     },
+                    yielded_process,
                 })
             }
             .await;
@@ -235,7 +222,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                         None,
                         Some(began),
                     );
-                    self.cancel(history, call)
+                    Ok(self.cancel(call))
                 }
                 Err(OperationError::Failed(error)) => {
                     let code = DiagnosticEvent::classify_failure(&DiagnosticFailure {
@@ -253,64 +240,44 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                         Some(code),
                         Some(began),
                     );
-                    self.fail(history, call, error.message)
+                    self.fail(call, error.message)
                 }
             }
         })
     }
-    pub(super) fn cancel(
-        &self,
-        history: &AgentHistoryView,
-        call: &ToolCall,
-    ) -> Result<Settlement, TurnError> {
-        let mut cancelled = self.event(history)?;
-        cancelled.set_tool_cancelled(ToolCancelled {
-            tool_call_id: call.id.clone(),
-            tool_name: call.name.clone(),
-            ..ToolCancelled::new()
-        });
-        Ok(Settlement {
-            published: cancelled,
-            terminal: ToolExecutionTerminal {
-                tool_call_id: call.id.clone(),
+    pub(super) fn cancel(&self, call: &ToolCall) -> ToolExecutionResult {
+        ToolExecutionResult {
+            result: ToolResult {
+                call_id: call.id.clone(),
                 tool_name: call.name.clone(),
-                status: ToolExecutionStatus::Cancelled,
-                result_parts: vec![ConversationPart::text(&self.interrupted_result)],
-                message: self.interrupted_result.clone(),
+                status: ToolStatus::Cancelled,
+                text: self.interrupted_result.clone(),
+                error_message: String::new(),
+                images: Vec::new(),
             },
-        })
+            yielded_process: None,
+        }
     }
-    fn fail(
-        &self,
-        history: &AgentHistoryView,
-        call: &ToolCall,
-        message: String,
-    ) -> Result<Settlement, TurnError> {
-        let mut failed = self.event(history)?;
-        failed.set_tool_error(ToolError {
-            tool_call_id: call.id.clone(),
-            tool_name: call.name.clone(),
-            message: message.clone(),
-            ..ToolError::new()
-        });
+    fn fail(&self, call: &ToolCall, message: String) -> Result<ToolExecutionResult, TurnError> {
         let text = self
             .config
             .templates
             .render(
                 "tool-result.error",
-                &[("message".into(), serde_json::Value::String(message))],
+                &[("message".into(), serde_json::Value::String(message.clone()))],
                 &NeverCancelled,
             )
             .map_err(|error| TurnError::Service(error.to_string()))?;
-        Ok(Settlement {
-            published: failed,
-            terminal: ToolExecutionTerminal {
-                tool_call_id: call.id.clone(),
+        Ok(ToolExecutionResult {
+            result: ToolResult {
+                call_id: call.id.clone(),
                 tool_name: call.name.clone(),
-                status: ToolExecutionStatus::Error,
-                result_parts: vec![ConversationPart::text(&text)],
-                message: text,
+                status: ToolStatus::Error,
+                text,
+                error_message: message,
+                images: Vec::new(),
             },
+            yielded_process: None,
         })
     }
     #[allow(clippy::too_many_arguments)]

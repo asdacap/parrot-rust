@@ -22,6 +22,7 @@ url = { version = "=2.5.4", default-features = false }
 unicode-general-category = "=1.0.0"
 
 [dev-dependencies]
+parrot-core = { path = "../parrot-core" }
 parrot-runtime = { path = "../parrot-runtime" }
 tokio = { version = "=1.43.0", default-features = false, features = ["test-util"] }
 

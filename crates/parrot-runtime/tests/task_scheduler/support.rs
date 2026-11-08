@@ -323,15 +323,19 @@ impl TurnTools<Security> for Tools {
     fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
         snapshot.clone()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        _: parrot_runtime::agent_turn::services::ToolExecutionChunk,
         _: TurnResources<'a>,
         _: &'a TurnSelection<Security>,
         _: &'a Self::Snapshot,
         _: &'a dyn SelectionSource<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async { Ok(()) })
+    ) -> BoxFuture<
+        'a,
+        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
+    > {
+        panic!("task fixture has no executable tools")
     }
 }
 struct Prompt(String);
@@ -577,7 +581,7 @@ impl Factory {
             skills: Arc::new(Skills),
             context: histories.controller(history.clone()),
             status: Arc::new(Status),
-            completions: vec![],
+            completion_sources: vec![],
             templates,
             reminders,
             output: output.clone(),

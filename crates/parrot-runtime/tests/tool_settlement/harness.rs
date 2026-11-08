@@ -8,7 +8,7 @@ pub use parrot_domain::{
     values::{activity::AgentSessionActivity, tools::ConfiguredToolDefinition},
 };
 pub use parrot_runtime::{
-    agent_turn::{lifecycle::Signal, usage::SessionUsageRecorder},
+    agent_turn::{lifecycle::Signal, services::ToolExecutionChunk, usage::SessionUsageRecorder},
     tool_settlement::*,
 };
 pub use parrot_storage::{
@@ -187,7 +187,8 @@ pub struct Harness {
     pub tools: Arc<ToolSettlement<Security>>,
     pub snapshot: ToolSnapshot<Security>,
     pub selection: TurnSelection<Security>,
-    pub capture: Selection,
+    pub capture: Arc<Selection>,
+    pub state: parrot_runtime::agent_turn::tool_conversation::ToolConversation,
     pub publisher: Arc<Publisher>,
     pub activity: Arc<AgentSessionActivity>,
     pub diagnostics: Arc<Diagnostics>,
@@ -234,7 +235,7 @@ impl Harness {
         let tools = Arc::new(
             ToolSettlement::new(ToolSettlementConfig {
                 factory: factory.clone(),
-                templates,
+                templates: templates.clone(),
                 output_blobs: blobs,
                 publisher: publisher.clone(),
                 activity: activity.clone(),
@@ -245,12 +246,20 @@ impl Harness {
         );
         let snapshot = tools.materialize().unwrap();
         let selection = selection(&Scripted::default());
-        let capture = Selection(Mutex::new(selection.clone()));
+        let capture = Arc::new(Selection(Mutex::new(selection.clone())));
+        let state = parrot_runtime::agent_turn::tool_conversation::ToolConversation::new(
+            fixture.history.clone(),
+            publisher.clone(),
+            Arc::new(id),
+            templates.as_ref(),
+        )
+        .unwrap();
         Self {
             tools,
             snapshot,
             selection,
             capture,
+            state,
             publisher,
             activity,
             diagnostics,
@@ -270,29 +279,81 @@ impl Harness {
             events: ContextPublisher(fixture.history.clone()),
         }
     }
+    pub async fn restore(&mut self, fixture: &Fixture) -> Result<(), TurnError> {
+        fixture.fresh_batches.lock().unwrap().clear();
+        self.state.reset_pending();
+        self.state.restore_results(&mut self.conversation).await
+    }
     pub async fn run(
         &mut self,
         fixture: &Fixture,
         cancellation: &dyn Cancellation,
     ) -> Result<(), TurnError> {
-        self.tools
-            .reconcile(
-                TurnResources {
-                    history: &fixture.history,
-                    conversation: &mut self.conversation,
-                    context: &mut self.context,
-                    prompt: &self.prompt,
-                    sessions: &self.sessions,
-                    status: &Status,
-                    events: &self.events,
-                    usage: &self.usage,
-                },
-                &self.selection,
-                &self.snapshot,
-                &self.capture,
-                cancellation,
-            )
+        let capture = self.capture.clone();
+        self.run_with_capture(fixture, capture.as_ref(), cancellation)
             .await
+    }
+    pub async fn run_with_capture(
+        &mut self,
+        fixture: &Fixture,
+        capture: &dyn SelectionSource<Security>,
+        cancellation: &dyn Cancellation,
+    ) -> Result<(), TurnError> {
+        let result = async {
+            loop {
+                let Some((sequence, calls)) = fixture.fresh_batches.lock().unwrap().pop_front()
+                else {
+                    break;
+                };
+                self.state.begin_execution(sequence, calls.clone())?;
+                let mut completed = Vec::new();
+                let mut cancelled = false;
+                while completed.len() < calls.len() {
+                    let request = ToolExecutionChunk {
+                        assistant_sequence: sequence,
+                        starts_batch: completed.is_empty(),
+                        calls: calls[completed.len()..].to_vec(),
+                        cancel_remaining: cancelled,
+                    };
+                    let results = self
+                        .tools
+                        .execute(
+                            request,
+                            TurnResources {
+                                history: &fixture.history,
+                                conversation: &mut self.conversation,
+                                context: &mut self.context,
+                                prompt: &self.prompt,
+                                sessions: &self.sessions,
+                                status: &Status,
+                                events: &self.events,
+                                usage: &self.usage,
+                            },
+                            &self.selection,
+                            &self.snapshot,
+                            capture,
+                            cancellation,
+                        )
+                        .await?;
+                    self.state
+                        .record_results(&mut self.conversation, &results)
+                        .await?;
+                    cancelled |= results
+                        .iter()
+                        .any(|result| result.result.status == parrot_core::ToolStatus::Cancelled);
+                    completed.extend(results.into_iter().map(|result| result.result));
+                }
+                self.state
+                    .complete_execution(&mut self.conversation, &completed)
+                    .await?;
+            }
+            self.state.restore_results(&mut self.conversation).await
+        }
+        .await;
+        if result.is_err() {
+            self.state.reset_pending();
+        }
+        result
     }
 }
 

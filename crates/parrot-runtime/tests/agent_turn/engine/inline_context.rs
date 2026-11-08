@@ -9,7 +9,7 @@ fn tool() -> Step {
     step
 }
 #[tokio::test]
-async fn tool_reconcile_borrows_actual_controller_and_compacted_state_reaches_next_provider_without_second_drain()
+async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_next_provider_without_second_drain()
  {
     let fixture = Fixture::new();
     fixture.seed().await;

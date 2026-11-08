@@ -95,7 +95,7 @@ async fn image_budget_latches_remaining_batch_resets_next_batch_and_synthetic_us
 }
 
 #[tokio::test]
-async fn restored_images_reconstruct_accepted_bytes_and_overflow_latch_before_pending_calls() {
+async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
     for overflow in [false, true] {
         let fixture = Fixture::new();
         let image = image(&fixture).await;
@@ -128,7 +128,7 @@ async fn restored_images_reconstruct_accepted_bytes_and_overflow_latch_before_pe
         fixture
             .repository
             .events()
-            .append_tool_terminal(event, terminal)
+            .append_tool_terminal(event, terminal.clone())
             .await
             .unwrap();
         let tool = image_tool(&fixture, "image", &image);
@@ -138,18 +138,17 @@ async fn restored_images_reconstruct_accepted_bytes_and_overflow_latch_before_pe
             image.byte_length as i32,
         )
         .await;
-        harness.run(&fixture, &NeverCancelled).await.unwrap();
-        harness.run(&fixture, &NeverCancelled).await.unwrap();
+        harness.restore(&fixture).await.unwrap();
+        harness.restore(&fixture).await.unwrap();
         let terminals = fixture
             .history
             .tool_terminals_of_calls(vec!["restored".into(), "pending".into()])
             .await
             .unwrap();
-        assert_eq!(
-            terminals[1].status,
-            ToolExecutionStatus::ImageBudgetExceeded
-        );
-        assert_eq!(tool.calls.lock().unwrap().len(), 1);
+        assert_eq!(terminals[0], terminal);
+        assert_eq!(terminals[1].status, ToolExecutionStatus::Error);
+        assert!(terminals[1].message.contains(CRASH_MESSAGE));
+        assert!(tool.calls.lock().unwrap().is_empty());
         assert_eq!(
             harness
                 .publisher
@@ -159,7 +158,7 @@ async fn restored_images_reconstruct_accepted_bytes_and_overflow_latch_before_pe
                 .iter()
                 .filter(|event| event.has_tool_started())
                 .count(),
-            1
+            0
         );
         assert_eq!(
             fixture
@@ -175,6 +174,16 @@ async fn restored_images_reconstruct_accepted_bytes_and_overflow_latch_before_pe
         assert_eq!(
             fixture.history.has_tool_synthetic(sequence).await.unwrap(),
             !overflow
+        );
+        let events = fixture.events().await;
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.has_tool_execution_started())
+        );
+        assert_eq!(
+            events.iter().filter(|event| event.has_tool_error()).count(),
+            1
         );
         assert!(
             !harness
@@ -223,12 +232,19 @@ async fn restored_missing_image_metadata_is_visible_error_and_does_not_advance_w
         )
         .await
         .unwrap();
-    let result = harness.run(&fixture, &NeverCancelled).await;
+    let result = harness.restore(&fixture).await;
     assert_eq!(
         result.err().unwrap().to_string(),
-        "A settled tool image artifact is missing."
+        "The image artifact does not exist."
     );
-    assert_eq!(harness.tools.settled_conversation_sequence(), 0);
+    let pending = fixture
+        .history
+        .tool_terminals_of_calls(vec!["pending".into()])
+        .await
+        .unwrap();
+    assert_eq!(pending[0].status, ToolExecutionStatus::Error);
+    assert!(pending[0].message.contains(CRASH_MESSAGE));
+    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert!(tool.calls.lock().unwrap().is_empty());
 }
 
@@ -238,6 +254,12 @@ async fn yielded_process_metadata_is_preserved_on_finished_event_and_result_proj
     let mut tool = RecordingTool::new(&fixture, "process", ParallelSafety::Sequential);
     let mut yielded = protocol::YieldedShellProcess::new();
     yielded.process_id = "owned-process".into();
+    yielded.name = "named process".into();
+    yielded.inventory_instance_id = "inventory-instance".into();
+    yielded.visible_revision = u64::MAX;
+    yielded.stdout_path = Some("scratch/process.stdout".into());
+    yielded.stderr_path = Some("scratch/process.stderr".into());
+    yielded.activity_kind = protobuf::EnumOrUnknown::from_i32(-37);
     tool.output.yielded_process = Some(yielded.clone());
     let tool = Arc::new(tool);
     fixture.batch(vec![call("yielded", "process")]).await;

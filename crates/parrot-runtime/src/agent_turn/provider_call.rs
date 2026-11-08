@@ -31,9 +31,9 @@ pub trait ProviderActivity: Send + Sync {
     fn finish_provider_request(&self);
 }
 
-/// The caller supplies actual token-budget calibration and durable request
-/// usage recording. Request construction and budget calculation remain outside
-/// this component; each completion, not just the last, is observed here.
+/// Reports every actual completion to the caller's accounting owner before
+/// publishing usage, including intermediate completions before a later failure.
+/// Request construction and token-budget calibration remain outside this component.
 pub trait ProviderUsage: Send + Sync {
     fn observe_completion<'a>(
         &'a mut self,

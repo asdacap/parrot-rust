@@ -6,6 +6,7 @@ struct BudgetTools {
     inner: Tools,
     definitions: Vec<sessions::Tool>,
     materializations: AtomicUsize,
+    executions: Mutex<Vec<(String, Vec<String>)>>,
 }
 impl BudgetTools {
     fn new(names: &[&str]) -> Arc<Self> {
@@ -20,6 +21,7 @@ impl BudgetTools {
                 })
                 .collect(),
             materializations: AtomicUsize::new(0),
+            executions: Mutex::new(Vec::new()),
         })
     }
 }
@@ -46,16 +48,30 @@ impl TurnTools<Security> for BudgetTools {
             .cloned()
             .collect()
     }
-    fn reconcile<'a>(
+    fn execute<'a>(
         &'a self,
+        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
         resources: TurnResources<'a>,
         selection: &'a TurnSelection<Security>,
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        self.inner
-            .reconcile(resources, selection, snapshot, capture, cancellation)
+    ) -> BoxFuture<
+        'a,
+        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
+    > {
+        self.executions.lock().unwrap().push((
+            selection.profile.id.clone(),
+            snapshot.iter().map(|tool| tool.name.clone()).collect(),
+        ));
+        self.inner.execute(
+            request,
+            resources,
+            selection,
+            snapshot,
+            capture,
+            cancellation,
+        )
     }
 }
 struct BudgetRuntime {
@@ -163,7 +179,7 @@ impl BudgetRuntime {
             skills: Arc::new(Skills(trace.clone())),
             context,
             status: Arc::new(Status(trace.clone())),
-            completions: vec![],
+            completion_sources: vec![],
             templates,
             reminders,
             output: Arc::new(Output::default()),
@@ -361,6 +377,87 @@ async fn actual_reported_usage_triggers_compaction_before_consuming_reserved_out
 }
 
 #[tokio::test]
+async fn intermediate_usage_calibrates_later_requests_even_when_the_stream_fails() {
+    for stream_fails in [false, true] {
+        let fixture = Fixture::new();
+        let mut first = Step::complete("first answer");
+        first
+            .events
+            .push_back(sessions::Event::Completed(Completion {
+                input_tokens: 147_776,
+                ..Completion::default()
+            }));
+        first.completion.as_mut().unwrap().input_tokens = 0;
+        if stream_fails {
+            first.completion = Err(Error::Provider("failure after completion".into()));
+        }
+        let provider = Scripted::new(vec![
+            first,
+            Step::complete("compacted summary"),
+            Step::complete("done"),
+        ]);
+        let runtime = BudgetRuntime::new(
+            &fixture,
+            &provider,
+            180_000,
+            0,
+            0,
+            profile(),
+            BudgetTools::new(&[]),
+        )
+        .await;
+        let first = runtime
+            .send("first prompt", protocol::Delivery::DELIVERY_STEER)
+            .await;
+        let first = bounded(first.execution.join()).await.unwrap();
+        assert_eq!(
+            first.status,
+            if stream_fails {
+                ExecutionStatus::Failed
+            } else {
+                ExecutionStatus::Succeeded
+            }
+        );
+        assert_eq!(provider.stream_closes.load(Ordering::SeqCst), 1);
+        let next = runtime
+            .send("second prompt", protocol::Delivery::DELIVERY_STEER)
+            .await;
+        assert_eq!(
+            bounded(next.execution.join()).await.unwrap().status,
+            ExecutionStatus::Succeeded
+        );
+        {
+            let requests = provider.requests.lock().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert_eq!(requests[1].max_output_tokens, 1024);
+            assert_eq!(requests[2].max_output_tokens, 32_768);
+        }
+        let events = fixture.events().await;
+        let usage: Vec<_> = events
+            .iter()
+            .filter(|event| event.has_request_usage_recorded())
+            .map(|event| event.request_usage_recorded().input_tokens)
+            .collect();
+        assert_eq!(
+            usage,
+            if stream_fails {
+                vec![147_776, 17]
+            } else {
+                vec![147_776, 0, 17]
+            }
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.has_compaction_finished())
+                .count(),
+            1
+        );
+        runtime.close().await;
+    }
+}
+
+#[tokio::test]
 async fn actual_input_and_exhausted_context_fail_before_any_provider_request_with_typed_diagnostics()
  {
     for (context, input_limit, message) in [
@@ -440,6 +537,108 @@ async fn actual_profile_allowed_and_disabled_tools_filter_every_request() {
 }
 
 #[tokio::test]
+async fn scheduled_work_precedes_queued_input_and_starts_a_fresh_core_budget_scope() {
+    let fixture = Fixture::new();
+    let first_gate = Gate::new();
+    let second_gate = Gate::new();
+    let scheduled_gate = Gate::new();
+    let mut first = Step::complete("first answer");
+    first.gate = Some(first_gate.clone());
+    let mut second = Step::complete("queued answer");
+    second.gate = Some(second_gate.clone());
+    let provider = Scripted::new(vec![first, second]);
+    let mut selected_profile = profile();
+    selected_profile.maximum_requests = 1;
+    let runtime = BudgetRuntime::new(
+        &fixture,
+        &provider,
+        100_000,
+        0,
+        0,
+        selected_profile,
+        BudgetTools::new(&[]),
+    )
+    .await;
+    let sent = runtime
+        .send("first prompt", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    first_gate.entered().await;
+    let queued = runtime
+        .send("queued prompt", protocol::Delivery::DELIVERY_QUEUE)
+        .await;
+    let scheduled = Arc::new(AtomicBool::new(false));
+    let observed = scheduled.clone();
+    let gate = scheduled_gate.clone();
+    let work = runtime
+        .session
+        .schedule_work(
+            move |_, cancellation| {
+                Box::pin(async move {
+                    observed.store(true, Ordering::SeqCst);
+                    gate.wait(cancellation.as_ref()).await.map_err(|_| {
+                        parrot_runtime::agent_turn::lifecycle::LifecycleError::Cancelled
+                    })
+                })
+            },
+            Arc::new(NeverCancelled),
+        )
+        .unwrap();
+    assert!(!scheduled.load(Ordering::SeqCst));
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    first_gate.open();
+    scheduled_gate.entered().await;
+    assert!(scheduled.load(Ordering::SeqCst));
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    let pending = fixture.history.peek_pending_input().await.unwrap().unwrap();
+    assert_eq!(pending.id, queued.admission.input.id);
+    assert_eq!(pending.message_id, queued.admission.input.message_id);
+    assert_eq!(pending.delivery, protocol::Delivery::DELIVERY_QUEUE);
+    scheduled_gate.open();
+    bounded(work.join()).await.unwrap();
+    second_gate.entered().await;
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert!(
+            requests[1]
+                .messages
+                .iter()
+                .any(|message| message.role == sessions::Role::User
+                    && message.content().contains("queued prompt"))
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request
+                    .messages
+                    .iter()
+                    .filter(|message| message.role == sessions::Role::System
+                        && message.content().contains("final provider request"))
+                    .count())
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+    let events = fixture.events().await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_turn_started())
+            .count(),
+        2
+    );
+    second_gate.open();
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    assert_eq!(
+        bounded(queued.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    runtime.close().await;
+}
+
+#[tokio::test]
 async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_turn_restores_current_selection()
  {
     let fixture = Fixture::new();
@@ -448,11 +647,17 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     let next_gate = Gate::new();
     let mut first = tool_step("worker");
     first.gate = Some(first_gate.clone());
-    let mut final_step = Step::complete("first answer");
+    let mut final_step = tool_step("survivor");
     final_step.gate = Some(final_gate.clone());
-    let mut next = Step::complete("queued answer");
+    let mut next = tool_step("new-tool");
     next.gate = Some(next_gate.clone());
-    let provider = Scripted::new(vec![first, final_step, next]);
+    let provider = Scripted::new(vec![
+        first,
+        final_step,
+        Step::complete("first answer"),
+        next,
+        Step::complete("queued answer"),
+    ]);
     let mut original = profile();
     original.maximum_requests = 2;
     original.allowed_tools = Some(vec!["worker".into(), "survivor".into()]);
@@ -497,15 +702,27 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     next_gate.entered().await;
     {
         let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(tool_names(&requests[2]), ["new-tool"]);
-        assert!(
-            requests[2]
-                .messages
-                .iter()
-                .any(|message| message.role == sessions::Role::System
-                    && message.content().contains("Tool access is restored"))
-        );
+        assert_eq!(requests.len(), 4);
+        assert_eq!(tool_names(&requests[3]), ["new-tool"]);
+        let restored: Vec<_> = requests[3]
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                message.role == sessions::Role::System
+                    && message.content().contains("Tool access is restored")
+            })
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(restored.len(), 1);
+        let queued = requests[3]
+            .messages
+            .iter()
+            .position(|message| {
+                message.role == sessions::Role::User && message.content().contains("queued prompt")
+            })
+            .unwrap();
+        assert!(restored[0] < queued);
     }
     next_gate.open();
     assert_eq!(
@@ -530,5 +747,13 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
         ["stop", "stop"]
     );
     assert!(!events.iter().any(|event| event.has_turn_failed()));
+    assert_eq!(
+        *tools.executions.lock().unwrap(),
+        [
+            ("original".into(), vec!["worker".into(), "survivor".into()]),
+            ("original".into(), vec!["survivor".into()]),
+            ("updated".into(), vec!["new-tool".into()]),
+        ]
+    );
     runtime.close().await;
 }

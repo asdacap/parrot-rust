@@ -1720,7 +1720,7 @@ where
                             self.user.templates.clone(),
                         ),
                         status: status.clone(),
-                        completions: vec![completion],
+                        completion_sources: vec![completion],
                         templates: self.user.templates.clone(),
                         reminders,
                         output: output.clone(),

@@ -1,16 +1,34 @@
 use super::*;
 
 struct CancelBeforeClose(Arc<Signal>);
-impl TurnCompletion<Security> for CancelBeforeClose {
-    fn complete<'a>(
+impl CompletionStateSource for CancelBeforeClose {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             self.0.cancel();
-            Ok(CompletionDecision::Complete)
+            Ok(None)
         })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
     }
 }
 #[tokio::test]
@@ -191,12 +209,23 @@ struct CheckReminder {
     history: AgentHistoryView,
     calls: AtomicUsize,
 }
-impl TurnCompletion<Security> for CheckReminder {
-    fn complete<'a>(
+impl CompletionStateSource for CheckReminder {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             assert_eq!(
                 self.history
@@ -207,8 +236,15 @@ impl TurnCompletion<Security> for CheckReminder {
                 1
             );
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(CompletionDecision::Complete)
+            Ok(None)
         })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
     }
 }
 #[tokio::test]

@@ -57,12 +57,13 @@ impl ConversationRepository {
         &self,
         event: Event,
         message: ConversationMessage,
-    ) -> Result<(), EventError> {
+    ) -> Result<ConversationItem, EventError> {
         self.validate(&event.agent_session_id)?;
         let agent = event.agent_session_id.clone();
         let context = self.events.context().clone();
         let projected_agent = agent.clone();
-        self.events
+        let item = self
+            .events
             .transaction(move |tx| {
                 crate::events::record(tx, &event, None, &(context.timestamp)())?;
                 crate::events::projection::project(
@@ -70,11 +71,11 @@ impl ConversationRepository {
                     &projected_agent,
                     &message,
                     &(context.timestamp)(),
-                )?;
-                Ok(())
+                )
             })
             .await?;
-        self.refresh_agent_history(&agent).await
+        self.refresh_agent_history(&agent).await?;
+        Ok(item)
     }
 }
 
@@ -114,7 +115,7 @@ impl AgentHistoryView {
         &self,
         event: Event,
         message: ConversationMessage,
-    ) -> Result<(), EventError> {
+    ) -> Result<ConversationItem, EventError> {
         self.repository.append_conversation(event, message).await
     }
     pub async fn has_tool_synthetic(&self, assistant: i64) -> Result<bool, EventError> {
@@ -239,6 +240,13 @@ impl AgentHistoryView {
             self.refresh().await?;
         }
         Ok(promoted)
+    }
+    /// Reads one pending input without promoting it or materializing its parts.
+    pub async fn peek_pending_input(&self) -> Result<Option<AdmittedInput>, EventError> {
+        self.repository
+            .events
+            .peek_pending_input(self.agent.clone())
+            .await
     }
     pub async fn inputs_for_next_promotion(&self) -> Result<Vec<AdmittedInput>, EventError> {
         self.repository
@@ -456,6 +464,21 @@ impl AgentConversation {
     }
     pub fn messages(&self) -> Vec<ModelMessage> {
         self.read_view().messages()
+    }
+    /// Reads the latest visible segment from its most recent user message, retaining
+    /// candidates and trailing notices. Without a visible user, keeps the available
+    /// context; system-only context has no turn. This does not imply durable acceptance.
+    pub fn read_last_turn_messages(&self) -> Option<Vec<ModelMessage>> {
+        let messages = self.messages.lock().expect("conversation poisoned");
+        messages
+            .iter()
+            .rev()
+            .find(|message| message.role != MessageRole::System)?;
+        let start = messages
+            .iter()
+            .rposition(|message| message.role == MessageRole::User)
+            .unwrap_or(0);
+        Some(messages[start..].to_vec())
     }
     pub fn len(&self) -> usize {
         self.messages.lock().expect("conversation poisoned").len()

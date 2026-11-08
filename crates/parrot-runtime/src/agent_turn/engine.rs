@@ -1,12 +1,12 @@
-//! Actual durable turn loop behind the session-owned lifecycle.
+//! Durable runtime integration behind the session-owned lifecycle.
 use super::{
-    budget::TurnBudget,
     lifecycle::{
         DrainBackend, DrainPass, DrainWork, Execution, ExecutionResultReference, ExecutionStatus,
         LifecycleError,
     },
     provider_call::{self, OutputWriter, ProviderActivity, ProviderCall, ProviderUsage},
     services::*,
+    tool_conversation::ToolConversation,
     usage::SessionUsageRecorder,
 };
 use crate::{
@@ -34,7 +34,10 @@ use parrot_domain::{
 use parrot_foundation::{
     config::runtime::AgentLimitsConfig, template_catalog::PromptTemplateCatalog,
 };
-use parrot_provider::sessions::{self, ProviderSessions};
+use parrot_provider::{
+    routing::registry::ProviderModel,
+    sessions::{self, ProviderSessions},
+};
 use parrot_storage::{
     conversation::{
         AgentConversation, AgentHistoryView, ConversationReadView, ModelContent, ModelMessage,
@@ -50,6 +53,8 @@ use std::sync::{
 };
 use tokio::sync::Mutex;
 
+mod core_loop;
+
 pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 
 pub struct RuntimeConfig<S: AccessSnapshot, T: TurnTools<S>> {
@@ -64,7 +69,7 @@ pub struct RuntimeConfig<S: AccessSnapshot, T: TurnTools<S>> {
     pub skills: Arc<dyn TurnSkills>,
     pub context: ContextController,
     pub status: Arc<dyn TurnStatus<S>>,
-    pub completions: Vec<Arc<dyn TurnCompletion<S>>>,
+    pub completion_sources: Vec<Arc<dyn CompletionStateSource>>,
     pub templates: Arc<PromptTemplateCatalog>,
     pub reminders: Arc<ExitReminders<Publisher>>,
     pub output: Arc<dyn SessionOutput>,
@@ -76,9 +81,41 @@ pub struct RuntimeConfig<S: AccessSnapshot, T: TurnTools<S>> {
 
 struct State {
     conversation: AgentConversation,
+    tool_conversation: ToolConversation,
     context: ContextController,
     turn: Option<TurnKey>,
     diagnostic_turn: Option<String>,
+    request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
+    request_accounting: Option<RequestAccounting>,
+    usage: Arc<SessionUsageRecorder>,
+}
+
+struct RequestAccounting {
+    selected: ProviderModel,
+    estimated_input_tokens: i64,
+}
+
+impl ProviderUsage for State {
+    fn observe_completion<'a>(
+        &'a mut self,
+        request: &'a sessions::Request,
+        completed: &'a sessions::Completion,
+    ) -> BoxFuture<'a, Result<(), EventError>> {
+        Box::pin(async move {
+            let accounting = self
+                .request_accounting
+                .as_ref()
+                .ok_or_else(|| EventError::Invalid("request accounting is unavailable".into()))?;
+            self.context.budget_mut().observe_usage(
+                &accounting.selected.selector(),
+                accounting.estimated_input_tokens,
+                completed,
+            );
+            self.usage
+                .record_request(&accounting.selected, request.reasoning.as_ref(), completed)
+                .await
+        })
+    }
 }
 
 /// A real storage/provider backend. No service has a success default, and no
@@ -93,15 +130,14 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     tools: Arc<T>,
     skills: Arc<dyn TurnSkills>,
     status: Arc<dyn TurnStatus<S>>,
-    completions: Vec<Arc<dyn TurnCompletion<S>>>,
+    completion_sources: Vec<Arc<dyn CompletionStateSource>>,
     output: Arc<dyn SessionOutput>,
     activity: Arc<dyn SessionActivity>,
     parent_completion: Arc<dyn ParentCompletion>,
     event_id: Arc<dyn Fn() -> String + Send + Sync>,
     sessions: ProviderSessions,
-    usage: SessionUsageRecorder,
+    usage: Arc<SessionUsageRecorder>,
     reminders: Arc<ExitReminders<Publisher>>,
-    interruption: AtomicBool,
     suspending: AtomicBool,
     state: Mutex<State>,
     prompt: SessionPrompt,
@@ -116,7 +152,6 @@ struct Notices {
     truncated: String,
     invalid: String,
     final_request: String,
-    interrupted_final: String,
     restored: String,
     interrupted: String,
 }
@@ -141,13 +176,21 @@ where
             ));
         }
         let conversation = AgentConversation::new(config.history.clone()).await?;
-        let usage = SessionUsageRecorder::new(
+        let usage = Arc::new(
+            SessionUsageRecorder::new(
+                config.history.clone(),
+                config.identity.parent_session_id.clone(),
+                config.broker.clone(),
+                config.ancestors,
+            )
+            .await?,
+        );
+        let tool_conversation = ToolConversation::new(
             config.history.clone(),
-            config.identity.parent_session_id.clone(),
-            config.broker.clone(),
-            config.ancestors,
-        )
-        .await?;
+            config.publisher.clone(),
+            config.event_id.clone(),
+            &config.templates,
+        )?;
         let reminders = config.reminders;
         let render = |key: &str| {
             config
@@ -160,7 +203,6 @@ where
             truncated: render("agent-session.truncated-tool-call")?,
             invalid: render("agent-session.invalid-tool-call")?,
             final_request: render("agent-session.final-request")?,
-            interrupted_final: render("agent-session.final-request-interrupted")?,
             restored: render("agent-session.tools-restored")?,
             interrupted: render("agent-session.interrupted-note")?,
         };
@@ -174,15 +216,14 @@ where
             tools: config.tools,
             skills: config.skills,
             status: config.status,
-            completions: config.completions,
+            completion_sources: config.completion_sources,
             output: config.output,
             activity: config.activity,
             parent_completion: config.parent_completion,
             event_id: config.event_id,
             sessions,
-            usage,
+            usage: usage.clone(),
             reminders,
-            interruption: AtomicBool::new(false),
             suspending: AtomicBool::new(false),
             prompt: SessionPrompt::new(config.prompt),
             conversation: conversation.read_view(),
@@ -190,9 +231,13 @@ where
             planner: config.context.compactor().planner_handle(),
             state: Mutex::new(State {
                 conversation,
+                tool_conversation,
                 context: config.context,
                 turn: None,
                 diagnostic_turn: None,
+                request_status: None,
+                request_accounting: None,
+                usage,
             }),
             notices,
             execution_activity: std::sync::Mutex::new(None),
@@ -229,9 +274,6 @@ where
             })
             .await??;
         Ok(super::observation::ObservedContext { selection, context })
-    }
-    pub fn request_final_phase(&self) {
-        self.interruption.store(true, Ordering::Release);
     }
     pub fn history(&self) -> &AgentHistoryView {
         &self.history
@@ -274,7 +316,7 @@ where
             )
             .await
     }
-    pub async fn compact_now(
+    async fn compact_now(
         &self,
         selection: &TurnSelection<S>,
         target: Option<&crate::compaction::ContextSize>,
@@ -338,38 +380,10 @@ where
             selection,
         )
     }
-    async fn reconcile(
-        &self,
-        state: &mut State,
-        cancellation: &dyn Cancellation,
-    ) -> Result<TurnSelection<S>, TurnError> {
-        let selection = self.selection.capture()?;
-        let snapshot = self.snapshot(&selection)?;
-        let status = self.status.bind(&selection);
-        let events = ContextEmitter { backend: self };
-        self.tools
-            .reconcile(
-                TurnResources {
-                    history: &self.history,
-                    conversation: &mut state.conversation,
-                    context: &mut state.context,
-                    prompt: &self.prompt,
-                    sessions: &self.sessions,
-                    status: status.as_ref(),
-                    events: &events,
-                    usage: &self.usage,
-                },
-                &selection,
-                &snapshot,
-                self.selection.as_ref(),
-                cancellation,
-            )
-            .await?;
-        Ok(selection)
-    }
     async fn promote(
         &self,
         state: &mut State,
+        admission: parrot_core::InputAdmission,
         cancellation: &dyn Cancellation,
     ) -> Result<(), TurnError> {
         let agent = self.identity.session_id.clone();
@@ -390,7 +404,7 @@ where
                 Ok(event)
             })
             .await?;
-        if promotions.is_empty() && !state.conversation.is_answerable() {
+        if promotions.is_empty() && admission == parrot_core::InputAdmission::SteersOrNextQueued {
             let agent = self.identity.session_id.clone();
             let ids = self.event_id.clone();
             promotions = self
@@ -549,357 +563,6 @@ where
             Err(CloseTurnError::AdmissionCancelled) => Err(TurnError::Cancelled),
             Err(CloseTurnError::Repository(error)) => Err(error.into()),
             Err(CloseTurnError::Publication { error, .. }) => Err(TurnError::Publication(error)),
-        }
-    }
-    async fn run_pass(
-        &self,
-        state: &mut State,
-        cancellation: &dyn Cancellation,
-        work: &dyn DrainWork,
-    ) -> Result<Execution, TurnError> {
-        let mut answer = String::new();
-        let mut budget = TurnBudget::new(self.agent_limits.disable_max_turns);
-        let mut retry_pending = false;
-        let mut compacted_oversized = false;
-        let mut selected: Option<TurnSelection<S>> = None;
-        let mut active_tools: Option<T::Snapshot> = None;
-        let events = ContextEmitter { backend: self };
-        loop {
-            if state.turn.is_none() && work.has_scheduled() {
-                return Ok(Execution::succeeded(answer));
-            }
-            self.reconcile(state, cancellation).await?;
-            cancellation.check().map_err(|_| TurnError::Cancelled)?;
-            if !retry_pending
-                && !state.conversation.is_answerable()
-                && !self.history.has_pending_inputs().await?
-            {
-                return Ok(Execution::succeeded(answer));
-            }
-            if state.turn.is_none() {
-                self.skills.end_turn().await;
-                let mut selection = self.selection.capture()?;
-                budget.begin_turn();
-                self.sessions.begin_turn().await?;
-                let mut started = self.event();
-                let mut payload = protocol::TurnStarted {
-                    model: selection.model.canonical_model.selector(),
-                    ..Default::default()
-                };
-                if let Some(icon) = selection
-                    .model
-                    .alias
-                    .as_ref()
-                    .and_then(|alias| alias.icon.as_ref())
-                {
-                    payload.model_alias_icon =
-                        protobuf::MessageField::some(protocol::TurnModelAliasIcon {
-                            glyph: icon.glyph.clone(),
-                            color: protobuf::EnumOrUnknown::from_i32(icon.color as i32),
-                            ..Default::default()
-                        });
-                }
-                started.set_turn_started(payload);
-                state.turn = Some(TurnKey {
-                    agent_session_id: self.identity.session_id.clone(),
-                    start_event_id: started.id.clone(),
-                });
-                state.diagnostic_turn = Some(started.id.clone());
-                self.activity.turn_started(&started.id);
-                self.emit(started, cancellation).await?;
-                state
-                    .context
-                    .ensure_epoch(&self.prompt, cancellation)
-                    .await?;
-                loop {
-                    let snapshot = self.snapshot(&selection)?;
-                    let definitions = self.tools.definitions(&snapshot).to_vec();
-                    let status = self.status.bind(&selection);
-                    let outcome = state
-                        .context
-                        .inject_status(
-                            EpochInput {
-                                selection: &selection.model,
-                                tools: &definitions,
-                                conversation: &mut state.conversation,
-                                prompt: &self.prompt,
-                                sessions: &self.sessions,
-                                status: status.as_ref(),
-                                events: &events,
-                            },
-                            self.identity.depth,
-                            &selection.profile.id,
-                            cancellation,
-                        )
-                        .await?;
-                    if matches!(outcome, StatusInjection::Complete) {
-                        break;
-                    }
-                    selection = self.selection.capture()?;
-                    tokio::task::yield_now().await;
-                }
-                self.skills.begin_turn(cancellation).await?;
-                active_tools = Some(self.snapshot(&selection)?);
-                state
-                    .context
-                    .restore_tool_availability(
-                        &mut state.conversation,
-                        &self.notices.restored,
-                        &events,
-                        cancellation,
-                    )
-                    .await?;
-                selected = Some(selection);
-            }
-            self.promote(state, cancellation).await?;
-            let selection = selected
-                .as_ref()
-                .ok_or_else(|| TurnError::Service("turn selection is unavailable".into()))?;
-            let active = active_tools
-                .as_ref()
-                .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
-            let Some(phase) = budget.admit(
-                selection.profile.maximum_requests,
-                self.interruption.swap(false, Ordering::AcqRel),
-            ) else {
-                self.fail(self.notices.runaway.clone(), String::new())
-                    .await?;
-                return Ok(Execution::failed(&self.notices.runaway));
-            };
-            let snapshot = if phase.final_phase {
-                self.tools.enabled_after_interruption(active)
-            } else {
-                active.clone()
-            };
-            let definitions = self.tools.definitions(&snapshot).to_vec();
-            if phase.enters_final_phase {
-                let content = if phase.interrupted {
-                    &self.notices.interrupted_final
-                } else {
-                    &self.notices.final_request
-                };
-                state
-                    .context
-                    .inject_final_provider_request_prompt(
-                        &mut state.conversation,
-                        content,
-                        &events,
-                        cancellation,
-                    )
-                    .await?;
-            }
-            let status = self.status.bind(selection);
-            let epoch = state
-                .context
-                .prepare_epoch(
-                    EpochInput {
-                        selection: &selection.model,
-                        tools: &definitions,
-                        conversation: &mut state.conversation,
-                        prompt: &self.prompt,
-                        sessions: &self.sessions,
-                        status: status.as_ref(),
-                        events: &events,
-                    },
-                    cancellation,
-                )
-                .await?;
-            let messages: Vec<_> = state
-                .conversation
-                .messages()
-                .iter()
-                .map(provider_message)
-                .collect();
-            let estimate = crate::compaction::CompactionPlanner::estimate_input_tokens(
-                &selection.model.canonical_model,
-                &epoch.instructions,
-                &definitions,
-                &messages,
-            )
-            .map_err(TurnError::Planning)?;
-            let maximum = state
-                .context
-                .budget()
-                .calculate_maximum_output_tokens(
-                    &selection.model.canonical_model.selector(),
-                    estimate,
-                    &selection.model.canonical_model.model,
-                )
-                .map_err(TurnError::Planning)?;
-            let request = sessions::Request {
-                model: selection.model.canonical_model.model.id.clone(),
-                instructions: epoch.instructions,
-                messages,
-                tools: definitions.clone(),
-                max_output_tokens: maximum,
-                reasoning: selection.model.canonical_model.reasoning(),
-                ..Default::default()
-            };
-            let attempt = budget.count_request();
-            let session = self
-                .sessions
-                .get(selection.model.canonical_model.provider.clone())
-                .await?;
-            let output = OutputBridge(self.output.as_ref());
-            let activity = ActivityBridge(self.activity.as_ref());
-            let mut usage = UsageBridge {
-                recorder: &self.usage,
-                selected: &selection.model.canonical_model,
-                budget: state.context.budget_mut(),
-                estimate,
-            };
-            let mut call = ProviderCall {
-                history: &self.history,
-                publisher: self.publisher.as_ref(),
-                event_id: self.event_id.as_ref(),
-                output: &output,
-                activity: &activity,
-                usage: &mut usage,
-            };
-            let completed = match call.stream(session.as_ref(), request, cancellation).await {
-                Ok(event) => match event.base_event() {
-                    sessions::Event::Completed(completed) => completed.clone(),
-                    _ => unreachable!("provider call returns completion"),
-                },
-                Err(
-                    error @ provider_call::ProviderCallError::Provider(
-                        sessions::Error::Http(
-                            parrot_provider::http_stream::HttpError::RequestTooLarge(_),
-                        )
-                        | sessions::Error::Socket(
-                            parrot_provider::responses_websocket::WebSocketError::RequestTooLarge {
-                                ..
-                            },
-                        ),
-                    ),
-                ) if !compacted_oversized => {
-                    compacted_oversized = true;
-                    let compacted = state
-                        .context
-                        .compact_epoch(
-                            EpochInput {
-                                selection: &selection.model,
-                                tools: &definitions,
-                                conversation: &mut state.conversation,
-                                prompt: &self.prompt,
-                                sessions: &self.sessions,
-                                status: status.as_ref(),
-                                events: &events,
-                            },
-                            None,
-                            cancellation,
-                        )
-                        .await?;
-                    if !compacted.reduced {
-                        return Err(error.into());
-                    }
-                    continue;
-                }
-                Err(error) => return Err(error.into()),
-            };
-            compacted_oversized = false;
-            if completed.finish_reason == "length" && !completed.tool_calls.is_empty() {
-                self.retry_notice(state, &self.notices.truncated, attempt, cancellation)
-                    .await?;
-                continue;
-            }
-            if completed.tool_calls.iter().any(|call| {
-                serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err()
-            }) {
-                self.retry_notice(state, &self.notices.invalid, attempt, cancellation)
-                    .await?;
-                continue;
-            }
-            if !completed.tool_calls.is_empty() {
-                let published = self.event();
-                self.history
-                    .append_conversation(published.clone(), conversation_message(&completed))
-                    .await?;
-                state.conversation.add(model_assistant(&completed));
-                self.publish(published, cancellation).await?;
-                self.activity.assistant_message(&completed.assistant_text);
-                let mut received = self.event();
-                received.set_tool_request_received(protocol::ToolRequestReceived {
-                    tool_call_count: completed.tool_calls.len() as i32,
-                    ..Default::default()
-                });
-                self.emit(received, cancellation).await?;
-                self.tools
-                    .reconcile(
-                        TurnResources {
-                            history: &self.history,
-                            conversation: &mut state.conversation,
-                            context: &mut state.context,
-                            prompt: &self.prompt,
-                            sessions: &self.sessions,
-                            status: status.as_ref(),
-                            events: &events,
-                            usage: &self.usage,
-                        },
-                        selection,
-                        &snapshot,
-                        self.selection.as_ref(),
-                        cancellation,
-                    )
-                    .await?;
-                if phase.final_phase && !budget.try_extend_settlement() {
-                    self.fail(self.notices.runaway.clone(), String::new())
-                        .await?;
-                    return Ok(Execution::failed(&self.notices.runaway));
-                }
-                continue;
-            }
-            work.join_mutations()
-                .await
-                .map_err(|e| TurnError::Service(e.to_string()))?;
-            let candidate = CompletionCandidate {
-                session_id: self.identity.session_id.clone(),
-                message_id: parrot_domain::values::identifiers::Identifier::message_id()
-                    .map_err(|error| TurnError::Service(error.to_string()))?,
-                assistant: completed.clone().into_message(),
-                selection: selection.clone(),
-            };
-            let mut retry = None;
-            for callback in &self.completions {
-                match callback.complete(&candidate, cancellation).await? {
-                    CompletionDecision::Complete => {}
-                    decision @ CompletionDecision::Retry { .. } => {
-                        retry = Some(decision);
-                        break;
-                    }
-                }
-            }
-            if let Some(CompletionDecision::Retry {
-                system_message,
-                retain_candidate_assistant,
-                completion_retry_pending,
-            }) = retry
-            {
-                if retain_candidate_assistant {
-                    state.conversation.add(model_assistant(&completed));
-                    self.activity.assistant_message(&completed.assistant_text);
-                }
-                state
-                    .conversation
-                    .add(text_message(MessageRole::System, system_message));
-                if let Some(pending) = completion_retry_pending {
-                    retry_pending = pending;
-                }
-                budget.restart();
-                continue;
-            }
-            work.join_mutations()
-                .await
-                .map_err(|e| TurnError::Service(e.to_string()))?;
-            answer = completed.assistant_text.clone();
-            retry_pending = false;
-            self.close_turn(state, &completed, cancellation).await?;
-            if let Some(turn) = state.diagnostic_turn.take() {
-                self.activity.turn_finished(&turn, "completed", None);
-            }
-            self.activity.assistant_message(&completed.assistant_text);
-            selected = None;
-            active_tools = None;
         }
     }
 }
@@ -1080,27 +743,6 @@ impl ProviderActivity for ActivityBridge<'_> {
     }
     fn finish_provider_request(&self) {
         self.0.finish_provider_request();
-    }
-}
-struct UsageBridge<'a> {
-    recorder: &'a SessionUsageRecorder,
-    selected: &'a parrot_provider::routing::registry::ProviderModel,
-    budget: &'a mut crate::compaction::ProviderTokenBudget,
-    estimate: i64,
-}
-impl ProviderUsage for UsageBridge<'_> {
-    fn observe_completion<'a>(
-        &'a mut self,
-        request: &'a sessions::Request,
-        completed: &'a sessions::Completion,
-    ) -> BoxFuture<'a, Result<(), EventError>> {
-        Box::pin(async move {
-            self.budget
-                .observe_usage(&self.selected.selector(), self.estimate, completed);
-            self.recorder
-                .record_request(self.selected, request.reasoning.as_ref(), completed)
-                .await
-        })
     }
 }
 struct ContextEmitter<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -1470,13 +1112,19 @@ where
     }
     fn prepare_scheduled<'a>(
         &'a self,
-        cancellation: &'a dyn Cancellation,
+        _cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Self::Selection, LifecycleError>> {
         Box::pin(async move {
-            let mut state = self.state.lock().await;
-            self.reconcile(&mut state, cancellation)
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
+            state
+                .tool_conversation
+                .restore_results(&mut state.conversation)
                 .await
-                .map_err(|e| e.lifecycle_error())
+                .map_err(|error| error.lifecycle_error())?;
+            self.selection
+                .capture()
+                .map_err(|error| error.lifecycle_error())
         })
     }
     fn pass<'a>(
@@ -1485,8 +1133,8 @@ where
         work: &'a dyn DrainWork,
     ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
+            let result = core_loop::run(self, cancellation, work).await;
             let mut state = self.state.lock().await;
-            let result = self.run_pass(&mut state, cancellation, work).await;
             let outcome = async {
                 match result {
                     Ok(execution) => {
@@ -1590,7 +1238,13 @@ where
     ) -> BoxFuture<'_, Result<i64, LifecycleError>> {
         let message_id = message_id.to_owned();
         Box::pin(async move {
-            let _state = self.state.lock().await;
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
+            state
+                .tool_conversation
+                .restore_results(&mut state.conversation)
+                .await
+                .map_err(|error| error.lifecycle_error())?;
             if let Some(input) = self
                 .history
                 .repository()

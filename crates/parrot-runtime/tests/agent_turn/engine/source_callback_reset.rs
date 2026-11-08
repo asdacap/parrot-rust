@@ -1,22 +1,36 @@
 use super::*;
 use parrot_runtime::agent_turn::lifecycle::DrainBackend;
 struct RetryOnce(AtomicBool);
-impl TurnCompletion<Security> for RetryOnce {
-    fn complete<'a>(
+impl CompletionStateSource for RetryOnce {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(self.0.load(Ordering::SeqCst).then(|| "source retry".into())) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
-            Ok(if self.0.swap(false, Ordering::SeqCst) {
-                CompletionDecision::Retry {
-                    system_message: "source retry".into(),
-                    retain_candidate_assistant: false,
-                    completion_retry_pending: None,
-                }
-            } else {
-                CompletionDecision::Complete
-            })
+            assert_eq!(feedback.kind, CompletionFeedbackKind::ActiveWork);
+            assert_eq!(feedback.message, "source retry");
+            assert!(feedback.candidate.is_some());
+            assert!(self.0.swap(false, Ordering::SeqCst));
+            Ok(())
         })
     }
 }
@@ -85,12 +99,23 @@ struct BlockOnce {
     entered: Arc<Gate>,
     first: AtomicBool,
 }
-impl TurnCompletion<Security> for BlockOnce {
-    fn complete<'a>(
+impl CompletionStateSource for BlockOnce {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             if self.first.swap(false, Ordering::SeqCst) {
                 self.entered
@@ -98,8 +123,15 @@ impl TurnCompletion<Security> for BlockOnce {
                     .await
                     .map_err(TurnError::Provider)?;
             }
-            Ok(CompletionDecision::Complete)
+            Ok(None)
         })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
     }
 }
 #[tokio::test]

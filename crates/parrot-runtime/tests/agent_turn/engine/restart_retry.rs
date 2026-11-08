@@ -1,19 +1,37 @@
 use super::*;
 
 struct BlockCompletion(Arc<Gate>);
-impl TurnCompletion<Security> for BlockCompletion {
-    fn complete<'a>(
+impl CompletionStateSource for BlockCompletion {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        _: &'a CompletionCandidate<Security>,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             self.0
                 .wait(cancellation)
                 .await
                 .map_err(TurnError::Provider)?;
-            Ok(CompletionDecision::Complete)
+            Ok(None)
         })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
     }
 }
 #[tokio::test]
@@ -178,65 +196,80 @@ async fn durable_queued_input_survives_controlled_shutdown_and_repository_restar
     );
     resumed.close().await;
 }
-struct OrderedCallback {
+struct OrderedSource {
     name: &'static str,
     trace: Arc<Trace>,
     retries: AtomicUsize,
-    retain: bool,
-    pending: Option<bool>,
-    candidates: Arc<Mutex<Vec<(String, String)>>>,
+    retains_candidate: bool,
+    feedback: Arc<Mutex<Vec<(String, CompletionFeedback)>>>,
 }
-impl TurnCompletion<Security> for OrderedCallback {
-    fn complete<'a>(
+impl CompletionStateSource for OrderedSource {
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        candidate: &'a CompletionCandidate<Security>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
-            self.trace
-                .push(format!("{}:{}", self.name, candidate.assistant.content()));
-            self.candidates
+            self.trace.push(format!("{}:asks", self.name));
+            Ok(None)
+        })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            self.trace.push(format!("{}:work", self.name));
+            Ok((self.retries.load(Ordering::SeqCst) > 0)
+                .then(|| format!("{} completion retry", self.name)))
+        })
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            self.trace.push(format!("{}:exit", self.name));
+            Ok(None)
+        })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            assert_eq!(feedback.kind, CompletionFeedbackKind::ActiveWork);
+            assert_eq!(feedback.candidate.is_some(), self.retains_candidate);
+            assert_eq!(feedback.message, format!("{} completion retry", self.name));
+            assert!(self.retries.fetch_sub(1, Ordering::SeqCst) > 0);
+            self.trace.push(format!("{}:feedback", self.name));
+            self.feedback
                 .lock()
                 .unwrap()
-                .push((self.name.into(), candidate.message_id.clone()));
-            if self
-                .retries
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
-                    value.checked_sub(1)
-                })
-                .is_ok()
-            {
-                Ok(CompletionDecision::Retry {
-                    system_message: "source completion retry".into(),
-                    retain_candidate_assistant: self.retain,
-                    completion_retry_pending: self.pending,
-                })
-            } else {
-                Ok(CompletionDecision::Complete)
-            }
+                .push((self.name.into(), feedback.clone()));
+            Ok(())
         })
     }
 }
 #[tokio::test]
-async fn completion_callbacks_short_circuit_in_order_and_retry_restarts_original_request_budget() {
+async fn completion_observations_collect_all_sources_in_order_and_retain_once_before_budget_restart()
+ {
     use parrot_runtime::agent_turn::lifecycle::DrainBackend;
-    let retain = false;
     let fixture = Fixture::new();
     let trace = Arc::new(Trace::default());
     let provider = Scripted::new(vec![Step::complete("candidate"), Step::complete("final")]);
-    let candidates = Arc::new(Mutex::new(vec![]));
-    let callbacks: Vec<Arc<dyn TurnCompletion<Security>>> =
-        [("first", 0), ("retry", 1), ("last", 0)]
+    let feedback = Arc::new(Mutex::new(vec![]));
+    let callbacks: Vec<Arc<dyn CompletionStateSource>> =
+        [("first", true), ("retry", false), ("last", false)]
             .into_iter()
-            .map(|(name, retries)| {
-                Arc::new(OrderedCallback {
+            .map(|(name, retains_candidate)| {
+                Arc::new(OrderedSource {
                     name,
                     trace: trace.clone(),
-                    retries: AtomicUsize::new(retries),
-                    retain,
-                    pending: None,
-                    candidates: candidates.clone(),
-                }) as Arc<dyn TurnCompletion<Security>>
+                    retries: AtomicUsize::new(1),
+                    retains_candidate,
+                    feedback: feedback.clone(),
+                }) as Arc<dyn CompletionStateSource>
             })
             .collect();
     let runtime = fixture
@@ -272,20 +305,63 @@ async fn completion_callbacks_short_circuit_in_order_and_retry_restarts_original
     assert_eq!(
         trace.values(),
         [
-            "first:candidate",
-            "retry:candidate",
-            "first:final",
-            "retry:final",
-            "last:final"
+            "first:asks",
+            "retry:asks",
+            "last:asks",
+            "first:work",
+            "retry:work",
+            "last:work",
+            "first:exit",
+            "retry:exit",
+            "last:exit",
+            "first:feedback",
+            "retry:feedback",
+            "last:feedback",
+            "first:asks",
+            "retry:asks",
+            "last:asks",
+            "first:work",
+            "retry:work",
+            "last:work",
+            "first:exit",
+            "retry:exit",
+            "last:exit",
         ]
     );
-    let candidates = candidates.lock().unwrap().clone();
-    assert_eq!(candidates.len(), 5);
-    assert_eq!(candidates[0].1, candidates[1].1);
-    assert_eq!(candidates[2].1, candidates[3].1);
-    assert_eq!(candidates[3].1, candidates[4].1);
-    assert_ne!(candidates[0].1, candidates[2].1);
-    drop(candidates);
+    let feedback = feedback.lock().unwrap().clone();
+    assert_eq!(feedback.len(), 3);
+    assert_eq!(
+        feedback
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "retry", "last"]
+    );
+    assert!(
+        feedback
+            .iter()
+            .all(|(_, feedback)| feedback.kind == CompletionFeedbackKind::ActiveWork)
+    );
+    assert_eq!(
+        feedback
+            .iter()
+            .map(|(_, feedback)| feedback.message.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "first completion retry",
+            "retry completion retry",
+            "last completion retry"
+        ]
+    );
+    assert_eq!(
+        feedback[0].1.candidate.as_ref().unwrap().assistant_text,
+        "candidate"
+    );
+    assert!(
+        feedback[1..]
+            .iter()
+            .all(|(_, feedback)| feedback.candidate.is_none())
+    );
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 2);
     let final_prompt = templates()
@@ -297,11 +373,19 @@ async fn completion_callbacks_short_circuit_in_order_and_retry_restarts_original
             .iter()
             .any(|message| message.content() == final_prompt)
     );
-    assert!(
+    assert_eq!(
         requests[1]
             .messages
             .iter()
-            .any(|message| message.content() == "source completion retry")
+            .filter(|message| message.role == sessions::Role::System
+                && message.content().ends_with("completion retry"))
+            .map(|message| message.content())
+            .collect::<Vec<_>>(),
+        [
+            "first completion retry",
+            "retry completion retry",
+            "last completion retry"
+        ]
     );
     assert_eq!(
         requests[1]
@@ -309,8 +393,11 @@ async fn completion_callbacks_short_circuit_in_order_and_retry_restarts_original
             .iter()
             .filter(|message| message.role == sessions::Role::Assistant)
             .count(),
-        if retain { 2 } else { 0 }
+        1
     );
+    assert!(requests[1].messages.iter().any(
+        |message| message.role == sessions::Role::Assistant && message.content() == "candidate"
+    ));
     drop(requests);
     let events = fixture.events().await;
     assert_eq!(

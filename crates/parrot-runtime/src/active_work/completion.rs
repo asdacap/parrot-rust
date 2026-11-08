@@ -1,7 +1,9 @@
-//! The ordered source completion callbacks, using the actual history and broker.
+//! Completion context observations and recording, with completion policy owned by core.
 use super::{blockers::ActiveWorkReminder, exit_reminders::ExitReminders};
 use crate::{
-    agent_turn::services::{CompletionCandidate, CompletionDecision, TurnCompletion, TurnError},
+    agent_turn::services::{
+        CompletionFeedback, CompletionFeedbackKind, CompletionStateSource, TurnError,
+    },
     event_broker::{BrokerError, EventBroker},
     interactions::AgentAsks,
 };
@@ -9,7 +11,6 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
         events::EventPublisher,
-        security::AccessSnapshot,
         storage::Committed,
     },
     protocol::messages::parrot::{AgentNotice, Event},
@@ -22,9 +23,8 @@ use parrot_storage::{
 };
 use std::sync::Arc;
 
-/// Supply the same reminder Arc to this callback and `RuntimeConfig.reminders`.
-/// The T46 drain owns this callback and joins its reminder mutations at the
-/// terminal boundary. Cancellation does not clear any of the observed work.
+/// Supply the same reminder Arc to this source and `RuntimeConfig.reminders`.
+/// Native state orders these observations; core retains its candidate for any blockers.
 pub struct SessionCompletion<P: EventPublisher<Event = Event, Error = BrokerError> + ?Sized> {
     pub asks: Option<Arc<AgentAsks>>,
     pub active_work: Arc<ActiveWorkReminder>,
@@ -33,113 +33,93 @@ pub struct SessionCompletion<P: EventPublisher<Event = Event, Error = BrokerErro
     pub broker: Arc<EventBroker>,
     pub publisher: Arc<P>,
 }
-impl<S, P> TurnCompletion<S> for SessionCompletion<P>
+impl<P> CompletionStateSource for SessionCompletion<P>
 where
-    S: AccessSnapshot,
     P: EventPublisher<Event = Event, Error = BrokerError> + ?Sized,
 {
-    fn complete<'a>(
+    fn get_pending_ask_reminder<'a>(
         &'a self,
-        candidate: &'a CompletionCandidate<S>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<CompletionDecision, TurnError>> {
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| TurnError::Cancelled)?;
-            if let Some(asks) = &self.asks {
-                if let Some(reminder) = asks
+            match &self.asks {
+                Some(asks) => asks
                     .completion_reminder()
-                    .map_err(|error| TurnError::Service(error.to_string()))?
-                {
-                    return self
-                        .retained(
-                            candidate,
-                            reminder,
-                            "pending_ask_reminder",
-                            "Retrying with pending ask reminder",
-                            cancellation,
-                        )
-                        .await;
-                }
+                    .map_err(|error| TurnError::Service(error.to_string())),
+                None => Ok(None),
             }
-            if let Some(reminder) = self.active_work.build().await? {
-                let event = notice(
-                    candidate,
-                    "active_work_reminder",
-                    "Active work reminder injected",
-                )?;
+        })
+    }
+    fn get_active_work_reminder<'a>(
+        &'a self,
+        _cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(self.active_work.build())
+    }
+    fn get_exit_reminder<'a>(
+        &'a self,
+        _cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            self.reminders
+                .build()
+                .await
+                .map_err(|error| TurnError::Service(error.to_string()))
+        })
+    }
+    fn record_completion_feedback<'a>(
+        &'a self,
+        feedback: &'a CompletionFeedback,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        Box::pin(async move {
+            let (kind, text) = match feedback.kind {
+                CompletionFeedbackKind::PendingAsks => {
+                    ("pending_ask_reminder", "Retrying with pending ask reminder")
+                }
+                CompletionFeedbackKind::ActiveWork => {
+                    ("active_work_reminder", "Active work reminder injected")
+                }
+                CompletionFeedbackKind::ExitReminders => {
+                    ("exit_reminder", "Exit reminder injected")
+                }
+            };
+            let event = notice(self.history.agent_session_id(), kind, text)?;
+            if let Some(candidate) = &feedback.candidate {
+                let completed: sessions::Completion = candidate.clone().into();
+                self.history
+                    .append_retained_reminder(
+                        event.clone(),
+                        assistant(&completed.into_message()),
+                        feedback.message.clone(),
+                    )
+                    .await?;
+                self.publisher
+                    .publish_committed(&Committed::after_commit(event), cancellation)
+                    .await
+                    .map_err(TurnError::Publication)?;
+            } else {
                 // Source AppendSystemPrompt projects the prompt, but does not
                 // record this notice. Its fanout is retained, not storage replay.
                 self.history
-                    .append_system_prompt(event.clone(), reminder.clone())
+                    .append_system_prompt(event.clone(), feedback.message.clone())
                     .await?;
                 cancellation.check().map_err(|_| TurnError::Cancelled)?;
                 self.broker.publish_retained(&event);
-                return Ok(CompletionDecision::Retry {
-                    system_message: reminder,
-                    retain_candidate_assistant: false,
-                    completion_retry_pending: None,
-                });
             }
-            if let Some(reminder) = self
-                .reminders
-                .build()
-                .await
-                .map_err(|error| TurnError::Service(error.to_string()))?
-            {
-                return self
-                    .retained(
-                        candidate,
-                        reminder,
-                        "exit_reminder",
-                        "Exit reminder injected",
-                        cancellation,
-                    )
-                    .await;
-            }
-            Ok(CompletionDecision::Complete)
+            Ok(())
         })
     }
 }
-impl<P: EventPublisher<Event = Event, Error = BrokerError> + ?Sized> SessionCompletion<P> {
-    async fn retained<S: AccessSnapshot>(
-        &self,
-        candidate: &CompletionCandidate<S>,
-        reminder: String,
-        kind: &str,
-        text: &str,
-        cancellation: &dyn Cancellation,
-    ) -> Result<CompletionDecision, TurnError> {
-        let event = notice(candidate, kind, text)?;
-        self.history
-            .append_retained_reminder(
-                event.clone(),
-                assistant(&candidate.assistant),
-                reminder.clone(),
-            )
-            .await?;
-        self.publisher
-            .publish_committed(&Committed::after_commit(event), cancellation)
-            .await
-            .map_err(TurnError::Publication)?;
-        Ok(CompletionDecision::Retry {
-            system_message: reminder,
-            retain_candidate_assistant: true,
-            completion_retry_pending: Some(true),
-        })
-    }
-}
-fn notice<S: AccessSnapshot>(
-    candidate: &CompletionCandidate<S>,
-    kind: &str,
-    text: &str,
-) -> Result<Event, TurnError> {
+fn notice(session_id: &str, kind: &str, text: &str) -> Result<Event, TurnError> {
     let mut event = Event::new();
     event.id = Identifier::event_id().map_err(|error| TurnError::Service(error.to_string()))?;
-    event.agent_session_id = candidate.session_id.clone();
+    event.agent_session_id = session_id.to_owned();
     event.set_agent_notice(AgentNotice {
         kind: kind.into(),
         notice: text.into(),
-        ..Default::default()
+        ..AgentNotice::new()
     });
     Ok(event)
 }
