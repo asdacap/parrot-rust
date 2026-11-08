@@ -241,6 +241,7 @@ impl EnhancedCli {
         let skill_paths = Arc::new(SkillReadPathFormatter::new(
             initial.working_directory.clone(),
             skills.root_locations().to_vec(),
+            skills.list_catalog_skills(),
         ));
         let registry = Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
             prefixes.clone(),
@@ -1087,8 +1088,10 @@ impl SessionState {
         if self.generation != generation {
             return false;
         }
-        self.skill_paths
-            .replace_root_locations(skills.root_locations().to_vec());
+        self.skill_paths.replace_context(
+            skills.root_locations().to_vec(),
+            skills.list_catalog_skills(),
+        );
         self.prepared_skills = Some(skills);
         true
     }
@@ -1477,6 +1480,7 @@ impl SessionReplacement for EnhancedSession {
             let skill_paths = Arc::new(SkillReadPathFormatter::new(
                 session.working_directory.clone(),
                 skills.root_locations().to_vec(),
+                skills.list_catalog_skills(),
             ));
             let registry = Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
                 self.read_only_command_prefixes.clone(),

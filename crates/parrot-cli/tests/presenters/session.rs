@@ -388,6 +388,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
             scope: wire::ListedSkillScope::SKILL_SCOPE_USER.into(),
             ..Default::default()
         }],
+        &[],
     ));
     let presenters: Vec<Arc<dyn ToolPresenter>> = vec![
         Arc::new(ReadToolPresenter::new(paths.clone())),
@@ -458,7 +459,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
         .unwrap();
     assert_eq!(read.style().start(), "\x1b[48;5;236m\x1b[36m");
     clock.store(12, Ordering::Release);
-    paths.replace_root_locations(Vec::new());
+    paths.replace_context(Vec::new(), &[]);
     let after = presenter.snapshot().unwrap();
     assert!(
         live(&after, 200).contains("running 12s"),

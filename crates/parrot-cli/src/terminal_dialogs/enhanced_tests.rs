@@ -16,7 +16,7 @@ fn enhanced_run_future_preserves_existing_send_contract() {
 
 #[tokio::test]
 async fn stale_skill_refresh_cannot_replace_the_current_binding_paths() {
-    use crate::presenters::{Presentation, ToolCallPresentation};
+    use crate::presenters::{Presentation, ToolCallPresentation, ToolTerminalPresentation};
     let diagnostics = Arc::new(
         parrot_storage::diagnostics::FileDiagnosticLog::open_global(
             std::env::temp_dir().join(format!(
@@ -45,6 +45,11 @@ async fn stale_skill_refresh_cannot_replace_the_current_binding_paths() {
             scope: wire::ListedSkillScope::SKILL_SCOPE_USER.into(),
             ..Default::default()
         }],
+        &[wire::Skill {
+            path: "/server/skills/solidifier/SKILL.md".into(),
+            name: "current-skill-name".into(),
+            ..Default::default()
+        }],
     ));
     let mut state = SessionState {
         session: wire::UserSession::new(),
@@ -62,9 +67,33 @@ async fn stale_skill_refresh_cannot_replace_the_current_binding_paths() {
         panic!("tool")
     };
     assert_eq!(report.label, "read $USER_SKILLS/solidifier/SKILL.md");
+    let terminal = ToolTerminalPresentation {
+        result_present: true,
+        result: "57: body\ntotal lines in file: 57\n".into(),
+        ..Default::default()
+    };
+    let Presentation::Tool(report) = registry
+        .present_terminal(&call, &terminal)
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("tool")
+    };
+    assert_eq!(
+        report.label,
+        "read skill current-skill-name ($USER_SKILLS/solidifier/SKILL.md L57-L57)"
+    );
     assert!(state.prepare_skills(9, SkillCompletion::new(client)));
     assert!(state.prepared_skills.is_some());
     let Presentation::Tool(report) = registry.present_live(&call, 0).unwrap() else {
+        panic!("tool")
+    };
+    assert_eq!(report.label, "read /server/skills/solidifier/SKILL.md");
+    let Presentation::Tool(report) = registry
+        .present_terminal(&call, &terminal)
+        .unwrap()
+        .unwrap()
+    else {
         panic!("tool")
     };
     assert_eq!(report.label, "read /server/skills/solidifier/SKILL.md");

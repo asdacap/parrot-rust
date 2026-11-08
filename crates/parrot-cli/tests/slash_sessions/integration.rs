@@ -815,11 +815,29 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
         };
         Ok(wire::ListSkillsResponse {
             root_locations,
-            skills: vec![wire::Skill {
-                name: request.user_session_id,
-                enabled: true,
-                ..Default::default()
-            }],
+            skills: vec![
+                wire::Skill {
+                    path: format!("/remote/{}/skills/first/SKILL.md", request.user_session_id),
+                    name: request.user_session_id.clone(),
+                    enabled: true,
+                    ..Default::default()
+                },
+                wire::Skill {
+                    path: format!(
+                        "/remote/{}/skills/duplicate/SKILL.md",
+                        request.user_session_id
+                    ),
+                    name: request.user_session_id,
+                    enabled: true,
+                    ..Default::default()
+                },
+                wire::Skill {
+                    path: "/remote/disabled/SKILL.md".into(),
+                    name: "disabled".into(),
+                    enabled: false,
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
         }
         .write_to_bytes()
@@ -830,6 +848,18 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
     let stop = Stop::new();
     for id in ["one", "legacy", "two"] {
         completion.refresh_catalog(id, &stop).await.unwrap();
+        assert_eq!(
+            completion
+                .list_catalog_skills()
+                .iter()
+                .map(|skill| (skill.name.as_str(), skill.enabled))
+                .collect::<Vec<_>>(),
+            [(id, true), (id, true), ("disabled", false)]
+        );
+        assert_ne!(
+            completion.list_catalog_skills()[0].path,
+            completion.list_catalog_skills()[1].path
+        );
         if id == "legacy" {
             assert!(completion.root_locations().is_empty());
         } else {
@@ -843,7 +873,12 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
             text: "$".into(),
             cursor: 1,
         });
+        assert_eq!(completion.skills().len(), 1);
         assert_eq!(completion.skills()[0].name, id);
+        assert_eq!(
+            completion.skills()[0].path,
+            format!("/remote/{id}/skills/first/SKILL.md")
+        );
     }
     completion.refresh_catalog("fail", &stop).await.unwrap();
     completion.refresh(&parrot_cli::terminal_input::PromptState {
@@ -852,6 +887,7 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
         cursor: 1,
     });
     assert!(completion.skills().is_empty());
+    assert!(completion.list_catalog_skills().is_empty());
     assert!(completion.root_locations().is_empty());
     let stopped = Stop::new();
     stopped.cancel();
