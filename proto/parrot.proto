@@ -767,6 +767,7 @@ message SessionUsageSnapshot {
 enum InputSource {
   INPUT_SOURCE_UNSPECIFIED = 0;
   INPUT_SOURCE_MONITOR = 1;
+  INPUT_SOURCE_PROCESS = 2;
 }
 
 // Incoming input, accepted but not yet part of the conversation. It is on the
