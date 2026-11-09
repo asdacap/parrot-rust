@@ -3,13 +3,14 @@ use parrot_core::{
     ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
     ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, FinishReason,
     InputAdmission, Message, Outcome, PendingMessage, Preparation, PromotedInput, Provider,
-    ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role, States, TokenCalibration,
-    ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
+    ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role, Skill, SkillContent,
+    SkillMention, SkillReference, States, TokenCalibration, ToolCall, ToolCatalog, ToolDefinition,
+    ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnRequestPhase},
-    run, run_turn,
+    parse_skill_mentions, run, run_turn,
 };
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     future::Future,
     sync::{
         Arc, Mutex,
@@ -27,6 +28,8 @@ mod completion_policy;
 mod context_preparation;
 #[path = "turn_loop/request_assembly.rs"]
 mod request_assembly;
+#[path = "turn_loop/skills.rs"]
+mod skills;
 #[path = "turn_loop/tool_execution.rs"]
 mod tool_execution;
 #[path = "turn_loop/turn_state.rs"]
@@ -248,16 +251,18 @@ struct MemoryRequestData {
 struct MemoryPreparation {
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
-    prepared_inputs: Arc<Mutex<Vec<Vec<PromotedInput>>>>,
-    derived_contexts: Arc<Mutex<VecDeque<DerivedContext>>>,
+    skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
     fail_at: Option<&'static str>,
 }
 
 struct MemoryState {
+    skill_rows: Vec<(Skill, SkillContent)>,
+    steers_after_results: VecDeque<String>,
+    skill_lookups: Mutex<Vec<SkillReference>>,
+    skill_reads: Mutex<Vec<String>>,
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
-    prepared_inputs: Arc<Mutex<Vec<Vec<PromotedInput>>>>,
-    derived_contexts: Arc<Mutex<VecDeque<DerivedContext>>>,
+    skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
     recorded_input_contexts: Vec<DerivedContext>,
     tools: MemoryTools,
     provider: MemoryProvider,
@@ -310,8 +315,7 @@ impl MemoryState {
         MemoryPreparation {
             trace: self.trace.clone(),
             request: self.request.clone(),
-            prepared_inputs: self.prepared_inputs.clone(),
-            derived_contexts: self.derived_contexts.clone(),
+            skill_templates: self.skill_templates.clone(),
             fail_at: self.fail_at,
         }
     }
@@ -341,9 +345,25 @@ impl MemoryState {
             renderings: VecDeque::new(),
         }));
         let mut state = Self {
+            skill_rows: Vec::new(),
+            steers_after_results: VecDeque::new(),
+            skill_lookups: Mutex::default(),
+            skill_reads: Mutex::default(),
             request,
-            prepared_inputs: Arc::default(),
-            derived_contexts: Arc::default(),
+            skill_templates: Arc::new(Mutex::new([
+                (
+                    "context.skill-selected".into(),
+                    "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
+                ),
+                (
+                    "context.skill-unavailable".into(),
+                    "<skill-unavailable>\n<name>{name}</name>\n<message>{message}</message>\n</skill-unavailable>".into(),
+                ),
+                (
+                    "context.skill-too-large".into(),
+                    "<skill-too-large>\n<name>{name}</name>\n<path>{path}</path>\n<message>The skill instructions exceed the {limit_bytes}-byte injection limit and were not loaded.</message>\n</skill-too-large>".into(),
+                ),
+            ].into())),
             recorded_input_contexts: Vec::new(),
             trace: trace.clone(),
             tools: MemoryTools {
@@ -528,22 +548,17 @@ impl MemoryState {
     }
 }
 impl Preparation for MemoryPreparation {
-    fn prepare_inputs<'a>(
-        &'a mut self,
-        inputs: &'a [PromotedInput],
-    ) -> BoxFuture<'a, Result<DerivedContext, Error>> {
-        Box::pin(async move {
-            if self.fail_at == Some("prepare_inputs") {
-                self.trace.step("prepare_inputs", self.fail_at)?;
-            }
-            self.prepared_inputs.lock().unwrap().push(inputs.to_vec());
-            Ok(self
-                .derived_contexts
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or_default())
-        })
+    fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error> {
+        self.trace.step("render_template", self.fail_at)?;
+        let templates = self.skill_templates.lock().unwrap();
+        let template = templates
+            .get(key)
+            .ok_or_else(|| Error::failed("unknown template"))?;
+        Ok(arguments
+            .iter()
+            .fold(template.clone(), |text, (name, value)| {
+                text.replace(&format!("{{{name}}}"), value)
+            }))
     }
     fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async move {
@@ -612,6 +627,9 @@ impl States for MemoryState {
                     ..Message::default()
                 });
             }
+            if let Some(steer) = self.steers_after_results.pop_front() {
+                self.enqueue_message(Delivery::Steer, &steer);
+            }
             Ok(())
         })
     }
@@ -666,6 +684,52 @@ impl States for MemoryState {
                     }
                 })
                 .collect())
+        })
+    }
+    fn get_skills<'a>(
+        &'a self,
+        references: &'a [SkillReference],
+    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
+        Box::pin(async move {
+            self.trace.step("get_skills", self.fail_at)?;
+            self.skill_lookups
+                .lock()
+                .unwrap()
+                .extend_from_slice(references);
+            if self.fail_at == Some("cancel_get_skills") {
+                self.cancellation.cancel();
+            }
+            Ok(references
+                .iter()
+                .map(|reference| {
+                    self.skill_rows
+                        .iter()
+                        .find(|(skill, _)| {
+                            skill.name == reference.name
+                                && reference
+                                    .path
+                                    .as_ref()
+                                    .is_none_or(|path| path == &skill.path || path == &skill.id)
+                        })
+                        .map(|(skill, _)| skill.clone())
+                })
+                .collect())
+        })
+    }
+    fn read_skill_content<'a>(
+        &'a self,
+        skill: &'a Skill,
+    ) -> BoxFuture<'a, Result<SkillContent, Error>> {
+        Box::pin(async move {
+            self.trace.step("read_skill_content", self.fail_at)?;
+            self.skill_reads.lock().unwrap().push(skill.id.clone());
+            Ok(self
+                .skill_rows
+                .iter()
+                .find(|(row, _)| row.id == skill.id)
+                .unwrap()
+                .1
+                .clone())
         })
     }
     fn record_input_context<'a>(

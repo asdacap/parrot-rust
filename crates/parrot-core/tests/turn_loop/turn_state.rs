@@ -361,111 +361,39 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
     );
     assert!(state.pending_messages.is_empty());
     assert_eq!(state.last_turn.as_ref().unwrap().messages, [message]);
-    assert!(state.prepared_inputs.lock().unwrap().is_empty());
+    assert!(state.skill_lookups.lock().unwrap().is_empty());
+    assert!(state.skill_reads.lock().unwrap().is_empty());
     assert!(state.request().rendered_instructions.is_empty());
     assert!(state.recorded_input_contexts.is_empty());
     assert!(state.provider.requests.lock().unwrap().is_empty());
 }
 
 #[test]
-fn promoted_inputs_are_supplied_to_preparation_and_derived_context_reaches_the_provider() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.pending_messages.clear();
-    state.enqueue_message(Delivery::Queue, "queued for another turn");
-    state.enqueue_message(Delivery::Steer, "use $first");
-    state.enqueue_message(Delivery::Steer, "then $second");
-    let context = DerivedContext {
-        content: "FIRST BODY\nSECOND BODY".into(),
-        loaded_paths: vec![
-            "skills/first/SKILL.md".into(),
-            "skills/second/SKILL.md".into(),
-        ],
-    };
-    state
-        .derived_contexts
-        .lock()
-        .unwrap()
-        .push_back(context.clone());
-    let tools = state.tools.clone();
-    let provider = state.provider.clone();
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(false);
-    let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let mut preparation = state.preparation();
-
-    assert_eq!(
-        finish(run_turn(
-            &mut state,
-            &mut preparation,
-            &tools,
-            &provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
-        )),
-        Ok(Outcome::Completed("answer".into()))
-    );
-    assert_eq!(
-        *state.prepared_inputs.lock().unwrap(),
-        [vec![
-            PromotedInput {
-                input_id: "input-2".into(),
-                message_id: "message-2".into(),
-                message: Message {
-                    role: Role::User,
-                    contents: vec![Content::Text("use $first".into())],
-                    ..Message::default()
-                },
-            },
-            PromotedInput {
-                input_id: "input-3".into(),
-                message_id: "message-3".into(),
-                message: Message {
-                    role: Role::User,
-                    contents: vec![Content::Text("then $second".into())],
-                    ..Message::default()
-                },
-            },
-        ]]
-    );
-    assert_eq!(state.recorded_input_contexts, [context]);
-    assert_eq!(state.pending_messages.len(), 1);
-    assert_eq!(state.pending_messages[0].0.delivery, Delivery::Queue);
-    assert_eq!(
-        provider.requests.lock().unwrap()[0].messages,
-        [Message {
-            role: Role::User,
-            contents: vec![Content::Text("FIRST BODY\nSECOND BODY".into())],
-            ..Message::default()
-        }]
-    );
-}
-
-#[test]
-fn input_preparation_and_recording_failures_preserve_promoted_inputs_without_invoking_provider() {
-    for stage in ["prepare_inputs", "record_input_context"] {
+fn skill_read_and_recording_failures_preserve_promoted_inputs_without_invoking_provider() {
+    for stage in [
+        "get_skills",
+        "read_skill_content",
+        "render_template",
+        "record_input_context",
+    ] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
+        state.pending_messages.clear();
+        state.enqueue_message(Delivery::Steer, "use $selected");
         state.fail_at = Some(stage);
-        state
-            .derived_contexts
-            .lock()
-            .unwrap()
-            .push_back(DerivedContext {
-                content: "prepared skill body".into(),
-                loaded_paths: vec!["skills/selected/SKILL.md".into()],
-            });
+        state.skill_rows.push((
+            Skill {
+                id: "selected-row".into(),
+                name: "selected".into(),
+                path: "skills/selected/SKILL.md".into(),
+            },
+            SkillContent::Text("prepared skill body".into()),
+        ));
 
         assert_eq!(state.run(), Err(Error::failed(stage)));
         assert!(state.pending_messages.is_empty());
         assert_eq!(
             state.last_turn.as_ref().unwrap().messages[0].contents,
-            [Content::Text("question".into())]
-        );
-        assert_eq!(
-            state.prepared_inputs.lock().unwrap().len(),
-            usize::from(stage == "record_input_context")
+            [Content::Text("use $selected".into())]
         );
         assert!(state.recorded_input_contexts.is_empty());
         assert!(state.request().rendered_instructions.is_empty());
@@ -492,4 +420,30 @@ fn empty_derived_context_records_no_message_or_loaded_paths() {
     assert!(state.recorded_input_contexts.is_empty());
     assert!(state.request().messages.is_empty());
     assert!(state.trace.values().is_empty());
+}
+
+#[test]
+fn core_loads_skill_rows_without_native_input_preparation() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.pending_messages.clear();
+    state.enqueue_message(Delivery::Steer, "use $selected");
+    state.skill_rows.push((
+        Skill {
+            id: "row-1".into(),
+            name: "selected".into(),
+            path: "/skills/selected/SKILL.md".into(),
+        },
+        SkillContent::Text("instructions from the skill row".into()),
+    ));
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.recorded_input_contexts.len(), 1);
+    assert_eq!(
+        state.recorded_input_contexts[0].content,
+        "<skill>\n<name>selected</name>\n<path>/skills/selected/SKILL.md</path>\ninstructions from the skill row\n</skill>"
+    );
+    assert_eq!(
+        state.recorded_input_contexts[0].loaded_paths,
+        ["/skills/selected/SKILL.md"]
+    );
 }

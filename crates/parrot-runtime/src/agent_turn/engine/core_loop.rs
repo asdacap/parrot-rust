@@ -43,34 +43,24 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    fn prepare_inputs<'a>(
-        &'a mut self,
-        inputs: &'a [parrot_core::PromotedInput],
-    ) -> BoxFuture<'a, Result<parrot_core::DerivedContext, CoreError>> {
-        adapt_operation(async move {
-            for input in inputs {
-                let parts = input
-                    .message
-                    .contents
-                    .iter()
-                    .filter_map(|content| match content {
-                        parrot_core::Content::Text(text) => {
-                            Some(ConversationPart::text(text.clone()))
-                        }
-                        parrot_core::Content::Image { .. } => None,
-                    })
-                    .collect::<Vec<_>>();
-                self.backend
-                    .skills
-                    .select(&parts, self.cancellation)
-                    .await?;
-            }
-            let rendering = self.backend.skills.render(self.cancellation).await?;
-            Ok(parrot_core::DerivedContext {
-                content: rendering.content,
-                loaded_paths: rendering.loaded_paths,
+    fn render_template(
+        &self,
+        key: &str,
+        arguments: &[(String, String)],
+    ) -> Result<String, CoreError> {
+        let arguments = arguments
+            .iter()
+            .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+            .collect::<Vec<_>>();
+        self.backend
+            .templates
+            .render(key, &arguments, &NeverCancelled)
+            .map_err(|error| {
+                TurnError::Prompt(crate::prompt_context::PromptError::Template(
+                    error.to_string(),
+                ))
+                .into()
             })
-        })
     }
     fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
         adapt_operation(async move {
@@ -550,6 +540,30 @@ where
             self.backend
                 .promote(&mut state, admission, self.cancellation)
                 .await
+        })
+    }
+    fn get_skills<'a>(
+        &'a self,
+        references: &'a [parrot_core::SkillReference],
+    ) -> BoxFuture<'a, Result<Vec<Option<parrot_core::Skill>>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .skills
+                .get_skills(references, self.cancellation)
+                .await
+                .map_err(TurnError::from)
+        })
+    }
+    fn read_skill_content<'a>(
+        &'a self,
+        skill: &'a parrot_core::Skill,
+    ) -> BoxFuture<'a, Result<parrot_core::SkillContent, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .skills
+                .read_skill_content(skill, self.cancellation)
+                .await
+                .map_err(TurnError::from)
         })
     }
     fn record_input_context<'a>(

@@ -3,7 +3,7 @@ use super::provider_call::{OutputWriter, ProviderActivity, ProviderCallError};
 use crate::{
     compaction::{ContextController, ContextError, ContextEvents, ContextStatus},
     event_broker::BrokerError,
-    prompt_context::{AgentSkills, PromptError, PromptResult, SkillRendering},
+    prompt_context::{AgentSkills, PromptError, PromptResult},
 };
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation, OperationError},
@@ -11,10 +11,7 @@ use parrot_domain::contracts::{
     security::{AccessSnapshot, SecurityProvider},
 };
 use parrot_provider::{routing::aliases::ResolvedModelSelection, sessions};
-use parrot_storage::{
-    conversation::AgentHistoryView,
-    events::{ConversationPart, EventError},
-};
+use parrot_storage::{conversation::AgentHistoryView, events::EventError};
 use std::{fmt, sync::Arc};
 
 #[derive(Clone, Debug)]
@@ -155,20 +152,26 @@ pub trait CompletionStateSource: Send + Sync {
     ) -> BoxFuture<'a, Result<(), TurnError>>;
 }
 
+/// Exposes agent-local skill records and authorized content without preparing prompts.
 pub trait TurnSkills: Send + Sync {
+    /// Captures the catalog used by this turn and its live catalog prompt view.
     fn begin_turn<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, PromptResult<()>>;
-    fn select<'a>(
+    /// Finds enabled record metadata in query order, refreshing at most once per batch.
+    fn get_skills<'a>(
         &'a self,
-        parts: &'a [ConversationPart],
+        references: &'a [parrot_core::SkillReference],
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<()>>;
-    fn render<'a>(
+    ) -> BoxFuture<'a, PromptResult<Vec<Option<parrot_core::Skill>>>>;
+    /// Reads the supplied record with current authority, returning raw text or diagnostics.
+    fn read_skill_content<'a>(
         &'a self,
+        skill: &'a parrot_core::Skill,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<SkillRendering>>;
+    ) -> BoxFuture<'a, PromptResult<parrot_core::SkillContent>>;
+    /// Releases the turn's catalog snapshot and live prompt view.
     fn end_turn(&self) -> BoxFuture<'_, ()>;
 }
 impl<R, P> TurnSkills for tokio::sync::Mutex<AgentSkills<R, P>>
@@ -182,18 +185,24 @@ where
     ) -> BoxFuture<'a, PromptResult<()>> {
         Box::pin(async move { self.lock().await.begin_turn(cancellation).await })
     }
-    fn select<'a>(
+    fn get_skills<'a>(
         &'a self,
-        parts: &'a [ConversationPart],
+        references: &'a [parrot_core::SkillReference],
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<()>> {
-        Box::pin(async move { self.lock().await.select(parts, cancellation).await })
+    ) -> BoxFuture<'a, PromptResult<Vec<Option<parrot_core::Skill>>>> {
+        Box::pin(async move { self.lock().await.get_skills(references, cancellation).await })
     }
-    fn render<'a>(
+    fn read_skill_content<'a>(
         &'a self,
+        skill: &'a parrot_core::Skill,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<SkillRendering>> {
-        Box::pin(async move { self.lock().await.render(cancellation).await })
+    ) -> BoxFuture<'a, PromptResult<parrot_core::SkillContent>> {
+        Box::pin(async move {
+            self.lock()
+                .await
+                .read_skill_content(skill, cancellation)
+                .await
+        })
     }
     fn end_turn(&self) -> BoxFuture<'_, ()> {
         Box::pin(async move {

@@ -78,6 +78,27 @@ pub struct PromotedInput {
     pub message: Message,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkillReference {
+    pub name: String,
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Skill {
+    /// Opaque, stable canonical identity used for turn-wide deduplication.
+    pub id: String,
+    pub name: String,
+    /// Presentation or discovery path, not the record identity or read authority.
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SkillContent {
+    Text(String),
+    Unavailable(String),
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DerivedContext {
     pub content: String,
@@ -86,12 +107,9 @@ pub struct DerivedContext {
 
 /// Prepares request content without recording conversation effects or invoking a model.
 pub trait Preparation: Send {
-    /// Selects and renders derived context from the explicitly promoted inputs.
-    /// Empty content has no conversation effect.
-    fn prepare_inputs<'a>(
-        &'a mut self,
-        inputs: &'a [PromotedInput],
-    ) -> BoxFuture<'a, Result<DerivedContext, Error>>;
+    /// Expands one configured prompt template from supplied string arguments.
+    /// Does not look up or select skills, read their content, or persist context.
+    fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error>;
     /// Renders current instructions while retaining native request-scoped bindings.
     fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
     /// Estimates exactly the supplied request content using native tokenizer and
@@ -123,6 +141,19 @@ pub trait States: Send {
         &mut self,
         admission: InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>>;
+    /// Retrieves skill metadata in one batch without reading instruction bodies.
+    /// Returns one result per reference in the supplied order, preserving backing-store
+    /// precedence and name/path matching semantics.
+    fn get_skills<'a>(
+        &'a self,
+        references: &'a [SkillReference],
+    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>>;
+    /// Reads the selected record's complete instruction body or unavailable diagnostic.
+    /// Does not format prompt text, update turn deduplication, or record context.
+    fn read_skill_content<'a>(
+        &'a self,
+        skill: &'a Skill,
+    ) -> BoxFuture<'a, Result<SkillContent, Error>>;
     /// Records supplied derived content and loaded-path facts after preparation.
     /// Empty content records and publishes nothing.
     fn record_input_context<'a>(

@@ -1,8 +1,7 @@
-use super::skills_rendering::SelectionRendering;
 use super::{
     AgentIdentityDescription, PromptError, PromptResult, SkillCatalog, SkillMetadata,
     SkillSnapshot, SystemPrompt, SystemPromptProvider, normalize_skill_match_path,
-    normalize_skill_path, parse_skill_mentions, render_skill_catalog,
+    normalize_skill_path, render_skill_catalog,
 };
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation, OperationError},
@@ -11,21 +10,10 @@ use parrot_domain::contracts::{
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
-use parrot_storage::events::ConversationPart;
-use std::{
-    collections::HashSet,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SkillRendering {
-    pub content: String,
-    pub loaded_paths: Vec<String>,
-}
-
-/// Owns turn-local selection, not authorization. Every I/O invocation receives
-/// a fresh immutable snapshot from the injected session security provider.
+/// Exposes agent-local catalog records without preparing selected-skill context.
 pub struct AgentSkills<
     R: AuthorizedReadService + ?Sized,
     P: SecurityProvider<Snapshot = R::Security>,
@@ -38,8 +26,6 @@ pub struct AgentSkills<
     snapshot: Arc<SkillSnapshot>,
     catalog_rendering: Option<(Arc<SkillSnapshot>, String)>,
     catalog_view: Arc<RwLock<Option<PromptResult<String>>>>,
-    selected: Vec<(SkillMetadata, usize)>,
-    selected_paths: HashSet<String>,
     turn_active: bool,
 }
 impl<R, P> AgentSkills<R, P>
@@ -69,8 +55,6 @@ where
             }),
             catalog_rendering: None,
             catalog_view: Arc::new(RwLock::new(None)),
-            selected: Vec::new(),
-            selected_paths: HashSet::new(),
             turn_active: false,
         })
     }
@@ -83,8 +67,6 @@ where
             .map_err(super::agents::read_error)?;
         self.turn_active = true;
         self.snapshot = snapshot;
-        self.selected.clear();
-        self.selected_paths.clear();
         let _ = self.publish_catalog(self.snapshot.clone());
         Ok(())
     }
@@ -120,28 +102,18 @@ where
             .expect("skill catalog view lock poisoned") = Some(rendered.clone());
         rendered
     }
-    pub async fn select(
+    pub async fn get_skills(
         &mut self,
-        parts: &[ConversationPart],
+        references: &[parrot_core::SkillReference],
         cancellation: &dyn Cancellation,
-    ) -> PromptResult<()> {
+    ) -> PromptResult<Vec<Option<parrot_core::Skill>>> {
+        cancellation.check().map_err(|_| PromptError::Cancelled)?;
         self.ensure_turn(cancellation).await?;
-        let mut mentions = Vec::new();
-        let mut offset = 0;
-        for part in parts {
-            if let ConversationPart::Text(text) = part {
-                mentions.extend(parse_skill_mentions(text).into_iter().map(|mut mention| {
-                    mention.position += offset;
-                    mention
-                }));
-                offset += text.encode_utf16().count();
-            }
-        }
         let working_directory = self.working_directory.clone();
         let platform = self.catalog.context().platform;
-        let matches = |candidate: &SkillMetadata, name: &str, path: &Option<String>| {
-            candidate.name == name
-                && path.as_ref().is_none_or(|path| {
+        let matches = |candidate: &SkillMetadata, reference: &parrot_core::SkillReference| {
+            candidate.name == reference.name
+                && reference.path.as_ref().is_none_or(|path| {
                     let Ok(path) =
                         normalize_skill_match_path(path, Some(&working_directory), platform)
                     else {
@@ -160,12 +132,12 @@ where
                         })
                 })
         };
-        if mentions.iter().any(|mention| {
+        if references.iter().any(|reference| {
             !self
                 .snapshot
                 .skills
                 .iter()
-                .any(|skill| matches(skill, &mention.name, &mention.path))
+                .any(|skill| matches(skill, reference))
         }) {
             let security = self.security.capture();
             self.snapshot = self
@@ -175,81 +147,56 @@ where
                 .map_err(super::agents::read_error)?;
             let _ = self.publish_catalog(self.snapshot.clone());
         }
-        mentions.sort_by_key(|mention| mention.position);
-        for mention in mentions {
-            if let Some(skill) = self
-                .snapshot
-                .skills
-                .iter()
-                .find(|skill| skill.enabled && matches(skill, &mention.name, &mention.path))
-            {
-                if self.selected_paths.insert(skill.path.clone()) {
-                    self.selected.push((skill.clone(), mention.position));
-                }
-            }
-        }
-        Ok(())
+        Ok(references
+            .iter()
+            .map(|reference| {
+                self.snapshot
+                    .skills
+                    .iter()
+                    .find(|skill| skill.enabled && matches(skill, reference))
+                    .map(|skill| parrot_core::Skill {
+                        id: skill.path.clone(),
+                        name: skill.name.clone(),
+                        path: skill.discovery_path.clone(),
+                    })
+            })
+            .collect())
     }
-    pub async fn render(
+    pub async fn read_skill_content(
         &mut self,
+        skill: &parrot_core::Skill,
         cancellation: &dyn Cancellation,
-    ) -> PromptResult<SkillRendering> {
-        self.ensure_turn(cancellation).await?;
-        if self.selected.is_empty() {
-            return Ok(SkillRendering {
-                content: String::new(),
-                loaded_paths: Vec::new(),
-            });
-        }
+    ) -> PromptResult<parrot_core::SkillContent> {
+        cancellation.check().map_err(|_| PromptError::Cancelled)?;
         let security = self.security.capture();
-        let mut rendering = SelectionRendering::new(&self.templates)?;
-        let mut selected = self.selected.clone();
-        selected.sort_by(|(a, ap), (b, bp)| {
-            ap.cmp(bp)
-                .then_with(|| a.path.encode_utf16().cmp(b.path.encode_utf16()))
-        });
-        for (skill, _) in selected {
-            let request = ReadRequest {
-                requested: skill.discovery_path.clone().into(),
-                expected_physical: Some(skill.path.clone().into()),
-                links: LinkPolicy::Follow,
-                max_bytes: Some(1024 * 1024),
-            };
-            match self.reader.read(&request, &security, cancellation).await {
-                Ok(read) => match std::str::from_utf8(&read.bytes) {
-                    Ok(content) => rendering.selected(&self.templates, &skill, content)?,
-                    Err(_) => rendering.diagnostic(
-                        &self.templates,
-                        &skill.name,
-                        &format!(
-                            "Skill source '{}' is not valid UTF-8.",
-                            skill.discovery_path
-                        ),
-                    )?,
-                },
-                Err(OperationError::Cancelled) => return Err(PromptError::Cancelled),
-                Err(OperationError::Failed(error))
-                    if error.is_io()
-                        || matches!(
-                            error.kind,
-                            FileReadErrorKind::Denied | FileReadErrorKind::InvalidOperation
-                        ) =>
-                {
-                    rendering.diagnostic(&self.templates, &skill.name, &error.message)?;
-                }
-                Err(error) => return Err(super::agents::read_error(error)),
+        let request = ReadRequest {
+            requested: skill.path.clone().into(),
+            expected_physical: Some(skill.id.clone().into()),
+            links: LinkPolicy::Follow,
+            max_bytes: Some(1024 * 1024),
+        };
+        match self.reader.read(&request, &security, cancellation).await {
+            Ok(read) => match std::str::from_utf8(&read.bytes) {
+                Ok(content) => Ok(parrot_core::SkillContent::Text(content.to_owned())),
+                Err(_) => Ok(parrot_core::SkillContent::Unavailable(format!(
+                    "Skill source '{}' is not valid UTF-8.",
+                    skill.path
+                ))),
+            },
+            Err(OperationError::Cancelled) => Err(PromptError::Cancelled),
+            Err(OperationError::Failed(error))
+                if error.is_io()
+                    || matches!(
+                        error.kind,
+                        FileReadErrorKind::Denied | FileReadErrorKind::InvalidOperation
+                    ) =>
+            {
+                Ok(parrot_core::SkillContent::Unavailable(error.message))
             }
+            Err(error) => Err(super::agents::read_error(error)),
         }
-        let rendering = rendering.finish(&self.templates)?;
-        self.selected.clear();
-        Ok(SkillRendering {
-            content: rendering.content,
-            loaded_paths: rendering.loaded_paths,
-        })
     }
     pub fn end_turn(&mut self) {
-        self.selected.clear();
-        self.selected_paths.clear();
         self.turn_active = false;
         self.snapshot = Arc::new(SkillSnapshot {
             skills: Vec::new(),

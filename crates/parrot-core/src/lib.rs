@@ -4,8 +4,10 @@ pub mod budget;
 pub mod compaction;
 mod context;
 mod protocol;
+mod skills;
 pub use context::*;
 pub use protocol::*;
+pub use skills::{SkillMention, parse_skill_mentions};
 
 /// Runs admission, response validation, retry, and completion using the caller-owned budget.
 /// The supplied settings apply to every execution turn drained by this call.
@@ -62,6 +64,7 @@ pub async fn run_turn<'a>(
     budget.begin_turn();
     let catalog = tools.capture_catalog().await?;
     let mut compacted_oversized = false;
+    let mut skills = skills::SkillPreparation::default();
     loop {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
@@ -73,7 +76,9 @@ pub async fn run_turn<'a>(
             InputAdmission::SteersOrNextQueued
         };
         let inputs = states.promote_input(admission).await?;
-        let context = preparation.prepare_inputs(&inputs).await?;
+        let context = skills
+            .prepare(states, preparation, &inputs, cancellation)
+            .await?;
         states.record_input_context(&context).await?;
         let Some(phase) = budget.admit(options.maximum_requests) else {
             return Ok(Outcome::BudgetExhausted);

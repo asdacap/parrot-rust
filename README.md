@@ -31,9 +31,11 @@ ported from the .NET repository. Repository contributor guidance is in
 `parrot-core` owns the agent turn protocol, loop, and shared compaction algorithm.
 Its turn contracts are:
 
-- `States`: factual conversation turns and pending-message headers, context
-  configuration/calibration, explicit messages, estimates, result recording,
-  observed completion context, and explicit persistence/rendering effects.
+- `States`: factual conversation turns and pending-message headers, skill records
+  and content, context configuration/calibration, explicit messages, result
+  recording, observed completion context, and explicit persistence effects.
+- `Preparation`: live instruction construction, exact token estimates, and
+  expansion of explicitly supplied templates and arguments.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
@@ -71,6 +73,8 @@ The core specifies and implements:
 - Conversation readiness and input-admission decisions from actual turn/message
   state, recording assistant calls before execution, and completion ordering before
   closing a turn.
+- Skill mention parsing, turn-scoped deduplication, selected-skill ordering, prompt
+  composition, and skill-context size limits.
 
 For core-selected automatic compaction and oversized recovery,
 `States::prepare_compaction` returns a safe-prefix plan and explicitly scoped
@@ -88,8 +92,15 @@ delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch. Promotion
 returns the admitted inputs with their identities and content. It does not select
-or render skills. Core passes those inputs to `Preparation::prepare_inputs`, then
-explicitly persists the returned context through `States::record_input_context`.
+or render skills. Core parses their skill mentions and resolves references in one
+batch per input through `States::get_skills`. That read returns metadata without
+loading instruction bodies and permits one fallback catalog refresh per batch.
+Core deduplicates records by stable identity before calling
+`States::read_skill_content`, then applies formatting and injection limits.
+`Preparation::render_template` only expands the configured template and supplied
+arguments. Core explicitly persists the resulting context through
+`States::record_input_context`. State implementations can supply skill records
+from files or a database without preparing a prompt themselves.
 
 There is no `States::prepare_context` workflow hook. Core reads raw model limits
 and context overrides through `read_context_configuration` and token calibration

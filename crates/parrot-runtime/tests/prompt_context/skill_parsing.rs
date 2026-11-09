@@ -1,7 +1,6 @@
 use parrot_runtime::prompt_context::{
-    SkillDisplayMetadata, SkillMention, SkillScope, normalize_skill_path,
-    parse_skill_display_metadata, parse_skill_frontmatter, parse_skill_mentions, select_skills,
-    select_skills_in_directory, select_skills_on_platform,
+    SkillDisplayMetadata, SkillScope, normalize_skill_path, parse_skill_display_metadata,
+    parse_skill_frontmatter,
 };
 
 fn skill(path: &str, name: &str) -> parrot_runtime::prompt_context::SkillMetadata {
@@ -212,109 +211,6 @@ fn yaml_scalar_forms_anchors_and_block_strings_use_existing_foundation_parser() 
 }
 
 #[test]
-fn mention_syntax_preserves_original_boundaries_and_environment_exclusions() {
-    for (input, expected) in [
-        ("$9skill", "9skill"),
-        ("($skill-name).", "skill-name"),
-        ("$plugin:skill", "plugin:skill"),
-        ("email$x", ""),
-        ("$PATH and $skill", "skill"),
-        (
-            "$HOME $PATH $USER $SHELL $PWD $TMP $TMPDIR $TEMP $LANG $TERM $XDG_CONFIG_HOME",
-            "",
-        ),
-        ("$home $PATHS", "home,PATHS"),
-        ("é$skill _embedded$skip :$ok", "skill,ok"),
-    ] {
-        assert_eq!(
-            parse_skill_mentions(input)
-                .iter()
-                .map(|mention| mention.name.as_str())
-                .collect::<Vec<_>>()
-                .join(","),
-            expected,
-            "{input}"
-        );
-    }
-}
-
-#[test]
-fn mentions_include_code_and_escaping_as_the_actual_source_regex_does() {
-    let mentions = parse_skill_mentions("`$inline`\n```\n$fenced\n```\n\\$escaped");
-    assert_eq!(
-        mentions
-            .iter()
-            .map(|mention| mention.name.as_str())
-            .collect::<Vec<_>>(),
-        ["inline", "fenced", "escaped"]
-    );
-}
-
-#[test]
-fn mention_positions_are_utf16_and_links_preserve_path_and_name_trimming() {
-    let mentions = parse_skill_mentions("😀 [$ same ]( /second/SKILL.md ) then $other");
-    assert_eq!(
-        mentions[0],
-        SkillMention {
-            name: "same".into(),
-            path: Some("/second/SKILL.md".into()),
-            position: 3
-        }
-    );
-    assert_eq!(mentions[1].position, 38);
-    let linked_environment = parse_skill_mentions("[$HOME](/skill/SKILL.md)");
-    assert_eq!(linked_environment[0].name, "HOME");
-    assert_eq!(parse_skill_mentions("[$same](/path)x")[0].path, None);
-    assert_eq!(parse_skill_mentions("[$ ]( )")[0].path.as_deref(), Some(""));
-}
-
-#[test]
-fn selection_orders_deduplicates_and_uses_first_enabled_duplicate() {
-    let mut first = skill("/first/SKILL.md", "same");
-    first.enabled = false;
-    let second = skill("/second/SKILL.md", "same");
-    let third = skill("/third/SKILL.md", "other");
-    let skills = vec![first, second, third];
-    let selected = select_skills(
-        &skills,
-        &parse_skill_mentions("$HOME then $other, $same, and $same again"),
-    );
-    assert_eq!(
-        selected
-            .iter()
-            .map(|skill| skill.path.as_str())
-            .collect::<Vec<_>>(),
-        ["/third/SKILL.md", "/second/SKILL.md"]
-    );
-    let selected = select_skills(
-        &skills,
-        &parse_skill_mentions("use [$same](/second/SKILL.md)"),
-    );
-    assert_eq!(selected.len(), 1);
-    assert_eq!(selected[0].path, "/second/SKILL.md");
-}
-
-#[test]
-fn selection_matches_logical_discovery_paths_and_explicit_relative_paths() {
-    let mut parsed = skill("/physical/SKILL.md", "same");
-    parsed.discovery_path = "/logical/SKILL.md".into();
-    assert_eq!(
-        select_skills(
-            &[parsed.clone()],
-            &parse_skill_mentions("[$same](/logical/../logical/SKILL.md)")
-        )
-        .len(),
-        1
-    );
-    let mentions = parse_skill_mentions("[$same](../logical/SKILL.md)");
-    assert!(select_skills(&[parsed.clone()], &mentions).is_empty());
-    assert_eq!(
-        select_skills_in_directory(&[parsed], &mentions, Some("/working")).len(),
-        1
-    );
-}
-
-#[test]
 fn lexical_path_normalization_never_consults_host_or_resolves_links() {
     assert_eq!(
         normalize_skill_path("/a//b/../../skill/SKILL.md", None).unwrap(),
@@ -335,33 +231,4 @@ fn lexical_path_normalization_never_consults_host_or_resolves_links() {
         )
         .is_err()
     );
-}
-
-#[test]
-fn linked_selection_normalizes_supported_macos_aliases_on_both_paths() {
-    use parrot_domain::values::config::PathPlatform;
-    for alias in ["tmp", "var", "etc"] {
-        let path = format!("/private/{alias}/skills/review/SKILL.md");
-        let skill = parse_skill_frontmatter(
-            &path,
-            "---\nname: review\ndescription: review description\n---\nbody",
-            SkillScope::Repo,
-            true,
-        )
-        .unwrap();
-        let mentions = parse_skill_mentions(&format!("[$review](/{alias}/skills/review/SKILL.md)"));
-        assert_eq!(
-            select_skills_on_platform(
-                std::slice::from_ref(&skill),
-                &mentions,
-                Some("/work"),
-                PathPlatform::MacOs
-            ),
-            [skill.clone()]
-        );
-        assert!(
-            select_skills_on_platform(&[skill], &mentions, Some("/work"), PathPlatform::Unix)
-                .is_empty()
-        );
-    }
 }
