@@ -30,7 +30,6 @@ async fn projection_counts(repository: &EventRepository) -> Vec<i64> {
         .transaction(|tx| {
             [
                 "event",
-                "message",
                 "conversation_item",
                 "conversation_part",
                 "agent_history",
@@ -67,7 +66,7 @@ async fn an_event_and_its_projection_commit_together() {
     // source_assertion: An_event_and_its_projection_commit_together:60
     assert_eq!(repository.replay().await.unwrap().len(), 2);
     // Concrete projection observations, not a replacement T18 Messages API.
-    assert_eq!(projection_counts(&repository).await, vec![2, 1, 1, 1, 1]);
+    assert_eq!(projection_counts(&repository).await, vec![2, 1, 1, 1]);
     repository.database().close().await.unwrap();
 }
 
@@ -89,7 +88,7 @@ async fn events_survive_reopening_the_database() {
     // source_assertion: Events_survive_reopening_the_database:292
     assert_eq!(reopened.replay().await.unwrap()[0].id, "kept");
     assert_eq!(reopened.replay_raw().await.unwrap(), before);
-    assert_eq!(projection_counts(&reopened).await, vec![1, 1, 1, 1, 1]);
+    assert_eq!(projection_counts(&reopened).await, vec![1, 1, 1, 1]);
     reopened.database().close().await.unwrap();
 }
 
@@ -123,7 +122,7 @@ async fn ordinary_append_projection_trigger_rolls_back_event_and_all_partial_pro
     repository
         .transaction(|tx| {
             let missing: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM message WHERE content = ?1",
+                "SELECT COUNT(*) FROM conversation_part WHERE kind = 'text' AND text = ?1",
                 params!["must roll back"],
                 |row| row.get(0),
             )?;

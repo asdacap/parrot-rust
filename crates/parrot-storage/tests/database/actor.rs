@@ -10,10 +10,10 @@ use std::sync::{
 #[tokio::test]
 async fn panic_rolls_back_and_does_not_kill_worker() {
     let fixture = Fixture::new();
-    let db = SessionDatabase::open(fixture.root()).unwrap();
+    let db = fixture.open_actor_database().await;
     let failed = db
         .admit("panic", &active(), |tx| -> Result<(), DatabaseError> {
-            tx.execute("INSERT INTO projection_version VALUES('panic',1)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('panic',1)", [])?;
             panic!("controlled transaction failure");
         })
         .unwrap()
@@ -22,11 +22,9 @@ async fn panic_rolls_back_and_does_not_kill_worker() {
     assert!(matches!(failed, Err(DatabaseError::CommandPanicked)));
     let rows = db
         .admit("after", &active(), |tx| {
-            Ok(
-                tx.query_row("SELECT count(*) FROM projection_version", [], |r| {
-                    r.get::<_, i64>(0)
-                })?,
-            )
+            Ok(tx.query_row("SELECT count(*) FROM actor_probe", [], |r| {
+                r.get::<_, i64>(0)
+            })?)
         })
         .unwrap()
         .into_completion()
@@ -41,7 +39,7 @@ async fn panic_rolls_back_and_does_not_kill_worker() {
 #[tokio::test]
 async fn dropped_completion_future_does_not_own_queued_transaction() {
     let fixture = Fixture::new();
-    let db = SessionDatabase::open(fixture.root()).unwrap();
+    let db = fixture.open_actor_database().await;
     let (entered, entry) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let blocking = db
@@ -55,7 +53,7 @@ async fn dropped_completion_future_does_not_own_queued_transaction() {
     let cancellation = Cancel(AtomicBool::new(false));
     let queued = db
         .admit("queued", &cancellation, |tx| {
-            tx.execute("INSERT INTO projection_version VALUES('queued',7)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('queued',7)", [])?;
             Ok(())
         })
         .unwrap();
@@ -68,7 +66,7 @@ async fn dropped_completion_future_does_not_own_queued_transaction() {
     assert_eq!(
         reopened
             .query_row(
-                "SELECT version FROM projection_version WHERE name='queued'",
+                "SELECT value FROM actor_probe WHERE name='queued'",
                 [],
                 |r| r.get::<_, i64>(0)
             )
@@ -80,17 +78,17 @@ async fn dropped_completion_future_does_not_own_queued_transaction() {
 #[tokio::test]
 async fn every_admitted_command_runs_serially_on_same_non_executor_thread() {
     let fixture = Fixture::new();
-    let db = SessionDatabase::open(fixture.root()).unwrap();
+    let db = fixture.open_actor_database().await;
     let caller = std::thread::current().id();
     let mut tickets = Vec::new();
     for i in 0..32 {
         tickets.push(
             db.admit(i, &active(), move |tx| {
                 let prior: i64 =
-                    tx.query_row("SELECT count(*) FROM projection_version", [], |r| r.get(0))?;
+                    tx.query_row("SELECT count(*) FROM actor_probe", [], |r| r.get(0))?;
                 assert_eq!(prior, i);
                 tx.execute(
-                    "INSERT INTO projection_version VALUES(?1,?2)",
+                    "INSERT INTO actor_probe VALUES(?1,?2)",
                     rusqlite::params![i.to_string(), i],
                 )?;
                 Ok(std::thread::current().id())
@@ -124,14 +122,14 @@ impl TransactionCommand for Command {
 }
 impl DatabaseCommand for Command {
     fn execute(self, tx: &Transaction<'_>) -> Result<i64, DatabaseError> {
-        tx.execute("INSERT INTO projection_version VALUES(?1,9)", [self.key])?;
+        tx.execute("INSERT INTO actor_probe VALUES(?1,9)", [self.key])?;
         Ok(9)
     }
 }
 #[tokio::test]
 async fn typed_shared_contract_retains_key_receipt_and_selected_root() {
     let fixture = Fixture::new();
-    let db = SessionDatabase::open(fixture.root()).unwrap();
+    let db = fixture.open_actor_database().await;
     let transactions = db.transactions::<Command>();
     assert_eq!(transactions.selected_root(), &fixture.root());
     let ticket = transactions
@@ -153,11 +151,11 @@ async fn typed_shared_contract_retains_key_receipt_and_selected_root() {
 #[tokio::test]
 async fn close_from_another_clone_drains_and_closes_every_clone() {
     let fixture = Fixture::new();
-    let db = SessionDatabase::open(fixture.root()).unwrap();
+    let db = fixture.open_actor_database().await;
     let clone = db.clone();
     let ticket = db
         .admit("close", &active(), |tx| {
-            tx.execute("INSERT INTO projection_version VALUES('closing',1)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('closing',1)", [])?;
             Ok(())
         })
         .unwrap();
@@ -170,12 +168,12 @@ async fn close_from_another_clone_drains_and_closes_every_clone() {
 #[tokio::test]
 async fn dropping_last_database_handle_still_finishes_admitted_transaction() {
     let fixture = Fixture::new();
-    let db = SessionDatabase::open(fixture.root()).unwrap();
+    let db = fixture.open_actor_database().await;
     let written = Arc::new(AtomicBool::new(false));
     let result = written.clone();
     let ticket = db
         .admit("last", &active(), move |tx| {
-            tx.execute("INSERT INTO projection_version VALUES('last',1)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('last',1)", [])?;
             result.store(true, Ordering::SeqCst);
             Ok(())
         })
@@ -186,7 +184,7 @@ async fn dropping_last_database_handle_still_finishes_admitted_transaction() {
     let reader = rusqlite::Connection::open(fixture.0.join("session.db")).unwrap();
     assert_eq!(
         reader
-            .query_row("SELECT count(*) FROM projection_version", [], |r| r
+            .query_row("SELECT count(*) FROM actor_probe", [], |r| r
                 .get::<_, i64>(0))
             .unwrap(),
         1

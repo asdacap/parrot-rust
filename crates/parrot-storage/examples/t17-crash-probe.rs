@@ -58,7 +58,9 @@ impl EventPublisher for CrashPublisher {
                 .unwrap();
             assert_eq!(Event::parse_from_bytes(&raw).unwrap(), *event.value());
             let messages: i64 = connection
-                .query_row("SELECT COUNT(*) FROM message", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) FROM conversation_part", [], |row| {
+                    row.get(0)
+                })
                 .unwrap();
             assert_eq!(messages, 1);
             wait_at_gate("publisher-entry committed=true closed=true");
@@ -130,7 +132,7 @@ async fn main() {
                     )?;
                     assert_eq!(outcome.closure, TurnClosure::NewlyClosed);
                     assert_eq!(count_rows(transaction, "event"), 2);
-                    for table in ["message", "conversation_item", "agent_history"] {
+                    for table in ["conversation_part", "conversation_item", "agent_history"] {
                         assert_eq!(count_rows(transaction, table), 1);
                     }
                     assert!(!transaction.is_autocommit());
@@ -148,7 +150,7 @@ async fn main() {
             repository
                 .transaction(|transaction| {
                     assert_eq!(count_rows(transaction, "event"), 2);
-                    for table in ["message", "conversation_item", "agent_history"] {
+                    for table in ["conversation_part", "conversation_item", "agent_history"] {
                         assert_eq!(count_rows(transaction, table), 1);
                     }
                     Ok(())

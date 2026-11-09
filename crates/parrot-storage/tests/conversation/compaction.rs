@@ -405,7 +405,7 @@ async fn final_request_messages_and_tool_restoration_roll_back_with_projected_me
             .await
             .unwrap()
     );
-    assert_eq!(count(&repo, "message").await, 1);
+    assert_eq!(count(&repo, "conversation_item").await, 1);
     fail_projection(&repo).await;
     assert!(
         repo.append_tool_availability_restored_prompt(event("same"), "failed".into())
@@ -420,7 +420,7 @@ async fn final_request_messages_and_tool_restoration_roll_back_with_projected_me
             .unwrap()
             .final_phase
     );
-    assert_eq!(count(&repo, "message").await, 1);
+    assert_eq!(count(&repo, "conversation_item").await, 1);
     resume_projection(&repo).await;
     assert!(
         repo.append_tool_availability_restored_prompt(event("same"), "restored".into())
@@ -436,7 +436,7 @@ async fn final_request_messages_and_tool_restoration_roll_back_with_projected_me
     repo.append_system_prompt(event("same"), "system".into())
         .await
         .unwrap();
-    assert_eq!(count(&repo, "message").await, 3);
+    assert_eq!(count(&repo, "conversation_item").await, 3);
     assert_eq!(count(&repo, "event").await, 0);
     repo.events().database().close().await.unwrap();
 }
@@ -521,7 +521,7 @@ async fn retained_reminder_atomically_records_event_assistant_and_system_then_re
         .is_err()
     );
     assert_eq!(count(&repo, "event").await, 0);
-    assert_eq!(count(&repo, "message").await, 0);
+    assert_eq!(count(&repo, "conversation_item").await, 0);
     resume_projection(&repo).await;
     repo.append_retained_reminder(
         event("retained"),

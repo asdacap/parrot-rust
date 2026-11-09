@@ -13,7 +13,8 @@ async fn fifty_event_message_transactions_leave_truncate_without_wal_or_shm() {
         database.admit(index,&active(),move|tx| {
             let event=Event{id:index.to_string(),agent_session_id:"agent".into(),..Default::default()};
             tx.execute("INSERT INTO event(id,agent_session,payload,created_at) VALUES(?1,'agent',?2,'')",params![event.id,event.write_to_bytes()?])?;
-            tx.execute("INSERT INTO message(agent_session,role,content,created_at) VALUES('agent','user','hello','')",[])?;Ok(())
+            tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','input','user','','')",[])?;
+            tx.execute("INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(?1,0,'text','hello','','','')", [tx.last_insert_rowid()])?;Ok(())
         }).unwrap().into_completion().await.unwrap();
         assert!(!fixture.0.join("session.db-wal").exists());
         assert!(!fixture.0.join("session.db-shm").exists());
@@ -48,7 +49,8 @@ async fn sql_event_and_message_are_durable_together_without_claiming_repository_
     let payload = original.clone();
     database.admit("durable",&active(),move|tx| {
         tx.execute("INSERT INTO event(id,agent_session,payload,created_at) VALUES('kept','agent',?1,'')",[payload])?;
-        tx.execute("INSERT INTO message(agent_session,role,content,created_at) VALUES('agent','user','durable','')",[])?;Ok(())
+        tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','input','user','','')",[])?;
+            tx.execute("INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(?1,0,'text','durable','','','')", [tx.last_insert_rowid()])?;Ok(())
     }).unwrap().into_completion().await.unwrap();
     database.close().await.unwrap();
     let reopened = SessionDatabase::open(fixture.root()).unwrap();
@@ -58,7 +60,11 @@ async fn sql_event_and_message_are_durable_together_without_claiming_repository_
                 tx.query_row("SELECT payload FROM event WHERE id='kept'", [], |r| {
                     r.get(0)
                 })?;
-            let text: String = tx.query_row("SELECT content FROM message", [], |r| r.get(0))?;
+            let text: String = tx.query_row(
+                "SELECT text FROM conversation_part WHERE kind = 'text'",
+                [],
+                |r| r.get(0),
+            )?;
             assert_eq!(text, "durable");
             Ok(payload)
         })

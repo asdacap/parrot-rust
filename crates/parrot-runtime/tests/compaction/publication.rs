@@ -58,7 +58,7 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
         user(&history, "tail").await;
         if sqlite_failure {
             fixture.repository.events().transaction(|tx| {
-                tx.execute_batch("CREATE TRIGGER fail_t45_snapshot BEFORE INSERT ON compaction_snapshot BEGIN SELECT RAISE(ABORT, 'synthetic snapshot failure'); END;")?;
+                tx.execute_batch("CREATE TRIGGER fail_t45_snapshot BEFORE INSERT ON agent_history WHEN NEW.kind = 'compaction' BEGIN SELECT RAISE(ABORT, 'synthetic snapshot failure'); END;")?;
                 Ok(())
             }).await.unwrap();
         }

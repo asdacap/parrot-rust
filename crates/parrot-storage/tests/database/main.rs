@@ -25,6 +25,21 @@ impl Fixture {
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
     }
+    async fn open_actor_database(&self) -> SessionDatabase {
+        let database = SessionDatabase::open(self.root()).unwrap();
+        database
+            .admit("actor-probe", &active(), |tx| {
+                tx.execute_batch(
+                    "CREATE TABLE actor_probe (name TEXT PRIMARY KEY, value INTEGER NOT NULL);",
+                )?;
+                Ok(())
+            })
+            .unwrap()
+            .into_completion()
+            .await
+            .unwrap();
+        database
+    }
     fn root(&self) -> SelectedSessionRoot {
         SelectedSessionRoot::new(self.0.clone(), RootOrigin::Current).unwrap()
     }
@@ -68,16 +83,16 @@ async fn schema_foreign_keys_truncate_and_no_wal() {
 #[tokio::test]
 async fn dropped_ticket_and_late_cancellation_cannot_split_transaction() {
     let fixture = Fixture::new();
-    let database = SessionDatabase::open(fixture.root()).unwrap();
+    let database = fixture.open_actor_database().await;
     let cancellation = active();
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let ticket = database
         .admit("whole", &cancellation, move |tx| {
-            tx.execute("INSERT INTO projection_version VALUES('first',1)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('first',1)", [])?;
             entered_tx.send(()).unwrap();
             release_rx.recv().unwrap();
-            tx.execute("INSERT INTO projection_version VALUES('second',2)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('second',2)", [])?;
             Ok(())
         })
         .unwrap();
@@ -87,13 +102,13 @@ async fn dropped_ticket_and_late_cancellation_cannot_split_transaction() {
     // A separate connection cannot observe the first half while the worker waits.
     let observer = Connection::open(fixture.0.join("session.db")).unwrap();
     let before: i64 = observer
-        .query_row("SELECT count(*) FROM projection_version", [], |r| r.get(0))
+        .query_row("SELECT count(*) FROM actor_probe", [], |r| r.get(0))
         .unwrap();
     assert_eq!(before, 0);
     release_tx.send(()).unwrap();
     database.close().await.unwrap();
     let after: i64 = observer
-        .query_row("SELECT count(*) FROM projection_version", [], |r| r.get(0))
+        .query_row("SELECT count(*) FROM actor_probe", [], |r| r.get(0))
         .unwrap();
     assert_eq!(after, 2);
 }
@@ -101,11 +116,11 @@ async fn dropped_ticket_and_late_cancellation_cannot_split_transaction() {
 #[tokio::test]
 async fn command_error_rolls_back_every_statement_and_worker_continues() {
     let fixture = Fixture::new();
-    let database = SessionDatabase::open(fixture.root()).unwrap();
+    let database = fixture.open_actor_database().await;
     let failed = database
         .admit("failure", &active(), |tx| {
-            tx.execute("INSERT INTO projection_version VALUES('first',1)", [])?;
-            tx.execute("INSERT INTO projection_version VALUES('first',2)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('first',1)", [])?;
+            tx.execute("INSERT INTO actor_probe VALUES('first',2)", [])?;
             Ok(())
         })
         .unwrap()
@@ -114,11 +129,9 @@ async fn command_error_rolls_back_every_statement_and_worker_continues() {
     assert!(matches!(failed, Err(DatabaseError::Sqlite(_))));
     let count = database
         .admit("count", &active(), |tx| {
-            Ok(
-                tx.query_row("SELECT count(*) FROM projection_version", [], |r| {
-                    r.get::<_, i64>(0)
-                })?,
-            )
+            Ok(tx.query_row("SELECT count(*) FROM actor_probe", [], |r| {
+                r.get::<_, i64>(0)
+            })?)
         })
         .unwrap()
         .into_completion()

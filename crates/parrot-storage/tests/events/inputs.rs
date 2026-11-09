@@ -331,12 +331,7 @@ async fn promotion_second_compose_failure_rolls_back_all_inputs_events_and_proje
     assert_eq!(repository.replay().await.unwrap().len(), 2);
     repository
         .transaction(|tx| {
-            for table in [
-                "message",
-                "conversation_item",
-                "conversation_part",
-                "agent_history",
-            ] {
+            for table in ["conversation_item", "conversation_part", "agent_history"] {
                 let count: i64 =
                     tx.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                         row.get(0)

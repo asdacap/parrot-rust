@@ -52,7 +52,7 @@ fn write_json(path: &Path, value: &Value) {
 async fn observe(fixture: &Fixture) -> Value {
     let sql = fixture.repository.events().database()
         .admit("crash-observation", &NeverCancelled, |tx| {
-            let mut messages = tx.prepare("SELECT role, content FROM message WHERE agent_session = 'agent' ORDER BY sequence")?;
+            let mut messages = tx.prepare("SELECT item.role, part.text FROM conversation_item AS item JOIN conversation_part AS part ON part.item_sequence = item.sequence WHERE item.agent_session = 'agent' AND part.kind = 'text' ORDER BY item.sequence, part.position")?;
             let history = messages.query_map([], |row| Ok(format!("{}: {}", row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             let mut inputs = tx.prepare("SELECT id, message_id, content, delivery, status FROM input WHERE agent_session = 'agent' ORDER BY sequence")?;

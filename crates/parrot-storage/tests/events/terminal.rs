@@ -75,7 +75,7 @@ async fn counts(repository: &EventRepository) -> (i64, i64, i64, i64) {
             };
             Ok((
                 count("event")?,
-                count("message")?,
+                count("conversation_part")?,
                 count("conversation_item")?,
                 count("agent_history")?,
             ))
@@ -130,7 +130,7 @@ async fn projection_failure_after_terminal_insert_rolls_back_whole_close() {
         .append(start("agent", "start"), None)
         .await
         .unwrap();
-    repository.transaction(|tx| { tx.execute_batch("CREATE TRIGGER fail_message BEFORE INSERT ON message BEGIN SELECT RAISE(ABORT, 'controlled projection failure'); END;")?; Ok(()) }).await.unwrap();
+    repository.transaction(|tx| { tx.execute_batch("CREATE TRIGGER fail_message BEFORE INSERT ON conversation_part BEGIN SELECT RAISE(ABORT, 'controlled projection failure'); END;")?; Ok(()) }).await.unwrap();
     let failure = repository
         .admit_close_turn(
             key("agent", "start"),
@@ -253,7 +253,7 @@ impl EventPublisher for CancellingPublisher {
             assert_eq!(Event::parse_from_bytes(&bytes).unwrap(), *event.value());
             let messages: i64 = connection
                 .query_row(
-                    "SELECT COUNT(*) FROM message WHERE content='winning answer'",
+                    "SELECT COUNT(*) FROM conversation_part WHERE kind='text' AND text='winning answer'",
                     [],
                     |row| row.get(0),
                 )
