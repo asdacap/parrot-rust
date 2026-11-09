@@ -12,6 +12,35 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
         executable: false,
     },
     PackagedSkillAsset {
+        relative_path: "architecture/LICENSE.txt",
+        bytes: include_bytes!("../../../../assets/skills/architecture/LICENSE.txt"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "architecture/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/architecture/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "architecture/references/design-red-flags.md",
+        bytes: include_bytes!(
+            "../../../../assets/skills/architecture/references/design-red-flags.md"
+        ),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "architecture/references/rationale-template.md",
+        bytes: include_bytes!(
+            "../../../../assets/skills/architecture/references/rationale-template.md"
+        ),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "architecture/references/runner-prompt.md",
+        bytes: include_bytes!("../../../../assets/skills/architecture/references/runner-prompt.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
         relative_path: "domain-modeling/ADR-FORMAT.md",
         bytes: include_bytes!("../../../../assets/skills/domain-modeling/ADR-FORMAT.md"),
         executable: false,
@@ -64,6 +93,26 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
     PackagedSkillAsset {
         relative_path: "grill-with-docs/SKILL.md",
         bytes: include_bytes!("../../../../assets/skills/grill-with-docs/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "how/LICENSE.txt",
+        bytes: include_bytes!("../../../../assets/skills/how/LICENSE.txt"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "how/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/how/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "how/references/explainer-prompt.md",
+        bytes: include_bytes!("../../../../assets/skills/how/references/explainer-prompt.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "how/references/explorer-prompt.md",
+        bytes: include_bytes!("../../../../assets/skills/how/references/explorer-prompt.md"),
         executable: false,
     },
     PackagedSkillAsset {
@@ -124,6 +173,16 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
     PackagedSkillAsset {
         relative_path: "imagegen/SKILL.md",
         bytes: include_bytes!("../../../../assets/skills/imagegen/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "interrogate/LICENSE.txt",
+        bytes: include_bytes!("../../../../assets/skills/interrogate/LICENSE.txt"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "interrogate/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/interrogate/SKILL.md"),
         executable: false,
     },
     PackagedSkillAsset {
@@ -301,6 +360,16 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
         executable: false,
     },
     PackagedSkillAsset {
+        relative_path: "prove-it-works/LICENSE.txt",
+        bytes: include_bytes!("../../../../assets/skills/prove-it-works/LICENSE.txt"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "prove-it-works/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/prove-it-works/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
         relative_path: "queue/SKILL.md",
         bytes: include_bytes!("../../../../assets/skills/queue/SKILL.md"),
         executable: false,
@@ -309,6 +378,36 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
         relative_path: "queue/scripts/queue.py",
         bytes: include_bytes!("../../../../assets/skills/queue/scripts/queue.py"),
         executable: true,
+    },
+    PackagedSkillAsset {
+        relative_path: "reflect/LICENSE.txt",
+        bytes: include_bytes!("../../../../assets/skills/reflect/LICENSE.txt"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "reflect/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/reflect/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "reflect/references/divergent-reviewer.md",
+        bytes: include_bytes!("../../../../assets/skills/reflect/references/divergent-reviewer.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "reflect/references/judgment-reviewer.md",
+        bytes: include_bytes!("../../../../assets/skills/reflect/references/judgment-reviewer.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "reflect/references/synthesizer.md",
+        bytes: include_bytes!("../../../../assets/skills/reflect/references/synthesizer.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "reflect/references/tooling-reviewer.md",
+        bytes: include_bytes!("../../../../assets/skills/reflect/references/tooling-reviewer.md"),
+        executable: false,
     },
     PackagedSkillAsset {
         relative_path: "review-agent/agents/openai.yaml",
@@ -416,6 +515,30 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
         executable: false,
     },
     PackagedSkillAsset {
+        relative_path: "technical-writing/LICENSE.txt",
+        bytes: include_bytes!("../../../../assets/skills/technical-writing/LICENSE.txt"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "technical-writing/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/technical-writing/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "test-behavior-not-implementation/LICENSE.txt",
+        bytes: include_bytes!(
+            "../../../../assets/skills/test-behavior-not-implementation/LICENSE.txt"
+        ),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "test-behavior-not-implementation/SKILL.md",
+        bytes: include_bytes!(
+            "../../../../assets/skills/test-behavior-not-implementation/SKILL.md"
+        ),
+        executable: false,
+    },
+    PackagedSkillAsset {
         relative_path: "unslop/agents/openai.yaml",
         bytes: include_bytes!("../../../../assets/skills/unslop/agents/openai.yaml"),
         executable: false,
@@ -443,6 +566,80 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
     PackagedSkillAsset {
         relative_path: "wayfinder/SKILL.md",
         bytes: include_bytes!("../../../../assets/skills/wayfinder/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/LICENSE.txt",
+        bytes: include_bytes!("../../../../assets/skills/why/LICENSE.txt"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/SKILL.md",
+        bytes: include_bytes!("../../../../assets/skills/why/SKILL.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/epistemics.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/epistemics.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/investigator-prompt.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/investigator-prompt.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/source-playbook.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/source-playbook.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/code-archaeology.md",
+        bytes: include_bytes!(
+            "../../../../assets/skills/why/references/sources/code-archaeology.md"
+        ),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/databricks.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/sources/databricks.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/datadog.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/sources/datadog.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/incident-postmortem.md",
+        bytes: include_bytes!(
+            "../../../../assets/skills/why/references/sources/incident-postmortem.md"
+        ),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/linear.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/sources/linear.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/notion.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/sources/notion.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/sentry.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/sources/sentry.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/sources/slack.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/sources/slack.md"),
+        executable: false,
+    },
+    PackagedSkillAsset {
+        relative_path: "why/references/synthesizer-prompt.md",
+        bytes: include_bytes!("../../../../assets/skills/why/references/synthesizer-prompt.md"),
         executable: false,
     },
 ];
