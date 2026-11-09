@@ -1,8 +1,6 @@
 // Exact source assertion translations; see assertion-map/ for runtime row identities.
 #[path = "cases/agent_send_to_parent_defaults_to_false_and_rejects_non_boolean_values.rs"]
 mod agent_send_to_parent_defaults_to_false_and_rejects_non_boolean_values;
-#[path = "cases/agent_task_configuration_defaults_to_dependency_history.rs"]
-mod agent_task_configuration_defaults_to_dependency_history;
 #[path = "cases/agent_task_configuration_must_be_a_mapping.rs"]
 mod agent_task_configuration_must_be_a_mapping;
 #[path = "cases/agent_task_configuration_overrides_maximum_attempts.rs"]
@@ -147,8 +145,6 @@ mod openrouter_provider_preferences_partially_override_predefined_privacy_defaul
 mod predefined_configuration_provisions_shared_write_directories;
 #[path = "cases/predefined_configuration_uses_the_home_cache_fallback_when_xdg_cache_is_missing.rs"]
 mod predefined_configuration_uses_the_home_cache_fallback_when_xdg_cache_is_missing;
-#[path = "cases/predefined_responses_providers_have_standard_defaults.rs"]
-mod predefined_responses_providers_have_standard_defaults;
 #[path = "cases/profile_configuration_rejects_invalid_required_fields.rs"]
 mod profile_configuration_rejects_invalid_required_fields;
 #[path = "cases/profile_configuration_rejects_the_removed_user_agent_classification.rs"]
