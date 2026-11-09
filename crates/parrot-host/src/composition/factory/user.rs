@@ -1691,7 +1691,6 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                     .images
                     .persist(
                         std::io::Cursor::new(upload.content),
-                        &upload.upload_id,
                         &upload.display_name,
                         "upload",
                         Some(&upload.media_type),
@@ -1705,14 +1704,16 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
     fn resolve_image<'a>(
         &'a self,
         id: &'a str,
+        display_name: &'a str,
     ) -> BoxFuture<'a, protocol::Result<Option<parrot_storage::artifacts::ImageArtifactMetadata>>>
     {
         let id = id.to_owned();
+        let display_name = display_name.to_owned();
         self.core.owned_mutation(move |core| async move {
             core.services
                 .lease
                 .images
-                .resolve(&id, &NeverCancelled)
+                .resolve(&id, &display_name, "upload", &NeverCancelled)
                 .await
                 .map_err(RpcError::from)
         })

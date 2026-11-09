@@ -471,7 +471,6 @@ impl HostedSession for FakeHostedSession {
                 .images
                 .persist(
                     std::io::Cursor::new(upload.content),
-                    &upload.upload_id,
                     &upload.display_name,
                     "upload",
                     Some(&upload.media_type),
@@ -485,11 +484,17 @@ impl HostedSession for FakeHostedSession {
     fn resolve_image<'a>(
         &'a self,
         id: &'a str,
+        display_name: &'a str,
     ) -> BoxFuture<'a, Result<Option<ImageArtifactMetadata>>> {
         Box::pin(async move {
             self.resources
                 .images
-                .resolve(id, &parrot_storage::events::NeverCancelled)
+                .resolve(
+                    id,
+                    display_name,
+                    "upload",
+                    &parrot_storage::events::NeverCancelled,
+                )
                 .await
                 .map_err(RpcError::from)
         })
@@ -989,12 +994,12 @@ impl UploadStream for Frames {
 pub fn frames(values: Vec<wire::AttachmentUploadFrame>) -> Frames {
     Frames(values.into_iter().map(Ok).collect())
 }
-pub fn header(session: &str, upload: &str) -> wire::AttachmentUploadFrame {
+pub fn header(session: &str) -> wire::AttachmentUploadFrame {
     wire::AttachmentUploadFrame {
         payload: Some(wire::attachment_upload_frame::Payload::Header(
             wire::AttachmentUploadHeader {
                 user_session_id: session.into(),
-                upload_id: upload.into(),
+
                 ..Default::default()
             },
         )),

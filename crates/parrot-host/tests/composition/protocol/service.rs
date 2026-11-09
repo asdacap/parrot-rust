@@ -811,9 +811,9 @@ async fn sandbox_and_context_limit_validate_owner_before_mutating_shared_configu
 
 const PIXEL: &[u8] =
     include_bytes!("../../../../parrot-storage/tests/artifacts/fixtures/pixel.png");
-fn image_upload(id: &str, upload: &str) -> Frames {
+fn image_upload(id: &str) -> Frames {
     frames(vec![
-        header(id, upload),
+        header(id),
         chunk(PIXEL[..12].to_vec()),
         chunk(PIXEL[12..].to_vec()),
         description("pixel.png", "image/png", PIXEL.len() as i64),
@@ -825,23 +825,24 @@ fn text_part(text: &str) -> wire::MessageContentPart {
         ..Default::default()
     }
 }
-fn image_part(id: &str) -> wire::MessageContentPart {
+fn image_part(id: &str, display_name: &str) -> wire::MessageContentPart {
     wire::MessageContentPart {
         content: Some(wire::message_content_part::Content::ArtifactId(id.into())),
+        display_name: display_name.into(),
         ..Default::default()
     }
 }
 
 // Source: Images_are_uploaded_with_canonical_metadata_and_admitted_as_structured_parts.
 #[tokio::test]
-async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserves_prompt_order() {
+async fn real_image_upload_persists_canonical_metadata_and_preserves_prompt_order() {
     let f = Fixture::new();
     let owner = f.create().await;
     let other = f.create().await;
-    let response = bounded(f.service.upload_attachment(
-        &mut image_upload(&owner.id(), "upload-one"),
-        active().as_ref(),
-    ))
+    let response = bounded(
+        f.service
+            .upload_attachment(&mut image_upload(&owner.id()), active().as_ref()),
+    )
     .await
     .unwrap();
     let artifact = response.artifact.as_ref().unwrap();
@@ -882,7 +883,7 @@ async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserv
     );
     assert_eq!(
         owner
-            .resolve_image(&artifact.artifact_id)
+            .resolve_image(&artifact.artifact_id, &artifact.display_name)
             .await
             .unwrap()
             .unwrap()
@@ -891,17 +892,14 @@ async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserv
     );
     assert!(
         other
-            .resolve_image(&artifact.artifact_id)
+            .resolve_image(&artifact.artifact_id, &artifact.display_name)
             .await
             .unwrap()
             .is_none()
     );
     let retry = f
         .service
-        .upload_attachment(
-            &mut image_upload(&owner.id(), "upload-one"),
-            active().as_ref(),
-        )
+        .upload_attachment(&mut image_upload(&owner.id()), active().as_ref())
         .await
         .unwrap();
     assert_eq!(response, retry);
@@ -911,7 +909,7 @@ async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserv
         delivery: wire::Delivery::DELIVERY_QUEUE.into(),
         parts: vec![
             text_part("before"),
-            image_part(&artifact.artifact_id),
+            image_part(&artifact.artifact_id, "pixel.png"),
             text_part("after"),
         ],
         ..Default::default()
@@ -968,19 +966,103 @@ async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserv
         RpcCode::InvalidArgument,
     );
     let mut missing = request.clone();
-    missing.parts = vec![image_part("missing")];
+    missing.parts = vec![image_part("missing", "missing.png")];
     code(
         f.service.send_message(&missing, active()).await,
         RpcCode::InvalidArgument,
     );
     let mut too_many = request;
     too_many.parts = (0..=parrot_storage::artifacts::ImageLimits::SOURCE.maximum_images)
-        .map(|_| image_part(&artifact.artifact_id))
+        .map(|_| image_part(&artifact.artifact_id, "pixel.png"))
         .collect();
     code(
         f.service.send_message(&too_many, active()).await,
         RpcCode::InvalidArgument,
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn image_admission_inspects_local_bytes_without_upload_registry_and_validates_reference_names()
+ {
+    let f = Fixture::new();
+    let owner = f.create().await;
+    let metadata = owner
+        .resources
+        .images
+        .store()
+        .persist(
+            &mut std::io::Cursor::new(include_bytes!(
+                "../../../../parrot-storage/tests/artifacts/fixtures/rectangle.png"
+            )),
+            "unregistered.png",
+            "local fixture",
+            None,
+            None,
+            &parrot_storage::events::NeverCancelled,
+        )
+        .unwrap();
+    let request = wire::SendMessageRequest {
+        user_session_id: owner.id(),
+        message_id: "unregistered-image".into(),
+        delivery: wire::Delivery::DELIVERY_QUEUE.into(),
+        parts: vec![image_part(&metadata.artifact_id, "reference.png")],
+        ..Default::default()
+    };
+    assert!(
+        f.service
+            .send_message(&request, active())
+            .await
+            .unwrap()
+            .created
+    );
+    let mut expected = metadata.clone();
+    expected.display_name = "reference.png".into();
+    expected.origin = "upload".into();
+    assert_eq!((expected.width, expected.height), (24, 12));
+    assert_eq!(
+        owner.calls(),
+        [Call::Send(
+            vec![ConversationPart::image(expected)],
+            "unregistered-image".into(),
+            wire::Delivery::DELIVERY_QUEUE,
+        )]
+    );
+    for name in ["", " ", "../image.png", "folder/image.png", "image\n.png"] {
+        let mut invalid = request.clone();
+        invalid.message_id = format!("invalid-name-{name}");
+        invalid.parts[0].display_name = name.into();
+        code(
+            f.service.send_message(&invalid, active()).await,
+            RpcCode::InvalidArgument,
+        );
+    }
+    let path = owner
+        .resources
+        .images
+        .store()
+        .path_of(&metadata.artifact_id)
+        .unwrap();
+    std::fs::write(&path, PIXEL).unwrap();
+    let mut replaced = request.clone();
+    replaced.message_id = "hash-mismatched-image".into();
+    code(
+        f.service.send_message(&replaced, active()).await,
+        RpcCode::InvalidArgument,
+    );
+    std::fs::write(&path, b"not an image").unwrap();
+    replaced.message_id = "corrupted-image".into();
+    code(
+        f.service.send_message(&replaced, active()).await,
+        RpcCode::InvalidArgument,
+    );
+    std::fs::remove_file(path).unwrap();
+    replaced.message_id = "missing-image".into();
+    code(
+        f.service.send_message(&replaced, active()).await,
+        RpcCode::InvalidArgument,
+    );
+    assert_eq!(owner.calls().len(), 1);
     f.close().await;
 }
 
@@ -991,14 +1073,13 @@ async fn upload_rejects_bad_frame_order_sizes_descriptions_and_media_without_per
     let f = Fixture::new();
     let owner = f.create().await;
     let id = owner.id();
-    let h = header(&id, "bad-upload");
+    let h = header(&id);
     let d = description("pixel.png", "image/png", PIXEL.len() as i64);
     let cases = vec![
         vec![],
         vec![chunk(PIXEL.to_vec())],
         vec![wire::AttachmentUploadFrame::new()],
-        vec![header("", "x")],
-        vec![header(&id, " ")],
+        vec![header("")],
         vec![h.clone(), h.clone()],
         vec![h.clone(), wire::AttachmentUploadFrame::new()],
         vec![h.clone(), chunk(Vec::new())],
@@ -1066,12 +1147,12 @@ async fn upload_rejects_bad_frame_order_sizes_descriptions_and_media_without_per
     );
     code(
         f.service
-            .upload_attachment(&mut frames(vec![header("missing", "x")]), active().as_ref())
+            .upload_attachment(&mut frames(vec![header("missing")]), active().as_ref())
             .await,
         RpcCode::NotFound,
     );
     let failure = RpcError::new(RpcCode::Unavailable, "reader failed");
-    let mut failed = Frames(vec![Ok(header(&id, "failed")), Err(failure.clone())].into());
+    let mut failed = Frames(vec![Ok(header(&id)), Err(failure.clone())].into());
     assert_eq!(
         f.service
             .upload_attachment(&mut failed, active().as_ref())
@@ -1081,10 +1162,7 @@ async fn upload_rejects_bad_frame_order_sizes_descriptions_and_media_without_per
     );
     code(
         f.service
-            .upload_attachment(
-                &mut image_upload(&id, "cancelled"),
-                Cancel::new(true).as_ref(),
-            )
+            .upload_attachment(&mut image_upload(&id), Cancel::new(true).as_ref())
             .await,
         RpcCode::Cancelled,
     );
@@ -2117,7 +2195,7 @@ async fn closed_storage_session_resumes_exact_identity_and_new_create_is_always_
 
 #[tokio::test]
 async fn unsupported_schema_resume_is_failed_precondition_without_replacing_or_mutating_session() {
-    for version in [0_i64, 6, 7, 9] {
+    for version in [0_i64, 6, 7, 8, 10] {
         let f = Fixture::new();
         let original = f.create().await;
         let id = original.id();
@@ -2777,7 +2855,7 @@ async fn cancellation_during_pending_compaction_and_upload_releases_waiters() {
     let cancellation = active();
     let (writer, mut reader) = bounded_client_stream();
     writer
-        .write(header(&owner.id(), "cancel-upload"), active().as_ref())
+        .write(header(&owner.id()), active().as_ref())
         .await
         .unwrap();
     let upload = f
