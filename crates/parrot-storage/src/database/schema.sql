@@ -21,9 +21,14 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     agent_session TEXT NOT NULL,
     origin        TEXT NOT NULL,
     role          TEXT NOT NULL,
+    kind          TEXT NOT NULL DEFAULT 'message',
     tool_call_id  TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     final_phase   INTEGER NOT NULL DEFAULT 0,
+    context_reminder TEXT CHECK (
+        json_extract(context_reminder, '$.context_limit') > 0
+        AND json_extract(context_reminder, '$.percentage') > 0
+    ),
     provider_id   TEXT NOT NULL DEFAULT '',
     provider_content TEXT NOT NULL DEFAULT '',
     tool_owner_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE SET NULL,
@@ -39,6 +44,19 @@ CREATE TABLE IF NOT EXISTS conversation_item (
 
 CREATE INDEX IF NOT EXISTS conversation_by_session
     ON conversation_item (agent_session, sequence);
+
+CREATE INDEX IF NOT EXISTS conversation_context_reminder_by_session
+    ON conversation_item (agent_session, sequence DESC)
+    WHERE context_reminder IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS conversation_context_reminder_by_model
+    ON conversation_item (
+        agent_session,
+        json_extract(context_reminder, '$.canonical_model'),
+        json_extract(context_reminder, '$.context_limit'),
+        sequence DESC
+    )
+    WHERE context_reminder IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS conversation_owned_result
     ON conversation_item (agent_session, tool_call_id)
@@ -162,18 +180,6 @@ CREATE TABLE IF NOT EXISTS history_checkpoint (
 
 CREATE INDEX IF NOT EXISTS history_checkpoint_by_title
     ON history_checkpoint (agent_session, title, sequence DESC);
-
-CREATE TABLE IF NOT EXISTS context_reminder (
-    sequence        INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_session   TEXT NOT NULL,
-    canonical_model TEXT NOT NULL,
-    context_limit   INTEGER NOT NULL CHECK (context_limit > 0),
-    percentage      INTEGER NOT NULL CHECK (percentage > 0),
-    created_at      TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS context_reminder_by_session
-    ON context_reminder (agent_session, sequence DESC);
 
 CREATE TABLE IF NOT EXISTS session_state (
     user_session    TEXT PRIMARY KEY,
