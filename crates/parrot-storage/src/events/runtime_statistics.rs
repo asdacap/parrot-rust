@@ -2,6 +2,7 @@
 use super::*;
 use crate::diagnostics::statistics::UserSessionStatistics;
 use parrot_domain::values::accounting::{AgentSessionStatistics, AgentUsageIncrement};
+use std::collections::HashMap;
 
 type StatisticsError = Box<dyn std::error::Error + Send + Sync>;
 impl EventRepository {
@@ -16,11 +17,36 @@ impl EventRepository {
         &self,
         progress: Option<EventLoadProgress>,
     ) -> Result<Arc<UserSessionStatistics>, EventError> {
+        self.load_runtime_statistics(HashMap::new(), progress).await
+    }
+
+    /// Restores the shared coordinator with canonical root ancestry before any root facts exist.
+    pub async fn restore_runtime_statistics(
+        &self,
+        root_agent_session_id: String,
+        progress: Option<EventLoadProgress>,
+    ) -> Result<Arc<UserSessionStatistics>, EventError> {
+        self.load_runtime_statistics(
+            HashMap::from([(root_agent_session_id, String::new())]),
+            progress,
+        )
+        .await
+    }
+
+    async fn load_runtime_statistics(
+        &self,
+        parents: HashMap<String, String>,
+        progress: Option<EventLoadProgress>,
+    ) -> Result<Arc<UserSessionStatistics>, EventError> {
         let statistics = self
             .inner
             .runtime_statistics
             .get_or_try_init(|| async {
-                let replay = self.replay_statistics_with_progress(progress).await?;
+                let replay = self
+                    .transaction(move |tx| {
+                        statistics::replay_statistics_with_parents(tx, parents, progress)
+                    })
+                    .await?;
                 let database = self.database().clone();
                 let context = self.context().clone();
                 let runtime = tokio::runtime::Handle::try_current()

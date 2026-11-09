@@ -201,9 +201,16 @@ pub fn replay_statistics_with_progress(
     tx: &Transaction<'_>,
     progress: Option<EventLoadProgress>,
 ) -> Result<AgentStatisticsReplay, EventError> {
+    replay_statistics_with_parents(tx, HashMap::new(), progress)
+}
+
+pub(super) fn replay_statistics_with_parents(
+    tx: &Transaction<'_>,
+    mut parents: HashMap<String, String>,
+    progress: Option<EventLoadProgress>,
+) -> Result<AgentStatisticsReplay, EventError> {
     let facts = read_statistics_events(tx, progress.as_ref())?;
-    let mut parents = HashMap::new();
-    let mut parent_order = Vec::new();
+    let mut parent_order = parents.keys().cloned().collect::<Vec<_>>();
     let mut agents = HashMap::new();
     // .NET dictionaries enumerate in insertion order. Preserve that order for
     // floating-point accumulation and source-first validation diagnostics.
