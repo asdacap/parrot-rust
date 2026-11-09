@@ -127,6 +127,17 @@ pub trait SlashSession: Send {
         limit: i32,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<i32, SlashFailure>>;
+    /// Refresh the current session and return its shared ChatGPT fast-mode selection.
+    fn get_fast_mode<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>>;
+    /// Update the session selection and save the default for future sessions.
+    fn set_fast_mode<'a>(
+        &'a mut self,
+        enabled: bool,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>>;
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

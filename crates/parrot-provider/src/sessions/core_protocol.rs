@@ -19,6 +19,7 @@ impl From<Request> for parrot_core::ProviderRequest {
 impl From<parrot_core::ProviderRequest> for Request {
     fn from(request: parrot_core::ProviderRequest) -> Self {
         Self {
+            fast_mode: false,
             model: request.model,
             instructions: request.instructions,
             messages: request.messages.into_iter().map(Into::into).collect(),
@@ -264,6 +265,7 @@ mod tests {
         native_message.provider_id = "future-provider-id".into();
         native_message.provider_content = "  {\"unknown\":\"opaque\\u003dstring\"}\n".into();
         let request = Request {
+            fast_mode: false,
             model: "provider/model:variant ".into(),
             instructions: "system\nwith whitespace".into(),
             messages: vec![Message::user("first"), native_message],
@@ -467,5 +469,17 @@ mod tests {
             ToolCall::from(parrot_core::ToolCall::from(call.clone())),
             call
         );
+    }
+
+    #[test]
+    fn core_request_round_trip_does_not_retain_transport_fast_mode() {
+        let request = Request {
+            fast_mode: true,
+            model: "model".into(),
+            ..Request::default()
+        };
+        let restored = Request::from(parrot_core::ProviderRequest::from(request));
+        assert!(!restored.fast_mode);
+        assert_eq!(restored.model, "model");
     }
 }

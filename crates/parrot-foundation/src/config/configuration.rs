@@ -67,6 +67,7 @@ pub struct ModelConfigurationSnapshot {
 #[derive(Clone, Debug)]
 pub struct Configuration {
     pub model: String,
+    pub fast_mode: bool,
     pub models: ModelSettings,
     pub runtime: RuntimeSettings,
     pub system_prompts: BTreeMap<String, String>,
@@ -107,6 +108,9 @@ impl Configuration {
         )?;
         Ok(Self {
             model: scalar_or_empty(&root, "model"),
+            fast_mode: root
+                .get("fast_mode")
+                .map_or(Ok(false), |value| boolean(Some(value), "fast_mode"))?,
             models,
             runtime,
             system_prompts,
@@ -167,6 +171,16 @@ impl Configuration {
         root.set("model", Node::scalar(model));
         self.write(&root)?;
         self.model = model.to_owned();
+        Ok(())
+    }
+
+    pub fn set_fast_mode(&mut self, enabled: bool) -> Result<()> {
+        let lock = self.write_lock.clone();
+        let _guard = lock.enter()?;
+        let mut root = self.user_root()?;
+        root.set("fast_mode", Node::scalar(enabled.to_string()));
+        self.write(&root)?;
+        self.fast_mode = enabled;
         Ok(())
     }
 

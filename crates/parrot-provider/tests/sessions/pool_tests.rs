@@ -1,6 +1,6 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::sessions::{
-    Error, Event, EventStream, Provider, ProviderSessions, Request, Session,
+    Error, Event, EventStream, FastMode, Provider, ProviderSessions, Request, Session,
     diagnostics::{DiagnosticEvent, DiagnosticSink, MonotonicDiagnosticClock},
 };
 use std::sync::{
@@ -23,6 +23,7 @@ impl EventStream for EmptyStream {
 }
 
 struct TestSession {
+    fast_modes: Mutex<Vec<bool>>,
     calls: AtomicUsize,
     fallback_calls: AtomicUsize,
     supports_fallback: AtomicBool,
@@ -40,7 +41,8 @@ impl Session for TestSession {
             Ok(())
         })
     }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
+    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
+        self.fast_modes.lock().unwrap().push(request.fast_mode);
         if self.closes.load(Ordering::SeqCst) != 0 {
             return Err(Error::Disposed);
         }
@@ -118,6 +120,7 @@ impl Provider for TestProvider {
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         self.opened.fetch_add(1, Ordering::SeqCst);
         let session = Arc::new(TestSession {
+            fast_modes: Mutex::new(Vec::new()),
             calls: AtomicUsize::new(0),
             fallback_calls: AtomicUsize::new(0),
             supports_fallback: AtomicBool::new(false),
@@ -391,4 +394,38 @@ async fn retrying_session_forwards_the_inner_fallback_outcome_for_both_source_ar
         assert_eq!(recorded.calls.load(Ordering::SeqCst), 0);
         session.close().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn fast_mode_is_shared_across_existing_and_new_pooled_sessions() {
+    let mode = Arc::new(FastMode::new(false));
+    let provider = TestProvider::new(None, false);
+    let root = ProviderSessions::new().with_fast_mode(mode.clone());
+    let child = ProviderSessions::new().with_fast_mode(mode.clone());
+    let root_session = root.get(provider.clone()).await.unwrap();
+    drop(root_session.call(Request::default()).unwrap());
+    mode.set_enabled(true);
+    drop(root_session.call(Request::default()).unwrap());
+    let child_session = child.get(provider.clone()).await.unwrap();
+    drop(child_session.call(Request::default()).unwrap());
+    mode.set_enabled(false);
+    drop(root_session.call(Request::default()).unwrap());
+    drop(child_session.call(Request::default()).unwrap());
+    assert_eq!(
+        *provider.session(0).fast_modes.lock().unwrap(),
+        [false, true, false]
+    );
+    assert_eq!(
+        *provider.session(1).fast_modes.lock().unwrap(),
+        [true, false]
+    );
+    assert!(!mode.is_enabled());
+    assert!(Arc::ptr_eq(
+        &root_session,
+        &root.get(provider.clone()).await.unwrap()
+    ));
+    root.close().await.unwrap();
+    child.close().await.unwrap();
+    assert_eq!(provider.session(0).closes.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.session(1).closes.load(Ordering::SeqCst), 1);
 }

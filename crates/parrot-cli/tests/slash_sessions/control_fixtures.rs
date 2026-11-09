@@ -166,6 +166,26 @@ impl SlashSession for Session {
             Ok(limit)
         })
     }
+    fn get_fast_mode<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            check(cancellation)?;
+            Ok(self.current.fast_mode)
+        })
+    }
+    fn set_fast_mode<'a>(
+        &'a mut self,
+        enabled: bool,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            check(cancellation)?;
+            self.current.fast_mode = enabled;
+            Ok(enabled)
+        })
+    }
     fn set_goal<'a>(
         &'a mut self,
         goal: &'a str,

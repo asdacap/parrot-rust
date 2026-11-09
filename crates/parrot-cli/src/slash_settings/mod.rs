@@ -4,6 +4,7 @@
 //! operations use the same supplied terminal/browser consumer port as dispatch.
 
 pub mod auth;
+pub mod fast_mode;
 pub mod model_alias;
 pub mod model_selection;
 pub mod model_wizard;
@@ -18,6 +19,7 @@ use tonic::Status;
 use crate::slash_sessions::{SlashCommand, SlashFailure};
 
 pub use auth::{AuthCommand, AuthPresetSelectCommand, AuthPresetSetCommand, AuthServices};
+pub use fast_mode::FastCommand;
 pub use model_alias::ModelAliasCommand;
 pub use model_selection::ModelSelection;
 pub use model_wizard::ModelWizard;
@@ -41,6 +43,7 @@ pub fn commands(services: SettingsServices) -> Vec<Box<dyn SlashCommand>> {
         Box::new(AuthPresetSelectCommand::new(services.auth.clone())),
         Box::new(AuthPresetSetCommand::new(services.auth)),
         Box::new(EffortCommand::new(services.client.clone())),
+        Box::new(FastCommand),
         Box::new(ModelCommand::new(wizard.clone())),
         Box::new(ModelAliasCommand::new(services.client.clone(), wizard)),
         Box::new(ModelPresetSelectCommand),

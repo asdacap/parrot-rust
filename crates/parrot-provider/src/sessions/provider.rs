@@ -187,6 +187,7 @@ impl Core {
         match self.auth {
             Authentication::OAuth(_) => request.max_output_tokens = 0,
             Authentication::ApiKey { .. } => {
+                request.fast_mode = false;
                 request.provider_preferences.clone_from(&self.preferences);
                 request.include_router_metadata = !self.preferences.is_empty();
             }
@@ -274,6 +275,14 @@ impl Core {
                 (body, self.headers(Some(session_id), cancellation).await?)
             }
         };
+        if matches!(self.auth, Authentication::OAuth(_)) {
+            let hint = if prepared.fast_mode {
+                format!("model={};tier=priority", prepared.model)
+            } else {
+                format!("model={}", prepared.model)
+            };
+            set_header(&mut headers, "x-codex-routing-hint", hint);
+        }
         if !turn_state.is_empty() {
             set_header(&mut headers, "x-codex-turn-state", turn_state.into());
         }

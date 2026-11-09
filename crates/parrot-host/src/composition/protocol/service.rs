@@ -415,9 +415,18 @@ impl ParrotService {
         {
             return Err(invalid("extra concurrent tasks must be nonnegative"));
         }
-        if model.is_some() || mode.is_some() || request.extra_concurrent_tasks.is_some() {
+        if model.is_some()
+            || mode.is_some()
+            || request.extra_concurrent_tasks.is_some()
+            || request.fast_mode.is_some()
+        {
             session
-                .update(model, mode, request.extra_concurrent_tasks)
+                .update(
+                    model,
+                    mode,
+                    request.extra_concurrent_tasks,
+                    request.fast_mode,
+                )
                 .await?;
         }
         Ok(map_session(session.as_ref(), false))

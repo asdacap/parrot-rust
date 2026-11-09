@@ -36,6 +36,7 @@ pub trait HostedSession: Send + Sync {
         model: Option<ResolvedModelSelection>,
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
+        fast_mode: Option<bool>,
     ) -> BoxFuture<'_, Result<()>>;
     fn update_selection(
         &self,

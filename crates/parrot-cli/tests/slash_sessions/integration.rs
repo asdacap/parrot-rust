@@ -121,6 +121,98 @@ fn refresh_noop() -> SkillRefresh {
 }
 
 #[tokio::test]
+async fn fast_mode_rpc_refreshes_selection_preserves_model_and_persists_effective_value() {
+    let effective = Arc::new(Mutex::new(true));
+    let observed = effective.clone();
+    let writes = Arc::new(AtomicUsize::new(0));
+    let write_count = writes.clone();
+    let mut fixture = Fixture::start(move |method, bytes| {
+        assert_eq!(method, "update_session");
+        let request = wire::UpdateSessionRequest::parse_from_bytes(bytes).unwrap();
+        assert_eq!(request.user_session_id, "old");
+        assert!(request.model.is_empty());
+        assert!(request.mode.is_empty());
+        assert_eq!(request.extra_concurrent_tasks, None);
+        let mut effective = observed.lock().unwrap();
+        if let Some(enabled) = request.fast_mode {
+            write_count.fetch_add(1, Ordering::SeqCst);
+            *effective = enabled;
+        }
+        Ok(wire::UserSession {
+            fast_mode: *effective,
+            ..initial()
+        }
+        .write_to_bytes()
+        .unwrap())
+    })
+    .await;
+    let configuration = configuration(&fixture.root);
+    let mut session = session(fixture.client(), configuration.clone(), inert_binding());
+    let stop = Stop::new();
+    assert!(!session.current_session().fast_mode);
+    assert!(session.get_fast_mode(&stop).await.unwrap());
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    assert!(!session.set_fast_mode(false, &stop).await.unwrap());
+    assert!(!configuration.lock().unwrap().fast_mode);
+    assert!(session.set_fast_mode(true, &stop).await.unwrap());
+    assert!(configuration.lock().unwrap().fast_mode);
+    assert_eq!(writes.load(Ordering::SeqCst), 2);
+    assert_eq!(session.model(), "provider/current");
+    let reloaded = Configuration::load(
+        &fixture.root.join("config.yaml"),
+        &fixture.root.join("predefined.yaml"),
+        &BTreeMap::from([("HOME".into(), fixture.root.to_string_lossy().into_owned())]),
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert!(reloaded.fast_mode);
+    assert_eq!(reloaded.model, "provider/current");
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn fast_mode_rpc_failure_does_not_save_default_or_confirm_success() {
+    let mut fixture = Fixture::start(|_, _| Err(Status::unavailable("offline"))).await;
+    let configuration = configuration(&fixture.root);
+    let mut session = session(fixture.client(), configuration.clone(), inert_binding());
+    let stop = Stop::new();
+    assert!(session.get_fast_mode(&stop).await.is_err());
+    assert!(session.set_fast_mode(true, &stop).await.is_err());
+    assert!(!session.current_session().fast_mode);
+    assert!(!configuration.lock().unwrap().fast_mode);
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join("config.yaml")).unwrap(),
+        "model: provider/current\n"
+    );
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn fast_mode_reports_default_save_failure_without_reverting_active_selection() {
+    let mut fixture = Fixture::start(|method, bytes| {
+        assert_eq!(method, "update_session");
+        let request = wire::UpdateSessionRequest::parse_from_bytes(bytes).unwrap();
+        Ok(wire::UserSession {
+            fast_mode: request.fast_mode.unwrap(),
+            ..initial()
+        }
+        .write_to_bytes()
+        .unwrap())
+    })
+    .await;
+    let configuration = configuration(&fixture.root);
+    let path = fixture.root.join("config.yaml");
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let mut session = session(fixture.client(), configuration.clone(), inert_binding());
+    let failure = session.set_fast_mode(true, &Stop::new()).await.unwrap_err();
+    assert!(matches!(failure, SlashFailure::Command(_)));
+    assert!(session.current_session().fast_mode);
+    assert!(!configuration.lock().unwrap().fast_mode);
+    fixture.close().await;
+}
+
+#[tokio::test]
 async fn task_limit_rpc_preserves_presence_and_refreshes_query_and_set_snapshots() {
     let effective = Arc::new(Mutex::new(7));
     let observed = effective.clone();
@@ -244,7 +336,7 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
         Some(application.clone()),
         "fixture-version",
     );
-    let expected = "/auth|/auth-preset-select|/auth-preset-set|/clear|/compact|/effort|/exit|/goal|/standing-instruction|/help|/mode|/model|/model-alias|/model-preset-select|/model-preset-set|/models|/modes|/sessions|/status|/sandbox_enable|/set-context-limit|/skills|/task-limit|/version";
+    let expected = "/auth|/auth-preset-select|/auth-preset-set|/clear|/compact|/effort|/fast|/exit|/goal|/standing-instruction|/help|/mode|/model|/model-alias|/model-preset-select|/model-preset-set|/models|/modes|/sessions|/status|/sandbox_enable|/set-context-limit|/skills|/task-limit|/version";
     assert_eq!(
         registry
             .descriptions()
@@ -520,6 +612,53 @@ async fn new_session_uses_fallback_model_and_configured_default_mode() {
     );
     assert_eq!(session.mode(), "plan");
     fixture.close().await;
+}
+
+#[tokio::test]
+async fn new_session_applies_latest_saved_fast_mode_without_restarting_host() {
+    for enabled in [true, false] {
+        let mut fixture = Fixture::start(move |method, bytes| {
+            let value = match method {
+                "create_session" => wire::UserSession {
+                    id: "fresh".into(),
+                    model: "provider/current".into(),
+                    mode: "build".into(),
+                    fast_mode: !enabled,
+                    ..Default::default()
+                },
+                "update_session" => {
+                    let request = wire::UpdateSessionRequest::parse_from_bytes(bytes).unwrap();
+                    assert_eq!(request.user_session_id, "fresh");
+                    assert_eq!(request.fast_mode, Some(enabled));
+                    assert!(request.model.is_empty());
+                    assert!(request.mode.is_empty());
+                    wire::UserSession {
+                        id: request.user_session_id,
+                        model: "provider/current".into(),
+                        mode: "build".into(),
+                        fast_mode: enabled,
+                        ..Default::default()
+                    }
+                }
+                _ => panic!("unexpected RPC {method}"),
+            };
+            Ok(value.write_to_bytes().unwrap())
+        })
+        .await;
+        let configuration = configuration(&fixture.root);
+        configuration
+            .lock()
+            .unwrap()
+            .set_fast_mode(enabled)
+            .unwrap();
+        let mut session = session(fixture.client(), configuration, inert_binding());
+        session.start_new(&Stop::new()).await.unwrap();
+        assert_eq!(session.id(), "fresh");
+        assert_eq!(session.current_session().fast_mode, enabled);
+        assert_eq!(session.model(), "provider/current");
+        assert_eq!(session.mode(), "build");
+        fixture.close().await;
+    }
 }
 
 #[tokio::test]

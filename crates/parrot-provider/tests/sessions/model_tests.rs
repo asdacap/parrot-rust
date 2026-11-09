@@ -20,6 +20,7 @@ fn common_request_borrows_all_adapters_without_losing_raw_json() {
     let raw =
         r#"{"huge":123456789012345678901234567890,"exponent":1e999,"duplicate":1,"duplicate":2}"#;
     let request = Request {
+        fast_mode: false,
         model: "model".into(),
         instructions: "instructions".into(),
         messages: vec![

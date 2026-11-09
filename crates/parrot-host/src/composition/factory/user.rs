@@ -124,6 +124,7 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub lifetime: Arc<Signal>,
     pub activation: Arc<StartupActivation>,
     pub task_concurrency: Arc<TaskConcurrencyBudget>,
+    pub fast_mode: Arc<parrot_provider::sessions::FastMode>,
     pub standing: StandingInstruction,
     pub statistics: Arc<UserSessionStatistics>,
     pub root_identity: Arc<AgentIdentity>,
@@ -261,6 +262,7 @@ pub fn durable_permission_factory(
 pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
     pub agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
     pub extra_concurrent_tasks: i32,
+    pub fast_mode: bool,
     pub router: Arc<ModelRouter>,
     pub modes: Arc<ModeRegistry<S>>,
     pub workflows: Vec<(String, Arc<dyn ModeWorkflowFactory<S>>)>,
@@ -645,6 +647,9 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 )
                 .map_err(invalid)?,
             ),
+            fast_mode: Arc::new(parrot_provider::sessions::FastMode::new(
+                initialization.fast_mode.unwrap_or(config.fast_mode),
+            )),
             standing: StandingInstruction::new(config.templates.clone()),
             statistics,
             root_identity: identity.clone(),
@@ -1006,6 +1011,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             mode,
             extra_concurrent_tasks: i32::try_from(self.services.task_concurrency.get_limit())
                 .expect("the session task limit fits in i32"),
+            fast_mode: self.services.fast_mode.is_enabled(),
             working_directory: self
                 .services
                 .resources
@@ -1033,8 +1039,16 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         model: Option<ResolvedModelSelection>,
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
+        fast_mode: Option<bool>,
     ) -> protocol::Result<()> {
         let _gate = self.update_gate.lock().await;
+        if let Some(enabled) = fast_mode {
+            self.services
+                .lease
+                .update_fast_mode_metadata(enabled)
+                .map_err(internal)?;
+            self.services.fast_mode.set_enabled(enabled);
+        }
         if let Some(limit) = extra_concurrent_tasks {
             let capacity = usize::try_from(limit).map_err(invalid)?;
             self.services
@@ -1668,9 +1682,11 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
         model: Option<ResolvedModelSelection>,
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
+        fast_mode: Option<bool>,
     ) -> BoxFuture<'_, protocol::Result<()>> {
         self.core.owned_mutation(move |core| async move {
-            core.update(model, mode, extra_concurrent_tasks).await
+            core.update(model, mode, extra_concurrent_tasks, fast_mode)
+                .await
         })
     }
     fn update_selection(&self, model: ResolvedModelSelection) -> ConfigurationResult<()> {
@@ -1914,7 +1930,12 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                     .observe_statistics(&query, statistics, cancellation.as_ref())
                     .await
                     .map_err(status_error)?;
-                Ok([full, statistics]
+                let fast_mode = if core.services.fast_mode.is_enabled() {
+                    "Fast mode: on (ChatGPT requests only; increased usage)"
+                } else {
+                    "Fast mode: off"
+                };
+                Ok([full, fast_mode.into(), statistics]
                     .into_iter()
                     .filter(|text| !text.trim().is_empty())
                     .collect::<Vec<_>>()

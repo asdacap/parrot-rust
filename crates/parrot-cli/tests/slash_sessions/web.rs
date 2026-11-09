@@ -149,8 +149,9 @@ async fn web_factory_lists_same_registry_without_exit_or_native_side_effects() {
         .unwrap()
         .into_inner()
         .commands;
-    assert_eq!(commands.len(), 23);
+    assert_eq!(commands.len(), 24);
     assert!(commands.iter().any(|command| command.name == "/task-limit"));
+    assert!(commands.iter().any(|command| command.name == "/fast"));
     assert_eq!(commands[0].name, "/auth");
     assert_eq!(commands.last().unwrap().name, "/version");
     assert!(

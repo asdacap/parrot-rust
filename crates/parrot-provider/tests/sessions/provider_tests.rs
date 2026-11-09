@@ -1461,3 +1461,198 @@ async fn compatible_catalog_legacy_same_messages_remain_provider_errors() {
         );
     }
 }
+
+#[tokio::test]
+async fn chatgpt_fast_mode_preserves_oauth_and_requests_priority_only_when_enabled() {
+    let transport = Transport::new(RESPONSES, 2);
+    let provider = ChatGptProvider::new(
+        ChatGptOptions::new(Tokens::new("subscription-token", "subscription-account")),
+        transport.clone(),
+        Arc::new(NoSocket),
+    )
+    .unwrap();
+    for enabled in [false, true] {
+        let mut request = request();
+        request.fast_mode = enabled;
+        request.reasoning = Some(parrot_provider::sessions::Reasoning {
+            effort: "high".into(),
+            summary: "auto".into(),
+        });
+        request.instructions = "unchanged instructions".into();
+        drain(provider.call(request).unwrap().as_mut())
+            .await
+            .unwrap();
+    }
+    let requests = transport.requests.lock().unwrap();
+    for (index, expected) in [None, Some("priority")].into_iter().enumerate() {
+        let request = &requests[index];
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(
+            body.get("service_tier").and_then(serde_json::Value::as_str),
+            expected
+        );
+        assert_eq!(body["model"], "model");
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert_eq!(body["instructions"], "unchanged instructions");
+        assert_eq!(
+            header(request, "Authorization"),
+            "Bearer subscription-token"
+        );
+        assert_eq!(
+            header(request, "ChatGPT-Account-Id"),
+            "subscription-account"
+        );
+    }
+    assert_eq!(header(&requests[0], "x-codex-routing-hint"), "model=model");
+    assert_eq!(
+        header(&requests[1], "x-codex-routing-hint"),
+        "model=model;tier=priority"
+    );
+}
+
+#[tokio::test]
+async fn compatible_providers_ignore_chatgpt_fast_mode() {
+    for protocol in [Protocol::Responses, Protocol::ChatCompletions] {
+        let transport = Transport::new(
+            if protocol == Protocol::Responses {
+                RESPONSES
+            } else {
+                CHAT
+            },
+            1,
+        );
+        let mut options = options(Key::new("api-key"));
+        options.protocol = protocol;
+        let provider =
+            OpenAICompatibleProvider::new(options, transport.clone(), Arc::new(NoSocket)).unwrap();
+        let mut request = request();
+        request.fast_mode = true;
+        drain(provider.call(request).unwrap().as_mut())
+            .await
+            .unwrap();
+        let requests = transport.requests.lock().unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(body.get("service_tier").is_none());
+        assert!(header(&requests[0], "x-codex-routing-hint").is_empty());
+    }
+}
+
+struct PriorityConnector {
+    sent: Arc<Mutex<Vec<serde_json::Value>>>,
+}
+impl Connector for PriorityConnector {
+    fn connect<'a>(
+        &'a self,
+        _: &'a str,
+        headers: &'a Headers,
+        _: Option<Duration>,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<ConnectedSocket, WebSocketError>> {
+        assert!(
+            headers
+                .iter()
+                .any(|(name, value)| name == "Authorization" && value == "Bearer token")
+        );
+        let sent = self.sent.clone();
+        Box::pin(async move {
+            Ok(ConnectedSocket {
+                socket: Box::new(PrioritySocket { sent }),
+                response_headers: Vec::new(),
+            })
+        })
+    }
+}
+struct PrioritySocket {
+    sent: Arc<Mutex<Vec<serde_json::Value>>>,
+}
+impl parrot_provider::responses_websocket::Socket for PrioritySocket {
+    fn state(&self) -> parrot_provider::responses_websocket::SocketState {
+        parrot_provider::responses_websocket::SocketState::Open
+    }
+    fn send<'a>(
+        &'a mut self,
+        data: &'a [u8],
+        _: bool,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), WebSocketError>> {
+        self.sent
+            .lock()
+            .unwrap()
+            .push(serde_json::from_slice(data).unwrap());
+        Box::pin(async { Ok(()) })
+    }
+    fn receive<'a>(
+        &'a mut self,
+        buffer: &'a mut [u8],
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<parrot_provider::responses_websocket::ReceivedFrame, WebSocketError>>
+    {
+        Box::pin(async move {
+            let completed = br#"{"type":"response.completed","response":{"id":"r","status":"completed","output":[]}}"#;
+            buffer[..completed.len()].copy_from_slice(completed);
+            Ok(parrot_provider::responses_websocket::ReceivedFrame {
+                count: completed.len(),
+                kind: parrot_provider::responses_websocket::FrameKind::Text,
+                end_of_message: true,
+                close_status: None,
+                close_description: None,
+            })
+        })
+    }
+    fn abort(&mut self) {}
+}
+
+#[tokio::test]
+async fn chatgpt_websocket_fast_mode_changes_settings_and_survives_http_fallback() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let connector = Arc::new(PriorityConnector { sent: sent.clone() });
+    let http = Transport::new(RESPONSES, 1);
+    let mut options = ChatGptOptions::new(Tokens::new("token", "account"));
+    options.disable_websocket = false;
+    let provider = ChatGptProvider::new(options, http.clone(), connector).unwrap();
+    let mode = Arc::new(parrot_provider::sessions::FastMode::new(false));
+    let pool = parrot_provider::sessions::ProviderSessions::new().with_fast_mode(mode.clone());
+    let session = pool.get(Arc::new(provider)).await.unwrap();
+    session.begin_turn().await.unwrap();
+    let mut initial = request();
+    initial
+        .messages
+        .push(parrot_provider::sessions::Message::user("first"));
+    drain(session.call(initial.clone()).unwrap().as_mut())
+        .await
+        .unwrap();
+    mode.set_enabled(true);
+    initial
+        .messages
+        .push(parrot_provider::sessions::Message::user("second"));
+    drain(session.call(initial.clone()).unwrap().as_mut())
+        .await
+        .unwrap();
+    {
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert!(sent[0].get("service_tier").is_none());
+        assert_eq!(sent[1]["service_tier"], "priority");
+        assert_eq!(sent[0]["model"], sent[1]["model"]);
+        assert!(
+            sent[1].get("previous_response_id").is_none(),
+            "tier changes invalidate incremental continuation settings"
+        );
+        assert_eq!(sent[1]["input"].as_array().unwrap().len(), 2);
+    }
+    assert!(session.try_fall_back_to_http().await.unwrap());
+    drain(session.call(initial).unwrap().as_mut())
+        .await
+        .unwrap();
+    {
+        let requests = http.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["service_tier"], "priority");
+        assert_eq!(
+            header(&requests[0], "x-codex-routing-hint"),
+            "model=model;tier=priority"
+        );
+    }
+    pool.close().await.unwrap();
+}

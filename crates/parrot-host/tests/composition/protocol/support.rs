@@ -427,6 +427,7 @@ impl HostedSession for FakeHostedSession {
         model: Option<ResolvedModelSelection>,
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
+        fast_mode: Option<bool>,
     ) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             self.route(
@@ -446,6 +447,9 @@ impl HostedSession for FakeHostedSession {
             }
             if let Some(limit) = extra_concurrent_tasks {
                 value.extra_concurrent_tasks = limit;
+            }
+            if let Some(enabled) = fast_mode {
+                value.fast_mode = enabled;
             }
             Ok(())
         })

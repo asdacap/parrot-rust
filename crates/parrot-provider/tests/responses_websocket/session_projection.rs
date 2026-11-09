@@ -272,6 +272,9 @@ struct Request {
     max_tokens: i32,
 }
 impl ResponsesRequestView for Request {
+    fn service_tier(&self) -> &str {
+        ""
+    }
     type Message = Message;
     type Tool = Empty;
     fn model(&self) -> &str {

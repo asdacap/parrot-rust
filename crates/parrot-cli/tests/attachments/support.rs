@@ -398,6 +398,7 @@ impl HostedSession for Hosted {
         _: Option<ResolvedModelSelection>,
         _: Option<String>,
         _: Option<i32>,
+        _: Option<bool>,
     ) -> BoxFuture<'_, protocol::Result<()>> {
         panic!("not a T68 operation")
     }

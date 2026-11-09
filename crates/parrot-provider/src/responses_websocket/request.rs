@@ -41,7 +41,7 @@ impl WebSocketRequest {
     }
     fn encode_items(&self, previous: &str, input: &[Box<RawValue>], turn: &str) -> Vec<u8> {
         let mut fields = vec!["\"type\":\"response.create\"".to_owned()];
-        for name in ["model", "instructions"] {
+        for name in ["model", "service_tier", "instructions"] {
             if let Some(value) = self.fields.get(name) {
                 fields.push(format!("\"{name}\":{}", value.get()));
             }

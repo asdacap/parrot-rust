@@ -61,6 +61,7 @@ message UserSession {
   bool loaded  = 4;
   string working_directory = 5;
   int32 extra_concurrent_tasks = 6;
+  bool fast_mode = 7;
 }
 
 message CreateSessionRequest {
@@ -86,6 +87,7 @@ message UpdateSessionRequest {
   string model           = 2;
   string mode            = 3;
   optional int32 extra_concurrent_tasks = 4;
+  optional bool fast_mode = 5;
 }
 
 message SetGoalRequest {

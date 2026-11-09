@@ -133,6 +133,49 @@ impl SlashSession for RpcSlashSession {
             Ok(self.current.extra_concurrent_tasks)
         })
     }
+    fn get_fast_mode<'a>(
+        &'a mut self,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            Ok(self.current.fast_mode)
+        })
+    }
+    fn set_fast_mode<'a>(
+        &'a mut self,
+        enabled: bool,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    fast_mode: Some(enabled),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            self.configuration
+                .lock()
+                .map_err(|_| SlashFailure::Command("configuration lock poisoned".into()))?
+                .set_fast_mode(self.current.fast_mode)
+                .map_err(|failure| {
+                    SlashFailure::Command(format!(
+                        "Fast mode changed for this session, but failed to save the default: {failure}"
+                    ))
+                })?;
+            Ok(self.current.fast_mode)
+        })
+    }
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,
@@ -234,14 +277,15 @@ impl SlashSession for RpcSlashSession {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut options = ChatOptions::default();
-            {
+            let fast_mode = {
                 let configuration = self.configuration.lock().expect("configuration poisoned");
                 options.apply_configuration(
                     &configuration.model,
                     &configuration.runtime.default_profile,
                 );
-            }
-            let replacement = native_call(
+                configuration.fast_mode
+            };
+            let mut replacement = native_call(
                 self.client.create_session(wire::CreateSessionRequest {
                     model: options.model,
                     mode: options.mode,
@@ -251,6 +295,17 @@ impl SlashSession for RpcSlashSession {
                 c,
             )
             .await?;
+            if replacement.fast_mode != fast_mode {
+                replacement = native_call(
+                    self.client.update_session(wire::UpdateSessionRequest {
+                        user_session_id: replacement.id.clone(),
+                        fast_mode: Some(fast_mode),
+                        ..Default::default()
+                    }),
+                    c,
+                )
+                .await?;
+            }
             let rollback = Rollback::new(&mut self.current);
             *rollback.current = replacement.clone();
             self.binding.replace(replacement, c).await?;

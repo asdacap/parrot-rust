@@ -3,6 +3,7 @@
 
 mod auth;
 mod auth_presets;
+mod fast_mode;
 mod model_alias;
 mod model_selection;
 mod model_wizard;
