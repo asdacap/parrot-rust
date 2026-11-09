@@ -137,7 +137,7 @@ impl<B: DrainBackend> AgentSession<B> {
                     let outcome = bounded(self.inner.backend.restore_execution(terminal).await?);
                     self.inner
                         .backend
-                        .execution_finished_correlated(&outcome, &previous.execution_id)
+                        .execution_finished_correlated(&outcome, terminal, &previous.execution_id)
                         .await?;
                     if let Some(notification) = &mut previous.parent_notification {
                         notification.admitted = true;
@@ -303,7 +303,7 @@ impl<B: DrainBackend> AgentSession<B> {
         } else {
             ExecutionPhase::Completed
         };
-        checkpoint.terminal = Some(terminal);
+        checkpoint.terminal = Some(terminal.clone());
         store
             .update(AgentStateUpdate::Execution(Some(checkpoint.clone())))
             .await
@@ -313,7 +313,7 @@ impl<B: DrainBackend> AgentSession<B> {
         let delivery = self
             .inner
             .backend
-            .execution_finished_correlated(execution, &checkpoint.execution_id)
+            .execution_finished_correlated(execution, &terminal, &checkpoint.execution_id)
             .await;
         if let Some(notification) = &mut checkpoint.parent_notification {
             match delivery {
@@ -521,7 +521,7 @@ impl<B: DrainBackend> AgentSession<B> {
             {
                 self.inner
                     .backend
-                    .execution_finished_correlated(&execution, &checkpoint.execution_id)
+                    .execution_finished_correlated(&execution, terminal, &checkpoint.execution_id)
                     .await?;
                 let _gate = self.inner.checkpoint_gate.lock().await;
                 let mut current = self.execution_checkpoint().await?.ok_or_else(|| {

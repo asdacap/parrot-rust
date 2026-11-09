@@ -169,6 +169,7 @@ impl DrainBackend for Backend {
     fn execution_finished_correlated<'a>(
         &'a self,
         _: &'a Execution,
+        _: &'a ExecutionTerminal,
         _: &'a str,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async { panic!("wake/mutation stress has no durable execution finishes") })

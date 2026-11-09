@@ -223,6 +223,8 @@ pub enum ExecutionPhase {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionTerminal {
     pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<i64>,
     /// The authoritative conversation result reference, not the lifecycle event.
     pub history_sequence: i64,
     /// The conversation boundary sealed by this terminal, captured before later input.

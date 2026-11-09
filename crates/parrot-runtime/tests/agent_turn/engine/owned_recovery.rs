@@ -79,17 +79,24 @@ impl Fixture {
 struct RecoveryParent {
     fail: AtomicBool,
     messages: Mutex<Vec<(String, Execution)>>,
+    elapsed: Mutex<Vec<Option<i64>>>,
 }
 impl ParentCompletion for RecoveryParent {
-    fn deliver<'a>(&'a self, _: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
+    fn deliver<'a>(
+        &'a self,
+        _: &'a Execution,
+        _: Option<i64>,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
         panic!("durable execution must use a correlated completion")
     }
     fn deliver_correlated<'a>(
         &'a self,
         execution: &'a Execution,
+        elapsed_ms: Option<i64>,
         message_id: &'a str,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
+            self.elapsed.lock().unwrap().push(elapsed_ms);
             if self.fail.load(Ordering::SeqCst) {
                 return Err(TurnError::Service("parent temporarily unavailable".into()));
             }
@@ -491,12 +498,11 @@ async fn pending_parent_admission_retries_without_changing_execution_outcome() {
     let store = fixture.recovery_store().await;
     let parent = Arc::new(RecoveryParent::default());
     parent.fail.store(true, Ordering::SeqCst);
+    let gate = Gate::new();
+    let mut step = Step::complete("actual answer");
+    step.gate = Some(gate.clone());
     let runtime = fixture
-        .recovered_runtime(
-            Scripted::new(vec![Step::complete("actual answer")]),
-            store.clone(),
-            parent.clone(),
-        )
+        .recovered_runtime(Scripted::new(vec![step]), store.clone(), parent.clone())
         .await;
     let handle = runtime
         .session
@@ -508,15 +514,17 @@ async fn pending_parent_admission_retries_without_changing_execution_outcome() {
             Arc::new(NeverCancelled),
         )
         .unwrap();
+    gate.entered().await;
+    runtime.activity.clock.advance(1234);
+    gate.open();
     assert_eq!(
         bounded(handle.join()).await.unwrap(),
         Execution::succeeded("actual answer")
     );
     let checkpoint = store.load().await.unwrap().unwrap().execution.unwrap();
-    assert_eq!(
-        checkpoint.terminal.unwrap().outcome,
-        ExecutionOutcome::Succeeded
-    );
+    let terminal = checkpoint.terminal.unwrap();
+    assert_eq!(terminal.outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(terminal.elapsed_ms, Some(1234));
     let notification = checkpoint.parent_notification.unwrap();
     assert!(!notification.admitted);
     assert_eq!(
@@ -545,6 +553,10 @@ async fn pending_parent_admission_retries_without_changing_execution_outcome() {
         Execution::succeeded("actual answer")
     );
     assert_eq!(parent.messages.lock().unwrap().len(), 1);
+    assert_eq!(
+        parent.elapsed.lock().unwrap().as_slice(),
+        [Some(1234), Some(1234)]
+    );
     assert!(provider.requests.lock().unwrap().is_empty());
     assert!(
         restarted

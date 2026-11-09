@@ -1,6 +1,12 @@
 use super::{harness::Harness, support::*};
 use parrot_domain::protocol::messages::parrot::InputSource;
-use parrot_runtime::{agent_turn::lifecycle::ExecutionStatus, children::*};
+use parrot_runtime::{
+    agent_turn::{
+        lifecycle::{Execution, ExecutionStatus},
+        services::ParentCompletion,
+    },
+    children::*,
+};
 use parrot_storage::events::{ConversationPart, NeverCancelled};
 use std::sync::{Arc, atomic::Ordering};
 
@@ -74,7 +80,48 @@ async fn actual_foreground_child_completion_awaits_parent_admission_publication_
             .unwrap();
         assert!(message.contains(&child.identity().session.session_id));
         assert!(message.contains("succeeded"));
+        assert!(message.contains("Runtime: 1.23 seconds."), "{message}");
         assert!(message.contains("answer"));
+        h.close().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn correlated_completion_preserves_legacy_text_and_distinguishes_measured_zero() {
+    bounded(async {
+        let h = Harness::new();
+        let root = h.root("root").await;
+        let mut request = h.request(&root, "automatic");
+        request.delivery = CompletionDelivery::Automatic;
+        let child = root.spawner().spawn(request).unwrap().join().await.unwrap();
+        for (elapsed_ms, runtime) in [(None, None), (Some(0), Some("Runtime: 0.00 seconds."))] {
+            let execution = Execution::succeeded("answer");
+            let message_id = id();
+            for _ in 0..2 {
+                child
+                    .parent_scope()
+                    .deliver_correlated(&execution, elapsed_ms, &message_id)
+                    .await
+                    .unwrap();
+            }
+            let input = h
+                .histories
+                .repository
+                .events()
+                .find_input(root.identity().session.session_id.clone(), message_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let [ConversationPart::Text(notification)] = input.parts.as_slice() else {
+                panic!("completion must be one text part")
+            };
+            if let Some(runtime) = runtime {
+                assert!(notification.contains(runtime), "{notification}");
+            } else {
+                assert!(!notification.contains("Runtime:"), "{notification}");
+            }
+        }
         h.close().await;
     })
     .await;

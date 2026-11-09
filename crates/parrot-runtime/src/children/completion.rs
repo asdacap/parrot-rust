@@ -148,6 +148,7 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentScope<S> {
     async fn deliver_inner(
         &self,
         execution: &Execution,
+        elapsed_ms: Option<i64>,
         message_id: CompletionIdentity<'_>,
     ) -> ChildResult<()> {
         if self.delivery != CompletionDelivery::Automatic {
@@ -178,6 +179,12 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentScope<S> {
         append_bounded(&mut result, &identity.name);
         result.push_str("\nStatus: ");
         append_bounded(&mut result, status);
+        if let Some(elapsed_ms) = elapsed_ms {
+            result.push_str(&format!(
+                "\nRuntime: {:.2} seconds.",
+                elapsed_ms as f64 / 1000.0
+            ));
+        }
         if !execution.error.is_empty() {
             result.push_str("\nError:\n");
             append_bounded(&mut result, &execution.error);
@@ -222,18 +229,27 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentCompletion for ParentScope<S
     fn deliver_correlated<'a>(
         &'a self,
         execution: &'a Execution,
+        elapsed_ms: Option<i64>,
         message_id: &'a str,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
-            self.deliver_inner(execution, CompletionIdentity::Correlated(message_id))
-                .await
-                .map_err(|error| TurnError::Service(error.to_string()))
+            self.deliver_inner(
+                execution,
+                elapsed_ms,
+                CompletionIdentity::Correlated(message_id),
+            )
+            .await
+            .map_err(|error| TurnError::Service(error.to_string()))
         })
     }
-    fn deliver<'a>(&'a self, execution: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
+    fn deliver<'a>(
+        &'a self,
+        execution: &'a Execution,
+        elapsed_ms: Option<i64>,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
             let _ = self
-                .deliver_inner(execution, CompletionIdentity::Legacy)
+                .deliver_inner(execution, elapsed_ms, CompletionIdentity::Legacy)
                 .await;
             Ok(())
         })

@@ -50,6 +50,7 @@ async fn actual_automatic_completion_bounds_oversized_multibyte_terminal_error_t
             panic!("completion must be one text part")
         };
         assert!(notification.contains("Status: failed"));
+        assert!(notification.contains("Runtime: 1.23 seconds."));
         assert!(notification.contains("Error:"));
         assert!(notification.contains('界'));
         assert!(notification.contains(&child.identity().session.session_id));

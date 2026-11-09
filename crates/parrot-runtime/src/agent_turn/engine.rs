@@ -907,20 +907,16 @@ where
     fn finish_execution<'a>(
         &'a self,
         execution: &'a Execution,
+        elapsed_ms: Option<i64>,
         correlation: ExecutionCorrelation,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async move {
             let mut event = self.event();
-            let elapsed = self
-                .activity
-                .execution_duration()
-                .as_millis()
-                .min(i64::MAX as u128) as i64;
             if execution.status == ExecutionStatus::Succeeded {
                 event.set_agent_finished(protocol::AgentFinished {
                     parent_agent_session_id: self.identity.parent_session_id.clone(),
                     name: self.identity.name.clone(),
-                    elapsed_ms: Some(elapsed),
+                    elapsed_ms,
                     ..Default::default()
                 });
             } else {
@@ -949,12 +945,12 @@ where
             }
             if let ExecutionCorrelation::Correlated(correlation) = correlation {
                 self.parent_completion
-                    .deliver_correlated(&completed, &format!("{correlation}.parent"))
+                    .deliver_correlated(&completed, elapsed_ms, &format!("{correlation}.parent"))
                     .await
                     .map_err(|error| error.lifecycle_error())?;
             } else {
                 self.parent_completion
-                    .deliver(&completed)
+                    .deliver(&completed, elapsed_ms)
                     .await
                     .map_err(|error| error.lifecycle_error())?;
             }
@@ -1214,15 +1210,26 @@ where
         &'a self,
         execution: &'a Execution,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
-        self.finish_execution(execution, ExecutionCorrelation::Legacy)
+        self.finish_execution(
+            execution,
+            Some(
+                self.activity
+                    .execution_duration()
+                    .as_millis()
+                    .min(i64::MAX as u128) as i64,
+            ),
+            ExecutionCorrelation::Legacy,
+        )
     }
     fn execution_finished_correlated<'a>(
         &'a self,
         execution: &'a Execution,
+        terminal: &'a ExecutionTerminal,
         correlation: &'a str,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         self.finish_execution(
             execution,
+            terminal.elapsed_ms,
             ExecutionCorrelation::Correlated(correlation.to_owned()),
         )
     }
@@ -1333,6 +1340,12 @@ where
             }
             Ok(ExecutionTerminal {
                 event_id: format!("{}.finished", checkpoint.execution_id),
+                elapsed_ms: Some(
+                    self.activity
+                        .execution_duration()
+                        .as_millis()
+                        .min(i64::MAX as u128) as i64,
+                ),
                 history_sequence: candidate.as_ref().map_or(0, |item| item.sequence),
                 recovery_watermark,
                 outcome: match execution.status {

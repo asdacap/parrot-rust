@@ -226,11 +226,13 @@ pub trait ParentCompletion: Send + Sync {
     fn deliver<'a>(
         &'a self,
         execution: &'a super::lifecycle::Execution,
+        elapsed_ms: Option<i64>,
     ) -> BoxFuture<'a, Result<(), TurnError>>;
     /// Uses a stable message identity so recovery can retry durable admission.
     fn deliver_correlated<'a>(
         &'a self,
         execution: &'a super::lifecycle::Execution,
+        elapsed_ms: Option<i64>,
         message_id: &'a str,
     ) -> BoxFuture<'a, Result<(), TurnError>>;
 }
