@@ -4,6 +4,7 @@ pub mod budget;
 pub mod compaction;
 mod context;
 mod protocol;
+use compaction::CompactionDependencies;
 pub use context::*;
 pub use protocol::*;
 
@@ -13,6 +14,7 @@ pub async fn run<'a>(
     states: &mut dyn States,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
+    compaction: &mut CompactionDependencies<'_>,
     options: &TurnOptions,
     budget: &mut budget::TurnBudget,
     cancellation: CancellationToken<'a>,
@@ -28,7 +30,17 @@ pub async fn run<'a>(
         {
             return Ok(Outcome::Completed(answer));
         }
-        match run_turn(states, tools, provider, options, budget, cancellation).await? {
+        match run_turn(
+            states,
+            tools,
+            provider,
+            compaction,
+            options,
+            budget,
+            cancellation,
+        )
+        .await?
+        {
             Outcome::Completed(completed) => answer = completed,
             Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
         }
@@ -40,6 +52,7 @@ pub async fn run_turn<'a>(
     states: &mut dyn States,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
+    compaction: &mut CompactionDependencies<'_>,
     options: &TurnOptions,
     budget: &mut budget::TurnBudget,
     cancellation: CancellationToken<'a>,
@@ -69,14 +82,21 @@ pub async fn run_turn<'a>(
         } else {
             &catalog.normal
         };
-        let request =
-            context::prepare_request(states, definitions, phase, options, cancellation).await?;
+        let request = context::prepare_request(
+            states,
+            compaction,
+            definitions,
+            phase,
+            options,
+            cancellation,
+        )
+        .await?;
         let attempt = budget.count_request();
         let response = match provider.invoke(request).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(states, definitions, cancellation)
+                if !context::compact_context(states, compaction, definitions, cancellation)
                     .await?
                     .reduced
                 {

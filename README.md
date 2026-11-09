@@ -37,10 +37,12 @@ Its turn contracts are:
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
-Compaction uses two additional contracts: `CompactionEffects` supplies model-aware
-estimates, actual blob notices, and awaited progress; `SummaryProvider` invokes
-private summary requests and joins their streams. Its typed summary/no-summary
-outcome preserves diagnostics without exposing provider stream representations.
+Compaction receives its dependencies separately through `CompactionDependencies`.
+`CompactionContext` computes the safe-prefix plan and fits the actual replacement
+status. `CompactionEffects` supplies model-aware estimates, actual blob notices,
+and awaited progress. `SummaryProvider` invokes private summary requests and joins
+their streams. Its typed summary outcome preserves diagnostics without exposing
+provider stream representations.
 
 Requests, responses, tool execution results, messages, tool definitions, and errors
 are concrete core-owned types. Adapters implement the same interface; they do not
@@ -73,13 +75,20 @@ The core specifies and implements:
   closing a turn.
 
 For core-selected automatic compaction and oversized recovery,
-`States::prepare_compaction` returns a safe-prefix plan and explicitly scoped
-compaction-effect/provider adapters, not a ready provider request. Core constructs
-and invokes the summary requests, then awaits `record_compaction` on success or
-failure before continuing or propagating the error. Settlement returns refreshed
-instructions and whether context was reduced. Native state owns lifecycle events,
-summary/watermark persistence, status fitting, and conversation reload. Inline and
-explicit native paths retain that same boundary around the shared core algorithm.
+`States::read_compaction` returns owned conversation groups, checkpoint metadata,
+watermarks, sampled instructions, and current messages. It returns no executable
+services or borrowed runtime guards. Runtime composition supplies the context,
+effects, and summary dependencies independently. Core explicitly computes the
+plan, runs the shared summary algorithm, fits the actual replacement status, and
+awaits `record_compaction` on success or failure before continuing. Recording returns
+refreshed instructions and whether context was reduced. Native state owns lifecycle
+events, summary and watermark persistence, and conversation reload. Inline and
+explicit native paths reuse the same planning, fitting, and summary computations.
+
+The native retention planner remains the single implementation of checkpoint and
+safe-prefix selection. Moving that policy into core is not required to separate
+service ownership from persistence. Blob publication is awaited so the runtime
+adapter can lock state for the spill without retaining that lock during summaries.
 
 `States` exposes the latest visible conversation segment and its result, not a
 precomputed work flag. A no-tool assistant candidate can be present while durable

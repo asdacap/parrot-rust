@@ -119,17 +119,17 @@ pub trait States: Send {
     ) -> BoxFuture<'a, Result<(), Error>>;
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
-    /// Prepares a safe-prefix plan and scoped native effects for core-selected compaction.
-    /// Core constructs and invokes every summary request before recording the outcome.
-    fn prepare_compaction<'a>(
+    /// Reads owned conversation groups, sampled context, and durable compaction correlations.
+    /// Planning, summary execution, and fitting use separately supplied dependencies.
+    fn read_compaction<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<crate::compaction::PreparedCompaction<'a>, Error>>;
-    /// Applies the completed compaction and awaits terminal lifecycle effects on success
+    ) -> BoxFuture<'a, Result<crate::compaction::CompactionInput, Error>>;
+    /// Persists the fitted compaction and awaits terminal lifecycle effects on success
     /// or failure, returning the sampled instructions and whether context was reduced.
     fn record_compaction(
         &mut self,
-        result: Result<Option<crate::compaction::CompactionResult>, Error>,
+        result: Result<Option<crate::compaction::FittedCompaction>, Error>,
     ) -> BoxFuture<'_, Result<ContextCompaction, Error>>;
     /// Records why a malformed or truncated tool response must be retried.
     fn record_retry(

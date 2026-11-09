@@ -113,6 +113,7 @@ impl Cancellation for Uncancelled {
 
 /// Executes a planned safe prefix. The caller owns and joins provider-session lifetime
 /// and commits the returned summary/watermark through authoritative history storage.
+#[derive(Clone)]
 pub struct Compactor {
     planner: Arc<CompactionPlanner>,
     templates: Arc<PromptTemplateCatalog>,
@@ -160,7 +161,7 @@ impl Compactor {
         cancellation: &dyn Cancellation,
     ) -> Result<Option<CompactionResult>, CompactionError> {
         let plan = self.prepare_plan(selected, target, input)?;
-        let estimates = CompactionEstimates::new(self, selected, input.instructions, input.tools);
+        let estimates = CompactionEstimates::new(self, selected);
         self.run_plan(
             plan,
             estimates,
@@ -199,12 +200,51 @@ impl Compactor {
                 input_budget: plan.input_budget,
                 summary_output_tokens: plan.summary_output_tokens,
                 input_token_limit: model.model.input_token_limit(),
+                instructions: input.instructions.into(),
+                tools: input.tools.iter().cloned().map(Into::into).collect(),
                 fixed_message: input.fixed_message.clone().into(),
                 summary_instructions: self.summary_instructions.clone(),
                 summary_prefix: self.summary_prefix.clone(),
                 model: model.model.id.clone(),
                 reasoning: model.reasoning().map(Into::into),
             }))
+    }
+
+    pub(crate) fn prepare_input_plan(
+        &self,
+        selected: &ResolvedModelSelection,
+        target: Option<&ContextSize>,
+        input: &core::CompactionInput,
+        tools: &[Tool],
+    ) -> Result<Option<CompactionPlan>, CompactionError> {
+        let messages: Vec<Vec<Message>> = input
+            .groups
+            .iter()
+            .map(|group| group.messages.iter().cloned().map(Into::into).collect())
+            .collect();
+        let groups: Vec<super::CompactionGroup<'_>> = input
+            .groups
+            .iter()
+            .zip(&messages)
+            .map(|(group, messages)| super::CompactionGroup {
+                messages,
+                end_watermark: group.end_watermark,
+                has_checkpoint_before: group.has_checkpoint_before,
+                is_complete: group.is_complete,
+            })
+            .collect();
+        let fixed: Message = input.fixed_message.clone().into();
+        self.prepare_plan(
+            selected,
+            target,
+            &PlanningInput {
+                instructions: &input.instructions,
+                tools,
+                groups: &groups,
+                base_watermark: input.base_watermark,
+                fixed_message: &fixed,
+            },
+        )
     }
 
     pub(crate) async fn run_plan(
@@ -243,6 +283,17 @@ impl From<core::CompactionResult> for CompactionResult {
     }
 }
 
+impl From<CompactionResult> for core::CompactionResult {
+    fn from(result: CompactionResult) -> Self {
+        Self {
+            history: result.history.into_iter().map(Into::into).collect(),
+            summary: result.summary.into(),
+            retained_messages: result.retained_messages,
+            watermark: result.watermark,
+        }
+    }
+}
+
 impl From<CompactionFailure> for CompactionError {
     fn from(failure: CompactionFailure) -> Self {
         match failure {
@@ -267,25 +318,79 @@ pub(crate) struct CompactionResources<'a> {
 pub(crate) struct CompactionEstimates {
     planner: Arc<CompactionPlanner>,
     selected: ProviderModel,
-    instructions: String,
-    tools: Vec<Tool>,
     templates: Arc<PromptTemplateCatalog>,
 }
 
 impl CompactionEstimates {
-    pub(crate) fn new(
-        compactor: &Compactor,
-        selected: &ResolvedModelSelection,
-        instructions: &str,
-        tools: &[Tool],
-    ) -> Self {
+    pub(crate) fn new(compactor: &Compactor, selected: &ResolvedModelSelection) -> Self {
         Self {
             planner: compactor.planner.clone(),
             selected: selected.canonical_model.clone(),
-            instructions: instructions.into(),
-            tools: tools.to_vec(),
             templates: compactor.templates.clone(),
         }
+    }
+
+    pub(crate) fn estimate_tokens(
+        &self,
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, CompactionError> {
+        let messages: Vec<Message> = messages.iter().cloned().map(Into::into).collect();
+        CompactionPlanner::estimate_tokens(&self.selected, &messages).map_err(CompactionError::from)
+    }
+
+    pub(crate) fn estimate_summary_tokens(
+        &self,
+        preceding_summary: &str,
+        chunk_tokens: i64,
+        next_group: &[parrot_core::Message],
+    ) -> Result<i64, CompactionError> {
+        let messages: Vec<Message> = next_group.iter().cloned().map(Into::into).collect();
+        self.planner
+            .estimate_summary_request_tokens(
+                &self.selected,
+                preceding_summary,
+                chunk_tokens,
+                &messages,
+            )
+            .map_err(CompactionError::from)
+    }
+
+    pub(crate) fn estimate_context_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, CompactionError> {
+        let messages: Vec<Message> = messages.iter().cloned().map(Into::into).collect();
+        let tools: Vec<Tool> = definitions.iter().cloned().map(Into::into).collect();
+        CompactionPlanner::estimate_input_tokens(&self.selected, instructions, &tools, &messages)
+            .map_err(CompactionError::from)
+    }
+
+    pub(crate) fn spill_group(
+        &self,
+        blobs: &mut CompactionGroupBlobStore,
+        messages: &[parrot_core::Message],
+        cancellation: CancellationToken<'_>,
+    ) -> Result<Vec<parrot_core::Message>, CompactionError> {
+        let group = artifact::CompactionGroup {
+            messages: messages
+                .iter()
+                .cloned()
+                .map(Message::from)
+                .map(|message| artifact_message(&message))
+                .collect(),
+        };
+        let path = blobs.persist(&group, &CoreCancellation(cancellation))?;
+        let notice = self
+            .templates
+            .render(
+                "compaction.oversized-tool-group-notice",
+                &[("path".into(), path.to_string_lossy().as_ref().into())],
+                &Uncancelled,
+            )
+            .map_err(|error| CompactionError::Template(error.to_string()))?;
+        Ok(vec![Message::system(notice).into()])
     }
 }
 
@@ -316,9 +421,7 @@ where
     type Error = E;
 
     fn estimate_tokens(&self, messages: &[parrot_core::Message]) -> Result<i64, E> {
-        let messages: Vec<Message> = messages.iter().cloned().map(Into::into).collect();
-        CompactionPlanner::estimate_tokens(&self.estimates.selected, &messages)
-            .map_err(|error| CompactionError::from(error).into())
+        self.estimates.estimate_tokens(messages).map_err(Into::into)
     }
 
     fn estimate_summary_tokens(
@@ -327,56 +430,35 @@ where
         chunk_tokens: i64,
         next_group: &[parrot_core::Message],
     ) -> Result<i64, E> {
-        let messages: Vec<Message> = next_group.iter().cloned().map(Into::into).collect();
         self.estimates
-            .planner
-            .estimate_summary_request_tokens(
-                &self.estimates.selected,
-                preceding_summary,
-                chunk_tokens,
-                &messages,
-            )
-            .map_err(|error| CompactionError::from(error).into())
+            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
+            .map_err(Into::into)
     }
 
-    fn estimate_context_tokens(&self, messages: &[parrot_core::Message]) -> Result<i64, E> {
-        let messages: Vec<Message> = messages.iter().cloned().map(Into::into).collect();
-        CompactionPlanner::estimate_input_tokens(
-            &self.estimates.selected,
-            &self.estimates.instructions,
-            &self.estimates.tools,
-            &messages,
-        )
-        .map_err(|error| CompactionError::from(error).into())
-    }
-
-    fn spill_group(
-        &mut self,
+    fn estimate_context_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
         messages: &[parrot_core::Message],
-        cancellation: CancellationToken<'_>,
-    ) -> Result<Vec<parrot_core::Message>, E> {
-        let group = artifact::CompactionGroup {
-            messages: messages
-                .iter()
-                .cloned()
-                .map(Message::from)
-                .map(|message| artifact_message(&message))
-                .collect(),
-        };
-        let path = self
-            .blobs
-            .persist(&group, &CoreCancellation(cancellation))
-            .map_err(|error| E::from(CompactionError::from(error)))?;
-        let notice = self
-            .estimates
-            .templates
-            .render(
-                "compaction.oversized-tool-group-notice",
-                &[("path".into(), path.to_string_lossy().as_ref().into())],
-                &Uncancelled,
-            )
-            .map_err(|error| E::from(CompactionError::Template(error.to_string())))?;
-        Ok(vec![Message::system(notice).into()])
+    ) -> Result<i64, E> {
+        self.estimates
+            .estimate_context_tokens(instructions, definitions, messages)
+            .map_err(Into::into)
+    }
+
+    fn spill_group<'a, 'c>(
+        &'a mut self,
+        messages: &'a [parrot_core::Message],
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::Message>, E>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.estimates
+                .spill_group(&mut self.blobs, messages, cancellation)
+                .map_err(Into::into)
+        })
     }
 
     fn report_progress<'a, 'c>(

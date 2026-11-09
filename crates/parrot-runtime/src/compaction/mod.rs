@@ -3,8 +3,8 @@ mod budget;
 mod cadence;
 mod execution;
 pub(crate) use context::CompactionCheckpoint;
-pub(crate) use execution::{CompactionEffectsAdapter, SummaryProviderAdapter};
 pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
+pub(crate) use execution::{CompactionEstimates, SummaryProviderAdapter};
 mod context;
 pub use context::{
     ContextCompactionResult, ContextController, ContextError, ContextEvents, ContextResult,

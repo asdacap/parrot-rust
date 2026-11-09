@@ -1,23 +1,33 @@
 use crate::{
     CancellationToken, ContextCompaction, ContextSnapshot, Error, ProviderRequest, States,
-    ToolDefinition, TurnOptions, budget::TurnRequestPhase,
+    ToolDefinition, TurnOptions,
+    budget::TurnRequestPhase,
+    compaction::{CompactionDependencies, compact},
 };
 
 pub(crate) async fn compact_context(
     states: &mut dyn States,
+    compaction: &mut CompactionDependencies<'_>,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
-    let compacted = states
-        .prepare_compaction(definitions)
-        .await?
-        .run(cancellation)
-        .await;
+    let input = states.read_compaction(definitions).await?;
+    let compacted = async {
+        let plan = compaction.context.plan(&input, definitions)?;
+        let result = compact(plan, compaction.effects, compaction.provider, cancellation).await?;
+        let advancing = result.filter(|result| result.watermark > input.base_watermark);
+        compaction
+            .context
+            .fit(&input, definitions, advancing, cancellation)
+            .await
+    }
+    .await;
     states.record_compaction(compacted).await
 }
 
 pub(crate) async fn prepare_request(
     states: &mut dyn States,
+    compaction: &mut CompactionDependencies<'_>,
     definitions: &[ToolDefinition],
     phase: TurnRequestPhase,
     options: &TurnOptions,
@@ -38,7 +48,7 @@ pub(crate) async fn prepare_request(
         .await?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        instructions = compact_context(states, definitions, cancellation)
+        instructions = compact_context(states, compaction, definitions, cancellation)
             .await?
             .instructions;
         messages = states.read_messages().await?;
@@ -57,7 +67,7 @@ pub(crate) async fn prepare_request(
             .await?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
         if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            instructions = compact_context(states, definitions, cancellation)
+            instructions = compact_context(states, compaction, definitions, cancellation)
                 .await?
                 .instructions;
             messages = states.read_messages().await?;

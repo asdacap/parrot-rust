@@ -242,6 +242,7 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled)
@@ -286,6 +287,7 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled)

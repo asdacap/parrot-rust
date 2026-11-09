@@ -168,11 +168,14 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     let mut context = Context::from_waker(&waker);
     let options = state.capture_options();
     let mut budget = TurnBudget::new(state.unlimited);
+    let mut compaction = MemoryCompaction::default();
+    let mut dependencies = compaction.dependencies();
     let result = {
         let mut running = std::pin::pin!(run(
             &mut state,
             &tools,
             &provider,
+            &mut dependencies,
             &options,
             &mut budget,
             token

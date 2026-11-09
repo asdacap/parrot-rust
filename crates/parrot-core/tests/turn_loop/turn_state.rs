@@ -137,6 +137,7 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             token
@@ -151,6 +152,7 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             token
@@ -166,6 +168,7 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             token
@@ -230,6 +233,7 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),
@@ -266,6 +270,7 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),

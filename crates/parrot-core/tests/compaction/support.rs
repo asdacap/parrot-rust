@@ -32,6 +32,8 @@ pub fn plan(groups: &[&str]) -> CompactionPlan {
         input_budget: 1000,
         summary_output_tokens: 19,
         input_token_limit: 10000,
+        instructions: String::new(),
+        tools: Vec::new(),
         fixed_message: message("status"),
         summary_instructions: "instructions".into(),
         summary_prefix: "prefix:".into(),
@@ -47,6 +49,7 @@ pub fn plan(groups: &[&str]) -> CompactionPlan {
 pub struct Effects {
     pub progress: Mutex<Vec<CompactionProgress>>,
     pub spills: Vec<Vec<Message>>,
+    pub contexts: Mutex<Vec<ProviderRequest>>,
 }
 
 impl CompactionEffects for Effects {
@@ -82,17 +85,33 @@ impl CompactionEffects for Effects {
             + self.estimate_tokens(next_group)?)
     }
 
-    fn estimate_context_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
+    fn estimate_context_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
+        messages: &[Message],
+    ) -> Result<i64, Error> {
+        self.contexts.lock().unwrap().push(ProviderRequest {
+            instructions: instructions.into(),
+            tools: definitions.to_vec(),
+            messages: messages.to_vec(),
+            ..ProviderRequest::default()
+        });
         self.estimate_tokens(messages)
     }
 
-    fn spill_group(
-        &mut self,
-        messages: &[Message],
-        _: CancellationToken<'_>,
-    ) -> Result<Vec<Message>, Error> {
-        self.spills.push(messages.to_vec());
-        Ok(vec![message("blob")])
+    fn spill_group<'a, 'c>(
+        &'a mut self,
+        messages: &'a [Message],
+        _: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.spills.push(messages.to_vec());
+            Ok(vec![message("blob")])
+        })
     }
 
     fn report_progress<'a, 'c>(

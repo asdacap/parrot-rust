@@ -21,6 +21,8 @@ use std::{
 
 #[path = "turn_loop/cancellation.rs"]
 mod cancellation;
+#[path = "turn_loop/compaction_dependencies.rs"]
+mod compaction_dependencies;
 #[path = "turn_loop/completion_policy.rs"]
 mod completion_policy;
 #[path = "turn_loop/context_preparation.rs"]
@@ -36,6 +38,7 @@ mod turn_state;
 mod compaction_support;
 
 use cancellation::CancellationSource;
+use compaction_dependencies::MemoryCompaction;
 
 struct ThreadWake(thread::Thread);
 impl Wake for ThreadWake {
@@ -284,6 +287,7 @@ struct MemoryState {
     compaction_plan: Option<parrot_core::compaction::CompactionPlan>,
     summary_provider: compaction_support::Provider,
     recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
+    fitted_statuses: Vec<String>,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
@@ -363,6 +367,7 @@ impl MemoryState {
             compaction_plan: None,
             summary_provider: compaction_support::Provider::new([]),
             recorded_compactions: Vec::new(),
+            fitted_statuses: Vec::new(),
             fail_at: None,
         };
         state.enqueue_message(Delivery::Queue, "question");
@@ -471,6 +476,24 @@ impl MemoryState {
         self.run_with(&tools, &provider)
     }
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
+        let mut compaction =
+            MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
+        self.run_with_dependencies(tools, provider, &mut compaction.dependencies())
+    }
+    fn run_with_compaction(
+        &mut self,
+        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
+    ) -> Result<Outcome, Error> {
+        let tools = self.tools.clone();
+        let provider = self.provider.clone();
+        self.run_with_dependencies(&tools, &provider, compaction)
+    }
+    fn run_with_dependencies(
+        &mut self,
+        tools: &dyn Tools,
+        provider: &dyn Provider,
+        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
+    ) -> Result<Outcome, Error> {
         let cancellation = self.cancellation.clone();
         let is_cancelled = || cancellation.is_cancelled();
         let cancelled = || cancellation.cancelled();
@@ -480,6 +503,7 @@ impl MemoryState {
             self,
             tools,
             provider,
+            compaction,
             &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),
@@ -725,28 +749,48 @@ impl States for MemoryState {
             Ok(self.messages.clone())
         })
     }
-    fn prepare_compaction<'a>(
+    fn read_compaction<'a>(
         &'a mut self,
         definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<parrot_core::compaction::PreparedCompaction<'a>, Error>> {
+    ) -> BoxFuture<'a, Result<parrot_core::compaction::CompactionInput, Error>> {
         Box::pin(async move {
-            self.step("prepare_compaction")?;
+            self.step("read_compaction")?;
             self.compacted_definitions.push(definitions.to_vec());
-            Ok(parrot_core::compaction::PreparedCompaction {
-                plan: self.compaction_plan.clone(),
-                effects: Box::new(compaction_support::Effects::default()),
-                provider: Box::new(self.summary_provider.clone()),
+            Ok(parrot_core::compaction::CompactionInput {
+                groups: self
+                    .messages
+                    .iter()
+                    .enumerate()
+                    .map(
+                        |(index, message)| parrot_core::compaction::CompactionHistoryGroup {
+                            messages: vec![message.clone()],
+                            end_watermark: index as i64 + 1,
+                            has_checkpoint_before: false,
+                            is_complete: true,
+                        },
+                    )
+                    .collect(),
+                base_watermark: 0,
+                instructions: self.instructions.clone(),
+                messages: self.messages.clone(),
+                fixed_message: compaction_support::message("status"),
             })
         })
     }
     fn record_compaction(
         &mut self,
-        result: Result<Option<parrot_core::compaction::CompactionResult>, Error>,
+        result: Result<Option<parrot_core::compaction::FittedCompaction>, Error>,
     ) -> BoxFuture<'_, Result<ContextCompaction, Error>> {
         Box::pin(async move {
             self.step("compact")?;
-            self.recorded_compactions.push(result.clone());
-            result?;
+            self.recorded_compactions.push(
+                result
+                    .clone()
+                    .map(|result| result.map(|fitted| fitted.result)),
+            );
+            if let Some(fitted) = result? {
+                self.fitted_statuses.push(fitted.status);
+            }
             if let Some(compacted) = self.compactions.pop_front() {
                 self.instructions = compacted.instructions;
                 self.messages = compacted.messages;
@@ -964,6 +1008,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
                 &mut state,
                 &tools,
                 &provider,
+                &mut MemoryCompaction::default().dependencies(),
                 &options,
                 &mut budget,
                 CancellationToken::new(&is_cancelled, &cancelled),
@@ -1239,6 +1284,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             token
@@ -1274,6 +1320,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             token
@@ -1305,6 +1352,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             token
@@ -1338,6 +1386,7 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
             &mut state,
             &tools,
             &provider,
+            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
             CancellationToken::new(&is_cancelled, &cancelled),

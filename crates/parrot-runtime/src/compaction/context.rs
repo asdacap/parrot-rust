@@ -2,8 +2,7 @@
 use super::execution::{CompactionEstimates, CompactionResources};
 use super::{
     CompactionError, CompactionGroup, CompactionObserver, CompactionResult, Compactor,
-    ContextCadence, ContextSize, ContextSnapshot, PlanningError, PlanningInput,
-    ProviderTokenBudget,
+    ContextCadence, ContextSize, ContextSnapshot, PlanningError, ProviderTokenBudget,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_core::{
@@ -161,13 +160,11 @@ pub enum StatusInjection {
 
 pub(crate) struct CompactionCheckpoint {
     instructions: String,
-    base: i64,
 }
 
-pub(crate) struct PreparedEpochCompaction {
+pub(crate) struct CompactionEpochInput {
     pub checkpoint: CompactionCheckpoint,
-    pub plan: Option<parrot_core::compaction::CompactionPlan>,
-    pub estimates: CompactionEstimates,
+    pub input: parrot_core::compaction::CompactionInput,
 }
 
 pub struct ContextController {
@@ -560,40 +557,55 @@ impl ContextController {
         target: Option<&ContextSize>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
-        let prepared = self
-            .prepare_epoch_compaction(&mut input, target, cancellation)
-            .await?;
-        let result = self
-            .compactor
-            .run_plan(
-                prepared.plan,
-                prepared.estimates,
-                CompactionResources {
-                    blobs: &mut self.blobs,
-                    sessions: input.sessions,
-                    observer: &ContextObserver(input.events),
+        let prepared = self.read_epoch_compaction(&mut input, cancellation).await?;
+        let result = async {
+            let plan = self.compactor.prepare_input_plan(
+                input.selection,
+                target,
+                &prepared.input,
+                input.tools,
+            )?;
+            let compacted = self
+                .compactor
+                .run_plan(
+                    plan,
+                    CompactionEstimates::new(&self.compactor, input.selection),
+                    CompactionResources {
+                        blobs: &mut self.blobs,
+                        sessions: input.sessions,
+                        observer: &ContextObserver(input.events),
+                        cancellation,
+                    },
+                )
+                .await?;
+            let compacted = compacted
+                .filter(|result| result.watermark > prepared.input.base_watermark)
+                .map(Into::into);
+            self.compactor
+                .fit_context(
+                    input.selection,
+                    &prepared.input,
+                    input.tools,
+                    input.status,
+                    compacted,
                     cancellation,
-                },
-            )
-            .await
-            .map_err(Into::into);
+                )
+                .await
+        }
+        .await;
         self.record_epoch_compaction(&mut input, prepared.checkpoint, result, cancellation)
             .await
     }
 
-    pub(crate) async fn prepare_epoch_compaction(
+    pub(crate) async fn read_epoch_compaction(
         &mut self,
         input: &mut EpochInput<'_>,
-        target: Option<&ContextSize>,
         cancellation: &dyn Cancellation,
-    ) -> ContextResult<PreparedEpochCompaction> {
+    ) -> ContextResult<CompactionEpochInput> {
         let mut started = self.event()?;
         started.set_compaction_started(CompactionStarted::new());
         input.events.emit(started, &Uncancelled).await?;
-        match self
-            .prepare_compaction_inner(input, target, cancellation)
-            .await
-        {
+        match self.read_compaction_inner(input, cancellation).await {
             Ok(prepared) => Ok(prepared),
             Err(error) => {
                 self.fail_epoch_compaction(error.to_string(), input.events)
@@ -607,7 +619,7 @@ impl ContextController {
         &mut self,
         input: &mut EpochInput<'_>,
         checkpoint: CompactionCheckpoint,
-        result: ContextResult<Option<CompactionResult>>,
+        result: ContextResult<Option<parrot_core::compaction::FittedCompaction>>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
         let outcome: ContextResult<EpochResult> = async {
@@ -649,12 +661,11 @@ impl ContextController {
         &mut self.blobs
     }
 
-    async fn prepare_compaction_inner(
+    async fn read_compaction_inner(
         &mut self,
         input: &mut EpochInput<'_>,
-        target: Option<&ContextSize>,
         cancellation: &dyn Cancellation,
-    ) -> ContextResult<PreparedEpochCompaction> {
+    ) -> ContextResult<CompactionEpochInput> {
         input.prompt.sample_epoch(cancellation).await?;
         let instructions = input.prompt.build(input.selection, cancellation).await?;
         let effective = self.history.effective_conversation_groups().await?;
@@ -704,23 +715,28 @@ impl ContextController {
             .observe(&self.estimate(input, &instructions)?, cancellation)
             .await?;
         let fixed = Message::system(status);
-        let plan = self.compactor.prepare_plan(
-            input.selection,
-            target,
-            &PlanningInput {
-                instructions: &instructions,
-                tools: input.tools,
-                groups: &groups,
-                base_watermark: base,
-                fixed_message: &fixed,
+        Ok(CompactionEpochInput {
+            checkpoint: CompactionCheckpoint {
+                instructions: instructions.clone(),
             },
-        )?;
-        let estimates =
-            CompactionEstimates::new(&self.compactor, input.selection, &instructions, input.tools);
-        Ok(PreparedEpochCompaction {
-            checkpoint: CompactionCheckpoint { instructions, base },
-            plan,
-            estimates,
+            input: parrot_core::compaction::CompactionInput {
+                groups: groups
+                    .iter()
+                    .map(|group| parrot_core::compaction::CompactionHistoryGroup {
+                        messages: group.messages.iter().cloned().map(Into::into).collect(),
+                        end_watermark: group.end_watermark,
+                        has_checkpoint_before: group.has_checkpoint_before,
+                        is_complete: group.is_complete,
+                    })
+                    .collect(),
+                base_watermark: base,
+                instructions,
+                messages: provider_messages(input.conversation)
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                fixed_message: fixed.into(),
+            },
         })
     }
 
@@ -728,24 +744,14 @@ impl ContextController {
         &mut self,
         input: &mut EpochInput<'_>,
         checkpoint: CompactionCheckpoint,
-        compacted: Option<CompactionResult>,
+        compacted: Option<parrot_core::compaction::FittedCompaction>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
-        let CompactionCheckpoint { instructions, base } = checkpoint;
+        let CompactionCheckpoint { instructions } = checkpoint;
         let mut reduced = false;
-        if let Some(compacted) = compacted.filter(|value| value.watermark > base) {
-            let estimate = |content: &str| -> ContextResult<ContextSnapshot> {
-                let history = replace_status(&compacted.history, content);
-                Ok(self.compactor.planner().estimate_selected_context(
-                    input.selection,
-                    &instructions,
-                    input.tools,
-                    &history,
-                )?)
-            };
-            let status = input.status.observe_fitted(&estimate, cancellation).await?;
-            let rendered = estimate(&status)?;
-            ensure_request_fits(&rendered)?;
+        if let Some(compacted) = compacted {
+            let status = compacted.status;
+            let compacted: CompactionResult = compacted.result.into();
             let mut saving = self.event()?;
             saving.set_compaction_progress(CompactionProgressEvent {
                 phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
@@ -782,12 +788,6 @@ impl ContextController {
                 .events
                 .publish_committed(Committed::after_commit(published), &Uncancelled)
                 .await?;
-        } else if self.estimate(input, &instructions)?.estimated_tokens
-            > i64::from(input.selection.canonical_model.model.input_token_limit())
-        {
-            return Err(ContextError::InvalidOperation(
-                "The conversation has no safe compaction boundary before the input limit.".into(),
-            ));
         }
         Ok(EpochResult {
             instructions,
@@ -864,6 +864,53 @@ impl ContextController {
             ..AgentNotice::new()
         });
         Ok(event)
+    }
+}
+
+impl Compactor {
+    pub(crate) async fn fit_context(
+        &self,
+        selected: &ResolvedModelSelection,
+        input: &parrot_core::compaction::CompactionInput,
+        tools: &[Tool],
+        status: &dyn ContextStatus,
+        compacted: Option<parrot_core::compaction::CompactionResult>,
+        cancellation: &dyn Cancellation,
+    ) -> ContextResult<Option<parrot_core::compaction::FittedCompaction>> {
+        if let Some(compacted) = compacted {
+            let history: Vec<Message> = compacted.history.iter().cloned().map(Into::into).collect();
+            let estimate = |content: &str| -> ContextResult<ContextSnapshot> {
+                Ok(self.planner().estimate_selected_context(
+                    selected,
+                    &input.instructions,
+                    tools,
+                    &replace_status(&history, content),
+                )?)
+            };
+            let status = status.observe_fitted(&estimate, cancellation).await?;
+            ensure_request_fits(&estimate(&status)?)?;
+            Ok(Some(parrot_core::compaction::FittedCompaction {
+                result: compacted,
+                status,
+            }))
+        } else {
+            let messages: Vec<Message> = input.messages.iter().cloned().map(Into::into).collect();
+            let estimate = self.planner().estimate_selected_context(
+                selected,
+                &input.instructions,
+                tools,
+                &messages,
+            )?;
+            if estimate.estimated_tokens
+                > i64::from(selected.canonical_model.model.input_token_limit())
+            {
+                return Err(ContextError::InvalidOperation(
+                    "The conversation has no safe compaction boundary before the input limit."
+                        .into(),
+                ));
+            }
+            Ok(None)
+        }
     }
 }
 
