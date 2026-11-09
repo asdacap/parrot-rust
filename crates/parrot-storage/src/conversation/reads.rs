@@ -68,7 +68,7 @@ pub fn read_conversation_item(
 ) -> Result<ConversationItem, EventError> {
     let item = tx
         .query_row(
-            "SELECT origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE sequence = ?1;",
+            "SELECT origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE sequence = ?1 AND kind <> 'compaction';",
             [sequence],
             |row| {
                 Ok((
@@ -104,9 +104,9 @@ fn read_selected(
     tail: bool,
 ) -> Result<Vec<ConversationItem>, EventError> {
     let sql = if tail {
-        "SELECT item.sequence, item.origin, item.role, item.tool_call_id, item.final_phase, item.provider_id, item.provider_content FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM agent_history AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence;"
+        "SELECT item.sequence, item.origin, item.role, item.tool_call_id, item.final_phase, item.provider_id, item.provider_content FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence) ORDER BY item.sequence;"
     } else {
-        "SELECT sequence, origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;"
+        "SELECT sequence, origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE agent_session = ?1 AND kind <> 'compaction' AND sequence > ?2 ORDER BY sequence;"
     };
     let mut read = tx.prepare(sql)?;
     let mut rows = read.query(params![agent, watermark])?;
@@ -152,7 +152,7 @@ impl ConversationRepository {
             .transaction(move |tx| {
                 let snapshot = super::compaction::read_snapshot(tx, &agent)?;
                 let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
-                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM agent_history AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.status_conversation_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
+                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.sequence > ?2 ORDER BY item.sequence;")?;
                 let mut rows = read.query(params![agent, watermark])?;
                 let mut items = Vec::new();
                 while let Some(row) = rows.next()? {
@@ -202,7 +202,7 @@ impl ConversationRepository {
     ) -> Result<bool, EventError> {
         self.events.transaction(move |tx| {
             Ok(tx.query_row(
-                "SELECT EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'pending') OR (EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'promoted') AND COALESCE((SELECT item.sequence > ?2 AND item.role IN ('user', 'tool') FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.role != 'system' AND NOT EXISTS (SELECT 1 FROM agent_history AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence DESC LIMIT 1), 0));",
+                "SELECT EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'pending') OR (EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'promoted') AND COALESCE((SELECT item.sequence > ?2 AND item.role IN ('user', 'tool') FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.role != 'system' AND NOT EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence) ORDER BY item.sequence DESC LIMIT 1), 0));",
                 params![agent, watermark], |row| row.get(0),
             )?)
         }).await
@@ -216,7 +216,7 @@ impl ConversationRepository {
     ) -> Result<Option<ConversationItem>, EventError> {
         self.events.transaction(move |tx| {
             let owned: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM conversation_item WHERE agent_session = ?1 AND sequence = ?2);",
+                "SELECT EXISTS(SELECT 1 FROM conversation_item WHERE agent_session = ?1 AND kind <> 'compaction' AND sequence = ?2);",
                 params![agent, sequence], |row| row.get(0),
             )?;
             if owned { read_conversation_item(tx, sequence).map(Some) } else { Ok(None) }

@@ -65,7 +65,7 @@ async fn finish(
         .into_value()
         .into_output()
 }
-async fn counts(repository: &EventRepository) -> (i64, i64, i64, i64) {
+async fn counts(repository: &EventRepository) -> (i64, i64, i64) {
     repository
         .transaction(|tx| {
             let count = |table: &str| {
@@ -77,7 +77,6 @@ async fn counts(repository: &EventRepository) -> (i64, i64, i64, i64) {
                 count("event")?,
                 count("conversation_part")?,
                 count("conversation_item")?,
-                count("agent_history")?,
             ))
         })
         .await
@@ -110,7 +109,7 @@ async fn cancellation_before_admission_keeps_turn_open_without_projection() {
         &cancelled,
     );
     assert!(matches!(ticket, Err(AdmissionError::Cancelled)));
-    assert_eq!(counts(&repository).await, (1, 0, 0, 0));
+    assert_eq!(counts(&repository).await, (1, 0, 0));
     let outcome = finish(
         &repository,
         key("agent", "start"),
@@ -143,7 +142,7 @@ async fn projection_failure_after_terminal_insert_rolls_back_whole_close() {
         .into_completion()
         .await;
     assert!(matches!(failure, Err(EventError::Database(_))));
-    assert_eq!(counts(&repository).await, (1, 0, 0, 0));
+    assert_eq!(counts(&repository).await, (1, 0, 0));
     repository
         .transaction(|tx| {
             tx.execute_batch("DROP TRIGGER fail_message;")?;
@@ -159,7 +158,7 @@ async fn projection_failure_after_terminal_insert_rolls_back_whole_close() {
     )
     .await;
     assert_eq!(winner.closure, TurnClosure::NewlyClosed);
-    assert_eq!(counts(&repository).await, (2, 1, 1, 1));
+    assert_eq!(counts(&repository).await, (2, 1, 1));
     repository.database().close().await.unwrap();
 }
 
@@ -207,7 +206,7 @@ async fn admitted_close_survives_dropped_ticket_late_cancel_and_reopen() {
     assert_eq!(retry.terminal.event, event);
     assert_eq!(retry.terminal.raw, raw);
     assert!(retry.conversation.is_none());
-    assert_eq!(counts(&repository).await, (2, 1, 1, 1));
+    assert_eq!(counts(&repository).await, (2, 1, 1));
     repository.database().close().await.unwrap();
     let reopened = fixture.repository();
     let retried = finish(
@@ -219,7 +218,7 @@ async fn admitted_close_survives_dropped_ticket_late_cancel_and_reopen() {
     .await;
     assert_eq!(retried.terminal, retry.terminal);
     assert_eq!(retried.closure, TurnClosure::AlreadyClosed);
-    assert_eq!(counts(&reopened).await, (2, 1, 1, 1));
+    assert_eq!(counts(&reopened).await, (2, 1, 1));
     reopened.database().close().await.unwrap();
 }
 
@@ -327,7 +326,7 @@ async fn publication_cancellation_reconciles_key_after_commit_and_never_republis
         .unwrap();
     assert_eq!(retried.terminal, committed.terminal);
     assert_eq!(publisher.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(counts(&repository).await, (2, 1, 1, 1));
+    assert_eq!(counts(&repository).await, (2, 1, 1));
     repository.database().close().await.unwrap();
 }
 
@@ -386,7 +385,7 @@ async fn competing_closes_have_one_exact_winner_and_other_agent_events_do_not_bo
     assert_eq!(a.terminal, b.terminal);
     assert_ne!(a.closure, b.closure);
     assert!(["winner-a", "winner-b"].contains(&a.terminal.event.id.as_str()));
-    assert_eq!(counts(&repository).await, (4, 1, 1, 1));
+    assert_eq!(counts(&repository).await, (4, 1, 1));
     repository.database().close().await.unwrap();
 }
 
@@ -462,7 +461,7 @@ async fn exact_invalid_turn_keys_and_stale_start_are_rejected_without_writes() {
     assert!(
         matches!(result, Err(EventError::Invalid(message)) if message=="turn key is stale: a later turn has started")
     );
-    assert_eq!(counts(&repository).await, (5, 0, 0, 0));
+    assert_eq!(counts(&repository).await, (5, 0, 0));
     repository.database().close().await.unwrap();
 }
 
@@ -503,7 +502,7 @@ async fn historical_duplicate_terminals_remain_in_replay_without_repair_or_norma
             .count(),
         2
     );
-    assert_eq!(counts(&repository).await, (3, 2, 2, 2));
+    assert_eq!(counts(&repository).await, (3, 2, 2));
     repository.database().close().await.unwrap();
 }
 
@@ -740,11 +739,7 @@ async fn actual_process_kills_recover_before_admission_during_transaction_and_af
         let repository = fixture.repository();
         assert_eq!(
             counts(&repository).await,
-            if committed {
-                (2, 1, 1, 1)
-            } else {
-                (1, 0, 0, 0)
-            },
+            if committed { (2, 1, 1) } else { (1, 0, 0) },
             "crash mode {mode}"
         );
         let before = repository.replay_raw().await.unwrap();

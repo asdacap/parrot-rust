@@ -206,12 +206,7 @@ fn cross_assistant_conflict_preserves_the_original_result_and_owner() {
     let second = assistant(&tx, "agent");
     append_tool_settlement(&tx, &event("original", "agent"), first, &terminal, &clock).unwrap();
     tx.commit().unwrap();
-    let tables = [
-        "event",
-        "conversation_item",
-        "conversation_part",
-        "agent_history",
-    ];
+    let tables = ["event", "conversation_item", "conversation_part"];
     let before: Vec<_> = tables
         .iter()
         .map(|table| count(&connection, table))
@@ -244,12 +239,7 @@ fn missing_assistant_foreign_key_rolls_back_the_event_result_and_history() {
         append_tool_settlement(&tx, &event("e1", "agent"), 123, &terminal("call"), &clock).is_err()
     );
     tx.rollback().unwrap();
-    for table in [
-        "event",
-        "conversation_item",
-        "conversation_part",
-        "agent_history",
-    ] {
+    for table in ["event", "conversation_item", "conversation_part"] {
         assert_eq!(count(&connection, table), 0, "{table}");
     }
 }

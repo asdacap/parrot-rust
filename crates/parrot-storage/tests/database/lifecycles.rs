@@ -64,11 +64,10 @@ async fn repository_workflows_keep_current_schema_after_reopen() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!((version, tables.len()), (6, 8));
+    assert_eq!((version, tables.len()), (7, 7));
     assert_eq!(
         tables,
         [
-            "agent_history",
             "conversation_item",
             "conversation_part",
             "event",

@@ -10,7 +10,6 @@ from urllib.parse import quote_from_bytes
 
 
 TABLES = {
-    "agent_history",
     "conversation_item",
     "conversation_part",
     "event",
@@ -47,8 +46,8 @@ def main():
             )
         }
         require(
-            version == 6 and tables == TABLES,
-            f"Expected format 6 and 8 application tables. Observed format {version} "
+            version == 7 and tables == TABLES,
+            f"Expected format 7 and 7 application tables. Observed format {version} "
             f"and {len(tables)} tables {sorted(tables)}.",
         )
         require(database.execute("PRAGMA integrity_check").fetchall() == [("ok",)], "Database integrity failed.")

@@ -58,7 +58,7 @@ fn unversioned_tables_and_views_are_rejected_without_writes() {
 
 #[test]
 fn unknown_versions_are_rejected_without_writes() {
-    for version in [1, 2, 3, 4, 5, 7] {
+    for version in [1, 2, 3, 4, 5, 6, 8] {
         let fixture = Fixture::new();
         let path = fixture.0.join("session.db");
         let connection = Connection::open(&path).unwrap();
@@ -99,7 +99,7 @@ async fn empty_unversioned_file_initializes_the_current_format() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (6, 8));
+    assert_eq!(state, (7, 7));
     database.close().await.unwrap();
 }
 
@@ -128,7 +128,7 @@ async fn current_format_reopens_without_schema_repair() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (6, 8, false));
+    assert_eq!(state, (7, 7, false));
     reopened.close().await.unwrap();
 }
 
@@ -169,19 +169,21 @@ async fn compaction_status_is_unique_and_clears_without_deleting_history() {
         tx.execute_batch(
             "INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at) VALUES
              (1,'agent','system','system','','at'),(2,'agent','system','system','','at');
-             INSERT INTO agent_history(agent_session,kind,conversation_sequence,summary,watermark,created_at,status_conversation_sequence) VALUES
-             ('agent','compaction',NULL,'first',10,'at',1);"
+             INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at,kind,compaction_watermark,compaction_status_sequence) VALUES
+             (3,'agent','system','system','','at','compaction',10,1);
+             INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(3,0,'text','first','','','');"
         )?;
-        assert!(tx.execute("INSERT INTO agent_history(agent_session,kind,conversation_sequence,summary,watermark,created_at,status_conversation_sequence) VALUES('agent','compaction',NULL,'duplicate',10,'at',2)", []).is_err());
-        assert!(tx.execute("INSERT INTO agent_history(agent_session,kind,conversation_sequence,summary,watermark,created_at,status_conversation_sequence) VALUES('agent','compaction',NULL,'duplicate-status',11,'at',1)", []).is_err());
-        assert!(tx.execute("INSERT INTO agent_history(agent_session,kind,conversation_sequence,summary,watermark,created_at,status_conversation_sequence) VALUES('agent','message',2,'',0,'at',1)", []).is_err());
-        tx.execute("INSERT INTO agent_history(agent_session,kind,conversation_sequence,summary,watermark,created_at,status_conversation_sequence) VALUES('agent','compaction',NULL,'later',5,'at',2)", [])?;
-        let current: (String,i64) = tx.query_row("SELECT summary,watermark FROM agent_history WHERE agent_session='agent' AND kind='compaction' ORDER BY sequence DESC LIMIT 1", [], |row| Ok((row.get(0)?,row.get(1)?)))?;
+        assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,kind,compaction_watermark,compaction_status_sequence) VALUES('agent','system','system','','at','compaction',10,2)", []).is_err());
+        assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,kind,compaction_watermark,compaction_status_sequence) VALUES('agent','system','system','','at','compaction',11,1)", []).is_err());
+        assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,kind,compaction_watermark,compaction_status_sequence) VALUES('agent','system','system','','at','message',NULL,1)", []).is_err());
+        tx.execute("INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at,kind,compaction_watermark,compaction_status_sequence) VALUES(4,'agent','system','system','','at','compaction',5,2)", [])?;
+        tx.execute("INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(4,0,'text','later','','','')", [])?;
+        let current: (String,i64) = tx.query_row("SELECT part.text,item.compaction_watermark FROM conversation_item AS item JOIN conversation_part AS part ON part.item_sequence=item.sequence AND part.position=0 WHERE item.agent_session='agent' AND item.kind='compaction' ORDER BY item.sequence DESC LIMIT 1", [], |row| Ok((row.get(0)?,row.get(1)?)))?;
         assert_eq!(current, ("later".into(),5));
         tx.execute("DELETE FROM conversation_item WHERE sequence=1", [])?;
-        let first: (String,Option<i64>) = tx.query_row("SELECT summary,status_conversation_sequence FROM agent_history WHERE watermark=10", [], |row| Ok((row.get(0)?,row.get(1)?)))?;
+        let first: (String,Option<i64>) = tx.query_row("SELECT part.text,item.compaction_status_sequence FROM conversation_item AS item JOIN conversation_part AS part ON part.item_sequence=item.sequence AND part.position=0 WHERE item.compaction_watermark=10", [], |row| Ok((row.get(0)?,row.get(1)?)))?;
         assert_eq!(first, ("first".into(),None));
-        let count: i64 = tx.query_row("SELECT count(*) FROM agent_history", [], |row| row.get(0))?;
+        let count: i64 = tx.query_row("SELECT count(*) FROM conversation_item WHERE kind='compaction'", [], |row| row.get(0))?;
         assert_eq!(count,2);
         Ok(())
     }).unwrap().into_completion().await.unwrap();

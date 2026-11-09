@@ -144,7 +144,7 @@ async fn row_counts(repo: &ConversationRepository, agent: &str) -> Vec<i64> {
     let agent = agent.to_owned();
     repo.events()
         .transaction(move |tx| {
-            ["event", "conversation_item", "agent_history"]
+            ["event", "conversation_item"]
                 .iter()
                 .map(|table| {
                     tx.query_row(
@@ -835,7 +835,7 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     )
     .await
     .unwrap();
-    assert_eq!(row_counts(&repo, "empty").await, vec![0; 3]);
+    assert_eq!(row_counts(&repo, "empty").await, vec![0; 2]);
     repo.events().database().close().await.unwrap();
 }
 
@@ -847,11 +847,20 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
     let status = append(&repo, "agent", message(MessageRole::System, "status")).await;
     append(&repo, "agent", message(MessageRole::User, "tail")).await;
     let final_item = append(&repo, "agent", message(MessageRole::Assistant, "final")).await;
+    repo.save_compaction(
+        "agent".into(),
+        CompactionSnapshot {
+            summary: "summary".into(),
+            watermark: old,
+        },
+    )
+    .await
+    .unwrap();
     repo.events()
         .transaction(move |tx| {
             tx.execute(
-                "INSERT INTO agent_history (agent_session, kind, summary, watermark, created_at, status_conversation_sequence) VALUES ('agent','compaction','summary',?1,'at',?2)",
-                rusqlite::params![old, status],
+                "UPDATE conversation_item SET compaction_status_sequence = ?1 WHERE agent_session = 'agent' AND kind = 'compaction'",
+                [status],
             )?;
             tx.execute(
                 "UPDATE conversation_item SET final_phase = 1 WHERE sequence IN (?1, ?2);",
@@ -934,7 +943,7 @@ async fn fork_failure_after_partial_clone_rolls_back_every_destination_row() {
         .await,
         Err(ForkError::Repository(EventError::Database(_)))
     ));
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 3]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 2]);
     assert_eq!(repo.events().replay_raw().await.unwrap(), before);
     repo.events()
         .transaction(|tx| {
@@ -976,7 +985,7 @@ async fn complete_message_group_without_result_metadata_rolls_back() {
     assert!(
         matches!(fork(&repo,"agent","child",HistoryForkBoundary::AfterCompletedHistory,"full").await,Err(ForkError::Repository(EventError::Invalid(message))) if message=="a complete tool group has no result metadata")
     );
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 3]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 2]);
     repo.events()
         .transaction(|tx| {
             tx.execute(

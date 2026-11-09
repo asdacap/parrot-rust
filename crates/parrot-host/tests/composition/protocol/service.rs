@@ -2105,7 +2105,7 @@ async fn closed_storage_session_resumes_exact_identity_and_new_create_is_always_
 
 #[tokio::test]
 async fn unsupported_schema_resume_is_failed_precondition_without_replacing_or_mutating_session() {
-    for version in [0_i64, 7] {
+    for version in [0_i64, 6, 8] {
         let f = Fixture::new();
         let original = f.create().await;
         let id = original.id();

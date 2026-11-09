@@ -2,25 +2,10 @@
 use super::{error::EventError, types::*};
 use rusqlite::{OptionalExtension, Row, ToSql, Transaction, params};
 
-pub fn insert_agent_history_message(
-    tx: &Transaction<'_>,
-    agent: &str,
-    conversation_sequence: i64,
-    at: &str,
-) -> Result<(), EventError> {
-    tx.execute(
-        "INSERT OR IGNORE INTO agent_history \
-         (agent_session, kind, conversation_sequence, summary, watermark, created_at) \
-         VALUES (?1, 'message', ?2, '', 0, ?3);",
-        params![agent, conversation_sequence, at],
-    )?;
-    Ok(())
-}
-
 pub fn read_latest_final_phase(tx: &Transaction<'_>, agent: &str) -> Result<bool, EventError> {
     Ok(tx
         .query_row(
-            "SELECT final_phase FROM conversation_item WHERE agent_session = ?1 ORDER BY sequence DESC LIMIT 1;",
+            "SELECT final_phase FROM conversation_item WHERE agent_session = ?1 AND kind <> 'compaction' ORDER BY sequence DESC LIMIT 1;",
             [agent],
             |row| row.get(0),
         )
@@ -183,7 +168,6 @@ pub fn project(
             ],
         )?;
     }
-    insert_agent_history_message(tx, agent, sequence, at)?;
     Ok(ConversationItem {
         sequence,
         message: message.clone(),

@@ -1,23 +1,31 @@
 //! Durable compaction snapshots and their explicitly associated status message.
 use super::{
-    CompactionContext, CompactionSnapshot, ConversationMessage, ConversationRepository, EventError,
-    MessageRole,
+    CompactionContext, CompactionSnapshot, ConversationMessage, ConversationPart,
+    ConversationRepository, EventError, MessageRole,
 };
 use crate::events::{projection, record};
 use parrot_domain::protocol::messages::parrot::Event;
 use rusqlite::{OptionalExtension, Transaction, params};
 
 fn already_saved(tx: &Transaction<'_>, agent: &str, watermark: i64) -> Result<bool, EventError> {
-    Ok(tx.query_row("SELECT EXISTS (SELECT 1 FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' AND watermark = ?2);", params![agent, watermark], |row| row.get(0))?)
+    Ok(tx.query_row("SELECT EXISTS (SELECT 1 FROM conversation_item WHERE agent_session = ?1 AND kind = 'compaction' AND compaction_watermark = ?2);", params![agent, watermark], |row| row.get(0))?)
 }
-fn save_snapshot(
+pub(super) fn save_snapshot(
     tx: &Transaction<'_>,
     agent: &str,
     snapshot: &CompactionSnapshot,
     at: &str,
 ) -> Result<i64, EventError> {
-    tx.execute("INSERT INTO agent_history (agent_session, kind, conversation_sequence, summary, watermark, created_at) VALUES (?1, 'compaction', NULL, ?2, ?3, ?4);", params![agent, snapshot.summary, snapshot.watermark, at])?;
-    Ok(tx.last_insert_rowid())
+    tx.execute("INSERT INTO conversation_item (agent_session, kind, origin, role, tool_call_id, compaction_watermark, created_at) VALUES (?1, 'compaction', 'system', 'system', '', ?2, ?3);", params![agent, snapshot.watermark, at])?;
+    let sequence = tx.last_insert_rowid();
+    projection::insert_parts(
+        tx,
+        "conversation_part",
+        "item_sequence",
+        sequence,
+        &[ConversationPart::text(snapshot.summary.clone())],
+    )?;
+    Ok(sequence)
 }
 pub fn read_snapshot(
     tx: &Transaction<'_>,
@@ -25,7 +33,7 @@ pub fn read_snapshot(
 ) -> Result<Option<CompactionSnapshot>, EventError> {
     Ok(tx
         .query_row(
-            "SELECT summary, watermark FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' ORDER BY sequence DESC LIMIT 1;",
+            "SELECT (SELECT text FROM conversation_part WHERE item_sequence = item.sequence AND position = 0 AND kind = 'text'), compaction_watermark FROM conversation_item AS item WHERE agent_session = ?1 AND kind = 'compaction' ORDER BY sequence DESC LIMIT 1;",
             [agent],
             |row| {
                 Ok(CompactionSnapshot {
@@ -71,10 +79,10 @@ impl ConversationRepository {
         let context = self.events.context().clone();
         let appended = self.events.transaction(move |tx| {
             if already_saved(tx, &published.agent_session_id, snapshot.watermark)? { return Ok(false); }
-            let history_sequence = save_snapshot(tx, &published.agent_session_id, &snapshot, &(context.timestamp)())?;
+            let summary_sequence = save_snapshot(tx, &published.agent_session_id, &snapshot, &(context.timestamp)())?;
             record(tx, &published, None, &(context.timestamp)())?;
             let status = projection::project(tx, &published.agent_session_id, &ConversationMessage::text(MessageRole::System, content), &(context.timestamp)())?;
-            tx.execute("UPDATE agent_history SET status_conversation_sequence = ?1 WHERE sequence = ?2;", params![status.sequence, history_sequence])?;
+            tx.execute("UPDATE conversation_item SET compaction_status_sequence = ?1 WHERE sequence = ?2;", params![status.sequence, summary_sequence])?;
             tx.execute("UPDATE conversation_item SET context_reminder = NULL WHERE agent_session = ?1 AND context_reminder IS NOT NULL;", [&published.agent_session_id])?;
             Ok(true)
         }).await?;
@@ -97,7 +105,7 @@ impl ConversationRepository {
     ) -> Result<Option<CompactionContext>, EventError> {
         self.events.transaction(move |tx| {
             let Some(snapshot) = read_snapshot(tx, &agent)? else { return Ok(None); };
-            let sequence: Option<i64> = tx.query_row("SELECT status_conversation_sequence FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' AND watermark = ?2;", params![agent, snapshot.watermark], |row| row.get(0))?;
+            let sequence: Option<i64> = tx.query_row("SELECT compaction_status_sequence FROM conversation_item WHERE agent_session = ?1 AND kind = 'compaction' AND compaction_watermark = ?2;", params![agent, snapshot.watermark], |row| row.get(0))?;
             let status = sequence.map(|sequence| super::reads::read_conversation_item(tx, sequence)).transpose()?;
             let tail = super::reads::read_compaction_tail(tx, &agent, snapshot.watermark)?;
             Ok(Some(CompactionContext { snapshot, status, tail }))

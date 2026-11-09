@@ -59,7 +59,7 @@ pub fn include_request_history(
 impl ConversationRepository {
     pub async fn agent_history_session_ids(&self) -> Result<Vec<String>, EventError> {
         self.events.transaction(|tx| {
-            let mut read = tx.prepare("SELECT agent_session FROM agent_history UNION SELECT agent_session FROM event WHERE request_id IS NOT NULL AND history_anchor IS NOT NULL ORDER BY agent_session;")?;
+            let mut read = tx.prepare("SELECT agent_session FROM conversation_item UNION SELECT agent_session FROM event WHERE request_id IS NOT NULL AND history_anchor IS NOT NULL ORDER BY agent_session;")?;
             Ok(read.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?)
         }).await
     }
@@ -73,17 +73,16 @@ impl ConversationRepository {
         request_event_sequence: i64,
     ) -> Result<Vec<AgentHistoryEntry>, EventError> {
         self.events.transaction(move |tx| {
-            let mut read = tx.prepare("SELECT sequence, kind, conversation_sequence, summary, watermark FROM agent_history WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;")?;
+            let mut read = tx.prepare("SELECT item.sequence, item.kind, (SELECT text FROM conversation_part WHERE item_sequence = item.sequence AND position = 0 AND kind = 'text'), item.compaction_watermark FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
             let mut rows = read.query(params![agent, history_sequence])?;
             let mut entries = Vec::new();
             while let Some(row) = rows.next()? {
                 let sequence = row.get(0)?;
                 let kind: String = row.get(1)?;
-                entries.push(if kind == "message" {
-                    let conversation_sequence = row.get::<_, Option<i64>>(2)?.unwrap_or(0);
-                    message_entry(sequence, read_conversation_item(tx, conversation_sequence)?)
+                entries.push(if kind == "compaction" {
+                    AgentHistoryEntry::Compaction { sequence, summary: row.get(2)?, watermark: row.get(3)? }
                 } else {
-                    AgentHistoryEntry::Compaction { sequence, summary: row.get(3)?, watermark: row.get(4)? }
+                    message_entry(sequence, read_conversation_item(tx, sequence)?)
                 });
             }
             include_request_history(tx, &agent, request_event_sequence, entries)

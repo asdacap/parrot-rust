@@ -28,21 +28,16 @@ fn sqlite_constraint(error: EventError, extended: i32) -> String {
 async fn projection_counts(repository: &EventRepository) -> Vec<i64> {
     repository
         .transaction(|tx| {
-            [
-                "event",
-                "conversation_item",
-                "conversation_part",
-                "agent_history",
-            ]
-            .into_iter()
-            .map(|table| {
-                Ok(
-                    tx.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                        row.get(0)
-                    })?,
-                )
-            })
-            .collect()
+            ["event", "conversation_item", "conversation_part"]
+                .into_iter()
+                .map(|table| {
+                    Ok(
+                        tx.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                            row.get(0)
+                        })?,
+                    )
+                })
+                .collect()
         })
         .await
         .unwrap()
@@ -66,7 +61,7 @@ async fn an_event_and_its_projection_commit_together() {
     // source_assertion: An_event_and_its_projection_commit_together:60
     assert_eq!(repository.replay().await.unwrap().len(), 2);
     // Concrete projection observations, not a replacement T18 Messages API.
-    assert_eq!(projection_counts(&repository).await, vec![2, 1, 1, 1]);
+    assert_eq!(projection_counts(&repository).await, vec![2, 1, 1]);
     repository.database().close().await.unwrap();
 }
 
@@ -88,7 +83,7 @@ async fn events_survive_reopening_the_database() {
     // source_assertion: Events_survive_reopening_the_database:292
     assert_eq!(reopened.replay().await.unwrap()[0].id, "kept");
     assert_eq!(reopened.replay_raw().await.unwrap(), before);
-    assert_eq!(projection_counts(&reopened).await, vec![1, 1, 1, 1]);
+    assert_eq!(projection_counts(&reopened).await, vec![1, 1, 1]);
     reopened.database().close().await.unwrap();
 }
 

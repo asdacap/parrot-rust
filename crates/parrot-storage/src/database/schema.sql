@@ -28,6 +28,13 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     provider_content TEXT NOT NULL DEFAULT '',
     tool_owner_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE SET NULL,
     mode_status_revision INTEGER CHECK (mode_status_revision >= 0),
+    compaction_watermark INTEGER CHECK (compaction_watermark >= 0),
+    compaction_status_sequence INTEGER UNIQUE REFERENCES conversation_item(sequence) ON DELETE SET NULL,
+    CHECK (
+        (kind = 'compaction' AND compaction_watermark IS NOT NULL)
+        OR
+        (kind <> 'compaction' AND compaction_watermark IS NULL AND compaction_status_sequence IS NULL)
+    ),
     CHECK (
         (tool_result_name IS NULL AND tool_result_status IS NULL)
         OR (
@@ -86,6 +93,12 @@ CREATE INDEX IF NOT EXISTS conversation_checkpoint_results
     WHERE role = 'tool' AND tool_result_name = 'set_checkpoint'
         AND tool_result_status = 'finished';
 
+CREATE UNIQUE INDEX IF NOT EXISTS conversation_compaction
+    ON conversation_item (agent_session, compaction_watermark) WHERE kind = 'compaction';
+
+CREATE INDEX IF NOT EXISTS conversation_latest_compaction
+    ON conversation_item (agent_session, sequence DESC) WHERE kind = 'compaction';
+
 CREATE TABLE IF NOT EXISTS conversation_part (
     item_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
     position      INTEGER NOT NULL CHECK (position >= 0),
@@ -132,32 +145,6 @@ CREATE TABLE IF NOT EXISTS input_part (
 );
 
 CREATE INDEX IF NOT EXISTS input_part_by_artifact ON input_part (artifact_id);
-
-CREATE TABLE IF NOT EXISTS agent_history (
-    sequence              INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_session         TEXT NOT NULL,
-    kind                  TEXT NOT NULL CHECK (kind IN ('message', 'compaction')),
-    conversation_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    summary               TEXT NOT NULL,
-    watermark             INTEGER NOT NULL CHECK (watermark >= 0),
-    created_at            TEXT NOT NULL,
-    status_conversation_sequence INTEGER UNIQUE REFERENCES conversation_item(sequence) ON DELETE SET NULL,
-    CHECK (
-        (kind = 'message' AND conversation_sequence IS NOT NULL AND summary = '' AND watermark = 0 AND status_conversation_sequence IS NULL)
-        OR
-        (kind = 'compaction' AND conversation_sequence IS NULL)
-    ),
-    UNIQUE (conversation_sequence)
-);
-
-CREATE INDEX IF NOT EXISTS agent_history_by_session
-    ON agent_history (agent_session, sequence);
-
-CREATE UNIQUE INDEX IF NOT EXISTS agent_history_compaction
-    ON agent_history (agent_session, watermark) WHERE kind = 'compaction';
-
-CREATE INDEX IF NOT EXISTS agent_history_latest_compaction
-    ON agent_history (agent_session, sequence DESC) WHERE kind = 'compaction';
 
 CREATE TABLE IF NOT EXISTS image_artifact (
     artifact_id      TEXT PRIMARY KEY,

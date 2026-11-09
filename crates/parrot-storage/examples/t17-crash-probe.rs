@@ -132,7 +132,7 @@ async fn main() {
                     )?;
                     assert_eq!(outcome.closure, TurnClosure::NewlyClosed);
                     assert_eq!(count_rows(transaction, "event"), 2);
-                    for table in ["conversation_part", "conversation_item", "agent_history"] {
+                    for table in ["conversation_part", "conversation_item"] {
                         assert_eq!(count_rows(transaction, table), 1);
                     }
                     assert!(!transaction.is_autocommit());
@@ -150,7 +150,7 @@ async fn main() {
             repository
                 .transaction(|transaction| {
                     assert_eq!(count_rows(transaction, "event"), 2);
-                    for table in ["conversation_part", "conversation_item", "agent_history"] {
+                    for table in ["conversation_part", "conversation_item"] {
                         assert_eq!(count_rows(transaction, table), 1);
                     }
                     Ok(())

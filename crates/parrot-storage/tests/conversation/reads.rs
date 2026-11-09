@@ -510,6 +510,19 @@ async fn merged_request_history_stably_interleaves_independent_cursors_and_optio
         .append_usage_fact(request("other-request", "other", Some("high")))
         .await
         .unwrap();
+    repo.save_compaction(
+        "agent".into(),
+        CompactionSnapshot {
+            summary: "summary".into(),
+            watermark: first_message.sequence,
+        },
+    )
+    .await
+    .unwrap();
+    repo.events()
+        .append_usage_fact(request("after-compaction", "agent", None))
+        .await
+        .unwrap();
     append(
         &repo,
         "last-message",
@@ -538,6 +551,8 @@ async fn merged_request_history_stably_interleaves_independent_cursors_and_optio
             "message:first",
             "request:same-anchor-1",
             "request:same-anchor-2",
+            "compaction:summary",
+            "request:after-compaction",
             "message:last"
         ]
     );
@@ -616,6 +631,8 @@ async fn merged_request_history_stably_interleaves_independent_cursors_and_optio
         [
             "request:legacy-no-anchor",
             "request:same-anchor-2",
+            "compaction:summary",
+            "request:after-compaction",
             "message:last"
         ]
     );
@@ -664,7 +681,24 @@ async fn compaction_tail_excludes_all_associated_status_items_not_just_current_s
         message(MessageRole::System, "current"),
     )
     .await;
-    repo.events().transaction(move |tx| { tx.execute("INSERT INTO agent_history (agent_session, kind, summary, watermark, created_at, status_conversation_sequence) VALUES ('agent', 'compaction', 'old', 0, 'at', ?1), ('agent', 'compaction', 'current', 1, 'at', ?2)", rusqlite::params![old.sequence, current.sequence])?; Ok(()) }).await.unwrap();
+    for (summary, watermark, status) in [
+        ("old", 0, old.sequence),
+        ("current", first.sequence, current.sequence),
+    ] {
+        repo.save_compaction(
+            "agent".into(),
+            CompactionSnapshot {
+                summary: summary.into(),
+                watermark,
+            },
+        )
+        .await
+        .unwrap();
+        repo.events().transaction(move |tx| {
+            tx.execute("UPDATE conversation_item SET compaction_status_sequence = ?1 WHERE agent_session = 'agent' AND kind = 'compaction' AND compaction_watermark = ?2", rusqlite::params![status, watermark])?;
+            Ok(())
+        }).await.unwrap();
+    }
     let tail = repo
         .events()
         .transaction(|tx| parrot_storage::conversation::reads::read_compaction_tail(tx, "agent", 0))
@@ -694,7 +728,7 @@ async fn malformed_conversation_metadata_and_missing_item_are_observable_without
         matches!(repo.conversation("agent".into()).await, Err(EventError::Invalid(message)) if message == "unknown conversation role unexpected")
     );
     let state = repo.events().transaction(|tx| {
-        Ok(tx.query_row("SELECT role,(SELECT count(*) FROM conversation_item),(SELECT count(*) FROM agent_history) FROM conversation_item", [], |row| Ok((row.get::<_, String>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?)))?)
+        Ok(tx.query_row("SELECT role,(SELECT count(*) FROM conversation_item),(SELECT count(*) FROM conversation_part) FROM conversation_item", [], |row| Ok((row.get::<_, String>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?)))?)
     }).await.unwrap();
     assert_eq!(state, ("unexpected".into(), 1, 0));
     assert!(

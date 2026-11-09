@@ -99,6 +99,62 @@ async fn resume_projection(repo: &ConversationRepository) {
 }
 
 #[tokio::test]
+async fn compaction_is_conversation_owned_without_a_separate_history_table() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    append(&repo, "covered", MessageRole::User, "covered").await;
+    let covered = repo.conversation("agent".into()).await.unwrap()[0].sequence;
+    append(&repo, "retained", MessageRole::Assistant, "retained").await;
+    repo.save_compaction("agent".into(), snapshot("summary", covered))
+        .await
+        .unwrap();
+    let tables = repo
+        .events()
+        .transaction(|tx| {
+            let mut query = tx.prepare(
+                "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name;",
+            )?;
+            Ok(query.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap();
+    assert!(!tables.iter().any(|table| table == "agent_history"));
+    assert_eq!(tables.len(), 7);
+    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert_eq!(state.snapshot, Some(snapshot("summary", covered)));
+    assert_eq!(state.items.len(), 1);
+    assert_eq!(
+        parrot_storage::events::types::content(&state.items[0].item.message.parts),
+        "retained"
+    );
+    let conversation = repo.conversation("agent".into()).await.unwrap();
+    assert_eq!(conversation.len(), 2);
+    assert_eq!(repo.model_history("agent".into()).await.unwrap().len(), 2);
+    let history = repo.agent_history("agent".into()).await.unwrap();
+    let summary_sequence = history.last().unwrap().sequence();
+    assert!(matches!(
+        history.last(),
+        Some(AgentHistoryEntry::Compaction { .. })
+    ));
+    assert!(
+        repo.execution_message("agent".into(), summary_sequence)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    repo.events().database().close().await.unwrap();
+    let reopened = fixture.repository();
+    assert_eq!(
+        reopened
+            .read_conversation_state("agent".into())
+            .await
+            .unwrap(),
+        state
+    );
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn agent_history_retains_messages_and_compaction_markers() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
@@ -121,7 +177,14 @@ async fn agent_history_retains_messages_and_compaction_markers() {
         .append(event("tool"), Some(tool))
         .await
         .unwrap();
-    repo.save_compaction("agent".into(), snapshot("summary two", 2))
+    let covered = repo
+        .conversation("agent".into())
+        .await
+        .unwrap()
+        .last()
+        .unwrap()
+        .sequence;
+    repo.save_compaction("agent".into(), snapshot("summary two", covered))
         .await
         .unwrap();
     let history = repo.agent_history("agent".into()).await.unwrap();
@@ -160,7 +223,7 @@ async fn agent_history_retains_messages_and_compaction_markers() {
     );
     assert!(
         !repo
-            .save_compaction("agent".into(), snapshot("duplicate", 2))
+            .save_compaction("agent".into(), snapshot("duplicate", covered))
             .await
             .unwrap()
     );
@@ -182,6 +245,13 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         .unwrap()
     );
     append(&repo, "between", MessageRole::User, "between").await;
+    let covered = repo
+        .conversation("agent".into())
+        .await
+        .unwrap()
+        .last()
+        .unwrap()
+        .sequence;
     assert!(
         repo.append_context_reminder(
             event("reminder"),
@@ -200,7 +270,7 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
     assert!(
         repo.append_compaction_status(
             event("second-status"),
-            snapshot("second summary", 3),
+            snapshot("second summary", covered),
             "second status".into()
         )
         .await
@@ -255,7 +325,7 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         !repo
             .append_compaction_status(
                 event("duplicate"),
-                snapshot("duplicate", 3),
+                snapshot("duplicate", covered),
                 "duplicate status".into()
             )
             .await
@@ -301,7 +371,7 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
         .events()
         .transaction(|tx| {
             Ok(tx.query_row(
-                "SELECT count(*) FROM agent_history WHERE status_conversation_sequence IS NOT NULL",
+                "SELECT count(*) FROM conversation_item WHERE compaction_status_sequence IS NOT NULL",
                 [],
                 |row| row.get::<_, i64>(0),
             )?)
@@ -635,6 +705,9 @@ async fn final_request_state_survives_later_messages_and_reopen_without_duplicat
     repo.append_final_provider_request_prompt(event("final"), "final".into())
         .await
         .unwrap();
+    repo.save_compaction("agent".into(), snapshot("summary", 0))
+        .await
+        .unwrap();
     for (id, role) in [
         ("assistant", MessageRole::Assistant),
         ("tool", MessageRole::Tool),
@@ -821,7 +894,7 @@ async fn projection_failure_is_postcommit_and_duplicate_compaction_does_not_refr
         .events()
         .transaction(|tx| {
             Ok(tx.query_row(
-                "SELECT count(*) FROM agent_history WHERE kind = 'compaction'",
+                "SELECT count(*) FROM conversation_item WHERE kind = 'compaction'",
                 [],
                 |row| row.get::<_, i64>(0),
             )?)

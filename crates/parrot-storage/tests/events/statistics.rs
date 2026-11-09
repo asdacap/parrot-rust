@@ -223,8 +223,7 @@ async fn request_history_anchor_uses_agent_max_and_lookup_uses_latest_matching_r
     let fixture = Fixture::new();
     let repository = fixture.repository();
     repository.transaction(|tx| {
-        tx.execute("INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at) VALUES (1,'agent','model','assistant','',?1),(2,'other','model','assistant','',?1);", [AT])?;
-        tx.execute("INSERT INTO agent_history(sequence,agent_session,kind,conversation_sequence,summary,watermark,created_at) VALUES (10,'agent','message',1,'',0,?1),(20,'other','message',2,'',0,?1);", [AT])?;
+        tx.execute("INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at) VALUES (10,'agent','model','assistant','',?1),(20,'other','model','assistant','',?1);", [AT])?;
         let first = append_usage_fact(tx, &request("old", "agent", "", "old", 1), &clock)?;
         let second = append_usage_fact(tx, &request("new", "agent", "", "new", 2), &clock)?;
         let mut irrelevant = request("irrelevant", "agent", "", "irrelevant", 3);
@@ -625,8 +624,7 @@ async fn usage_fact_embedded_anchors_survive_history_deletion_and_retry_without_
         let fact = request("zero-anchor", "agent", "", "zero", 7);
         let bytes = fact.write_to_bytes()?;
         let revision = append_usage_fact(tx, &fact, &clock)?;
-        tx.execute("INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at) VALUES (1,'agent','model','assistant','',?1),(2,'other','model','assistant','',?1);", [AT])?;
-        tx.execute("INSERT INTO agent_history(sequence,agent_session,kind,conversation_sequence,summary,watermark,created_at) VALUES (10,'agent','message',1,'',0,?1),(20,'other','message',2,'',0,?1);", [AT])?;
+        tx.execute("INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at) VALUES (10,'agent','model','assistant','',?1),(20,'other','model','assistant','',?1);", [AT])?;
         assert_eq!(append_usage_fact(tx, &fact, &clock)?, revision);
         append_usage_fact(tx, &request("ten-anchor", "agent", "", "ten", 8), &clock)?;
         append_usage_fact(tx, &request("other-anchor", "other", "", "other", 9), &clock)?;
@@ -636,7 +634,6 @@ async fn usage_fact_embedded_anchors_survive_history_deletion_and_retry_without_
             read.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)))?.collect::<Result<Vec<_>, _>>()?
         };
         assert_eq!(anchors, vec![("zero-anchor".into(), Some(0)), ("ten-anchor".into(), Some(10)), ("other-anchor".into(), Some(20)), ("tool-only".into(), None)]);
-        tx.execute("DELETE FROM agent_history WHERE agent_session = 'agent';", [])?;
         tx.execute("DELETE FROM conversation_item WHERE agent_session = 'agent';", [])?;
         assert_eq!(append_usage_fact(tx, &fact, &clock)?, revision);
         let stored: Vec<u8> = tx.query_row("SELECT payload FROM event WHERE sequence = ?1;", [revision], |row| row.get(0))?;

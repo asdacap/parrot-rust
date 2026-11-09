@@ -1,18 +1,25 @@
 # Session storage ownership
 
 The user-facing change moves root identity, mode state, and permanent agent
-lineage from SQLite into JSON. Database format 6 combines that change with
-conversation-owned context reminders, tool calls, tool results, and named history
-checkpoints. It has 8 application tables instead of format 1's 15. The removed
-tables are `session_state`, `agent_lineage`, `context_reminder`,
-`conversation_tool_call`, `tool_execution_terminal`, `tool_execution_result_part`,
-and `history_checkpoint`. There are no replacement tables or automatic conversions.
+lineage from SQLite into JSON. Database format 7 combines that change with
+conversation-owned context reminders, tool calls, tool results, named history
+checkpoints, and compaction summaries. It has 7 application tables instead of
+format 1's 15. The removed tables are `session_state`, `agent_lineage`,
+`context_reminder`, `conversation_tool_call`, `tool_execution_terminal`,
+`tool_execution_result_part`, `history_checkpoint`, and `agent_history`. There are
+no replacement tables or automatic conversions.
 
 Named checkpoints come from `set_checkpoint` tool-call parts with valid title
 arguments and a completed successful result. Forking and compaction derive the
 latest completed checkpoint for each title from these conversation records.
 Unexecuted, failed, cancelled, and malformed calls do not create checkpoints.
 Fork copies carry checkpoints through their existing tool-call and result records.
+
+Compaction summaries are typed conversation records, not ordinary model messages.
+Each summary has a coverage watermark that identifies the last conversation item
+it covers. The watermark is separate from the position where the summary is stored.
+Usage history anchors use the conversation sequence, and `history.jsonl` remains a
+derived file.
 
 ## One metadata owner
 
@@ -98,7 +105,7 @@ measured performance improvement.
 
 ## Format boundary and inspection
 
-Formats 1, 2, 3, and 4, populated unversioned databases, and unknown formats use the
+Formats 1 through 6, populated unversioned databases, and unknown formats use the
 existing typed refusal path. Opening does not convert, reset, or delete them.
 Current and legacy filesystem roots use the same check. `parrot chat --new-session`
 selects a separate fresh session.

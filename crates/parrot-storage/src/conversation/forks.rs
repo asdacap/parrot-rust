@@ -163,12 +163,10 @@ impl ConversationRepository {
         let target = agent.clone();
         self.events
             .transaction(move |tx| {
-                for table in ["conversation_item", "agent_history"] {
-                    tx.execute(
-                        &format!("DELETE FROM {table} WHERE agent_session = ?1;"),
-                        [&target],
-                    )?;
-                }
+                tx.execute(
+                    "DELETE FROM conversation_item WHERE agent_session = ?1;",
+                    [&target],
+                )?;
                 Ok(())
             })
             .await?;
@@ -225,7 +223,7 @@ pub fn read_effective_conversation_groups(
 ) -> Result<EffectiveConversationHistory, EventError> {
     let snapshot = compaction::read_snapshot(tx, agent)?;
     let status = if let Some(snapshot) = &snapshot {
-        let sequence: Option<i64> = tx.query_row("SELECT status_conversation_sequence FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' AND watermark = ?2;", params![agent,snapshot.watermark], |row| row.get(0))?;
+        let sequence: Option<i64> = tx.query_row("SELECT compaction_status_sequence FROM conversation_item WHERE agent_session = ?1 AND kind = 'compaction' AND compaction_watermark = ?2;", params![agent,snapshot.watermark], |row| row.get(0))?;
         sequence
             .map(|sequence| reads::read_conversation_item(tx, sequence))
             .transpose()?
@@ -384,8 +382,15 @@ fn initialize_fork(
         .filter(|_| selection.kind == HistoryForkKind::Full)
     {
         let at = clock();
-        tx.execute("INSERT INTO agent_history (agent_session, kind, conversation_sequence, summary, watermark, created_at) VALUES (?1, 'compaction', NULL, ?2, 0, ?3);", params![destination,snapshot.summary,at])?;
-        let history_sequence = tx.last_insert_rowid();
+        let summary_sequence = compaction::save_snapshot(
+            tx,
+            destination,
+            &CompactionSnapshot {
+                summary: snapshot.summary.clone(),
+                watermark: 0,
+            },
+            &at,
+        )?;
         if let Some(status) = &effective.status {
             let sequence =
                 projection::project(tx, destination, &status.message, &clock())?.sequence;
@@ -394,8 +399,8 @@ fn initialize_fork(
                 params![status.final_phase, sequence],
             )?;
             tx.execute(
-                "UPDATE agent_history SET status_conversation_sequence = ?1 WHERE sequence = ?2;",
-                params![sequence, history_sequence],
+                "UPDATE conversation_item SET compaction_status_sequence = ?1 WHERE sequence = ?2;",
+                params![sequence, summary_sequence],
             )?;
         }
     }

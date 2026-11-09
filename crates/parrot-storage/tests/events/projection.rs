@@ -95,12 +95,9 @@ fn project_writes_structured_components_without_legacy_tables() {
         "provider:{\"opaque\":true}"
     );
     assert_eq!(
-        tx.query_row(
-            "SELECT conversation_sequence FROM agent_history",
-            [],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
+        tx.query_row("SELECT sequence FROM conversation_item", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
         item.sequence
     );
     let empty = project(
@@ -119,7 +116,7 @@ fn project_writes_structured_components_without_legacy_tables() {
         .unwrap();
     assert_eq!(provider, (String::new(), String::new()));
     let retired_tables: i64 = tx.query_row(
-        "SELECT count(*) FROM sqlite_schema WHERE name IN ('message','conversation_provider_content','conversation_tool_call')",
+        "SELECT count(*) FROM sqlite_schema WHERE name IN ('message','conversation_provider_content','conversation_tool_call','agent_history')",
         [],
         |row| row.get(0),
     ).unwrap();
@@ -147,7 +144,7 @@ fn project_writes_structured_components_without_legacy_tables() {
             .message,
         calls_only.message
     );
-    assert_eq!(count(&tx, "agent_history"), 3);
+    assert_eq!(count(&tx, "conversation_item"), 3);
 }
 
 #[test]
@@ -210,7 +207,7 @@ fn projection_failure_leaves_every_write_in_callers_transaction_for_rollback() {
             .is_err()
         );
     }
-    for table in ["conversation_item", "conversation_part", "agent_history"] {
+    for table in ["conversation_item", "conversation_part"] {
         assert_eq!(count(&connection, table), 0, "{table}");
     }
     let retired_tables: i64 = connection.query_row(

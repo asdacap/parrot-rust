@@ -667,7 +667,7 @@ fn executable_creates_then_resumes_real_local_session_and_joins_owners() {
 
 #[test]
 fn executable_refuses_incompatible_session_then_starts_fresh_without_changing_old_data() {
-    for incompatible_version in [0_i64, 1, 2, 3, 4, 5, 7] {
+    for incompatible_version in [0_i64, 1, 2, 3, 4, 5, 6, 8] {
         let fixture = Fixture::new(false);
         std::fs::write(
             fixture.root.join("workspace/retained.png"),
@@ -748,7 +748,7 @@ fn executable_refuses_incompatible_session_then_starts_fresh_without_changing_ol
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, tables), (6, 8));
+        assert_eq!((version, tables), (7, 7));
         drop(database);
         let requests = fixture.chat_requests();
         assert_eq!(requests.len(), 2);
