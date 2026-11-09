@@ -222,6 +222,28 @@ Additional native-platform and package-smoke gates are listed in
 - [Configuration, legacy selection, backups and rollback](docs/operator/state-and-rollback.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
+### ChatGPT fast mode
+
+Use `/fast` to toggle priority inference for ChatGPT subscription requests, or
+`/fast on` and `/fast off` to select it explicitly. `/status` reports the current
+selection. The choice is saved as the default for new sessions in your YAML
+configuration:
+
+```yaml
+fast_mode: true
+```
+
+Fast mode defaults to `false`. It keeps the selected model and reasoning effort
+unchanged, but consumes more of your ChatGPT subscription allowance. Availability
+and acceleration depend on the selected model and your account. Other providers
+are unaffected.
+
+The selection belongs to the user session and is shared by its root agent and
+subagents. Changes apply to subsequent requests, including requests from already
+running subagents; they do not change a request already in flight. Resuming a
+session restores its own saved selection rather than replacing it with the
+current default.
+
 ### Steering a running agent
 
 In interactive chat, messages submitted while the agent is busy stay in the live

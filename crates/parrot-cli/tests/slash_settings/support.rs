@@ -306,6 +306,26 @@ impl SlashSession for Session {
     ) -> BoxFuture<'a, Result<i32, SlashFailure>> {
         unused_session(cancellation)
     }
+    fn get_fast_mode<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            self.boundary(cancellation)?;
+            Ok(self.current.fast_mode)
+        })
+    }
+    fn set_fast_mode<'a>(
+        &'a mut self,
+        enabled: bool,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            self.boundary(cancellation)?;
+            self.current.fast_mode = enabled;
+            Ok(enabled)
+        })
+    }
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

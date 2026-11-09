@@ -133,6 +133,49 @@ impl SlashSession for RpcSlashSession {
             Ok(self.current.extra_concurrent_tasks)
         })
     }
+    fn get_fast_mode<'a>(
+        &'a mut self,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            Ok(self.current.fast_mode)
+        })
+    }
+    fn set_fast_mode<'a>(
+        &'a mut self,
+        enabled: bool,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<bool, SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    fast_mode: Some(enabled),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            self.configuration
+                .lock()
+                .map_err(|_| SlashFailure::Command("configuration lock poisoned".into()))?
+                .set_fast_mode(self.current.fast_mode)
+                .map_err(|failure| {
+                    SlashFailure::Command(format!(
+                        "Fast mode changed for this session, but failed to save the default: {failure}"
+                    ))
+                })?;
+            Ok(self.current.fast_mode)
+        })
+    }
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::slash_settings::{
-    AuthCommand, AuthPresetSelectCommand, AuthPresetSetCommand, EffortCommand, ModelAliasCommand,
-    ModelCommand, ModelPresetSelectCommand, ModelPresetSetCommand, ModelWizard, ModelsCommand,
-    SetContextLimitCommand, SettingsServices,
+    AuthCommand, AuthPresetSelectCommand, AuthPresetSetCommand, EffortCommand, FastCommand,
+    ModelAliasCommand, ModelCommand, ModelPresetSelectCommand, ModelPresetSetCommand, ModelWizard,
+    ModelsCommand, SetContextLimitCommand, SettingsServices,
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 
@@ -173,6 +173,7 @@ impl SlashCommands {
             Box::new(ClearCommand),
             Box::new(CompactCommand),
             Box::new(EffortCommand::new(client.clone())),
+            Box::new(FastCommand),
         ];
         if let Some(application) = application {
             commands.push(Box::new(ExitCommand::new(application)));

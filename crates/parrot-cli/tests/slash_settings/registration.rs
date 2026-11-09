@@ -98,6 +98,10 @@ async fn real_settings_handlers_register_exact_source_spellings_and_dispatch_thr
             "Save all stored credentials as a named preset",
         ),
         ("/effort", "Switch the model effort for this session"),
+        (
+            "/fast",
+            "Toggle fast mode for ChatGPT requests (increased usage)",
+        ),
         ("/model", "Switch the model for this session"),
         ("/model-alias", "Configure a model alias"),
         (
