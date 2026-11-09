@@ -19,25 +19,36 @@ pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
     }
     let existing = path.try_exists()?;
     let mut connection = if existing {
-        let mut uri = String::from("file:");
-        let hex = b"0123456789ABCDEF";
-        for &byte in path.as_os_str().as_encoded_bytes() {
-            uri.push('%');
-            uri.push(char::from(hex[usize::from(byte >> 4)]));
-            uri.push(char::from(hex[usize::from(byte & 15)]));
-        }
-        uri.push_str("?immutable=1");
-        // Probe without journal recovery before the format is accepted.
-        Connection::open_with_flags(
-            uri,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-        )?
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?
     } else {
         Connection::open(path)?
     };
     let timeout = Duration::from_secs(30);
     connection.busy_timeout(timeout)?;
-    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let version: i64 = match connection.pragma_query_value(None, "user_version", |row| row.get(0)) {
+        Ok(version) => version,
+        Err(rusqlite::Error::SqliteFailure(error, _))
+            if error.extended_code == rusqlite::ffi::SQLITE_READONLY_ROLLBACK =>
+        {
+            // Immutable mode ignores WAL, so reserve it for this rollback-only error.
+            drop(connection);
+            let mut uri = String::from("file:");
+            let hex = b"0123456789ABCDEF";
+            for &byte in path.as_os_str().as_encoded_bytes() {
+                uri.push('%');
+                uri.push(char::from(hex[usize::from(byte >> 4)]));
+                uri.push(char::from(hex[usize::from(byte & 15)]));
+            }
+            uri.push_str("?immutable=1");
+            connection = Connection::open_with_flags(
+                uri,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+            )?;
+            connection.busy_timeout(timeout)?;
+            connection.pragma_query_value(None, "user_version", |row| row.get(0))?
+        }
+        Err(error) => return Err(error.into()),
+    };
     let initialize = match version {
         0 => {
             let populated: bool = connection.query_row(
