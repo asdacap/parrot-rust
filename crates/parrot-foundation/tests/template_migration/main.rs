@@ -192,6 +192,23 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
                 .unwrap()
                 .to_owned();
             base.kind = Kind::Scalar(Some(text));
+            // The active resource combines these two prompts into toolings.md.
+            let markdown_reading = expected
+                .get("runtime:system-context:04a-markdown-reading")
+                .and_then(Node::as_str)
+                .unwrap()
+                .to_owned();
+            let git_ethics = expected
+                .get("runtime:system-context:05-git-ethics")
+                .and_then(Node::as_str)
+                .unwrap()
+                .to_owned();
+            expected.remove("runtime:system-context:04a-markdown-reading");
+            expected.remove("runtime:system-context:05-git-ethics");
+            expected.set(
+                "runtime:system-context:05-toolings",
+                Node::scalar(format!("{markdown_reading}\n\n{}", git_ethics.trim_start())),
+            );
             let expected = Node::mapping(vec![(Node::scalar("system_prompts"), expected)]);
             assert_eq!(
                 templates::read_system_prompts(&expected).unwrap(),

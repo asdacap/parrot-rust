@@ -19,7 +19,7 @@ resource, not the active production resource.
 
 ## Built-in system prompts
 
-The seven static `system_prompts` bodies live in `assets/config/system-prompts/`:
+The six static `system_prompts` bodies live in `assets/config/system-prompts/`:
 
 | Provider key | Markdown file |
 | --- | --- |
@@ -28,8 +28,11 @@ The seven static `system_prompts` bodies live in `assets/config/system-prompts/`
 | `runtime:system-context:02a-agent-tasks` | `agent-tasks.md` |
 | `runtime:system-context:03-subagent-pattern` | `subagent-patterns.md` |
 | `runtime:system-context:04-behavior-guideline` | `behavior-guidelines.md` |
-| `runtime:system-context:04a-markdown-reading` | `markdown-reading.md` |
-| `runtime:system-context:05-git-ethics` | `git-ethics.md` |
+| `runtime:system-context:05-toolings` | `toolings.md` |
+
+Architecture guidance is provided by the bundled
+[`architecture` skill](../skills/architecture/SKILL.md), not an always-loaded
+system prompt.
 
 Predefined configuration selects these files with reserved string values such as
 `@builtin:system-prompts/base.md`. The files are embedded at compile time. A
@@ -139,7 +142,10 @@ The former `agent-session.child-question`,
 keys are removed. Custom overrides must migrate to the new descriptors; old
 keys are not supported through aliases.
 
-These are first-party application resources from the pinned source. No per-file
-license header or root source-repository LICENSE was found for these resources;
-no license grant is inferred from third-party skill licenses. See
-[third-party notices](../../THIRD_PARTY_NOTICES.md) for retained dependency notices.
+The resources retained from .NET are first-party application resources from the
+pinned source. No per-file license header or root source-repository LICENSE was
+found for those resources; no license grant is inferred from third-party skill
+licenses. Third-party prompt adaptations and bundled skills are credited in the
+[README acknowledgments](../../README.md#acknowledgments). See
+[third-party notices](../../THIRD_PARTY_NOTICES.md) for retained dependency and
+prompt notices.

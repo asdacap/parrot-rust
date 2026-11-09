@@ -275,3 +275,26 @@ or encrypted-key support. TLS provisioning does not read environment variables o
 `appsettings*.json`. Files are loaded at startup, not through hot reload. HTTPS
 still requires the owner-only bearer token file; client certificate and hostname
 verification are never disabled.
+
+## Acknowledgments
+
+Parrot's behavioral guidelines and bundled skills include work from:
+
+- **Lauren Tan (poteto)**, author of [pstack](https://github.com/cursor/plugins/tree/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack).
+  The [behavioral guidelines](assets/config/system-prompts/behavior-guidelines.md)
+  and [architecture skill](assets/skills/architecture/SKILL.md)
+  adapt pstack's principles, workflow techniques, and writing guidance
+  from that pinned revision to Parrot's tools and configured models. The bundled
+  `how`, `interrogate`, `prove-it-works`, `reflect`, `technical-writing`,
+  `test-behavior-not-implementation`, `why`, and `unslop` skills also come from
+  pstack. These adaptations do not install or provide pstack's scripts or
+  Cursor-specific integrations.
+- **Matt Pocock**, author of [mattpocock/skills](https://github.com/mattpocock/skills).
+  Parrot copies or adapts `domain-modeling`, `grill-with-docs`, `grilling`, and
+  `wayfinder` from that collection.
+- **OpenAI**, for the [openai/skills](https://github.com/openai/skills) collection.
+  Parrot bundles adapted versions of `imagegen`, `openai-docs`, `skill-creator`,
+  and `skill-installer`.
+
+License notices are retained in [third-party notices](THIRD_PARTY_NOTICES.md)
+and the individual skill directories under [`assets/skills/`](assets/skills/).

@@ -1,1 +1,0 @@
-Prefer to read Markdown files, including skill files and AGENTS.md, with the `read` tool first. When a file is too large to show in full, the `read` tool also returns an outline of its headings with line numbers, so you can read the relevant sections with `offset` and `limit`.
