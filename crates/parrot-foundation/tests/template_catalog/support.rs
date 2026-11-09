@@ -3,7 +3,6 @@ use parrot_foundation::{config::ConfigError, template_catalog::PromptTemplateCat
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -26,32 +25,22 @@ pub fn environment() -> BTreeMap<String, String> {
     .collect()
 }
 
-pub struct CancelAt {
-    calls: AtomicUsize,
-    at: usize,
+pub enum CancellationState {
+    Active,
+    Cancelled,
 }
-impl CancelAt {
-    pub fn new(at: usize) -> Self {
-        Self {
-            calls: AtomicUsize::new(0),
-            at,
-        }
-    }
-    #[cfg(test)]
-    pub fn never() -> Self {
-        Self::new(usize::MAX)
-    }
-    #[cfg(test)]
-    pub fn calls(&self) -> usize {
-        self.calls.load(Ordering::SeqCst)
-    }
-}
-impl Cancellation for CancelAt {
+
+impl Cancellation for CancellationState {
     fn is_cancelled(&self) -> bool {
-        self.calls.fetch_add(1, Ordering::SeqCst) + 1 >= self.at
+        matches!(self, Self::Cancelled)
     }
+
     fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
+        Box::pin(async move {
+            if !self.is_cancelled() {
+                std::future::pending::<()>().await;
+            }
+        })
     }
 }
 
@@ -77,11 +66,11 @@ pub fn probe(input: &Value) -> Result<String, OperationError<ConfigError>> {
     } else {
         Vec::new()
     };
-    let cancellation = CancelAt::new(if input["cancel"].as_bool() == Some(true) {
-        1
+    let cancellation = if input["cancel"].as_bool() == Some(true) {
+        CancellationState::Cancelled
     } else {
-        usize::MAX
-    });
+        CancellationState::Active
+    };
     catalog.render(
         input["template_id"].as_str().unwrap(),
         &values,

@@ -249,11 +249,6 @@ impl ResponsesParser {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn original_text_frame_state(&self) -> (&str, &[String]) {
-        (&self.response_id, &self.output)
-    }
-
     pub fn push_data(&mut self, data: &str) -> Result<Vec<ResponsesEvent>, ResponsesError> {
         if self.done {
             return Ok(Vec::new());

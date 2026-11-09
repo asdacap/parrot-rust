@@ -1,8 +1,6 @@
 use super::*;
 use parrot_domain::values::identifiers::UserSessionId;
-use parrot_storage::{
-    database::Connection, history_files::SessionMeta, ownership::ClaimDisposition,
-};
+use parrot_storage::{history_files::SessionMeta, ownership::ClaimDisposition};
 use std::os::unix::fs::symlink;
 
 fn workspaces(fixture: &Fixture) -> (PathBuf, PathBuf) {
@@ -15,16 +13,9 @@ fn workspaces(fixture: &Fixture) -> (PathBuf, PathBuf) {
 
 fn persisted_identity(fixture: &Fixture, id: &str) -> (SessionMeta, String) {
     let directory = fixture.roots.current().state().join("sessions").join(id);
-    let metadata =
+    let metadata: SessionMeta =
         serde_json::from_slice(&std::fs::read(directory.join("meta.json")).unwrap()).unwrap();
-    let database = Connection::open(directory.join("session.db")).unwrap();
-    let root = database
-        .query_row(
-            "SELECT agent_session FROM session_state WHERE user_session = ?1",
-            [id],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let root = metadata.root_agent_session_id.clone().unwrap();
     (metadata, root)
 }
 

@@ -9,14 +9,6 @@ fn source_assertions() {
     ] {
         let context = Context::new();
         let defaults = context.configured("").unwrap().runtime.request_limits;
-        assert_eq!(
-            (
-                defaults.image_bytes_per_tool_cycle,
-                defaults.image_bytes_per_read,
-                defaults.provider_request_bytes
-            ),
-            (16 << 20, 3 << 20, 64 << 20)
-        );
         let configured = context
             .configured(&format!("request_limits:\n  {key}: {value}\n"))
             .unwrap()

@@ -38,7 +38,7 @@ use parrot_storage::{
     },
     database::SessionDatabase,
     events::{EventRepository, NeverCancelled},
-    history_files::AgentHistoryFile,
+    history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 use std::{
     collections::BTreeMap,
@@ -79,24 +79,48 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_identity("fixture-root", "initial")
+    }
+    fn with_identity(agent: &str, mode: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
             "t45-context-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(path.join("scratch/blobs")).unwrap();
+        let metadata = Self::metadata(&path);
+        let mut session = SessionMeta::new(
+            path.file_name().unwrap().to_str().unwrap(),
+            std::env::current_dir().unwrap().to_str().unwrap(),
+            "provider",
+            "model",
+        );
+        session.root_agent_name = Some("main".into());
+        session.mode = Some(mode.into());
+        metadata.initialize(session, agent.into()).unwrap();
         Self {
             repository: Self::open(&path),
             path,
         }
     }
-    fn open(path: &Path) -> ConversationRepository {
-        ConversationRepository::new(EventRepository::new(
-            SessionDatabase::open(
-                SelectedSessionRoot::new(path.to_path_buf(), RootOrigin::Current).unwrap(),
+    fn metadata(path: &Path) -> SessionIndex {
+        SessionIndex::new(
+            SelectedSessionRoot::new(path.to_path_buf(), RootOrigin::Current).unwrap(),
+            parrot_domain::values::identifiers::UserSessionId::parse(
+                path.file_name().unwrap().to_str().unwrap(),
             )
             .unwrap(),
-        ))
+            std::env::current_dir().unwrap(),
+        )
+        .unwrap()
+    }
+    fn open(path: &Path) -> ConversationRepository {
+        let metadata = Self::metadata(path);
+        ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(metadata.selected_root().clone()).unwrap()),
+            metadata,
+        )
+        .unwrap()
     }
     fn history_for(repository: &ConversationRepository, agent: &str) -> AgentHistoryView {
         let root = repository.events().database().selected_root().clone();

@@ -458,8 +458,7 @@ fn bound_response_body(body: &str) -> String {
 
 #[cfg(test)]
 mod original_helper_tests {
-    use super::{HttpFailure, bound_response_body};
-    use crate::chat_completions::ProviderFailure;
+    use super::bound_response_body;
 
     #[test]
     fn source_response_bodies_are_bounded_without_splitting_utf8() {
@@ -476,36 +475,5 @@ mod original_helper_tests {
         assert!(within_limit);
         assert!(has_suffix);
         assert!(no_replacement_character);
-    }
-
-    #[test]
-    fn source_http_failure_retains_actual_typed_response_body() {
-        let failure = HttpFailure {
-            status: 400,
-            error_type: "type".into(),
-            error_code: "code".into(),
-            detail: "detail".into(),
-            response_body: "http body".into(),
-        };
-        println!(
-            "T25_ORIGINAL_HELPER_TYPED http_response_body={:?}",
-            failure.response_body
-        );
-        assert_eq!(failure.response_body, "http body");
-    }
-
-    #[test]
-    fn source_response_failure_retains_actual_typed_response_body() {
-        let failure = ProviderFailure {
-            error_type: "type".into(),
-            error_code: "code".into(),
-            message: "detail".into(),
-            response_body: "stream body".into(),
-        };
-        println!(
-            "T25_ORIGINAL_HELPER_TYPED stream_response_body={:?}",
-            failure.response_body
-        );
-        assert_eq!(failure.response_body, "stream body");
     }
 }

@@ -275,3 +275,136 @@ async fn publication_panic_keeps_durable_fact_advanced_state_and_suppresses_retr
     );
     repository.database().close().await.unwrap();
 }
+
+#[tokio::test]
+async fn runtime_restoration_accepts_descendant_usage_before_any_root_facts() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    let mut fact = request("child-usage");
+    fact.agent_session_id = "child".into();
+    fact.mut_request_usage_recorded().parent_agent_session_id = "root".into();
+    repository.append_usage_fact(fact.clone()).await.unwrap();
+    assert!(matches!(repository.replay_statistics().await,
+        Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
+    ));
+    assert!(matches!(repository.get_runtime_statistics().await,
+        Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
+    ));
+    let counts = Arc::new(Mutex::new(Vec::new()));
+    let observed = counts.clone();
+    let statistics = repository
+        .restore_runtime_statistics(
+            "root".into(),
+            Some(Arc::new(move |count| {
+                observed.lock().unwrap().push(count);
+            })),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*counts.lock().unwrap(), [1]);
+    let root = statistics.get_agent_statistics("root");
+    let child = statistics.get_agent_statistics("child");
+    assert_eq!(root.capture().own.totals.input_tokens, 0);
+    assert_eq!(root.capture().cumulative.totals.input_tokens, 17);
+    assert_eq!(child.capture().own.totals.input_tokens, 17);
+    assert_eq!(repository.replay().await.unwrap(), [fact]);
+    let cached = repository
+        .get_runtime_statistics_with_progress(Some(Arc::new(|_| {
+            panic!("cached statistics must not replay events")
+        })))
+        .await
+        .unwrap();
+    assert!(Arc::ptr_eq(&statistics, &cached));
+    assert!(Arc::ptr_eq(
+        &statistics,
+        &repository
+            .restore_runtime_statistics("root".into(), None)
+            .await
+            .unwrap()
+    ));
+    let mut next = request("next-child-usage");
+    next.agent_session_id = "child".into();
+    next.mut_request_usage_recorded().parent_agent_session_id = "root".into();
+    let applyroot = root.clone();
+    let applychild = child.clone();
+    assert!(
+        repository
+            .record_usage(
+                next,
+                increment(),
+                child,
+                root.clone(),
+                move |value| {
+                    applychild.add_own(value).unwrap();
+                    applyroot.add_descendant(value).unwrap();
+                },
+                |_| {}
+            )
+            .await
+            .unwrap()
+    );
+    assert_eq!(statistics.capture_usage(&root).input_tokens, 34);
+    repository.database().close().await.unwrap();
+    let reopened = fixture.repository();
+    let restored = reopened
+        .restore_runtime_statistics("root".into(), None)
+        .await
+        .unwrap();
+    let root = restored.get_agent_statistics("root").capture();
+    assert_eq!(root.own.totals.input_tokens, 0);
+    assert_eq!(root.cumulative.totals.input_tokens, 34);
+    assert_eq!(reopened.replay().await.unwrap().len(), 2);
+    assert!(matches!(reopened.replay_statistics().await,
+        Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
+    ));
+    reopened.database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn canonical_root_seed_preserves_other_ancestry_and_overflow_errors() {
+    let mut missing = request("missing");
+    missing.agent_session_id = "child".into();
+    missing.mut_request_usage_recorded().parent_agent_session_id = "absent".into();
+    let mut conflict = request("conflict");
+    conflict
+        .mut_request_usage_recorded()
+        .parent_agent_session_id = "other".into();
+    let mut cycle_a = request("cycle-a");
+    cycle_a.agent_session_id = "a".into();
+    cycle_a.mut_request_usage_recorded().parent_agent_session_id = "b".into();
+    let mut cycle_b = request("cycle-b");
+    cycle_b.agent_session_id = "b".into();
+    cycle_b.mut_request_usage_recorded().parent_agent_session_id = "a".into();
+    let mut maximum = request("maximum");
+    maximum.mut_request_usage_recorded().input_tokens = i64::MAX;
+    for (facts, expected) in [
+        (
+            vec![missing],
+            "Historical ancestor absent has no parent lineage.",
+        ),
+        (
+            vec![conflict],
+            "Historical agent lineage contains conflicting parents.",
+        ),
+        (
+            vec![cycle_a, cycle_b],
+            "Historical agent lineage contains a cycle.",
+        ),
+        (
+            vec![maximum, request("overflow")],
+            "usage integer arithmetic overflow",
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let repository = fixture.repository();
+        for fact in &facts {
+            repository.append_usage_fact(fact.clone()).await.unwrap();
+        }
+        let result = repository
+            .restore_runtime_statistics("root".into(), None)
+            .await;
+        assert!(matches!(result, Err(error) if error.to_string() == expected));
+        assert_eq!(repository.replay().await.unwrap(), facts);
+        repository.database().close().await.unwrap();
+    }
+}

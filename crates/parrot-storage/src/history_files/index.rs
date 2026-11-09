@@ -217,7 +217,6 @@ impl SessionIndex {
         })
     }
 
-    #[cfg(test)]
     pub(crate) async fn guard_status(
         &self,
         agent: &str,

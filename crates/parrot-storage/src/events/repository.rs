@@ -204,9 +204,7 @@ impl EventRepository {
         self.transaction(move |tx| statistics::find_request_usage(tx, &agent, &call))
             .await
     }
-    pub async fn agent_lineage(&self) -> Result<Vec<AgentLineageRecord>, EventError> {
-        self.transaction(statistics::agent_lineage).await
-    }
+
     pub async fn replay_statistics(
         &self,
     ) -> Result<crate::diagnostics::statistics::AgentStatisticsReplay, EventError> {

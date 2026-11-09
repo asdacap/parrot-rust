@@ -63,7 +63,7 @@ use parrot_storage::{
     database::SessionDatabase,
     diagnostics::{DiagnosticEvent, FailureKind},
     events::{ConversationPart, EventRepository, NeverCancelled},
-    history_files::AgentHistoryFile,
+    history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 use parrot_tools::agents::{
     self, AgentSelection, AgentTool, AgentToolError, AgentToolKind, ModelSelector, NamedRequest,
@@ -595,16 +595,34 @@ pub(super) struct Harness {
 }
 impl Harness {
     pub(super) async fn new(blockers: Vec<Arc<dyn ActiveWorkBlocker>>) -> Self {
-        let directory = std::env::current_dir().unwrap().join(".tmp").join(format!(
-            "retained-wait-{}-{}",
-            std::process::id(),
-            id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("retained-wait-{}-{}", std::process::id(), id()));
         std::fs::create_dir_all(directory.join("scratch")).unwrap();
         let root = SelectedSessionRoot::new(directory.clone(), RootOrigin::Current).unwrap();
-        let repository = ConversationRepository::new(EventRepository::new(
-            SessionDatabase::open(root.clone()).unwrap(),
-        ));
+        let session_id = root.path().file_name().unwrap().to_str().unwrap();
+        let launch_directory = std::env::current_dir().unwrap();
+        let metadata = SessionIndex::new(
+            root.clone(),
+            parrot_domain::values::identifiers::UserSessionId::parse(session_id).unwrap(),
+            launch_directory.clone(),
+        )
+        .unwrap();
+        if metadata.find().unwrap().is_none() {
+            let mut session = SessionMeta::new(
+                session_id,
+                launch_directory.to_str().unwrap(),
+                "provider",
+                "model",
+            );
+            session.root_agent_name = Some("main".into());
+            session.mode = Some("initial".into());
+            metadata.initialize(session, "fixture-root".into()).unwrap();
+        }
+        let repository = ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+            metadata,
+        )
+        .unwrap();
         let session_id = id();
         let history = repository
             .bind_agent_history(

@@ -8,17 +8,9 @@ use parrot_storage::{
 #[tokio::test]
 async fn pending_and_initial_status_fit_actual_next_promotion_before_commit_once() {
     for depth in [0, 1] {
-        let fixture = Fixture::new();
+        let fixture = Fixture::with_identity("agent", "mode");
         let history = fixture.history();
         user(&history, "existing").await;
-        let repository = fixture
-            .repository
-            .clone()
-            .with_agent_session_id_generator(Arc::new(|| Ok("agent".into())));
-        repository
-            .session_state("user".into(), "mode".into())
-            .await
-            .unwrap();
         history
             .admit_parts(
                 "pending-message".into(),

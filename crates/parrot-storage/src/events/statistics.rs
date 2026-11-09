@@ -1,7 +1,7 @@
 //! Durable usage facts and source replay.
 //! All functions execute inside the caller's whole repository transaction.
 
-use super::{AgentLineageRecord, EventError, EventLoadProgress};
+use super::{EventError, EventLoadProgress};
 use crate::diagnostics::statistics::AgentStatisticsReplay;
 use parrot_domain::protocol::messages::parrot::{Event, RequestUsageRecorded};
 use parrot_domain::values::accounting::{
@@ -137,19 +137,6 @@ pub fn find_request_usage(
     Ok(None)
 }
 
-pub fn agent_lineage(tx: &Transaction<'_>) -> Result<Vec<AgentLineageRecord>, EventError> {
-    let mut read = tx.prepare("SELECT agent_session, parent_agent_session, name FROM agent_lineage ORDER BY event_sequence;")?;
-    Ok(read
-        .query_map([], |row| {
-            Ok(AgentLineageRecord {
-                agent_session_id: row.get(0)?,
-                parent_agent_session_id: row.get(1)?,
-                name: row.get(2)?,
-            })
-        })?
-        .collect::<Result<_, _>>()?)
-}
-
 fn read_statistics_events(
     tx: &Transaction<'_>,
     progress: Option<&EventLoadProgress>,
@@ -214,9 +201,16 @@ pub fn replay_statistics_with_progress(
     tx: &Transaction<'_>,
     progress: Option<EventLoadProgress>,
 ) -> Result<AgentStatisticsReplay, EventError> {
+    replay_statistics_with_parents(tx, HashMap::new(), progress)
+}
+
+pub(super) fn replay_statistics_with_parents(
+    tx: &Transaction<'_>,
+    mut parents: HashMap<String, String>,
+    progress: Option<EventLoadProgress>,
+) -> Result<AgentStatisticsReplay, EventError> {
     let facts = read_statistics_events(tx, progress.as_ref())?;
-    let mut parents = HashMap::new();
-    let mut parent_order = Vec::new();
+    let mut parent_order = parents.keys().cloned().collect::<Vec<_>>();
     let mut agents = HashMap::new();
     // .NET dictionaries enumerate in insertion order. Preserve that order for
     // floating-point accumulation and source-first validation diagnostics.
@@ -313,16 +307,6 @@ pub fn replay_statistics_with_progress(
         .filter(|key| !tools.contains(key))
         .map(|(agent, _)| agent)
         .collect();
-    let main: Option<String> = tx
-        .query_row(
-            "SELECT agent_session FROM session_state LIMIT 1;",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if let Some(main) = main {
-        record_parent(&mut parents, &mut parent_order, &main, "")?;
-    }
     for agent in &agent_order {
         if !agents[agent].capture().own.models.is_empty() && !parents.contains_key(agent) {
             return Err(EventError::Invalid(format!(

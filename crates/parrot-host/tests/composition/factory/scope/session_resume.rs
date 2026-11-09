@@ -1583,7 +1583,7 @@ async fn actual_cold_canceled_consumed_input_does_not_restart_from_answerable_hi
 }
 
 #[tokio::test]
-async fn actual_absent_legacy_root_snapshot_warns_and_does_not_reconstruct_lineage_children() {
+async fn actual_absent_root_snapshot_refuses_resume_without_reconstructing_children() {
     let fixture = fixture().await;
     let hosted = bounded(fixture.open()).await.unwrap();
     let root = fixture.root();
@@ -1608,27 +1608,186 @@ async fn actual_absent_legacy_root_snapshot_warns_and_does_not_reconstruct_linea
     bounded(hosted.close()).await.unwrap();
     std::fs::remove_file(path).unwrap();
     let requests = fixture.requests.lock().unwrap().len();
-    let resumed = reopen(&fixture, &id).await;
-    assert_eq!(
-        fixture.user().registry().unwrap().snapshot_scopes().len(),
-        1
-    );
-    assert!(child_path.is_file());
-    assert_eq!(fixture.requests.lock().unwrap().len(), requests);
-    let events = fixture.user().lease.events.replay().await.unwrap();
-    let notices = events
-        .iter()
-        .filter(|event| {
-            event.has_agent_notice() && event.agent_notice().kind == "legacy_root_only_resume"
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(notices.len(), 1);
-    assert!(
-        notices[0]
-            .agent_notice()
-            .notice
-            .contains("Only the root agent was reopened")
-    );
-    bounded(resumed.close()).await.unwrap();
+    let metadata_path = user.lease.metadata().metadata_path();
+    let metadata_before = std::fs::read(metadata_path).unwrap();
+    for _ in 0..2 {
+        let error = bounded(fixture.store.resume(&id, true, false))
+            .await
+            .err()
+            .expect("missing root recovery must not become a root-only session");
+        assert!(
+            error.to_string().contains("root agent state is missing"),
+            "{error}"
+        );
+        assert!(child_path.is_file());
+        assert_eq!(fixture.requests.lock().unwrap().len(), requests);
+        assert_eq!(std::fs::read(metadata_path).unwrap(), metadata_before);
+    }
     std::fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[tokio::test]
+async fn json_identity_lineage_and_status_survive_retirement_name_reuse_and_root_reopen() {
+    let artifact = std::env::temp_dir().join(format!(
+        "schema13-host-lifecycle-{}",
+        Identifier::event_id().unwrap(),
+    ));
+    let fixture = Fixture::with_root_config(
+        artifact,
+        false,
+        false,
+        None,
+        None,
+        Arc::new(ChildProfiles),
+        |_| {},
+    )
+    .await;
+    let hosted = bounded(fixture.open()).await.unwrap();
+    let root = fixture.root();
+    let user = fixture.user();
+    let root_id = root.identity().session.session_id.clone();
+    let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
+    let selected = user.lease.selected_root().clone();
+    finish(&root, "root before retirement").await;
+
+    let first = spawn(&fixture, &root, "worker").await;
+    let first_id = first.identity().session.session_id.clone();
+    finish(&first, "first historical occupant").await;
+    let first_snapshot = state_path(&user, &first);
+    bounded(root.spawner().retire(first).unwrap().join())
+        .await
+        .unwrap();
+    assert!(!first_snapshot.exists());
+    let second = spawn(&fixture, &root, "worker").await;
+    let second_id = second.identity().session.session_id.clone();
+    assert_ne!(first_id, second_id);
+    finish(&second, "second historical occupant").await;
+    user.lease.metadata().update_mode("build").await.unwrap();
+    finish(&root, "root after explicit mode revision").await;
+    bounded(hosted.close()).await.unwrap();
+
+    let resumed = reopen(&fixture, &id).await;
+    let restored = fixture.root();
+    assert_eq!(restored.identity().session.session_id, root_id);
+    let restored_child = restored.children().find("worker").unwrap();
+    assert_eq!(restored_child.identity().session.session_id, second_id);
+    let history = std::fs::read_to_string(
+        fixture
+            .user()
+            .resources
+            .agent_scratch(&["main", "worker"])
+            .unwrap()
+            .history_path(),
+    )
+    .unwrap();
+    assert!(history.contains("first historical occupant"));
+    assert!(history.contains("second historical occupant"));
+    finish(&restored, "root after reopen").await;
+    bounded(resumed.close()).await.unwrap();
+
+    let metadata: parrot_storage::history_files::SessionMeta =
+        serde_json::from_slice(&std::fs::read(selected.path().join("meta.json")).unwrap()).unwrap();
+    assert_eq!(
+        metadata.root_agent_session_id.as_deref(),
+        Some(root_id.as_str())
+    );
+    assert_eq!(metadata.mode.as_deref(), Some("build"));
+    assert_eq!(metadata.mode_revision, Some(1));
+    let lineage = metadata.agent_lineage.unwrap();
+    assert_eq!(
+        lineage
+            .iter()
+            .map(|record| record.session_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![root_id.as_str(), first_id.as_str(), second_id.as_str()]
+    );
+    assert_eq!(lineage[1].parent_session_id, root_id);
+    assert_eq!(lineage[2].parent_session_id, root_id);
+    assert_eq!(lineage[1].name, "worker");
+    assert_eq!(lineage[2].name, "worker");
+    let database =
+        parrot_storage::database::Connection::open(selected.path().join("session.db")).unwrap();
+    let version: i64 = database
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    let tables: i64 = database
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!((version, tables), (5, 9));
+    let revisions = database.prepare(
+        "SELECT mode_status_revision FROM conversation_item WHERE agent_session=?1 AND mode_status_revision IS NOT NULL ORDER BY mode_status_revision",
+    ).unwrap().query_map([&root_id], |row| row.get::<_, i64>(0)).unwrap()
+        .collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(revisions, vec![0, 1]);
+    println!("SCHEMA13_SESSION_ROOT={}", selected.path().display());
+}
+
+#[tokio::test]
+async fn missing_or_corrupt_canonical_metadata_refuses_actual_resume_without_new_identity() {
+    for corruption in ["missing", "malformed", "missing-root-id"] {
+        let fixture = fixture().await;
+        let hosted = bounded(fixture.open()).await.unwrap();
+        let root = fixture.root();
+        finish(&root, "retained root identity").await;
+        let user = fixture.user();
+        let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
+        let path = user.lease.metadata().metadata_path().to_path_buf();
+        let original = std::fs::read(&path).unwrap();
+        bounded(hosted.close()).await.unwrap();
+        match corruption {
+            "missing" => std::fs::remove_file(&path).unwrap(),
+            "malformed" => std::fs::write(&path, b"not JSON").unwrap(),
+            _ => {
+                let mut metadata: Value = serde_json::from_slice(&original).unwrap();
+                metadata
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("RootAgentSessionId");
+                std::fs::write(&path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+            }
+        }
+        let corrupted = std::fs::read(&path).ok();
+        let requests = fixture.requests.lock().unwrap().len();
+        assert!(
+            bounded(fixture.store.resume(&id, true, false))
+                .await
+                .is_err(),
+            "{corruption}"
+        );
+        assert_eq!(std::fs::read(&path).ok(), corrupted);
+        assert_eq!(fixture.requests.lock().unwrap().len(), requests);
+        std::fs::remove_dir_all(&fixture.root).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn actual_fresh_store_normalizes_blank_mode_before_initializing_canonical_identity() {
+    for mode in ["", " \t"] {
+        let fixture = fixture().await;
+        let opened = bounded(fixture.store.create_fresh(
+            SessionModelRouter::resolve(&Policies, "local/model").unwrap(),
+            mode,
+            true,
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            opened
+                .resources
+                .metadata()
+                .read_session_state()
+                .unwrap()
+                .mode
+                .mode,
+            "build"
+        );
+        let hosted = bounded(fixture.factory.bind_opened(opened)).await.unwrap();
+        assert_eq!(hosted.snapshot().mode, "build");
+        bounded(hosted.close()).await.unwrap();
+        std::fs::remove_dir_all(&fixture.root).unwrap();
+    }
 }

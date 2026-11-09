@@ -11,8 +11,11 @@ use parrot_domain::{
     },
     protocol::messages::parrot as wire,
     values::{
-        accounting::RetainedAgentBudget, context::ContextSize, identifiers::Identifier,
-        lineage::AgentDirectoryLineage, project_workspace::ProjectWorkspace,
+        accounting::RetainedAgentBudget,
+        context::ContextSize,
+        identifiers::Identifier,
+        lineage::{AgentDirectoryLineage, AgentLineageRecord},
+        project_workspace::ProjectWorkspace,
     },
 };
 use parrot_foundation::{paths::UserSessionResources, template_catalog::PromptTemplateCatalog};
@@ -313,30 +316,18 @@ struct Histories<S: RestrictableAccessSnapshot + 'static> {
     repository: ConversationRepository,
 }
 impl<S: RestrictableAccessSnapshot + 'static> Histories<S> {
-    async fn lineage(&self) -> ChildResult<AgentDirectoryLineage> {
+    fn lineage(&self) -> ChildResult<AgentDirectoryLineage> {
         let records = self
             .services
             .lease
-            .events
-            .agent_lineage()
-            .await
+            .metadata()
+            .read_agent_lineage()
             .map_err(|error| child(error.to_string()))?;
-        Ok(AgentDirectoryLineage::resolve(
-            &records
-                .into_iter()
-                .map(|record| {
-                    parrot_domain::values::lineage::AgentLineageRecord::new(
-                        record.agent_session_id,
-                        record.parent_agent_session_id,
-                        record.name,
-                    )
-                })
-                .collect::<Vec<_>>(),
-        ))
+        Ok(AgentDirectoryLineage::resolve(&records))
     }
 
     async fn refresh_all(&self) -> ChildResult<()> {
-        let lineage = self.lineage().await?;
+        let lineage = self.lineage()?;
         for directory in lineage.directories() {
             let path: Vec<_> = directory.name_path.iter().map(String::as_str).collect();
             let scratch = self
@@ -379,13 +370,22 @@ impl<S: RestrictableAccessSnapshot + 'static> HistoryPreparer for Histories<S> {
         identity: &'a AgentIdentity,
     ) -> BoxFuture<'a, ChildResult<AgentHistoryView>> {
         Box::pin(async move {
+            self.services
+                .lease
+                .metadata()
+                .remember_agent(AgentLineageRecord::new(
+                    &identity.session.session_id,
+                    &identity.session.parent_session_id,
+                    &identity.session.name,
+                ))
+                .map_err(|error| child(error.to_string()))?;
             let path: Vec<_> = identity.name_path.iter().map(String::as_str).collect();
             let scratch = self
                 .services
                 .resources
                 .agent_scratch(&path)
                 .map_err(child_io)?;
-            let lineage = self.lineage().await?;
+            let lineage = self.lineage()?;
             let occupants = lineage.occupants_of(&identity.name_path, &identity.session.session_id);
             let file = AgentHistoryFile::new(
                 self.services.lease.selected_root().clone(),
@@ -545,7 +545,6 @@ pub struct UserSessionCore<S: RestrictableAccessSnapshot + 'static> {
     pub registry: Arc<AgentRegistry<S>>,
     modes: Arc<UserSessionModes<S>>,
     materializer: Arc<dyn RetainedModePolicyMaterializer<S>>,
-    repository: ConversationRepository,
     main: Mutex<Main<S>>,
     update_gate: AsyncMutex<()>,
     mutations: OwnedMutations,
@@ -571,20 +570,15 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             )
             .map_err(internal)?,
         );
-        let repository = ConversationRepository::new(lease.events.clone())
-            .with_image_store(lease.images.store().clone())
-            .map_err(internal)?;
-        let requested = config
-            .modes
-            .resolve(&initialization.mode)
-            .map_err(invalid)?;
-        let (agent_id, mode_id) = repository
-            .session_state(initialization.id.value().into(), requested.id().into())
-            .await
-            .map_err(internal)?;
+        let state = lease.metadata().read_session_state().map_err(internal)?;
+        let repository =
+            ConversationRepository::new(lease.events.clone(), lease.metadata().clone())
+                .map_err(internal)?
+                .with_image_store(lease.images.store().clone())
+                .map_err(internal)?;
         let identity = AgentIdentity::root(
-            agent_id,
-            initialization.root_agent_name.clone(),
+            state.root_agent_session_id,
+            state.root_agent_name,
             config.templates.clone(),
         );
         let modes = Arc::new(
@@ -593,7 +587,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         );
         let names: Vec<_> = identity.name_path.iter().map(String::as_str).collect();
         modes.attach(resources.agent_scratch(&names).map_err(internal)?);
-        let mode = modes.resolve(&mode_id).map_err(invalid)?;
+        let mode = modes.resolve(&state.mode.mode).map_err(invalid)?;
         let model = config
             .router
             .resolve(&initialization.model.selector)
@@ -615,9 +609,29 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         });
         let statistics = lease
             .events
-            .get_runtime_statistics_with_progress(progress)
+            .restore_runtime_statistics(identity.session.session_id.clone(), progress)
             .await
             .map_err(internal)?;
+        let states = Arc::new(AgentStateFiles::new(lease.selected_root().clone()));
+        let saved_root = states
+            .open(&identity.name_path, &identity.session.session_id)
+            .await
+            .map_err(internal)?
+            .load()
+            .await
+            .map_err(internal)?;
+        if initialization.resumed && saved_root.is_none() {
+            return Err(internal("root agent state is missing"));
+        }
+        if saved_root.as_ref().is_some_and(|saved| {
+            !saved.descriptor.local_scope.is_empty()
+                || saved.descriptor.completion_delivery
+                    != parrot_domain::values::agent_state::CompletionDeliverySnapshot::Automatic
+        }) {
+            return Err(internal(
+                "root snapshot has an invalid scope or completion delivery",
+            ));
+        }
         *settled_on_error = false;
         let permissions = (config.permissions)(
             lease.clone(),
@@ -666,24 +680,6 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 repository: repository.clone(),
             });
             let bind = source.bind.clone();
-            let states = Arc::new(AgentStateFiles::new(lease.selected_root().clone()));
-            let saved_root = states
-                .open(&identity.name_path, &identity.session.session_id)
-                .await
-                .map_err(internal)?
-                .load()
-                .await
-                .map_err(internal)?;
-            let legacy = initialization.resumed && saved_root.is_none();
-            if saved_root.as_ref().is_some_and(|saved| {
-                !saved.descriptor.local_scope.is_empty()
-                    || saved.descriptor.completion_delivery
-                        != parrot_domain::values::agent_state::CompletionDeliverySnapshot::Automatic
-            }) {
-                return Err(internal(
-                    "root snapshot has an invalid scope or completion delivery",
-                ));
-            }
             let registry = AgentRegistry::new(RegistryConfig {
                 agent_limits: config.agent_limits,
                 profiles: config.profiles.clone(),
@@ -709,7 +705,11 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             let history = histories.prepare(&identity).await.map_err(internal)?;
             history.refresh().await.map_err(internal)?;
             let selection = modes
-                .capture_turn_selection(&mode_id, model.clone(), config.materializer.as_ref())
+                .capture_turn_selection(
+                    mode.profile().id(),
+                    model.clone(),
+                    config.materializer.as_ref(),
+                )
                 .map_err(invalid)?;
             let agent_state = registry
                 .prepare_state(&identity, &selection, "", CompletionDelivery::Automatic)
@@ -765,7 +765,6 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 registry,
                 modes,
                 materializer: config.materializer.clone(),
-                repository,
                 main: Mutex::new(Main {
                     model,
                     mode,
@@ -783,25 +782,6 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             let weak = Arc::downgrade(&core);
             core.mutations
                 .spawn(move || Self::complete_unowned_turns(weak, events, drain_state))?;
-            if legacy {
-                let notice = services
-                    .templates
-                    .render("session.legacy-resume-warning", &[], &NeverCancelled)
-                    .map_err(internal)?;
-                let mut event = wire::Event::new();
-                event.agent_session_id = services.root_identity.session.session_id.clone();
-                event.set_agent_notice(wire::AgentNotice {
-                    kind: "legacy_root_only_resume".into(),
-                    notice,
-                    ..wire::AgentNotice::new()
-                });
-                core.publish(event).await?;
-                services.diagnostic(&DiagnosticEvent::new(
-                    "session",
-                    "legacy_root_only_resume",
-                    DiagnosticSeverity::Warning,
-                ));
-            }
             core.activate_recovery().await?;
             Ok(core)
         }
@@ -1022,16 +1002,15 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             ..wire::UserSession::new()
         }
     }
-    fn publish_metadata(&self) -> protocol::Result<()> {
-        let (model, mode, _, _) = self.selected();
+    fn publish_metadata(&self, model: &ResolvedModelSelection) -> protocol::Result<()> {
         self.services
             .lease
-            .update_selection_metadata(
-                model.canonical_model.provider.id(),
-                &model.canonical_model.selector(),
-                &model.requested_selector.value,
-                &mode,
-            )
+            .metadata()
+            .update_model_selection(&SessionModelSelection {
+                provider_id: model.canonical_model.provider.id().into(),
+                canonical_model: model.canonical_model.selector(),
+                selector: model.requested_selector.value.clone(),
+            })
             .map_err(internal)
     }
     async fn update(
@@ -1045,7 +1024,8 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         if let Some(enabled) = fast_mode {
             self.services
                 .lease
-                .update_fast_mode_metadata(enabled)
+                .metadata()
+                .update_fast_mode(enabled)
                 .map_err(internal)?;
             self.services.fast_mode.set_enabled(enabled);
         }
@@ -1053,7 +1033,8 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             let capacity = usize::try_from(limit).map_err(invalid)?;
             self.services
                 .lease
-                .update_task_limit_metadata(limit)
+                .metadata()
+                .update_task_limit(limit)
                 .map_err(internal)?;
             self.services.task_concurrency.set_limit(capacity);
         }
@@ -1074,8 +1055,10 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             )
             .map_err(invalid)?;
         if previous_mode != next_mode.profile().id() {
-            self.repository
-                .update_mode(self.services.id.clone(), next_mode.profile().id().into())
+            self.services
+                .lease
+                .metadata()
+                .update_mode(next_mode.profile().id())
                 .await
                 .map_err(internal)?;
         }
@@ -1090,6 +1073,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 .map_err(internal)?;
             main.model = selected.model;
             main.mode = next_mode;
+            self.publish_metadata(&main.model)?;
         }
         let scope = self.main.lock().expect("user main poisoned").scope.clone();
         let selected = scope.selection().current().map_err(internal)?;
@@ -1112,7 +1096,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             )
             .await
             .map_err(internal)?;
-        self.publish_metadata()
+        Ok(())
     }
     fn update_model(&self, model: ResolvedModelSelection) -> ConfigurationResult<()> {
         {
@@ -1138,12 +1122,12 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                     ))
                 })?;
             main.model = model;
+            self.publish_metadata(&main.model).map_err(|e| {
+                CoordinatorError::Provider(parrot_provider::sessions::Error::InvalidOperation(
+                    e.to_string(),
+                ))
+            })
         }
-        self.publish_metadata().map_err(|e| {
-            CoordinatorError::Provider(parrot_provider::sessions::Error::InvalidOperation(
-                e.to_string(),
-            ))
-        })
     }
     async fn publish(&self, mut event: wire::Event) -> protocol::Result<()> {
         if event.id.is_empty() {

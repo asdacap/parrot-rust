@@ -197,10 +197,7 @@ async fn awaited_plan_completion_observes_joined_real_t52_reminder_mutation_afte
     };
     use parrot_domain::protocol::messages::parrot::Event;
     use parrot_runtime::active_work::exit_reminders::ExitReminders;
-    use parrot_storage::{
-        conversation::ConversationRepository, database::SessionDatabase, events::EventRepository,
-        history_files::AgentHistoryFile,
-    };
+    use parrot_storage::history_files::AgentHistoryFile;
     use std::sync::atomic::{AtomicBool, Ordering};
     struct Publisher {
         first: AtomicBool,
@@ -234,9 +231,7 @@ async fn awaited_plan_completion_observes_joined_real_t52_reminder_mutation_afte
     let fixture = Fixture::new();
     let scratch = fixture.scratch("main");
     let root = fixture.resources.selected_root().clone();
-    let repository = ConversationRepository::new(EventRepository::new(
-        SessionDatabase::open(root.clone()).unwrap(),
-    ));
+    let repository = fixture.repository();
     let history = repository
         .bind_agent_history(
             "main".into(),

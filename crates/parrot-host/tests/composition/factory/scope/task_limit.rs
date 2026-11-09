@@ -54,7 +54,7 @@ async fn actual_task_limit_persistence_failure_and_negative_value_leave_live_bud
     std::fs::create_dir(&staging).unwrap();
     let error = hosted.update(None, None, Some(0), None).await.unwrap_err();
     assert_eq!(error.code, RpcCode::Internal);
-    assert!(error.message.contains("write staged session metadata"));
+    assert!(error.message.contains("session metadata staging file"));
     assert_eq!(hosted.snapshot().extra_concurrent_tasks, 2);
     assert_eq!(user.task_concurrency.get_limit(), 2);
     std::fs::remove_dir(&staging).unwrap();

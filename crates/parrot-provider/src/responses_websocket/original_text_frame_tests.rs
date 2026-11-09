@@ -125,8 +125,6 @@ async fn original_text_frames_reassemble_and_share_responses_event_semantics() {
         events.push(event);
     }
 
-    // Read the parser actually owned and advanced by this transport exchange.
-    let (response_id, output) = exchange.state.parser.original_text_frame_state();
     let sent_body = String::from_utf8(sent.lock().unwrap().clone()).unwrap();
     let sent_json: Value = serde_json::from_str(&sent_body).unwrap();
     let kinds: Vec<_> = events
@@ -159,10 +157,7 @@ async fn original_text_frames_reassemble_and_share_responses_event_semantics() {
         .iter()
         .map(|frame| json!({"bytes":frame.bytes,"end_of_message":frame.end_of_message}))
         .collect();
-    let private_output: Vec<Value> = output
-        .iter()
-        .map(|item| serde_json::from_str(item).unwrap())
-        .collect();
+    let replay: Value = serde_json::from_str(last.provider_content.as_deref().unwrap()).unwrap();
     println!(
         "T27_ORIGINAL_TEXTFRAME_OBSERVATION={}",
         json!({
@@ -170,11 +165,10 @@ async fn original_text_frames_reassemble_and_share_responses_event_semantics() {
             "event_kinds":kinds,
             "assistant_text":last.assistant_text,
             "input_tokens":last.input_tokens,
-            "parser_response_id":response_id,
-            "parser_output":private_output,
+            "response_id":last.response_id,
+            "provider_content":replay,
             "sent_json":sent_json,
             "events":event_observations,
-            "parser_output_raw":output,
             "consumed_frame_count":received.len(),
             "received_frames":received_observations,
             "idle_timeout_ms":idle_timeout_ms,
@@ -182,14 +176,20 @@ async fn original_text_frames_reassemble_and_share_responses_event_semantics() {
         })
     );
 
-    // The seven original predicates at source lines171-178.
     assert_eq!(sent_json["type"].as_str(), Some("response.create"));
     assert_eq!(sent_json["stream"].as_bool(), Some(true));
     assert_eq!(kinds, ["TextDelta", "Completed"]);
     assert_eq!(last.assistant_text, "hello");
     assert_eq!(last.input_tokens, 7);
-    assert_eq!(response_id, "resp-1");
-    assert_eq!(output.len(), 1);
+    assert_eq!(last.response_id, "resp-1");
+    assert_eq!(
+        replay["Output"],
+        json!([{
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "hello"}],
+        }])
+    );
 
     assert_eq!(received, frames);
 }

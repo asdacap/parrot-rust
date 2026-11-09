@@ -8,6 +8,7 @@ pub mod reads;
 pub mod types;
 pub use crate::events::EventError;
 use crate::events::EventRepository;
+use crate::history_files::SessionIndex;
 pub use agent::{AgentConversation, AgentHistoryView, ConversationReadView};
 pub use forks::ForkError;
 use parrot_domain::contracts::async_ops::BoxFuture;
@@ -35,26 +36,21 @@ pub struct ConversationRepository {
     pub(crate) events: EventRepository,
     pub(crate) image_store: Option<crate::artifacts::ImageArtifactStore>,
     pub(crate) projection: Option<Arc<dyn HistoryProjection>>,
-    pub(crate) agent_session_id: Arc<dyn Fn() -> Result<String, std::io::Error> + Send + Sync>,
+    pub(crate) metadata: SessionIndex,
 }
 impl ConversationRepository {
-    pub fn new(events: EventRepository) -> Self {
-        Self {
+    pub fn new(events: EventRepository, metadata: SessionIndex) -> Result<Self, EventError> {
+        if metadata.selected_root() != events.database().selected_root() {
+            return Err(EventError::Argument(
+                "session metadata must use the selected session root".into(),
+            ));
+        }
+        Ok(Self {
             events,
+            metadata,
             image_store: None,
             projection: None,
-            agent_session_id: Arc::new(
-                parrot_domain::values::identifiers::Identifier::agent_session,
-            ),
-        }
-    }
-    /// Bind generated IDs as inputs for deterministic cross-language observations.
-    pub fn with_agent_session_id_generator(
-        mut self,
-        generate: Arc<dyn Fn() -> Result<String, std::io::Error> + Send + Sync>,
-    ) -> Self {
-        self.agent_session_id = generate;
-        self
+        })
     }
     pub fn with_image_store(
         mut self,

@@ -490,9 +490,13 @@ mod tests {
         assert!(projection.replace_entries(Vec::new()).await.is_err());
         assert!(!is_written(projection.path(), Some(9)));
         assert!(append_entries(projection.path(), &[]).is_err());
-        let repository = ConversationRepository::new(crate::events::EventRepository::new(
-            crate::database::SessionDatabase::open(root).unwrap(),
-        ));
+        let repository = ConversationRepository::new(
+            crate::events::EventRepository::new(
+                crate::database::SessionDatabase::open(root.clone()).unwrap(),
+            ),
+            crate::history_files::tests::metadata(&root),
+        )
+        .unwrap();
         projection.refresh(&repository, "current").await.unwrap();
         projection.rebuild(&repository, "current").await.unwrap();
         assert_eq!(fs::read(&target_history).unwrap(), b"unchanged");
@@ -516,9 +520,13 @@ mod tests {
         ));
         fs::create_dir_all(&directory).unwrap();
         let root = SelectedSessionRoot::new(directory.clone(), RootOrigin::Current).unwrap();
-        let repository = ConversationRepository::new(crate::events::EventRepository::new(
-            crate::database::SessionDatabase::open(root.clone()).unwrap(),
-        ));
+        let repository = ConversationRepository::new(
+            crate::events::EventRepository::new(
+                crate::database::SessionDatabase::open(root.clone()).unwrap(),
+            ),
+            crate::history_files::tests::metadata(&root),
+        )
+        .unwrap();
         let projection = AgentHistoryFile::new(
             root.clone(),
             root.path().join("agent/history.jsonl"),
@@ -588,9 +596,11 @@ mod tests {
         ));
         fs::create_dir_all(&directory).unwrap();
         let root = SelectedSessionRoot::new(directory.clone(), RootOrigin::Current).unwrap();
-        let repository = ConversationRepository::new(EventRepository::new(
-            SessionDatabase::open(root.clone()).unwrap(),
-        ));
+        let repository = ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+            crate::history_files::tests::metadata(&root),
+        )
+        .unwrap();
         // The previous occupant has later global history/event sequence numbers.
         for agent in ["current", "previous"] {
             repository

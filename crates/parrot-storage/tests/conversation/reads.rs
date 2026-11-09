@@ -27,9 +27,20 @@ impl Fixture {
         SelectedSessionRoot::new(self.0.clone(), RootOrigin::Current).unwrap()
     }
     fn repository(&self) -> ConversationRepository {
-        ConversationRepository::new(EventRepository::new(
-            SessionDatabase::open(self.root()).unwrap(),
-        ))
+        let events = EventRepository::new(SessionDatabase::open(self.root()).unwrap());
+        let root = events.database().selected_root().clone();
+        let id = parrot_domain::values::identifiers::UserSessionId::parse(
+            root.path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .unwrap();
+        let metadata =
+            parrot_storage::history_files::SessionIndex::new(root.clone(), id, root.path())
+                .unwrap();
+        ConversationRepository::new(events, metadata).unwrap()
     }
 }
 impl Drop for Fixture {
@@ -385,7 +396,22 @@ async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_fi
         b"materialization resolves existing paths without decoding file bytes",
     )
     .unwrap();
-    let metadata_only = ConversationRepository::new(repo.events().clone());
+    let metadata_only = {
+        let events = repo.events().clone();
+        let root = events.database().selected_root().clone();
+        let id = parrot_domain::values::identifiers::UserSessionId::parse(
+            root.path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .unwrap();
+        let metadata =
+            parrot_storage::history_files::SessionIndex::new(root.clone(), id, root.path())
+                .unwrap();
+        ConversationRepository::new(events, metadata).unwrap()
+    };
     let resolved = metadata_only
         .resolve_image_artifact(id.clone())
         .await

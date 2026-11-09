@@ -6,22 +6,23 @@ use parrot_storage::{
 };
 
 #[tokio::test]
-async fn fresh_synthetic_legacy_metadata_binds_real_host_and_reopens_in_selected_old_root() {
+async fn current_metadata_in_legacy_root_binds_real_host_and_reopens_in_place() {
     let fixture = fixture().await;
-    let id = Identifier::user_session().unwrap();
+    let initial = bounded(fixture.open()).await.unwrap();
+    let initial_user = fixture.user();
+    let id = UserSessionId::parse(&initial.snapshot().id).unwrap();
+    let metadata: SessionMeta = initial_user.lease.metadata().find().unwrap().unwrap();
+    let current_root = initial_user.lease.selected_root().path().to_path_buf();
+    bounded(initial.close()).await.unwrap();
     let workspace = fixture.root.join("workspace");
     let selected = SelectedSessionRoot::new(
         fixture.root.join("old/sessions").join(id.value()),
         RootOrigin::Legacy,
     )
     .unwrap();
+    std::fs::create_dir_all(selected.path().parent().unwrap()).unwrap();
+    std::fs::rename(current_root, selected.path()).unwrap();
     let index = SessionIndex::new(selected.clone(), id.clone(), &workspace).unwrap();
-    let mut metadata = SessionMeta::new(id.value(), workspace.to_str().unwrap(), "local", "model");
-    metadata.created_at = Some("2026-01-01T00:00:00Z".into());
-    metadata.root_agent_name = Some("t76-legacy-root".into());
-    metadata.mode = Some("build".into());
-    metadata.selector = None;
-    index.publish(&metadata).unwrap();
     let runtime = RuntimeIdentity::new(
         "host".into(),
         "boot".into(),

@@ -74,7 +74,11 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
     assert!(legacy_warning.required.is_empty());
     assert_eq!(
         catalog
-            .render("session.legacy-resume-warning", &[], &CancelAt::never())
+            .render(
+                "session.legacy-resume-warning",
+                &[],
+                &CancellationState::Active
+            )
             .unwrap(),
         legacy_warning.text
     );
@@ -138,7 +142,7 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
             .render(
                 row["template_id"].as_str().unwrap(),
                 &arguments(&row["arguments"]),
-                &CancelAt::never(),
+                &CancellationState::Active,
             )
             .unwrap();
         assert_eq!(
@@ -177,7 +181,11 @@ fn m2_all_ten_templates_thirty_empty_multiple_nested_cases_use_real_catalog() {
         );
         assert_eq!(
             catalog
-                .render(id, &arguments(&input["arguments"]), &CancelAt::never())
+                .render(
+                    id,
+                    &arguments(&input["arguments"]),
+                    &CancellationState::Active
+                )
                 .unwrap(),
             product_changes::align_product_text(id, result["output"]["value"].as_str().unwrap()),
             "{}",
@@ -279,7 +287,7 @@ fn m1_scalar_both_original_assertions_share_the_overridden_configuration() {
             .render(
                 "agent-session.child-completion",
                 &arguments(&input["arguments"]),
-                &CancelAt::never()
+                &CancellationState::Active
             )
             .unwrap(),
         "Agent worker says:\nvalue {not_a_placeholder}\nnext"
@@ -288,7 +296,7 @@ fn m1_scalar_both_original_assertions_share_the_overridden_configuration() {
         .render(
             "tool-result.output-blob-notice",
             &arguments(&json!({"path":"/tmp/{runtime}"})),
-            &CancelAt::never(),
+            &CancellationState::Active,
         )
         .unwrap();
     assert!(inherited.contains("/tmp/{runtime}; metadata: {literal}"));
@@ -301,7 +309,7 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
     let (config, catalog) = PromptTemplateCatalog::from_content(content, &environment()).unwrap();
     assert_eq!(
         catalog
-            .render("agent-task.stop-canceled", &[], &CancelAt::never())
+            .render("agent-task.stop-canceled", &[], &CancellationState::Active)
             .unwrap(),
         "Task canceled by owner."
     );
@@ -310,17 +318,17 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
             .render(
                 "agent-session.child-completion",
                 &arguments(&json!({"agent_name":"worker","result":"literal {value}"})),
-                &CancelAt::never()
+                &CancellationState::Active
             )
             .unwrap(),
         "worker: literal {value}"
     );
     assert_eq!(
         catalog
-            .render("agent-task.stop-succeeded", &[], &CancelAt::never())
+            .render("agent-task.stop-succeeded", &[], &CancellationState::Active)
             .unwrap(),
         baseline
-            .render("agent-task.stop-succeeded", &[], &CancelAt::never())
+            .render("agent-task.stop-succeeded", &[], &CancellationState::Active)
             .unwrap()
     );
     assert_eq!(config.prompt_templates.len(), 106);
@@ -350,7 +358,11 @@ fn m1_m3_m6_repeat_calls_large_loop_and_inputs_are_isolated() {
         for _ in 0..2 {
             assert_eq!(
                 catalog
-                    .render("custom.structured", &arguments(&model), &CancelAt::never())
+                    .render(
+                        "custom.structured",
+                        &arguments(&model),
+                        &CancellationState::Active
+                    )
                     .unwrap(),
                 expected
             );
@@ -361,17 +373,25 @@ fn m1_m3_m6_repeat_calls_large_loop_and_inputs_are_isolated() {
     model["items"] = json!(vec![json!({"name":"x"}); 1001]);
     assert_eq!(
         catalog
-            .render("custom.structured", &arguments(&model), &CancelAt::never())
+            .render(
+                "custom.structured",
+                &arguments(&model),
+                &CancellationState::Active
+            )
             .unwrap(),
         "x;".repeat(1001)
     );
     assert_eq!(
-        catalog.render("custom.structured", &arguments(&model), &CancelAt::new(1)),
+        catalog.render(
+            "custom.structured",
+            &arguments(&model),
+            &CancellationState::Cancelled
+        ),
         Err(OperationError::Cancelled)
     );
     let separate = custom("{{ missing }}", &[], &[]);
     assert!(
-        error(separate.render("custom.catalog", &[], &CancelAt::never()))
+        error(separate.render("custom.catalog", &[], &CancellationState::Active))
             .contains("undefined value")
     );
 }
@@ -388,7 +408,7 @@ fn m5_ordering_duplicate_extra_required_and_string_only_scalar() {
     assert_eq!(spec.allowed, ["z", "a", "optional"]);
     assert_eq!(spec.required, ["z", "a"]);
     assert_eq!(
-        error(catalog.render("custom.order", &[], &CancelAt::never())),
+        error(catalog.render("custom.order", &[], &CancellationState::Active)),
         "prompt_templates.custom.order requires argument 'z'"
     );
     let (_, reversed) = PromptTemplateCatalog::from_content(
@@ -397,23 +417,23 @@ fn m5_ordering_duplicate_extra_required_and_string_only_scalar() {
     )
     .unwrap();
     assert_eq!(
-        error(reversed.render("custom.order", &[], &CancelAt::never())),
+        error(reversed.render("custom.order", &[], &CancellationState::Active)),
         "prompt_templates.custom.order requires argument 'a'"
     );
     let duplicate = vec![("unknown".into(), json!(1)), ("unknown".into(), json!(2))];
     assert_eq!(
-        error(catalog.render("custom.order", &duplicate, &CancelAt::never())),
+        error(catalog.render("custom.order", &duplicate, &CancellationState::Active)),
         "prompt_templates.custom.order received duplicate argument 'unknown'"
     );
     assert_eq!(
-        error(catalog.render("absent", &duplicate, &CancelAt::never())),
+        error(catalog.render("absent", &duplicate, &CancellationState::Active)),
         "prompt_templates.absent received duplicate argument 'unknown'"
     );
     assert_eq!(
         error(catalog.render(
             "custom.order",
             &[("x".into(), json!(1)), ("b".into(), json!(2))],
-            &CancelAt::never()
+            &CancellationState::Active
         )),
         "prompt_templates.custom.order does not allow argument 'x'"
     );
@@ -421,7 +441,7 @@ fn m5_ordering_duplicate_extra_required_and_string_only_scalar() {
         error(catalog.render(
             "custom.order",
             &arguments(&json!({"z":null,"a":"x"})),
-            &CancelAt::never()
+            &CancellationState::Active
         )),
         "prompt_templates.custom.order requires scalar argument 'z'"
     );
@@ -430,7 +450,7 @@ fn m5_ordering_duplicate_extra_required_and_string_only_scalar() {
             error(catalog.render(
                 "custom.order",
                 &[("z".into(), value), ("a".into(), json!("a"))],
-                &CancelAt::never()
+                &CancellationState::Active
             )),
             "prompt_templates.custom.order requires scalar argument 'z'"
         );
@@ -440,13 +460,13 @@ fn m5_ordering_duplicate_extra_required_and_string_only_scalar() {
             .render(
                 "custom.order",
                 &arguments(&json!({"z":"${NAME} {{ hostile }}\n🪶","a":"{z}","optional":{}})),
-                &CancelAt::never()
+                &CancellationState::Active
             )
             .unwrap(),
         "${NAME} {{ hostile }}\n🪶:{z}"
     );
     assert_eq!(
-        error(catalog.render("absent", &[], &CancelAt::never())),
+        error(catalog.render("absent", &[], &CancellationState::Active)),
         "prompt_templates.absent is not defined"
     );
 }
@@ -483,7 +503,7 @@ fn m3_m8_unicode_opaque_native_content_scope_and_data_are_not_callables() {
         for _ in 0..2 {
             assert_eq!(
                 catalog
-                    .render("custom.catalog", &pairs, &CancelAt::never())
+                    .render("custom.catalog", &pairs, &CancellationState::Active)
                     .unwrap(),
                 format!("{value}|${{NAME}}")
             );
@@ -494,87 +514,68 @@ fn m3_m8_unicode_opaque_native_content_scope_and_data_are_not_callables() {
         error(callable.render(
             "custom.catalog",
             &arguments(&json!({"callable":{"name":"exec"}})),
-            &CancelAt::never()
+            &CancellationState::Active
         ))
         .contains("not callable")
     );
 }
 
 #[test]
-fn m7_catalog_cancels_before_validation_and_before_any_value_conversion() {
+fn m7_precancelled_catalog_rejects_validation_and_rendering_errors() {
     let catalog = defaults();
-    let token = CancelAt::new(1);
     assert_eq!(
         catalog.render(
             "absent",
             &[("x".into(), json!({})), ("x".into(), json!({}))],
-            &token
+            &CancellationState::Cancelled
         ),
         Err(OperationError::Cancelled)
     );
-    assert_eq!(token.calls(), 1);
     let native = custom("{{ missing }}", &[], &[]);
-    for at in [2, 3, 4, 5] {
-        let token = CancelAt::new(at);
-        assert_eq!(
-            native.render("custom.catalog", &[], &token),
-            Err(OperationError::Cancelled)
-        );
-        assert_eq!(token.calls(), at);
-    }
-    let scalar = defaults();
-    let token = CancelAt::new(2);
     assert_eq!(
-        scalar.render(
+        native.render("custom.catalog", &[], &CancellationState::Cancelled),
+        Err(OperationError::Cancelled)
+    );
+    assert_eq!(
+        catalog.render(
             "system.working-directory",
             &arguments(&json!({"working_directory":{}})),
-            &token
+            &CancellationState::Cancelled
         ),
         Err(OperationError::Cancelled)
     );
-    assert_eq!(token.calls(), 2);
 }
 
 #[test]
-fn m7_native_output_no_output_fuel_recursion_and_cancellation_precedence_through_catalog() {
+fn m7_native_complete_output_empty_output_and_bounded_failures_through_catalog() {
     let output = custom("prefix{{ value }}suffix", &["value"], &["value"]);
-    let token = CancelAt::new(6); // catalog2 + native2 + writes; post-native check observes again.
     assert_eq!(
-        output.render(
-            "custom.catalog",
-            &arguments(&json!({"value":"data"})),
-            &token
-        ),
-        Err(OperationError::Cancelled)
+        output
+            .render(
+                "custom.catalog",
+                &arguments(&json!({"value":"data"})),
+                &CancellationState::Active
+            )
+            .unwrap(),
+        "prefixdatasuffix"
     );
-    assert_eq!(token.calls(), 7);
     let fuel = custom(NO_OUTPUT_FUEL, &[], &[]);
     for _ in 0..2 {
-        let message = error(fuel.render("custom.catalog", &[], &CancelAt::never()));
+        let message = error(fuel.render("custom.catalog", &[], &CancellationState::Active));
         assert!(
             message.starts_with(&format!("{PATH}.template:"))
                 && message.contains("engine ran out of fuel"),
             "{message}"
         );
     }
-    let token = CancelAt::new(5); // no polling within native no-output work; observed only on return.
-    assert_eq!(
-        fuel.render("custom.catalog", &[], &token),
-        Err(OperationError::Cancelled)
-    );
-    assert_eq!(token.calls(), 5);
     let completion = custom(
         "{% for i in range(1001) %}{% set x=i %}{% endfor %}",
         &[],
         &[],
     );
     assert_eq!(
-        completion.render("custom.catalog", &[], &CancelAt::new(5)),
-        Err(OperationError::Cancelled)
-    );
-    assert_eq!(
         completion
-            .render("custom.catalog", &[], &CancelAt::never())
+            .render("custom.catalog", &[], &CancellationState::Active)
             .unwrap(),
         ""
     );
@@ -584,7 +585,7 @@ fn m7_native_output_no_output_fuel_recursion_and_cancellation_precedence_through
         &[],
     );
     assert!(
-        error(failure.render("custom.catalog", &[], &CancelAt::never()))
+        error(failure.render("custom.catalog", &[], &CancellationState::Active))
             .contains("engine ran out of fuel")
     );
     let recursion = custom(
@@ -593,7 +594,7 @@ fn m7_native_output_no_output_fuel_recursion_and_cancellation_precedence_through
         &[],
     );
     assert!(
-        error(recursion.render("custom.catalog", &[], &CancelAt::never()))
+        error(recursion.render("custom.catalog", &[], &CancellationState::Active))
             .contains("recursion limit exceeded")
     );
 }
@@ -609,7 +610,7 @@ fn m8_no_loader_ambient_functions_or_scriban_aliases_in_catalog() {
         serde_json::to_string(&path.to_string_lossy()).unwrap()
     );
     assert!(
-        error(custom(&text, &[], &[]).render("custom.catalog", &[], &CancelAt::never()))
+        error(custom(&text, &[], &[]).render("custom.catalog", &[], &CancellationState::Active))
             .contains("template not found")
     );
     std::fs::remove_file(path).unwrap();
@@ -625,7 +626,7 @@ fn m8_no_loader_ambient_functions_or_scriban_aliases_in_catalog() {
         "{{ date.now }}",
     ] {
         let message =
-            error(custom(text, &[], &[]).render("custom.catalog", &[], &CancelAt::never()));
+            error(custom(text, &[], &[]).render("custom.catalog", &[], &CancellationState::Active));
         assert!(
             message.starts_with(&format!("{PATH}.template:")),
             "{text}: {message}"
@@ -676,7 +677,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
             .render(
                 "custom.structured",
                 &arguments(&json!({"value":"{{ literal }}"})),
-                &CancelAt::never()
+                &CancellationState::Active
             )
             .unwrap(),
         "{{ literal }}"
@@ -698,7 +699,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
                 .render(
                     row["template_id"].as_str().unwrap(),
                     &arguments(&row["arguments"]),
-                    &CancelAt::never()
+                    &CancellationState::Active
                 )
                 .unwrap(),
             product_changes::align_product_text(
@@ -716,7 +717,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
 #[test]
 fn source_skill_catalog_conveniences_preserve_opaque_literal_arguments() {
     let catalog = defaults();
-    let token = CancelAt::never();
+    let token = CancellationState::Active;
     let hostile = "{{ value }}\n${NAME}";
     assert_eq!(
         catalog.render_skills(hostile, &token).unwrap(),

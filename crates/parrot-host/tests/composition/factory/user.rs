@@ -531,13 +531,19 @@ async fn real_lease() -> Arc<SessionResourceLease> {
         |_| {},
     )
     .unwrap();
-    SessionResourceLease::open(
-        SessionIndex::new(selected, id, &workspace).unwrap(),
-        activation,
-        diagnostics,
-    )
-    .await
-    .unwrap()
+    let index = SessionIndex::new(selected, id.clone(), &workspace).unwrap();
+    let mut metadata = parrot_storage::history_files::SessionMeta::new(
+        id.value(),
+        workspace.to_string_lossy(),
+        "local",
+        "model",
+    );
+    metadata.root_agent_name = Some("main".into());
+    metadata.mode = Some("build".into());
+    index.initialize(metadata, "root".into()).unwrap();
+    SessionResourceLease::open(index, activation, diagnostics)
+        .await
+        .unwrap()
 }
 
 async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSecurity> {
@@ -596,7 +602,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
         fast_mode: Arc::new(parrot_provider::sessions::FastMode::new(false)),
         standing: StandingInstruction::new(catalog.clone()),
         statistics: lease.events.get_runtime_statistics().await.unwrap(),
-        root_identity: AgentIdentity::root("agent-first".into(), "main".into(), catalog),
+        root_identity: AgentIdentity::root("root".into(), "main".into(), catalog),
         modes: Arc::new(
             UserSessionModes::new(
                 Arc::new(
@@ -632,16 +638,37 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
     });
     Histories {
         services,
-        repository: ConversationRepository::new(lease.events.clone()),
+        repository: ConversationRepository::new(lease.events.clone(), lease.metadata().clone())
+            .unwrap(),
     }
 }
 
-async fn record_history_occupant(histories: &Histories<TestSecurity>, id: &str, text: &str) {
+async fn record_history_occupant(
+    histories: &Histories<TestSecurity>,
+    id: &str,
+    text: &str,
+) -> AgentIdentity {
+    let identity = AgentIdentity {
+        session: parrot_runtime::agent_turn::services::SessionIdentity {
+            session_id: id.into(),
+            name: "worker".into(),
+            parent_session_id: "root".into(),
+            depth: 1,
+        },
+        parent_name: "main".into(),
+        name_path: vec!["main".into(), "worker".into()],
+        prompt_scope: parrot_runtime::prompt_context::PromptScope::empty(
+            histories.services.templates.clone(),
+        ),
+        templates: histories.services.templates.clone(),
+    };
+    histories.prepare(&identity).await.unwrap();
     let mut started = wire::Event::new();
     started.id = Identifier::event_id().unwrap();
     started.agent_session_id = id.into();
     started.set_agent_started(wire::AgentStarted {
-        name: "main".into(),
+        name: "worker".into(),
+        parent_agent_session_id: "root".into(),
         ..wire::AgentStarted::new()
     });
     histories
@@ -659,18 +686,14 @@ async fn record_history_occupant(histories: &Histories<TestSecurity>, id: &str, 
         .append(message, Some("user".into()), Some(text.into()))
         .await
         .unwrap();
+    identity
 }
 
 #[tokio::test]
 async fn actual_history_preparation_queries_new_lineage_after_same_name_reuse() {
     let lease = real_lease().await;
     let histories = actual_histories(lease.clone()).await;
-    record_history_occupant(&histories, "agent-first", "first-occupant-message").await;
-    let first = AgentIdentity::root(
-        "agent-first".into(),
-        "main".into(),
-        histories.services.templates.clone(),
-    );
+    let first = record_history_occupant(&histories, "agent-first", "first-occupant-message").await;
     histories
         .prepare(&first)
         .await
@@ -678,12 +701,8 @@ async fn actual_history_preparation_queries_new_lineage_after_same_name_reuse() 
         .refresh()
         .await
         .unwrap();
-    record_history_occupant(&histories, "agent-second", "second-occupant-message").await;
-    let second = AgentIdentity::root(
-        "agent-second".into(),
-        "main".into(),
-        histories.services.templates.clone(),
-    );
+    let second =
+        record_history_occupant(&histories, "agent-second", "second-occupant-message").await;
     histories
         .prepare(&second)
         .await
@@ -694,7 +713,7 @@ async fn actual_history_preparation_queries_new_lineage_after_same_name_reuse() 
     let scratch = histories
         .services
         .resources
-        .agent_scratch(&["main"])
+        .agent_scratch(&["main", "worker"])
         .unwrap();
     let physical = std::fs::read_to_string(scratch.history_path()).unwrap();
     assert!(physical.contains("first-occupant-message"));
@@ -724,7 +743,7 @@ async fn refresh_all_histories_preserves_occupant_order_and_source_failure_bound
     let path = histories
         .services
         .resources
-        .agent_scratch(&["main"])
+        .agent_scratch(&["main", "worker"])
         .unwrap()
         .history_path();
     // A directory at a derived-file path is replaced, not treated as authority.
@@ -748,15 +767,10 @@ async fn refresh_all_histories_preserves_occupant_order_and_source_failure_bound
 }
 
 #[tokio::test]
-async fn dropping_actual_history_query_observer_allows_fresh_preparation_after_actor_settles() {
+async fn actual_history_preparation_does_not_wait_for_the_database_actor() {
     let lease = real_lease().await;
     let histories = actual_histories(lease.clone()).await;
-    record_history_occupant(&histories, "agent-first", "retained-history").await;
-    let identity = AgentIdentity::root(
-        "agent-first".into(),
-        "main".into(),
-        histories.services.templates.clone(),
-    );
+    let identity = record_history_occupant(&histories, "agent-first", "retained-history").await;
     let (release, blocked) = std::sync::mpsc::channel();
     let (started, entered) = oneshot::channel();
     let barrier = lease
@@ -772,29 +786,21 @@ async fn dropping_actual_history_query_observer_allows_fresh_preparation_after_a
         )
         .unwrap();
     entered.await.unwrap();
-    {
-        let preparing = histories.prepare(&identity);
-        tokio::pin!(preparing);
-        assert!(
-            std::future::poll_fn(|context| std::task::Poll::Ready(
-                preparing.as_mut().poll(context).is_pending()
-            ))
-            .await
-        );
-    }
+    let preparing = histories.prepare(&identity);
+    tokio::pin!(preparing);
+    let prepared =
+        std::future::poll_fn(|context| std::task::Poll::Ready(preparing.as_mut().poll(context)))
+            .await;
     release.send(()).unwrap();
     barrier.into_completion().await.unwrap();
-    histories
-        .prepare(&identity)
-        .await
-        .unwrap()
-        .refresh()
-        .await
-        .unwrap();
+    let std::task::Poll::Ready(prepared) = prepared else {
+        panic!("JSON membership preparation waited for the database actor");
+    };
+    prepared.unwrap().refresh().await.unwrap();
     let scratch = histories
         .services
         .resources
-        .agent_scratch(&["main"])
+        .agent_scratch(&["main", "worker"])
         .unwrap();
     assert!(
         std::fs::read_to_string(scratch.history_path())

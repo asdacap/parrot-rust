@@ -22,12 +22,25 @@ impl Fixture {
         Self(path)
     }
     fn repository(&self) -> ConversationRepository {
-        ConversationRepository::new(EventRepository::new(
+        let events = EventRepository::new(
             SessionDatabase::open(
                 SelectedSessionRoot::new(self.0.clone(), RootOrigin::Current).unwrap(),
             )
             .unwrap(),
-        ))
+        );
+        let root = events.database().selected_root().clone();
+        let id = parrot_domain::values::identifiers::UserSessionId::parse(
+            root.path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .unwrap();
+        let metadata =
+            parrot_storage::history_files::SessionIndex::new(root.clone(), id, root.path())
+                .unwrap();
+        ConversationRepository::new(events, metadata).unwrap()
     }
 }
 impl Drop for Fixture {
