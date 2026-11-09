@@ -9,14 +9,14 @@ use parrot_runtime::agent_turn::budget::TurnBudget;
 fn disabled_max_turns_preserves_normal_phase_settlement_cap_and_restart_policy() {
     let mut budget = TurnBudget::new(true);
     for _ in 0..12 {
-        let phase = budget.admit(2).unwrap();
-        assert!(!phase.final_phase && !phase.enters_final_phase);
+        let flags = budget.admit(2).unwrap();
+        assert!(!flags.final_phase);
         budget.count_request();
     }
     for _ in 0..4 {
         assert!(budget.try_extend_settlement());
-        let phase = budget.admit(2).unwrap();
-        assert!(!phase.final_phase && !phase.enters_final_phase);
+        let flags = budget.admit(2).unwrap();
+        assert!(!flags.final_phase);
         budget.count_request();
     }
     assert!(!budget.try_extend_settlement());
@@ -37,13 +37,13 @@ fn final_phase_and_settlement_extensions_follow_original_request_budget() {
     assert!(!first.final_phase);
     assert_eq!(budget.count_request(), 1);
     let last = budget.admit(2).unwrap();
-    assert!(last.final_phase && last.enters_final_phase);
+    assert!(last.final_phase);
     assert_eq!(budget.count_request(), 2);
     assert!(budget.admit(2).is_none());
     for _ in 0..4 {
         assert!(budget.try_extend_settlement());
-        let phase = budget.admit(2).unwrap();
-        assert!(phase.final_phase && !phase.enters_final_phase);
+        let flags = budget.admit(2).unwrap();
+        assert!(flags.final_phase);
         budget.count_request();
     }
     assert!(!budget.try_extend_settlement());
@@ -54,23 +54,23 @@ fn begin_turn_only_resets_requests_but_completion_retry_restart_resets_everythin
     let mut budget = TurnBudget::new(false);
     assert!(!budget.admit(2).unwrap().final_phase);
     assert_eq!(budget.count_request(), 1);
-    assert!(budget.admit(2).unwrap().enters_final_phase);
+    assert!(budget.admit(2).unwrap().final_phase);
     assert_eq!(budget.count_request(), 2);
     assert!(budget.try_extend_settlement());
     budget.begin_turn();
     let continuing = budget.admit(2).unwrap();
-    assert!(!continuing.final_phase && !continuing.enters_final_phase);
+    assert!(!continuing.final_phase);
     assert_eq!(budget.count_request(), 1);
     let last = budget.admit(2).unwrap();
-    assert!(last.final_phase && !last.enters_final_phase);
+    assert!(last.final_phase);
     assert_eq!(budget.count_request(), 2);
     assert!(budget.admit(2).is_some());
     budget.restart();
     let restarted = budget.admit(2).unwrap();
-    assert!(!restarted.final_phase && !restarted.enters_final_phase);
+    assert!(!restarted.final_phase);
     assert_eq!(budget.count_request(), 1);
     let final_request = budget.admit(2).unwrap();
-    assert!(final_request.final_phase && final_request.enters_final_phase);
+    assert!(final_request.final_phase);
     assert_eq!(budget.count_request(), 2);
     assert!(budget.admit(2).is_none());
     for _ in 0..4 {

@@ -95,24 +95,37 @@ pub fn insert_agent_history_message(
     Ok(())
 }
 
+pub fn read_latest_final_phase(tx: &Transaction<'_>, agent: &str) -> Result<bool, EventError> {
+    Ok(tx
+        .query_row(
+            "SELECT final_phase FROM conversation_item WHERE agent_session = ?1 ORDER BY sequence DESC LIMIT 1;",
+            [agent],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
 pub fn insert_conversation_item(
     tx: &Transaction<'_>,
     agent: &str,
     message: &ConversationMessage,
     at: &str,
-) -> Result<i64, EventError> {
+) -> Result<(i64, bool), EventError> {
+    let final_phase = read_latest_final_phase(tx, agent)?;
     tx.execute(
-        "INSERT INTO conversation_item (agent_session, origin, role, tool_call_id, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5);",
+        "INSERT INTO conversation_item (agent_session, origin, role, tool_call_id, created_at, final_phase) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
         params![
             agent,
             message.origin.as_str(),
             message.role.as_str(),
             message.tool_call_id,
-            at
+            at,
+            final_phase
         ],
     )?;
-    Ok(tx.last_insert_rowid())
+    Ok((tx.last_insert_rowid(), final_phase))
 }
 
 pub fn insert_parts(
@@ -293,7 +306,7 @@ pub fn project(
         "INSERT INTO message (agent_session, role, content, created_at) VALUES (?1, ?2, ?3, ?4);",
         params![agent, message.role.as_str(), content(&message.parts), at],
     )?;
-    let sequence = insert_conversation_item(tx, agent, message, at)?;
+    let (sequence, final_phase) = insert_conversation_item(tx, agent, message, at)?;
     insert_parts(
         tx,
         "conversation_part",
@@ -307,5 +320,6 @@ pub fn project(
     Ok(ConversationItem {
         sequence,
         message: message.clone(),
+        final_phase,
     })
 }

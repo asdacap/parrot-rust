@@ -160,7 +160,7 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert!(state.pending_messages.is_empty());
     assert_eq!(state.capture_catalogs()[1], ["read"]);
-    assert_eq!(state.final_requests, [0]);
+    assert_eq!(state.final_requests, [0, 1]);
     assert_eq!(
         finish(run(
             &mut state,

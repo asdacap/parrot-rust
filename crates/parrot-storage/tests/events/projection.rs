@@ -97,7 +97,7 @@ fn existing_conversation_skips_legacy_backfill_and_future_versions_are_not_repla
         [],
     )
     .unwrap();
-    let item = insert_conversation_item(
+    let (item, _) = insert_conversation_item(
         &tx,
         "b",
         &ConversationMessage::text(MessageRole::Assistant, "existing"),
@@ -134,7 +134,7 @@ fn existing_conversation_skips_legacy_backfill_and_future_versions_are_not_repla
 fn history_backfill_orders_pre_watermark_messages_compactions_then_tail() {
     let mut connection = database();
     connection.execute_batch(
-        "INSERT INTO conversation_item VALUES (1,'a','user_input','user','','t1'),(2,'b','model','assistant','','t2'),(3,'a','model','assistant','','t3'),(4,'c','tool','tool','','t4'),(5,'b','user_input','user','','t5');
+        "INSERT INTO conversation_item (sequence, agent_session, origin, role, tool_call_id, created_at) VALUES (1,'a','user_input','user','','t1'),(2,'b','model','assistant','','t2'),(3,'a','model','assistant','','t3'),(4,'c','tool','tool','','t4'),(5,'b','user_input','user','','t5');
          INSERT INTO compaction_snapshot VALUES ('b','b-summary',2,'compact'),('a','a-summary',1,'compact');",
     ).unwrap();
     let tx = connection.transaction().unwrap();
@@ -406,7 +406,7 @@ fn projection_failure_leaves_every_write_in_callers_transaction_for_rollback() {
 #[test]
 fn history_initialization_failure_is_rolled_back_without_marking_version() {
     let mut connection = database();
-    connection.execute_batch("INSERT INTO conversation_item VALUES(1,'a','model','assistant','','at'); CREATE TRIGGER reject_history BEFORE INSERT ON agent_history BEGIN SELECT RAISE(ABORT,'reject-history'); END;").unwrap();
+    connection.execute_batch("INSERT INTO conversation_item (sequence, agent_session, origin, role, tool_call_id, created_at) VALUES(1,'a','model','assistant','','at'); CREATE TRIGGER reject_history BEFORE INSERT ON agent_history BEGIN SELECT RAISE(ABORT,'reject-history'); END;").unwrap();
     {
         let tx = connection.transaction().unwrap();
         assert!(ensure_agent_history_projection(&tx).is_err());

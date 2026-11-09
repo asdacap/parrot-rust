@@ -113,6 +113,7 @@ impl ConversationMessage {
 pub struct ConversationItem {
     pub sequence: i64,
     pub message: ConversationMessage,
+    pub final_phase: bool,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdmittedInput {

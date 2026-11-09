@@ -1,16 +1,14 @@
 //! Source turn-request and bounded settlement budget, distinct from token limits.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TurnRequestPhase {
+pub struct TurnFlags {
     pub final_phase: bool,
-    pub enters_final_phase: bool,
 }
 
 #[derive(Debug)]
 pub struct TurnBudget {
     disable_max_turns: bool,
     provider_requests: i32,
-    final_phase_active: bool,
     settlement_extensions: i32,
 }
 
@@ -19,7 +17,6 @@ impl TurnBudget {
         Self {
             disable_max_turns,
             provider_requests: 0,
-            final_phase_active: false,
             settlement_extensions: 0,
         }
     }
@@ -32,7 +29,7 @@ impl TurnBudget {
         *self = Self::new(self.disable_max_turns);
     }
 
-    pub fn admit(&mut self, maximum: i32) -> Option<TurnRequestPhase> {
+    pub fn admit(&mut self, maximum: i32) -> Option<TurnFlags> {
         if !self.disable_max_turns
             && self.provider_requests >= maximum.wrapping_add(self.settlement_extensions)
         {
@@ -40,12 +37,7 @@ impl TurnBudget {
         }
         let final_phase =
             !self.disable_max_turns && self.provider_requests.wrapping_add(1) >= maximum;
-        let enters_final_phase = final_phase && !self.final_phase_active;
-        self.final_phase_active |= final_phase;
-        Some(TurnRequestPhase {
-            final_phase,
-            enters_final_phase,
-        })
+        Some(TurnFlags { final_phase })
     }
 
     pub fn count_request(&mut self) -> i32 {

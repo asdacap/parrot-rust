@@ -383,7 +383,7 @@ impl AgentHistoryView {
         &self,
         event: Event,
         content: String,
-    ) -> Result<(), EventError> {
+    ) -> Result<bool, EventError> {
         self.repository
             .append_final_provider_request_prompt(event, content)
             .await

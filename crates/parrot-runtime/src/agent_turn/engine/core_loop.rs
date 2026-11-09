@@ -905,7 +905,7 @@ where
         &'a self,
         calls: Vec<ToolCall>,
         receipt: ToolCallReceipt,
-        phase: parrot_core::budget::TurnRequestPhase,
+        flags: parrot_core::budget::TurnFlags,
         cancellation: parrot_core::CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
@@ -918,7 +918,7 @@ where
                 let tools = guard
                     .as_ref()
                     .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
-                if phase.final_phase {
+                if flags.final_phase {
                     tools.final_phase.clone()
                 } else {
                     tools.normal.clone()

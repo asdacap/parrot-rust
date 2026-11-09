@@ -5,7 +5,7 @@ use parrot_core::{
     Outcome, PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason,
     Role, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition,
     ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
-    budget::{TurnBudget, TurnRequestPhase},
+    budget::{TurnBudget, TurnFlags},
     run, run_turn,
 };
 use std::{
@@ -131,7 +131,7 @@ struct MemoryTools {
     requests: Arc<Mutex<Vec<Vec<ToolCall>>>>,
     replies: Arc<Mutex<VecDeque<Vec<ToolResult>>>>,
     receipts: Arc<Mutex<Vec<ToolCallReceipt>>>,
-    phases: Arc<Mutex<Vec<TurnRequestPhase>>>,
+    flags: Arc<Mutex<Vec<TurnFlags>>>,
 }
 impl Tools for MemoryTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
@@ -157,14 +157,14 @@ impl Tools for MemoryTools {
         &'a self,
         calls: Vec<ToolCall>,
         receipt: ToolCallReceipt,
-        phase: TurnRequestPhase,
+        flags: TurnFlags,
         _cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             assert!(!calls.is_empty());
             self.requests.lock().unwrap().push(calls.clone());
             self.receipts.lock().unwrap().push(receipt);
-            self.phases.lock().unwrap().push(phase);
+            self.flags.lock().unwrap().push(flags);
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
                 return Ok(reply);
@@ -302,7 +302,7 @@ impl MemoryState {
                 requests: Arc::default(),
                 replies: Arc::default(),
                 receipts: Arc::default(),
-                phases: Arc::default(),
+                flags: Arc::default(),
             },
             provider: MemoryProvider {
                 trace,
@@ -918,11 +918,11 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
     assert!(
         state
             .tools
-            .phases
+            .flags
             .lock()
             .unwrap()
             .iter()
-            .all(|phase| phase.final_phase)
+            .all(|flags| flags.final_phase)
     );
     assert!(
         state
@@ -931,7 +931,7 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
             .all(|tools| tools == &["read"])
     );
     assert!(state.final_requests.contains(&0));
-    assert_eq!(state.final_requests, [0]);
+    assert_eq!(state.final_requests, [0, 1, 2, 3, 4]);
     assert_eq!(
         state
             .trace
@@ -1063,11 +1063,11 @@ fn disabled_request_limits_keep_every_request_in_normal_phase() {
     assert!(
         state
             .tools
-            .phases
+            .flags
             .lock()
             .unwrap()
             .iter()
-            .all(|phase| !phase.final_phase && !phase.enters_final_phase)
+            .all(|flags| !flags.final_phase)
     );
     assert_eq!(state.applied_results.len(), 2);
     assert!(
@@ -1417,7 +1417,7 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.rendered_instructions.len(), 6);
     assert!(state.final_requests.contains(&0));
-    assert_eq!(state.final_requests, [0]);
+    assert_eq!(state.final_requests, [0, 1, 2, 3, 4, 5]);
     assert_eq!(
         state
             .trace
@@ -1460,13 +1460,13 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     assert_eq!(catalogs[1], ["read"]);
     assert_eq!(catalogs[2], ["read"]);
     assert_eq!(catalogs[3], ["read", "write"]);
-    assert_eq!(state.final_requests, [1, 4]);
+    assert_eq!(state.final_requests, [1, 2, 4, 5, 6, 7, 8]);
     assert!(catalogs[4..].iter().all(|tools| tools == &["read"]));
-    assert!(state.tools.phases.lock().unwrap()[3].enters_final_phase);
+    assert!(state.tools.flags.lock().unwrap()[3].final_phase);
     assert!(
-        state.tools.phases.lock().unwrap()[4..]
+        state.tools.flags.lock().unwrap()[4..]
             .iter()
-            .all(|phase| phase.final_phase && !phase.enters_final_phase)
+            .all(|flags| flags.final_phase)
     );
     assert_eq!(state.completion_feedback.len(), 1);
     assert_eq!(
@@ -1505,10 +1505,7 @@ fn tools_and_provider_operate_without_states() {
         ToolCallReceipt {
             assistant_sequence: 41,
         },
-        TurnRequestPhase {
-            final_phase: false,
-            enters_final_phase: false,
-        },
+        TurnFlags { final_phase: false },
         cancellation,
     ))
     .unwrap();
@@ -1592,7 +1589,7 @@ fn core_selects_phase_and_estimates_the_exact_advertised_tools() {
     states.maximum = 2;
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(states.rendered_instructions.len(), 2);
-    assert!(!states.tools.phases.lock().unwrap()[0].final_phase);
+    assert!(!states.tools.flags.lock().unwrap()[0].final_phase);
     assert_eq!(states.final_requests, [1]);
     let requests = states.provider.requests.lock().unwrap();
     let estimates = states.capture_request_estimates();

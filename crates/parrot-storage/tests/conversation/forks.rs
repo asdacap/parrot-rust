@@ -478,6 +478,10 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
                 "INSERT INTO compaction_status VALUES ('agent',?1,?2)",
                 rusqlite::params![old, status],
             )?;
+            tx.execute(
+                "UPDATE conversation_item SET final_phase = 1 WHERE sequence = ?1;",
+                [status],
+            )?;
             Ok(())
         })
         .await
@@ -500,11 +504,14 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
                 watermark: 0
             })
         );
+        let copied_status = effective.status.unwrap();
+        assert!(copied_status.final_phase);
         assert_eq!(
-            effective.status.unwrap().message.parts,
+            copied_status.message.parts,
             vec![ConversationPart::text("status")]
         );
         assert_eq!(effective.groups.len(), 1);
+        assert!(!effective.groups[0].items[0].final_phase);
         assert_eq!(
             effective.groups[0].items[0].message.parts,
             vec![ConversationPart::text("tail")]

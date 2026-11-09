@@ -399,9 +399,13 @@ impl ContextController {
             "final_provider_request_prompt",
             "Final provider request prompt injected".into(),
         )?;
-        self.history
+        if !self
+            .history
             .append_final_provider_request_prompt(published.clone(), content.into())
-            .await?;
+            .await?
+        {
+            return Ok(());
+        }
         conversation.add(system_model_message(content.into()));
         events.publish(published, cancellation).await
     }

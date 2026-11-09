@@ -1,6 +1,6 @@
 use crate::{
     CancellationToken, ContextCompaction, ContextSnapshot, Error, ProviderRequest, States,
-    ToolDefinition, TurnOptions, budget::TurnRequestPhase,
+    ToolDefinition, TurnOptions, budget::TurnFlags,
 };
 
 pub(crate) async fn compact_context(
@@ -19,11 +19,11 @@ pub(crate) async fn compact_context(
 pub(crate) async fn prepare_request(
     states: &mut dyn States,
     definitions: &[ToolDefinition],
-    phase: TurnRequestPhase,
+    flags: TurnFlags,
     options: &TurnOptions,
     cancellation: CancellationToken<'_>,
 ) -> Result<ProviderRequest, Error> {
-    if phase.enters_final_phase {
+    if flags.final_phase {
         states.record_final_request().await?;
     }
     if cancellation.is_cancelled() {

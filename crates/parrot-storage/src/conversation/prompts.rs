@@ -1,7 +1,7 @@
 //! Durable status/reminder boundaries. Project-only source operations do not record events.
 use super::{
-    ContextReminderCheckpoint, ConversationMessage, ConversationOrigin, ConversationRepository,
-    EventError, MessageRole, PendingStatus,
+    ContextReminderCheckpoint, ConversationItem, ConversationMessage, ConversationOrigin,
+    ConversationRepository, EventError, MessageRole, PendingStatus,
 };
 use crate::events::{RepositoryContext, projection, record};
 use parrot_domain::protocol::messages::parrot::Event;
@@ -12,14 +12,13 @@ fn project_system(
     context: &RepositoryContext,
     agent: &str,
     content: String,
-) -> Result<(), EventError> {
+) -> Result<ConversationItem, EventError> {
     projection::project(
         tx,
         agent,
         &ConversationMessage::text(MessageRole::System, content),
         &(context.timestamp)(),
-    )?;
-    Ok(())
+    )
 }
 impl ConversationRepository {
     pub async fn session_state(
@@ -153,16 +152,29 @@ impl ConversationRepository {
         &self,
         published: Event,
         content: String,
-    ) -> Result<(), EventError> {
+    ) -> Result<bool, EventError> {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
         let refresh_agent = agent.clone();
         let context = self.events.context().clone();
-        self.events.transaction(move |tx| {
-            tx.execute("INSERT INTO final_provider_request_prompt (agent_session, created_at) VALUES (?1, ?2);", params![agent, (context.timestamp)()])?;
-            project_system(tx, &context, &agent, content)
-        }).await?;
-        self.refresh_agent_history(&refresh_agent).await
+        let appended = self
+            .events
+            .transaction(move |tx| {
+                if projection::read_latest_final_phase(tx, &agent)? {
+                    return Ok(false);
+                }
+                let item = project_system(tx, &context, &agent, content)?;
+                tx.execute(
+                    "UPDATE conversation_item SET final_phase = 1 WHERE sequence = ?1;",
+                    [item.sequence],
+                )?;
+                Ok(true)
+            })
+            .await?;
+        if appended {
+            self.refresh_agent_history(&refresh_agent).await?;
+        }
+        Ok(appended)
     }
     pub async fn append_tool_availability_restored_prompt(
         &self,
@@ -176,14 +188,14 @@ impl ConversationRepository {
         let appended = self
             .events
             .transaction(move |tx| {
-                if tx.execute(
-                    "DELETE FROM final_provider_request_prompt WHERE agent_session = ?1;",
-                    [&agent],
-                )? == 0
-                {
+                if !projection::read_latest_final_phase(tx, &agent)? {
                     return Ok(false);
                 }
-                project_system(tx, &context, &agent, content)?;
+                let item = project_system(tx, &context, &agent, content)?;
+                tx.execute(
+                    "UPDATE conversation_item SET final_phase = 0 WHERE sequence = ?1;",
+                    [item.sequence],
+                )?;
                 Ok(true)
             })
             .await?;

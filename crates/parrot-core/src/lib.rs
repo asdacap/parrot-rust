@@ -61,16 +61,16 @@ pub async fn run_turn<'a>(
             InputAdmission::SteersOrNextQueued
         };
         states.promote_input(admission).await?;
-        let Some(phase) = budget.admit(options.maximum_requests) else {
+        let Some(flags) = budget.admit(options.maximum_requests) else {
             return Ok(Outcome::BudgetExhausted);
         };
-        let definitions = if phase.final_phase {
+        let definitions = if flags.final_phase {
             &catalog.final_phase
         } else {
             &catalog.normal
         };
         let request =
-            context::prepare_request(states, definitions, phase, options, cancellation).await?;
+            context::prepare_request(states, definitions, flags, options, cancellation).await?;
         let attempt = budget.count_request();
         let response = match provider.invoke(request).await {
             Ok(response) => response,
@@ -106,13 +106,13 @@ pub async fn run_turn<'a>(
         if !response.tool_calls.is_empty() {
             let receipt = states.record_tool_calls(&response).await?;
             let results = tools
-                .execute(response.tool_calls.clone(), receipt, phase, cancellation)
+                .execute(response.tool_calls.clone(), receipt, flags, cancellation)
                 .await?;
             if results.is_empty() {
                 return Err(Error::failed("tool execution returned no results"));
             }
             states.record_tool_results(&results).await?;
-            if phase.final_phase && !budget.try_extend_settlement() {
+            if flags.final_phase && !budget.try_extend_settlement() {
                 return Ok(Outcome::BudgetExhausted);
             }
             continue;

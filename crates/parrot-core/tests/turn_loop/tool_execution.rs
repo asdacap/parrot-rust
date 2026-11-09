@@ -164,7 +164,7 @@ fn complete_fresh_tool_results_reach_state_without_rewriting_metadata() {
 }
 
 #[test]
-fn core_passes_each_recording_receipt_and_selected_phase_into_execution() {
+fn core_passes_each_recording_receipt_and_turn_flags_into_execution() {
     let mut state = MemoryState::new([
         Reply::tools("first"),
         Reply::tools("second"),
@@ -184,10 +184,10 @@ fn core_passes_each_recording_receipt_and_selected_phase_into_execution() {
             },
         ]
     );
-    let phases = state.tools.phases.lock().unwrap();
-    assert_eq!(phases.len(), 2);
-    assert!(!phases[0].final_phase);
-    assert!(phases[1].final_phase);
+    let flags = state.tools.flags.lock().unwrap();
+    assert_eq!(flags.len(), 2);
+    assert!(!flags[0].final_phase);
+    assert!(flags[1].final_phase);
 }
 
 struct EchoTools;
@@ -201,7 +201,7 @@ impl Tools for EchoTools {
         &'a self,
         calls: Vec<ToolCall>,
         _receipt: ToolCallReceipt,
-        _phase: TurnRequestPhase,
+        _flags: TurnFlags,
         _cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {

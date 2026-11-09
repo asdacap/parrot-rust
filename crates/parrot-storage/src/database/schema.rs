@@ -22,6 +22,7 @@ pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
     // TRUNCATE is required on shared filesystems; WAL/SHM are never enabled.
     connection.execute_batch("PRAGMA journal_mode=TRUNCATE; PRAGMA foreign_keys=ON;")?;
     connection.execute_batch(include_str!("schema.sql"))?;
+    migrate_message_flags(&mut connection)?;
     migrate_usage_keys(&mut connection)?;
     migrate_lineage(&mut connection)?;
     connection.execute_batch(include_str!("event_indexes.sql"))?;
@@ -53,6 +54,39 @@ pub fn record_agent_start(
             params![event.agent_session_id, start.parent_agent_session_id, start.name, event_sequence],
         )?;
     }
+    Ok(())
+}
+
+fn migrate_message_flags(connection: &mut Connection) -> Result<(), DatabaseError> {
+    let has_flags: bool = connection.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('conversation_item') WHERE name = 'final_phase');",
+        [],
+        |row| row.get(0),
+    )?;
+    let has_marker: bool = connection.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'final_provider_request_prompt');",
+        [],
+        |row| row.get(0),
+    )?;
+    if has_flags && !has_marker {
+        return Ok(());
+    }
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if !has_flags {
+        transaction.execute_batch(
+            "ALTER TABLE conversation_item ADD COLUMN final_phase INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    if has_marker {
+        transaction.execute_batch(
+            "UPDATE conversation_item SET final_phase = 1 WHERE sequence IN \
+             (SELECT (SELECT sequence FROM conversation_item WHERE agent_session = marker.agent_session \
+             ORDER BY sequence DESC LIMIT 1) FROM final_provider_request_prompt AS marker); \
+             DROP TABLE final_provider_request_prompt;",
+        )?;
+    }
+    transaction.commit()?;
     Ok(())
 }
 

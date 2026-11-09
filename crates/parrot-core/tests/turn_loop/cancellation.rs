@@ -93,7 +93,7 @@ impl Tools for CancellingCatalog {
         &'a self,
         _calls: Vec<ToolCall>,
         _receipt: ToolCallReceipt,
-        _phase: TurnRequestPhase,
+        _flags: TurnFlags,
         _cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async { panic!("cancellation after initialization must prevent tool execution") })
@@ -132,7 +132,7 @@ impl Tools for JoiningTools {
         &'a self,
         calls: Vec<ToolCall>,
         _receipt: ToolCallReceipt,
-        _phase: TurnRequestPhase,
+        _flags: TurnFlags,
         cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
@@ -207,7 +207,7 @@ impl Tools for CancellingTools {
         &'a self,
         calls: Vec<ToolCall>,
         _receipt: ToolCallReceipt,
-        _phase: TurnRequestPhase,
+        _flags: TurnFlags,
         cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {

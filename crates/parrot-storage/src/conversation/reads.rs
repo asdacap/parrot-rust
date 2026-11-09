@@ -32,6 +32,7 @@ fn read_message(
     origin: &str,
     role: &str,
     tool_call_id: String,
+    final_phase: bool,
 ) -> Result<ConversationItem, EventError> {
     let origin = parse_origin(origin)?;
     let role = parse_role(role)?;
@@ -61,6 +62,7 @@ fn read_message(
         .unwrap_or_default();
     Ok(ConversationItem {
         sequence,
+        final_phase,
         message: ConversationMessage {
             origin,
             role,
@@ -78,21 +80,22 @@ pub fn read_conversation_item(
 ) -> Result<ConversationItem, EventError> {
     let item = tx
         .query_row(
-            "SELECT origin, role, tool_call_id FROM conversation_item WHERE sequence = ?1;",
+            "SELECT origin, role, tool_call_id, final_phase FROM conversation_item WHERE sequence = ?1;",
             [sequence],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
                 ))
             },
         )
         .optional()?;
-    let (origin, role, call) = item.ok_or_else(|| {
+    let (origin, role, call, final_phase) = item.ok_or_else(|| {
         EventError::Invalid(format!("Conversation item {sequence} does not exist."))
     })?;
-    read_message(tx, sequence, &origin, &role, call)
+    read_message(tx, sequence, &origin, &role, call, final_phase)
 }
 fn read_selected(
     tx: &Transaction<'_>,
@@ -101,9 +104,9 @@ fn read_selected(
     tail: bool,
 ) -> Result<Vec<ConversationItem>, EventError> {
     let sql = if tail {
-        "SELECT item.sequence, item.origin, item.role, item.tool_call_id FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence;"
+        "SELECT item.sequence, item.origin, item.role, item.tool_call_id, item.final_phase FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence;"
     } else {
-        "SELECT sequence, origin, role, tool_call_id FROM conversation_item WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;"
+        "SELECT sequence, origin, role, tool_call_id, final_phase FROM conversation_item WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;"
     };
     let mut read = tx.prepare(sql)?;
     let mut rows = read.query(params![agent, watermark])?;
@@ -115,6 +118,7 @@ fn read_selected(
             &row.get::<_, String>(1)?,
             &row.get::<_, String>(2)?,
             row.get(3)?,
+            row.get(4)?,
         )?);
     }
     Ok(items)

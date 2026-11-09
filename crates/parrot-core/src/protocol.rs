@@ -61,14 +61,14 @@ pub trait Tools: Send + Sync {
     /// for this turn. The final catalog is the subset permitted in the final phase.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
     /// Executes the recorded batch using retained executable identities for the
-    /// supplied phase and explicit durable assistant correlation. Returns results
+    /// supplied turn flags and explicit durable assistant correlation. Returns results
     /// in call order and joins all admitted work, including on failure. Native
     /// adapters may settle chunks durably before returning the complete batch to [`States`].
     fn execute<'a>(
         &'a self,
         calls: Vec<ToolCall>,
         receipt: ToolCallReceipt,
-        phase: budget::TurnRequestPhase,
+        flags: budget::TurnFlags,
         cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>>;
 }
@@ -102,7 +102,8 @@ pub trait States: Send {
         definitions: &'a [ToolDefinition],
         messages: &'a [Message],
     ) -> BoxFuture<'a, Result<i64, Error>>;
-    /// Records and publishes the configured final-request context before preparation.
+    /// Ensures the configured final-request context is recorded before preparation.
+    /// Repeated calls do not append or publish duplicate notices.
     fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>>;
     /// Observes readiness and retains an optional steer or status prompt for fitting,
     /// without appending or publishing it. Source-specific cadence and rendering stay native.

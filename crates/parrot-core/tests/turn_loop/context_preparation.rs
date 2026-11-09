@@ -118,13 +118,13 @@ fn pending_prompt_failures_stop_before_later_effects() {
 }
 
 #[test]
-fn core_records_final_request_once_before_rendering_and_retains_final_catalogs() {
+fn core_records_each_final_request_before_rendering_and_retains_final_catalogs() {
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.final_requests, [0]);
+    assert_eq!(state.final_requests, [0, 1]);
     assert_eq!(state.capture_catalogs(), [vec!["read"], vec!["read"]]);
-    assert!(state.tools.phases.lock().unwrap()[0].enters_final_phase);
+    assert!(state.tools.flags.lock().unwrap()[0].final_phase);
     let trace = state.trace.values();
     assert!(
         trace
