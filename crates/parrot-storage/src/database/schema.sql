@@ -9,13 +9,6 @@ CREATE TABLE IF NOT EXISTS event (
     history_anchor INTEGER CHECK (history_anchor >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS agent_lineage (
-    agent_session        TEXT PRIMARY KEY,
-    parent_agent_session TEXT NOT NULL,
-    name                 TEXT NOT NULL,
-    event_sequence       INTEGER NOT NULL REFERENCES event(sequence)
-);
-
 CREATE TABLE IF NOT EXISTS conversation_item (
     sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_session TEXT NOT NULL,
@@ -27,6 +20,7 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     provider_id   TEXT NOT NULL DEFAULT '',
     provider_content TEXT NOT NULL DEFAULT '',
     tool_owner_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE SET NULL,
+    mode_status_revision INTEGER CHECK (mode_status_revision >= 0),
     CHECK (
         tool_owner_sequence IS NULL
         OR (
@@ -36,6 +30,10 @@ CREATE TABLE IF NOT EXISTS conversation_item (
         )
     )
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS conversation_mode_status
+    ON conversation_item (agent_session, mode_status_revision)
+    WHERE mode_status_revision IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS conversation_by_session
     ON conversation_item (agent_session, sequence);
@@ -180,15 +178,6 @@ CREATE TABLE IF NOT EXISTS context_reminder (
 
 CREATE INDEX IF NOT EXISTS context_reminder_by_session
     ON context_reminder (agent_session, sequence DESC);
-
-CREATE TABLE IF NOT EXISTS session_state (
-    user_session    TEXT PRIMARY KEY,
-    agent_session   TEXT NOT NULL UNIQUE,
-    mode            TEXT NOT NULL,
-    mode_revision   INTEGER NOT NULL DEFAULT 0 CHECK (mode_revision >= 0),
-    status_revision INTEGER,
-    CHECK (status_revision IS NULL OR (status_revision >= 0 AND status_revision <= mode_revision))
-);
 
 CREATE TABLE IF NOT EXISTS image_artifact (
     artifact_id      TEXT PRIMARY KEY,

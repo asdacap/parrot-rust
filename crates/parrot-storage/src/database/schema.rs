@@ -1,10 +1,10 @@
-use super::{Connection, DatabaseError, Transaction};
+use super::{Connection, DatabaseError};
 use parrot_domain::protocol::messages::parrot::Event;
-use rusqlite::{OpenFlags, TransactionBehavior, params};
+use rusqlite::{OpenFlags, TransactionBehavior};
 use std::path::Path;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[cfg(test)]
 #[path = "../../tests/database/current_schema_crash.rs"]
@@ -93,20 +93,4 @@ pub fn extract_usage_keys(event: &Event) -> (Option<&str>, Option<&str>) {
     } else {
         (None, None)
     }
-}
-
-/// The first start, in event-sequence order, fixes an agent's lineage.
-pub fn record_agent_start(
-    transaction: &Transaction<'_>,
-    event_sequence: i64,
-    event: &Event,
-) -> Result<(), DatabaseError> {
-    if event.has_agent_started() {
-        let start = event.agent_started();
-        transaction.execute(
-            "INSERT OR IGNORE INTO agent_lineage (agent_session, parent_agent_session, name, event_sequence) VALUES (?1, ?2, ?3, ?4);",
-            params![event.agent_session_id, start.parent_agent_session_id, start.name, event_sequence],
-        )?;
-    }
-    Ok(())
 }

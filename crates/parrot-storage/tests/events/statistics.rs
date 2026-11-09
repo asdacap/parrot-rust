@@ -421,16 +421,8 @@ async fn replay_accumulates_each_descendant_own_models_once_in_source_agent_orde
             assert_eq!(replay.agents["middle"].cumulative.totals.input_tokens, 8);
             assert_eq!(replay.agents["leaf"].cumulative.totals.input_tokens, 5);
             assert_eq!(replay.agents["root"].context_size, 17);
-            let lineage = agent_lineage(tx)?;
-            assert_eq!(
-                lineage
-                    .iter()
-                    .map(|row| row.agent_session_id.as_str())
-                    .collect::<Vec<_>>(),
-                ["root", "middle", "leaf"]
-            );
-            assert_eq!(lineage[1].parent_agent_session_id, "root");
-            assert_eq!(lineage[1].name, "name-middle");
+            assert_eq!(replay.parents["middle"], "root");
+            assert_eq!(replay.parents["leaf"], "middle");
             Ok(())
         })
         .await
@@ -548,15 +540,11 @@ async fn replay_rejects_conflicting_missing_ancestor_and_cyclic_lineage_exactly(
 }
 
 #[tokio::test]
-async fn replay_uses_finished_failed_lineage_and_main_session_and_checks_fact_overflow() {
+async fn replay_uses_current_fact_and_finished_failed_lineage_and_checks_fact_overflow() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     repository
         .transaction(|tx| {
-            tx.execute(
-                "INSERT INTO session_state (user_session, agent_session, mode) VALUES('user','root','default');",
-                [],
-            )?;
             record(tx, &request("root-fact", "root", "", "root", 2), None, AT)?;
             let mut finished = envelope("finished", "child");
             finished.set_agent_finished(AgentFinished {
@@ -570,7 +558,12 @@ async fn replay_uses_finished_failed_lineage_and_main_session_and_checks_fact_ov
                 ..Default::default()
             });
             record(tx, &failed, None, AT)?;
-            record(tx, &request("leaf-fact", "leaf", "child", "leaf", 3), None, AT)?;
+            record(
+                tx,
+                &request("leaf-fact", "leaf", "child", "leaf", 3),
+                None,
+                AT,
+            )?;
             let replay = replay_statistics(tx)?;
             assert_eq!(replay.parents["root"], "");
             assert_eq!(replay.parents["leaf"], "child");
@@ -654,7 +647,22 @@ async fn usage_fact_embedded_anchors_survive_history_deletion_and_retry_without_
     }).await.unwrap();
     repository.database().close().await.unwrap();
     let reopened = fixture.repository();
-    let conversation = ConversationRepository::new(reopened.clone());
+    let conversation = {
+        let events = reopened.clone();
+        let root = events.database().selected_root().clone();
+        let id = parrot_domain::values::identifiers::UserSessionId::parse(
+            root.path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .unwrap();
+        let metadata =
+            parrot_storage::history_files::SessionIndex::new(root.clone(), id, root.path())
+                .unwrap();
+        ConversationRepository::new(events, metadata).unwrap()
+    };
     assert_eq!(
         conversation.agent_history_session_ids().await.unwrap(),
         vec!["agent", "other"]

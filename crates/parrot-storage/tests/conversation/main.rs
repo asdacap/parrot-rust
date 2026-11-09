@@ -3,6 +3,7 @@ mod compaction;
 mod embedded_metadata;
 mod forks;
 mod mode_status;
+mod mode_status_races;
 mod reads;
 mod reload_cancellation;
 mod upstream_remaining;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
-struct Fixture(PathBuf);
+struct Fixture(PathBuf, parrot_storage::history_files::SessionIndex);
 impl Fixture {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
@@ -25,11 +26,31 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&path).unwrap();
-        Self(path)
+        let root = SelectedSessionRoot::new(path.clone(), RootOrigin::Current).unwrap();
+        let id = parrot_domain::values::identifiers::UserSessionId::parse(
+            path.file_name().unwrap().to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        let metadata =
+            parrot_storage::history_files::SessionIndex::new(root, id.clone(), &path).unwrap();
+        let mut initial = parrot_storage::history_files::SessionMeta::new(
+            id.value(),
+            path.to_string_lossy(),
+            "provider",
+            "model",
+        );
+        initial.root_agent_name = Some("main".into());
+        initial.mode = Some("initial".into());
+        metadata.initialize(initial, "agent".into()).unwrap();
+        Self(path, metadata)
     }
     fn repository(&self) -> ConversationRepository {
         let root = SelectedSessionRoot::new(self.0.clone(), RootOrigin::Current).unwrap();
-        ConversationRepository::new(EventRepository::new(SessionDatabase::open(root).unwrap()))
+        ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root).unwrap()),
+            self.1.clone(),
+        )
+        .unwrap()
     }
 }
 impl Drop for Fixture {

@@ -2,7 +2,7 @@ use super::Fixture;
 use parrot_domain::protocol::messages::parrot::{
     AgentStarted, Event, RequestUsageRecorded, ToolExecutionStarted,
 };
-use parrot_storage::database::{Connection, extract_usage_keys, record_agent_start};
+use parrot_storage::database::{Connection, extract_usage_keys};
 use protobuf::Message;
 use rusqlite::params;
 
@@ -36,7 +36,7 @@ fn key_presence_is_oneof_specific_including_empty_keys() {
 }
 
 #[test]
-fn first_agent_start_fixes_lineage_during_writes_and_survives_reopen() {
+fn agent_start_facts_keep_their_original_identity_after_reopen() {
     let fixture = Fixture::new();
     let path = fixture.0.join("session.db");
     let mut connection = Connection::open(&path).unwrap();
@@ -58,21 +58,24 @@ fn first_agent_start_fixes_lineage_during_writes_and_survives_reopen() {
                 ],
             )
             .unwrap();
-        record_agent_start(&transaction, transaction.last_insert_rowid(), &event).unwrap();
     }
     transaction.commit().unwrap();
     drop(connection);
 
     let reopened = Connection::open(&path).unwrap();
-    let lineage: (String, String, String, i64) = reopened
-        .query_row(
-            "SELECT agent_session,parent_agent_session,name,event_sequence FROM agent_lineage",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
+    let mut read = reopened
+        .prepare("SELECT payload FROM event ORDER BY sequence")
         .unwrap();
+    let starts = read
+        .query_map([], |row| row.get::<_, Vec<u8>>(0))
+        .unwrap()
+        .map(|row| Event::parse_from_bytes(&row.unwrap()).unwrap())
+        .collect::<Vec<_>>();
     assert_eq!(
-        lineage,
-        ("child".into(), "old-parent".into(), "old".into(), 1)
+        starts,
+        [
+            start("original", "child", "old-parent", "old"),
+            start("later", "child", "new-parent", "new"),
+        ]
     );
 }

@@ -32,7 +32,22 @@ impl Fixture {
         } else {
             SessionDatabase::open(self.root()).unwrap()
         };
-        ConversationRepository::new(EventRepository::new(database))
+        {
+            let events = EventRepository::new(database);
+            let root = events.database().selected_root().clone();
+            let id = parrot_domain::values::identifiers::UserSessionId::parse(
+                root.path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+            .unwrap();
+            let metadata =
+                parrot_storage::history_files::SessionIndex::new(root.clone(), id, root.path())
+                    .unwrap();
+            ConversationRepository::new(events, metadata).unwrap()
+        }
     }
 }
 impl Drop for Fixture {

@@ -14,7 +14,7 @@ pub use repository::AppendOutcome;
 pub use terminal::{CloseTurnError, TurnClosure, TurnCommit, TurnKey};
 pub use types::*;
 
-use crate::database::{SessionDatabase, Transaction, extract_usage_keys, record_agent_start};
+use crate::database::{SessionDatabase, Transaction, extract_usage_keys};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::storage::{AdmissionError, CommitReceipt, CommitTicket, Committed};
 use parrot_domain::protocol::messages::parrot::Event;
@@ -193,7 +193,6 @@ pub fn record(
     let (request, call) = extract_usage_keys(event);
     tx.execute("INSERT INTO event (id, agent_session, payload, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",rusqlite::params![event.id,event.agent_session_id,bytes,at,request,call])?;
     let sequence = tx.last_insert_rowid();
-    record_agent_start(tx, sequence, event)?;
     Ok(StoredEvent {
         sequence,
         event: event.clone(),

@@ -21,31 +21,41 @@ fn project_system(
     )
 }
 impl ConversationRepository {
-    pub async fn session_state(
-        &self,
-        user_session: String,
-        requested_mode: String,
-    ) -> Result<(String, String), EventError> {
-        let generate = self.agent_session_id.clone();
-        self.events.transaction(move |tx| {
-            let agent = generate()?;
-            tx.execute("INSERT OR IGNORE INTO session_state (user_session, agent_session, mode) VALUES (?1, ?2, ?3);", params![user_session, agent, requested_mode])?;
-            Ok(tx.query_row("SELECT agent_session, mode FROM session_state WHERE user_session = ?1;", [user_session], |row| Ok((row.get(0)?, row.get(1)?)))?)
-        }).await
-    }
-    pub async fn update_mode(&self, user_session: String, mode: String) -> Result<(), EventError> {
-        self.events.transaction(move |tx| {
-            let revision: Option<i64> = tx.query_row("SELECT mode_revision FROM session_state WHERE user_session = ?1;", [&user_session], |row| row.get(0)).optional()?;
-            let revision = revision.ok_or_else(|| EventError::Invalid("session state does not exist".into()))?
-                .checked_add(1).ok_or_else(|| EventError::Invalid("mode revision overflow".into()))?;
-            tx.execute("UPDATE session_state SET mode = ?1, mode_revision = ?2 WHERE user_session = ?3;", params![mode, revision, user_session])?;
-            Ok(())
-        }).await
-    }
     pub async fn pending_status(&self, agent: String) -> Result<Option<PendingStatus>, EventError> {
-        self.events.transaction(move |tx| {
-            Ok(tx.query_row("SELECT mode, mode_revision FROM session_state WHERE agent_session = ?1 AND (status_revision IS NULL OR mode_revision > status_revision);", [agent], |row| Ok(PendingStatus { mode: row.get(0)?, version: row.get(1)? })).optional()?)
-        }).await
+        loop {
+            let state = self
+                .metadata
+                .read_session_state()
+                .map_err(|error| EventError::Invalid(error.to_string()))?;
+            if agent != state.root_agent_session_id {
+                return Ok(None);
+            }
+            let Some(guard) = self
+                .metadata
+                .guard_status(&agent, &state.mode)
+                .await
+                .map_err(|error| EventError::Invalid(error.to_string()))?
+            else {
+                continue;
+            };
+            let read_agent = agent.clone();
+            let (consumed, guard) = self.events.transaction(move |tx| {
+                let consumed: Option<i64> = tx.query_row(
+                    "SELECT MAX(mode_status_revision) FROM conversation_item WHERE agent_session = ?1 AND mode_status_revision IS NOT NULL;",
+                    [read_agent],
+                    |row| row.get(0),
+                )?;
+                Ok((consumed, guard))
+            }).await?;
+            drop(guard);
+            return match consumed {
+                Some(consumed) if consumed > state.mode.version => Err(EventError::Invalid(
+                    "consumed mode revision exceeds session metadata revision".into(),
+                )),
+                Some(consumed) if consumed == state.mode.version => Ok(None),
+                _ => Ok(Some(state.mode)),
+            };
+        }
     }
     pub async fn append_status_prompt(
         &self,
@@ -55,15 +65,38 @@ impl ConversationRepository {
     ) -> Result<bool, EventError> {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
+        let Some(guard) = self
+            .metadata
+            .guard_status(&agent, &expected)
+            .await
+            .map_err(|error| EventError::Invalid(error.to_string()))?
+        else {
+            return Ok(false);
+        };
         let refresh_agent = agent.clone();
         let context = self.events.context().clone();
-        let appended = self.events.transaction(move |tx| {
-            let pending: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM session_state WHERE agent_session = ?1 AND mode = ?2 AND mode_revision = ?3 AND (status_revision IS NULL OR mode_revision > status_revision));", params![agent, expected.mode, expected.version], |row| row.get(0))?;
-            if !pending { return Ok(false); }
-            project_system(tx, &context, &agent, content)?;
-            tx.execute("UPDATE session_state SET status_revision = ?1 WHERE agent_session = ?2;", params![expected.version, agent])?;
-            Ok(true)
+        let (appended, guard) = self.events.transaction(move |tx| {
+            let consumed: Option<i64> = tx.query_row(
+                "SELECT MAX(mode_status_revision) FROM conversation_item WHERE agent_session = ?1 AND mode_status_revision IS NOT NULL;",
+                [&agent],
+                |row| row.get(0),
+            )?;
+            if consumed.is_some_and(|revision| revision > expected.version) {
+                return Err(EventError::Invalid(
+                    "consumed mode revision exceeds session metadata revision".into(),
+                ));
+            }
+            if consumed == Some(expected.version) {
+                return Ok((false, guard));
+            }
+            let item = project_system(tx, &context, &agent, content)?;
+            tx.execute(
+                "UPDATE conversation_item SET mode_status_revision = ?1 WHERE sequence = ?2;",
+                params![expected.version, item.sequence],
+            )?;
+            Ok((true, guard))
         }).await?;
+        drop(guard);
         if appended {
             self.refresh_agent_history(&refresh_agent).await?;
         }
