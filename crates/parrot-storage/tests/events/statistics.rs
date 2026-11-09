@@ -92,7 +92,7 @@ async fn usage_fact_identity_and_per_agent_keys_are_exact_and_transactional() {
         let duplicate_tool = tool("tool-other", "agent", "", "request");
         assert!(matches!(append_usage_fact(tx, &duplicate_tool, &clock), Err(EventError::Invalid(_))));
         assert!(matches!(append_usage_fact(tx, &envelope("not-fact", "agent"), &clock), Err(EventError::Argument(message)) if message == "An individual usage fact is required."));
-        let counts: (i64, i64) = tx.query_row("SELECT (SELECT COUNT(*) FROM event), (SELECT COUNT(*) FROM request_history_anchor);", [], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let counts: (i64, i64) = tx.query_row("SELECT (SELECT COUNT(*) FROM event), (SELECT COUNT(*) FROM event WHERE history_anchor IS NOT NULL);", [], |row| Ok((row.get(0)?, row.get(1)?)))?;
         assert_eq!(counts, (3, 2));
         Ok(())
     }).await.unwrap();
@@ -149,6 +149,14 @@ async fn usage_fact_semantic_retry_preserves_original_wire_unknowns_and_optional
                     row.get(0)
                 })?;
             assert_eq!(stored, raw);
+            assert_eq!(
+                tx.query_row(
+                    "SELECT history_anchor FROM event WHERE id = 'raw';",
+                    [],
+                    |row| row.get::<_, Option<i64>>(0)
+                )?,
+                None
+            );
             let mut changed = fact.clone();
             changed.mut_request_usage_recorded().effort = Some(String::new());
             assert!(matches!(
@@ -223,7 +231,7 @@ async fn request_history_anchor_uses_agent_max_and_lookup_uses_latest_matching_r
         irrelevant.mut_request_usage_recorded().tool_call_ids = vec!["different".into()];
         append_usage_fact(tx, &irrelevant, &clock)?;
         append_usage_fact(tx, &request("other", "other", "", "other", 4), &clock)?;
-        let anchor: i64 = tx.query_row("SELECT history_sequence FROM request_history_anchor WHERE event_sequence = ?1;", [second], |row| row.get(0))?;
+        let anchor: i64 = tx.query_row("SELECT history_anchor FROM event WHERE sequence = ?1;", [second], |row| row.get(0))?;
         assert_eq!(anchor, 10); assert!(second > first);
         assert_eq!(find_request_usage(tx, "agent", "call")?.unwrap().request_id, "new");
         assert!(find_request_usage(tx, "agent", "absent")?.is_none());
@@ -681,7 +689,7 @@ async fn replay_uses_finished_failed_lineage_and_main_session_fallback_and_check
 async fn usage_fact_anchor_failure_rolls_back_the_preceding_event_insert() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
-    repository.transaction(|tx| { tx.execute_batch("CREATE TRIGGER reject_usage_anchor BEFORE INSERT ON request_history_anchor BEGIN SELECT RAISE(ABORT,'anchor injection'); END;")?; Ok(()) }).await.unwrap();
+    repository.transaction(|tx| { tx.execute_batch("CREATE TRIGGER reject_usage_anchor BEFORE UPDATE OF history_anchor ON event BEGIN SELECT RAISE(ABORT,'anchor injection'); END;")?; Ok(()) }).await.unwrap();
     let result = repository
         .transaction(|tx| {
             append_usage_fact(tx, &request("fact", "agent", "", "request", 1), &clock)
@@ -692,13 +700,13 @@ async fn usage_fact_anchor_failure_rolls_back_the_preceding_event_insert() {
     repository
         .transaction(|tx| {
             assert_eq!(
-                tx.query_row("SELECT COUNT(*) FROM request_history_anchor;", [], |row| {
+                tx.query_row("SELECT COUNT(*) FROM event WHERE history_anchor IS NOT NULL;", [], |row| {
                     row.get::<_, i64>(0)
                 })?,
                 0
             );
             assert_eq!(
-                tx.query_row("SELECT COUNT(*) FROM projection_version;", [], |row| row
+                tx.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('request_history_anchor', 'projection_version');", [], |row| row
                     .get::<_, i64>(0))?,
                 0
             );
@@ -707,4 +715,52 @@ async fn usage_fact_anchor_failure_rolls_back_the_preceding_event_insert() {
         .await
         .unwrap();
     repository.database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn usage_fact_embedded_anchors_survive_history_deletion_and_retry_without_recapture() {
+    use parrot_storage::conversation::{AgentHistoryEntry, ConversationRepository};
+
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    repository.transaction(|tx| {
+        let fact = request("zero-anchor", "agent", "", "zero", 7);
+        let bytes = fact.write_to_bytes()?;
+        let revision = append_usage_fact(tx, &fact, &clock)?;
+        tx.execute("INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at) VALUES (1,'agent','model','assistant','',?1),(2,'other','model','assistant','',?1);", [AT])?;
+        tx.execute("INSERT INTO agent_history(sequence,agent_session,kind,conversation_sequence,summary,watermark,created_at) VALUES (10,'agent','message',1,'',0,?1),(20,'other','message',2,'',0,?1);", [AT])?;
+        assert_eq!(append_usage_fact(tx, &fact, &clock)?, revision);
+        append_usage_fact(tx, &request("ten-anchor", "agent", "", "ten", 8), &clock)?;
+        append_usage_fact(tx, &request("other-anchor", "other", "", "other", 9), &clock)?;
+        append_usage_fact(tx, &tool("tool-only", "tool-agent", "", "call"), &clock)?;
+        let anchors = {
+            let mut read = tx.prepare("SELECT id, history_anchor FROM event ORDER BY sequence;")?;
+            read.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)))?.collect::<Result<Vec<_>, _>>()?
+        };
+        assert_eq!(anchors, vec![("zero-anchor".into(), Some(0)), ("ten-anchor".into(), Some(10)), ("other-anchor".into(), Some(20)), ("tool-only".into(), None)]);
+        tx.execute("DELETE FROM agent_history WHERE agent_session = 'agent';", [])?;
+        tx.execute("DELETE FROM conversation_item WHERE agent_session = 'agent';", [])?;
+        assert_eq!(append_usage_fact(tx, &fact, &clock)?, revision);
+        let stored: Vec<u8> = tx.query_row("SELECT payload FROM event WHERE sequence = ?1;", [revision], |row| row.get(0))?;
+        assert_eq!(stored, bytes);
+        let retained: Option<i64> = tx.query_row("SELECT history_anchor FROM event WHERE id = 'ten-anchor';", [], |row| row.get(0))?;
+        assert_eq!(retained, Some(10));
+        Ok(())
+    }).await.unwrap();
+    repository.database().close().await.unwrap();
+    let reopened = fixture.repository();
+    let conversation = ConversationRepository::new(reopened.clone());
+    assert_eq!(
+        conversation.agent_history_session_ids().await.unwrap(),
+        vec!["agent", "other"]
+    );
+    let history = conversation.agent_history("agent".into()).await.unwrap();
+    assert!(
+        matches!(&history[..], [AgentHistoryEntry::Request { sequence: 0, request_id: zero, .. }, AgentHistoryEntry::Request { sequence: 10, request_id: ten, .. }] if zero == "zero" && ten == "ten")
+    );
+    let other = conversation.agent_history("other".into()).await.unwrap();
+    assert!(
+        matches!(&other[..], [AgentHistoryEntry::Message { sequence: 20, .. }, AgentHistoryEntry::Request { sequence: 20, request_id, .. }] if request_id == "other")
+    );
+    reopened.database().close().await.unwrap();
 }

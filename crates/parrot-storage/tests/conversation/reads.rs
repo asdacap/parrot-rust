@@ -605,31 +605,20 @@ async fn compaction_tail_excludes_all_associated_status_items_not_just_current_s
 }
 
 #[tokio::test]
-async fn malformed_conversation_metadata_and_missing_item_are_observable_without_partial_projection()
- {
+async fn malformed_conversation_metadata_and_missing_item_are_observable_without_mutation() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    repo.events().transaction(|tx| { tx.execute("INSERT INTO message (agent_session, role, content, created_at) VALUES ('agent', 'unexpected', 'legacy', 'at')", [])?; Ok(()) }).await.unwrap();
+    repo.events().transaction(|tx| {
+        tx.execute("INSERT INTO conversation_item (agent_session,origin,role,tool_call_id,created_at) VALUES ('agent','model','unexpected','','at')", [])?;
+        Ok(())
+    }).await.unwrap();
     assert!(
         matches!(repo.conversation("agent".into()).await, Err(EventError::Invalid(message)) if message == "unknown conversation role unexpected")
     );
-    let counts = repo
-        .events()
-        .transaction(|tx| {
-            Ok((
-                tx.query_row("SELECT COUNT(*) FROM conversation_item", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
-                tx.query_row(
-                    "SELECT COUNT(*) FROM projection_version WHERE name = 'conversation'",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )?,
-            ))
-        })
-        .await
-        .unwrap();
-    assert_eq!(counts, (0, 0));
+    let state = repo.events().transaction(|tx| {
+        Ok(tx.query_row("SELECT role,(SELECT count(*) FROM conversation_item),(SELECT count(*) FROM agent_history) FROM conversation_item", [], |row| Ok((row.get::<_, String>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?)))?)
+    }).await.unwrap();
+    assert_eq!(state, ("unexpected".into(), 1, 0));
     assert!(
         matches!(repo.events().transaction(|tx| parrot_storage::conversation::reads::read_conversation_item(tx, 42)).await, Err(EventError::Invalid(message)) if message == "Conversation item 42 does not exist.")
     );

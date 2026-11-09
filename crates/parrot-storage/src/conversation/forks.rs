@@ -183,7 +183,6 @@ impl ConversationRepository {
                     "tool_execution_terminal",
                     "conversation_item",
                     "agent_history",
-                    "message",
                 ] {
                     tx.execute(
                         &format!("DELETE FROM {table} WHERE agent_session = ?1;"),

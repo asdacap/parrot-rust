@@ -1052,7 +1052,7 @@ async fn cleanup_keeps_events_usage_and_other_agents_while_removing_only_fork_st
         .events()
         .transaction(|tx| {
             Ok(tx.query_row(
-                "SELECT COUNT(*) FROM request_history_anchor WHERE agent_session='agent'",
+                "SELECT COUNT(*) FROM event WHERE agent_session='agent' AND request_id IS NOT NULL AND history_anchor IS NOT NULL",
                 [],
                 |row| row.get(0),
             )?)
@@ -1069,7 +1069,7 @@ async fn cleanup_keeps_events_usage_and_other_agents_while_removing_only_fork_st
         .events()
         .transaction(|tx| {
             Ok(tx.query_row(
-                "SELECT COUNT(*) FROM request_history_anchor WHERE agent_session='agent'",
+                "SELECT COUNT(*) FROM event WHERE agent_session='agent' AND request_id IS NOT NULL AND history_anchor IS NOT NULL",
                 [],
                 |row| row.get(0),
             )?)

@@ -24,7 +24,7 @@ pub fn include_request_history(
     after_request_event_sequence: i64,
     mut entries: Vec<AgentHistoryEntry>,
 ) -> Result<Vec<AgentHistoryEntry>, EventError> {
-    let mut read = tx.prepare("SELECT event.sequence, event.payload, COALESCE(anchor.history_sequence, 0) AS history_sequence FROM event LEFT JOIN request_history_anchor AS anchor ON anchor.event_sequence = event.sequence WHERE event.agent_session = ?1 AND event.request_id IS NOT NULL AND event.sequence > ?2 ORDER BY event.sequence;")?;
+    let mut read = tx.prepare("SELECT event.sequence, event.payload, COALESCE(event.history_anchor, 0) AS history_sequence FROM event WHERE event.agent_session = ?1 AND event.request_id IS NOT NULL AND event.sequence > ?2 ORDER BY event.sequence;")?;
     let mut rows = read.query(params![agent, after_request_event_sequence])?;
     while let Some(row) = rows.next()? {
         let event = Event::parse_from_bytes(&row.get::<_, Vec<u8>>(1)?)?;
@@ -59,7 +59,7 @@ pub fn include_request_history(
 impl ConversationRepository {
     pub async fn agent_history_session_ids(&self) -> Result<Vec<String>, EventError> {
         self.events.transaction(|tx| {
-            let mut read = tx.prepare("SELECT agent_session FROM agent_history UNION SELECT agent_session FROM request_history_anchor ORDER BY agent_session;")?;
+            let mut read = tx.prepare("SELECT agent_session FROM agent_history UNION SELECT agent_session FROM event WHERE request_id IS NOT NULL AND history_anchor IS NOT NULL ORDER BY agent_session;")?;
             Ok(read.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?)
         }).await
     }

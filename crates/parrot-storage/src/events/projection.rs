@@ -35,16 +35,23 @@ pub fn insert_conversation_item(
     at: &str,
 ) -> Result<(i64, bool), EventError> {
     let final_phase = read_latest_final_phase(tx, agent)?;
+    let provider_id = if message.provider_content.content.is_empty() {
+        ""
+    } else {
+        message.provider_content.provider_id.as_str()
+    };
     tx.execute(
-        "INSERT INTO conversation_item (agent_session, origin, role, tool_call_id, created_at, final_phase) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+        "INSERT INTO conversation_item (agent_session, origin, role, tool_call_id, created_at, final_phase, provider_id, provider_content) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);",
         params![
             agent,
             message.origin.as_str(),
             message.role.as_str(),
             message.tool_call_id,
             at,
-            final_phase
+            final_phase,
+            provider_id,
+            message.provider_content.content
         ],
     )?;
     Ok((tx.last_insert_rowid(), final_phase))
@@ -202,31 +209,12 @@ pub fn insert_tool_calls(
     Ok(())
 }
 
-pub fn insert_provider_content(
-    tx: &Transaction<'_>,
-    sequence: i64,
-    content: &ProviderContent,
-) -> Result<(), EventError> {
-    if !content.content.is_empty() {
-        tx.execute(
-            "INSERT INTO conversation_provider_content (item_sequence, provider, content) \
-             VALUES (?1, ?2, ?3);",
-            params![sequence, content.provider_id, content.content],
-        )?;
-    }
-    Ok(())
-}
-
 pub fn project(
     tx: &Transaction<'_>,
     agent: &str,
     message: &ConversationMessage,
     at: &str,
 ) -> Result<ConversationItem, EventError> {
-    tx.execute(
-        "INSERT INTO message (agent_session, role, content, created_at) VALUES (?1, ?2, ?3, ?4);",
-        params![agent, message.role.as_str(), content(&message.parts), at],
-    )?;
     let (sequence, final_phase) = insert_conversation_item(tx, agent, message, at)?;
     insert_parts(
         tx,
@@ -236,7 +224,6 @@ pub fn project(
         &message.parts,
     )?;
     insert_tool_calls(tx, sequence, &message.tool_calls)?;
-    insert_provider_content(tx, sequence, &message.provider_content)?;
     insert_agent_history_message(tx, agent, sequence, at)?;
     Ok(ConversationItem {
         sequence,
