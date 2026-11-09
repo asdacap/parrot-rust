@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     origin        TEXT NOT NULL,
     role          TEXT NOT NULL,
     tool_call_id  TEXT NOT NULL,
-    created_at    TEXT NOT NULL
+    created_at    TEXT NOT NULL,
+    final_phase   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS conversation_by_session
@@ -199,11 +200,6 @@ CREATE TABLE IF NOT EXISTS status_prompt (
 
 CREATE INDEX IF NOT EXISTS status_prompt_by_session
     ON status_prompt (agent_session, sequence);
-
-CREATE TABLE IF NOT EXISTS final_provider_request_prompt (
-    agent_session TEXT PRIMARY KEY,
-    created_at    TEXT NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS context_reminder (
     sequence        INTEGER PRIMARY KEY AUTOINCREMENT,

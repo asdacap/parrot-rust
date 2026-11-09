@@ -1,48 +1,56 @@
-//! R04 composition of nonempty skill results, not a replacement for T44's
-//! discovery, mention parsing, rendering or security algorithms.
+//! Skill preparation through the real core loop with raw native records.
 use super::*;
 use parrot_runtime::prompt_context::StaticSystemPrompt;
 use protobuf::Message;
 
-struct ScriptedSkills {
-    selections: Mutex<VecDeque<(String, SkillRendering)>>,
-    pending: Mutex<Option<SkillRendering>>,
+struct StoredSkills {
+    rows: Vec<(parrot_core::Skill, String)>,
+    reads: Mutex<Vec<String>>,
     beginnings: AtomicUsize,
 }
-impl TurnSkills for ScriptedSkills {
+impl TurnSkills for StoredSkills {
     fn begin_turn<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, PromptResult<()>> {
         Box::pin(async move {
-            assert!(self.pending.lock().unwrap().is_none());
             self.beginnings.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
     }
-    fn select<'a>(
+    fn get_skills<'a>(
         &'a self,
-        parts: &'a [ConversationPart],
+        references: &'a [parrot_core::SkillReference],
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<()>> {
+    ) -> BoxFuture<'a, PromptResult<Vec<Option<parrot_core::Skill>>>> {
         Box::pin(async move {
-            let (expected, rendering) = self.selections.lock().unwrap().pop_front().unwrap();
-            assert_eq!(parrot_storage::events::content(parts), expected);
-            assert!(self.pending.lock().unwrap().replace(rendering).is_none());
-            Ok(())
+            Ok(references
+                .iter()
+                .map(|reference| {
+                    self.rows
+                        .iter()
+                        .find(|(skill, _)| {
+                            skill.name == reference.name
+                                && reference
+                                    .path
+                                    .as_ref()
+                                    .is_none_or(|path| path == &skill.path || path == &skill.id)
+                        })
+                        .map(|(skill, _)| skill.clone())
+                })
+                .collect())
         })
     }
-    fn render<'a>(
+    fn read_skill_content<'a>(
         &'a self,
+        skill: &'a parrot_core::Skill,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<SkillRendering>> {
+    ) -> BoxFuture<'a, PromptResult<parrot_core::SkillContent>> {
         Box::pin(async move {
-            Ok(self
-                .pending
-                .lock()
-                .unwrap()
-                .take()
-                .unwrap_or(SkillRendering {
-                    content: String::new(),
-                    loaded_paths: vec![],
-                }))
+            let (_, content) = self
+                .rows
+                .iter()
+                .find(|(row, _)| row.id == skill.id)
+                .expect("skill body belongs to the stored record");
+            self.reads.lock().unwrap().push(skill.id.clone());
+            Ok(parrot_core::SkillContent::Text(content.clone()))
         })
     }
     fn end_turn(&self) -> BoxFuture<'_, ()> {
@@ -114,9 +122,10 @@ impl TurnTools<Security> for SettledTools {
 async fn skill_session(
     fixture: &Fixture,
     provider: Scripted,
-    skills: Arc<ScriptedSkills>,
+    skills: Arc<StoredSkills>,
     first_path: &str,
     second_path: &str,
+    templates: Arc<PromptTemplateCatalog>,
 ) -> AgentSession<RuntimeBackend<Security, SettledTools>> {
     let broker = Arc::new(EventBroker::new());
     let trace = Arc::new(Trace::default());
@@ -130,7 +139,6 @@ async fn skill_session(
         cancel_retry: AtomicBool::new(false),
         trace: trace.clone(),
     });
-    let templates = templates();
     let reminders = Arc::new(
         ExitReminders::new(
             fixture.history.clone(),
@@ -224,38 +232,25 @@ async fn selected_skill_context_follows_original_steer_and_new_turn_history_and_
         .join("skills/third/SKILL.md")
         .display()
         .to_string();
-    // Fixed source-shaped results, rather than copied T44 selection/rendering.
-    let first_body =
-        format!("<skill>\n<name>first</name>\n<path>{first_path}</path>\nFIRST BODY\n</skill>");
-    let second_body =
-        format!("<skill>\n<name>second</name>\n<path>{second_path}</path>\nSECOND BODY\n</skill>");
-    let third_body =
-        format!("<skill>\n<name>third</name>\n<path>{third_path}</path>\nTHIRD BODY\n</skill>");
-    let skills = Arc::new(ScriptedSkills {
-        selections: Mutex::new(VecDeque::from([
+    let skills = Arc::new(StoredSkills {
+        rows: [
+            ("first", first_path.clone(), "FIRST BODY"),
+            ("second", second_path.clone(), "SECOND BODY"),
+            ("third", third_path.clone(), "THIRD BODY"),
+        ]
+        .into_iter()
+        .map(|(name, path, body)| {
             (
-                "use $second then $second".into(),
-                SkillRendering {
-                    content: second_body,
-                    loaded_paths: vec![second_path.clone()],
+                parrot_core::Skill {
+                    id: path.clone(),
+                    name: name.into(),
+                    path,
                 },
-            ),
-            (
-                "also $first".into(),
-                SkillRendering {
-                    content: first_body.clone(),
-                    loaded_paths: vec![first_path.clone()],
-                },
-            ),
-            (
-                "next turn $first $third".into(),
-                SkillRendering {
-                    content: format!("{first_body}\n\n{third_body}"),
-                    loaded_paths: vec![first_path.clone(), third_path.clone()],
-                },
-            ),
-        ])),
-        pending: Mutex::new(None),
+                body.into(),
+            )
+        })
+        .collect(),
+        reads: Mutex::new(Vec::new()),
         beginnings: AtomicUsize::new(0),
     });
     let first_gate = Gate::new();
@@ -279,6 +274,7 @@ async fn selected_skill_context_follows_original_steer_and_new_turn_history_and_
         skills.clone(),
         &first_path,
         &second_path,
+        templates(),
     )
     .await;
     let first_send = send_skill_input(&session, "use $second then $second").await;
@@ -415,5 +411,79 @@ async fn selected_skill_context_follows_original_steer_and_new_turn_history_and_
     }
     assert_eq!(provider.requests.lock().unwrap().len(), 3);
     assert_eq!(skills.beginnings.load(Ordering::SeqCst), 2);
-    assert!(skills.selections.lock().unwrap().is_empty());
+    assert_eq!(
+        *skills.reads.lock().unwrap(),
+        [second_path, first_path.clone(), first_path, third_path]
+    );
+}
+
+#[tokio::test]
+async fn core_skill_context_uses_configured_minijinja_without_interpreting_skill_body() {
+    let fixture = Fixture::new();
+    let environment = [
+        ("HOME", "/skill-test/home"),
+        ("XDG_CONFIG_HOME", "/skill-test/config"),
+        ("XDG_STATE_HOME", "/skill-test/state"),
+        ("XDG_DATA_HOME", "/skill-test/data"),
+        ("WORKDIR", "/skill-test/work"),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.into(), value.into()))
+    .collect();
+    let templates = Arc::new(
+        PromptTemplateCatalog::from_content(
+            "prompt_templates:\n  context.skill-selected:\n    engine: minijinja\n    template: 'configured {{ name }} | {{ path }} | {{ content }}'\n    allowed_arguments: [name, path, content]\n    required_arguments: [name, path, content]\n",
+            &environment,
+        )
+        .unwrap()
+        .1,
+    );
+    let skills = Arc::new(StoredSkills {
+        rows: vec![(
+            parrot_core::Skill {
+                id: "physical-skill".into(),
+                name: "first".into(),
+                path: "logical<&>/SKILL.md".into(),
+            },
+            "body {{ untouched }}".into(),
+        )],
+        reads: Mutex::new(Vec::new()),
+        beginnings: AtomicUsize::new(0),
+    });
+    let provider = Scripted::new(vec![Step::complete("answer")]);
+    let session = skill_session(
+        &fixture,
+        provider.clone(),
+        skills.clone(),
+        "logical<&>/SKILL.md",
+        "unused",
+        templates,
+    )
+    .await;
+    let sent = send_skill_input(&session, "use $first").await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    bounded(session.close()).await.unwrap();
+
+    let expected = "configured first | logical&lt;&amp;&gt;/SKILL.md | body {{ untouched }}";
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].messages.last().unwrap().content(), expected);
+    }
+    assert!(
+        fixture
+            .history
+            .conversation()
+            .await
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item.message.role == MessageRole::User
+                    && parrot_storage::events::content(&item.message.parts) == expected
+            })
+    );
+    assert_eq!(*skills.reads.lock().unwrap(), ["physical-skill"]);
 }

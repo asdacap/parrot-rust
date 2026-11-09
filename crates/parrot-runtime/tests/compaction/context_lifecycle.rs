@@ -235,7 +235,7 @@ async fn candidate_reminder_that_crosses_trigger_compacts_instead_of_persisting_
 }
 
 #[tokio::test]
-async fn final_request_marker_restores_tools_once_after_projection_commit_and_reopen() {
+async fn final_request_flag_restores_tools_once_after_projection_commit_and_reopen() {
     let fixture = Fixture::new();
     let history = fixture.history();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
@@ -249,6 +249,16 @@ async fn final_request_marker_restores_tools_once_after_projection_commit_and_re
     );
     controller
         .inject_final_provider_request_prompt(&mut conversation, "final", &events, &NeverCancelled)
+        .await
+        .unwrap();
+    assert_eq!(conversation.messages().last().unwrap().content(), "final");
+    controller
+        .inject_final_provider_request_prompt(
+            &mut conversation,
+            "duplicate",
+            &events,
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     assert_eq!(conversation.messages().last().unwrap().content(), "final");

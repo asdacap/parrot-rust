@@ -13,6 +13,12 @@ use std::{
 mod support;
 use support::{Effects, Provider, message, plan};
 
+#[path = "compaction/fitting.rs"]
+mod fitting;
+
+#[path = "compaction/preparation.rs"]
+mod preparation;
+
 struct ThreadWake(thread::Thread);
 impl Wake for ThreadWake {
     fn wake(self: Arc<Self>) {

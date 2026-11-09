@@ -5,6 +5,7 @@ use parrot_storage::conversation::CompactionSnapshot;
 
 struct RacingStatus {
     history: AgentHistoryView,
+    observations: AtomicUsize,
 }
 impl ContextStatus for RacingStatus {
     fn observe<'a>(
@@ -12,29 +13,38 @@ impl ContextStatus for RacingStatus {
         _: &'a ContextSnapshot,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async { Ok("status".into()) })
+        Box::pin(async move {
+            let observed = self.observations.fetch_add(1, Ordering::SeqCst);
+            if observed == 0 {
+                return Ok("status".into());
+            }
+            if observed == 1 {
+                assert!(
+                    self.history
+                        .append_compaction_status(
+                            event("agent"),
+                            CompactionSnapshot {
+                                summary: "winner".into(),
+                                watermark: 1
+                            },
+                            "winner status".into()
+                        )
+                        .await?
+                );
+            }
+            Ok("fitted".into())
+        })
     }
     fn observe_fitted<'a>(
         &'a self,
         estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        _: &'a dyn Cancellation,
+        cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<String>> {
         Box::pin(async move {
-            let _ = estimate("fitted")?;
-            // A second real writer wins this watermark while status is being fitted.
-            assert!(
-                self.history
-                    .append_compaction_status(
-                        event("agent"),
-                        CompactionSnapshot {
-                            summary: "winner".into(),
-                            watermark: 1
-                        },
-                        "winner status".into()
-                    )
-                    .await?
-            );
-            Ok("fitted".into())
+            parrot_core::compaction::fit_status(estimate, |context| async move {
+                self.observe(&context, cancellation).await
+            })
+            .await
         })
     }
 }
@@ -63,6 +73,7 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
         } else {
             Box::new(RacingStatus {
                 history: history.clone(),
+                observations: AtomicUsize::new(0),
             })
         };
         let events = Events::new(history.clone());

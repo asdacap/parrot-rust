@@ -1,8 +1,17 @@
 use crate::{
-    BoxFuture, CancellationToken, Content, Error, ErrorCode, Message, ProviderRequest, Reasoning,
-    Role,
+    BoxFuture, CancellationToken, Content, ContextSnapshot, Error, ErrorCode, Message,
+    ProviderRequest, Reasoning, Role, ToolDefinition,
 };
 use std::fmt;
+
+mod fitting;
+mod planning;
+mod preparation;
+pub use fitting::{compact_conversation, fit_compaction, fit_status};
+pub use planning::{
+    CompactionConfiguration, CompactionPolicy, PlanningError, group_messages, is_complete,
+};
+pub use preparation::prepare_compaction;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactionGroup {
@@ -11,12 +20,53 @@ pub struct CompactionGroup {
 }
 
 impl CompactionGroup {
-    fn can_spill(&self) -> bool {
+    pub fn can_spill(&self) -> bool {
         self.is_complete
             && self.messages.first().is_some_and(|message| {
                 message.role == Role::Assistant && !message.tool_calls.is_empty()
             })
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionHistoryGroup {
+    pub messages: Vec<Message>,
+    pub end_watermark: i64,
+    pub has_checkpoint_before: bool,
+    pub is_complete: bool,
+}
+
+/// Captures durable history facts and the independent current provider-visible view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ConversationState {
+    pub summary: Option<ConversationSummary>,
+    /// Contains the chronological durable tail after the captured summary watermark.
+    pub history: Vec<ConversationHistoryItem>,
+    pub checkpoint_sequences: Vec<i64>,
+    pub messages: Vec<Message>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationSummary {
+    pub content: String,
+    pub watermark: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationHistoryItem {
+    pub sequence: i64,
+    pub tool_owner_sequence: Option<i64>,
+    pub is_compaction_status: bool,
+    pub message: Message,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionInput {
+    pub groups: Vec<CompactionHistoryGroup>,
+    pub base_watermark: i64,
+    pub instructions: String,
+    pub messages: Vec<Message>,
+    pub fixed_message: Message,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +77,8 @@ pub struct CompactionPlan {
     pub input_budget: i64,
     pub summary_output_tokens: i32,
     pub input_token_limit: i32,
+    pub instructions: String,
+    pub tools: Vec<ToolDefinition>,
     pub fixed_message: Message,
     pub summary_instructions: String,
     pub summary_prefix: String,
@@ -40,6 +92,56 @@ pub struct CompactionResult {
     pub summary: Message,
     pub retained_messages: usize,
     pub watermark: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FittedCompaction {
+    pub result: CompactionResult,
+    pub status: String,
+}
+
+/// Renders native status for exactly the context supplied by core.
+pub trait StatusRenderer: Send + Sync {
+    type Error: Send;
+
+    /// Observes and renders status without estimating, fitting, or persisting context.
+    fn render<'a, 'c>(
+        &'a self,
+        context: ContextSnapshot,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, Self::Error>>
+    where
+        'c: 'a;
+}
+
+/// Performs prompt and lifecycle effects without assembling compaction input.
+pub trait CompactionPreparationEffects: Send + Sync {
+    type Error: Send;
+
+    /// Publishes the start before preparation, independent of request cancellation.
+    fn report_started(&self) -> BoxFuture<'_, Result<(), Self::Error>>;
+    fn sample_epoch<'a, 'c>(
+        &'a self,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Self::Error>>
+    where
+        'c: 'a;
+    fn render_instructions<'a, 'c>(
+        &'a self,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, Self::Error>>
+    where
+        'c: 'a;
+    /// Publishes a preparation failure, independent of request cancellation.
+    fn report_failed(&self, message: String) -> BoxFuture<'_, Result<(), Self::Error>>;
+}
+
+pub struct CompactionDependencies<'a> {
+    pub configuration: &'a CompactionConfiguration,
+    pub preparation: &'a dyn CompactionPreparationEffects<Error = Error>,
+    pub effects: &'a mut dyn CompactionEffects<Error = Error>,
+    pub provider: &'a dyn SummaryProvider<Error = Error>,
+    pub status: &'a dyn StatusRenderer<Error = Error>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -60,6 +162,8 @@ pub enum CompactionFailure {
     GroupExceedsBudget,
     TokenOverflow,
     InputLimitExceeded,
+    FittedInputLimitExceeded,
+    NoSafeBoundary,
     NoSummary(String),
 }
 
@@ -71,8 +175,11 @@ impl fmt::Display for CompactionFailure {
                 "A complete conversation group exceeds the compaction input budget."
             }
             Self::TokenOverflow => "Token estimate overflow.",
-            Self::InputLimitExceeded => {
+            Self::InputLimitExceeded | Self::FittedInputLimitExceeded => {
                 "The compacted conversation exceeds the selected model input limit."
+            }
+            Self::NoSafeBoundary => {
+                "The conversation has no safe compaction boundary before the input limit."
             }
             Self::NoSummary(reason) => reason,
         })
@@ -111,13 +218,20 @@ pub trait CompactionEffects: Send + Sync {
         next_group: &[Message],
     ) -> Result<i64, Self::Error>;
     /// Estimates the complete replacement conversation, including instructions and tools.
-    fn estimate_context_tokens(&self, messages: &[Message]) -> Result<i64, Self::Error>;
-    /// Publishes the original group and returns notices containing the actual saved path.
-    fn spill_group(
-        &mut self,
+    fn estimate_context_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[ToolDefinition],
         messages: &[Message],
-        cancellation: CancellationToken<'_>,
-    ) -> Result<Vec<Message>, Self::Error>;
+    ) -> Result<i64, Self::Error>;
+    /// Publishes the original group and returns notices containing the actual saved path.
+    fn spill_group<'a, 'c>(
+        &'a mut self,
+        messages: &'a [Message],
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<Message>, Self::Error>>
+    where
+        'c: 'a;
     /// Publishes aggregate progress without disclosing summary content.
     fn report_progress<'a, 'c>(
         &'a self,
@@ -143,29 +257,8 @@ pub trait SummaryProvider: Send + Sync {
         'c: 'a;
 }
 
-pub struct PreparedCompaction<'a> {
-    pub plan: Option<CompactionPlan>,
-    pub effects: Box<dyn CompactionEffects<Error = Error> + 'a>,
-    pub provider: Box<dyn SummaryProvider<Error = Error> + 'a>,
-}
-
-impl PreparedCompaction<'_> {
-    pub async fn run(
-        mut self,
-        cancellation: CancellationToken<'_>,
-    ) -> Result<Option<CompactionResult>, Error> {
-        compact(
-            self.plan,
-            self.effects.as_mut(),
-            self.provider.as_ref(),
-            cancellation,
-        )
-        .await
-    }
-}
-
 /// Executes one safe-prefix plan, retaining atomic groups and joining every provider call.
-/// Native callers retain ownership of plan selection, lifecycle events, and persistence.
+/// Native callers retain lifecycle events and persistence. Core also exposes planning and fitting.
 pub async fn compact<E: From<CompactionFailure> + Send>(
     plan: Option<CompactionPlan>,
     effects: &mut dyn CompactionEffects<Error = E>,
@@ -211,7 +304,8 @@ impl<E: From<CompactionFailure> + Send> CompactionRunner<'_, '_, E> {
                 substituted[index] = true;
                 let notice = self
                     .effects
-                    .spill_group(&group.messages, self.cancellation)?;
+                    .spill_group(&group.messages, self.cancellation)
+                    .await?;
                 if self.effects.estimate_summary_tokens("", 0, &notice)? > plan.input_budget {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
                 }
@@ -246,7 +340,8 @@ impl<E: From<CompactionFailure> + Send> CompactionRunner<'_, '_, E> {
                 }
                 messages = self
                     .effects
-                    .spill_group(&pending[index].messages, self.cancellation)?;
+                    .spill_group(&pending[index].messages, self.cancellation)
+                    .await?;
                 substituted[index] = true;
                 if self
                     .effects
@@ -276,7 +371,11 @@ impl<E: From<CompactionFailure> + Send> CompactionRunner<'_, '_, E> {
         let retained_messages = retained.len();
         let mut history = vec![summary.clone(), plan.fixed_message.clone()];
         history.extend(retained);
-        if self.effects.estimate_context_tokens(&history)? > i64::from(plan.input_token_limit) {
+        if self
+            .effects
+            .estimate_context_tokens(&plan.instructions, &plan.tools, &history)?
+            > i64::from(plan.input_token_limit)
+        {
             return Err(CompactionFailure::InputLimitExceeded.into());
         }
         Ok(CompactionResult {

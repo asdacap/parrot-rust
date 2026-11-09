@@ -155,6 +155,124 @@ async fn row_counts(repo: &ConversationRepository, agent: &str) -> Vec<i64> {
 }
 
 #[tokio::test]
+async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_artifact_references() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let owner = assistant(&repo, "agent", "call", "set_checkpoint").await;
+    repo.record_checkpoint("agent".into(), "handoff".into(), owner, "call".into())
+        .await
+        .unwrap();
+    let between = append(&repo, "agent", message(MessageRole::User, "interleaved")).await;
+    settle(&repo, "agent", owner, "call").await;
+    let published = event("synthetic", "agent");
+    let synthetic = repo
+        .events()
+        .transaction(move |tx| {
+            tools::append_tool_synthetic(
+                tx,
+                &published,
+                owner,
+                &[ConversationPart::image("artifact", "image/png", "img")],
+                &|| "at".into(),
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    append(&repo, "other", message(MessageRole::User, "other agent")).await;
+
+    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert_eq!(state.snapshot, None);
+    assert_eq!(state.checkpoint_sequences, vec![owner]);
+    assert_eq!(state.items.len(), 4);
+    assert_eq!(state.items[0].item.sequence, owner);
+    assert_eq!(state.items[0].tool_owner_sequence, None);
+    assert_eq!(
+        state.items[0].item.message.provider_content.provider_id,
+        "provider"
+    );
+    assert_eq!(state.items[1].item.sequence, between);
+    assert_eq!(state.items[1].tool_owner_sequence, None);
+    assert_eq!(state.items[2].tool_owner_sequence, Some(owner));
+    assert_eq!(state.items[2].item.message.tool_call_id, "call");
+    assert_eq!(state.items[3].item, synthetic);
+    assert_eq!(state.items[3].tool_owner_sequence, Some(owner));
+    assert!(matches!(
+        &state.items[3].item.message.parts[0],
+        ConversationPart::ImageArtifact { artifact_id, .. } if artifact_id == "artifact"
+    ));
+    assert!(state.items.iter().all(|item| !item.is_compaction_status));
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_checkpoints() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let archived = assistant(&repo, "agent", "archived", "set_checkpoint").await;
+    repo.record_checkpoint(
+        "agent".into(),
+        "archived".into(),
+        archived,
+        "archived".into(),
+    )
+    .await
+    .unwrap();
+    let first = assistant(&repo, "agent", "first", "set_checkpoint").await;
+    repo.record_checkpoint("agent".into(), "handoff".into(), first, "first".into())
+        .await
+        .unwrap();
+    let latest = assistant(&repo, "agent", "latest", "set_checkpoint").await;
+    repo.record_checkpoint("agent".into(), "handoff".into(), latest, "latest".into())
+        .await
+        .unwrap();
+    let snapshot = CompactionSnapshot {
+        summary: "archived summary".into(),
+        watermark: archived,
+    };
+    repo.append_compaction_status(
+        event("status", "agent"),
+        snapshot.clone(),
+        "context status".into(),
+    )
+    .await
+    .unwrap();
+    settle(&repo, "agent", archived, "archived").await;
+    append(&repo, "agent", message(MessageRole::User, "tail")).await;
+
+    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert_eq!(state.snapshot, Some(snapshot));
+    assert_eq!(state.checkpoint_sequences, vec![latest]);
+    assert_eq!(state.items.len(), 5);
+    assert!(state.items.iter().all(|item| item.item.sequence > archived));
+    assert_eq!(state.items[0].item.sequence, first);
+    assert_eq!(state.items[1].item.sequence, latest);
+    assert!(state.items[2].is_compaction_status);
+    assert_eq!(single_text(&state.items[2].item), "context status");
+    assert_eq!(state.items[3].tool_owner_sequence, Some(archived));
+    assert_eq!(state.items[3].item.message.tool_call_id, "archived");
+    assert_eq!(single_text(&state.items[4].item), "tail");
+    assert_eq!(
+        state
+            .items
+            .iter()
+            .filter(|item| item.is_compaction_status)
+            .count(),
+        1
+    );
+    repo.events().database().close().await.unwrap();
+    let reopened = fixture.repository();
+    assert_eq!(
+        reopened
+            .read_conversation_state("agent".into())
+            .await
+            .unwrap(),
+        state
+    );
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn checkpoint_retries_conflicts_latest_before_and_active_compaction_boundary() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
@@ -478,6 +596,10 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
                 "INSERT INTO compaction_status VALUES ('agent',?1,?2)",
                 rusqlite::params![old, status],
             )?;
+            tx.execute(
+                "UPDATE conversation_item SET final_phase = 1 WHERE sequence = ?1;",
+                [status],
+            )?;
             Ok(())
         })
         .await
@@ -500,11 +622,14 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
                 watermark: 0
             })
         );
+        let copied_status = effective.status.unwrap();
+        assert!(copied_status.final_phase);
         assert_eq!(
-            effective.status.unwrap().message.parts,
+            copied_status.message.parts,
             vec![ConversationPart::text("status")]
         );
         assert_eq!(effective.groups.len(), 1);
+        assert!(!effective.groups[0].items[0].final_phase);
         assert_eq!(
             effective.groups[0].items[0].message.parts,
             vec![ConversationPart::text("tail")]

@@ -76,7 +76,7 @@ fn visible_user_and_tool_results_require_a_response_without_pending_input() {
             contents: vec![Content::Text("context only".into())],
             ..Message::default()
         });
-        state.messages = state.last_turn.as_ref().unwrap().messages.clone();
+        state.request().messages = state.last_turn.as_ref().unwrap().messages.clone();
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
         assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
@@ -132,43 +132,58 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     let token = CancellationToken::new(&is_cancelled, &cancelled);
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("first answer".into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.pending_messages.len(), 1);
     assert_eq!(state.final_requests, [0]);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("second answer".into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert!(state.pending_messages.is_empty());
     assert_eq!(state.capture_catalogs()[1], ["read"]);
-    assert_eq!(state.final_requests, [0]);
+    assert_eq!(state.final_requests, [0, 1]);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed(String::new()))
     );
@@ -225,9 +240,14 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
     let cancelled = || source.cancelled();
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
@@ -261,9 +281,14 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     let cancelled = || source.cancelled();
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
@@ -306,5 +331,134 @@ fn exit_blockers_retain_the_candidate_and_continue_without_pending_input() {
             .filter(|step| *step == "catalog")
             .count(),
         1
+    );
+}
+
+#[test]
+fn promotion_returns_exact_multimodal_input_without_request_preparation() {
+    let mut state = MemoryState::new([]);
+    state.pending_messages.clear();
+    state.fail_at = Some("render");
+    let message = Message {
+        role: Role::User,
+        contents: vec![
+            Content::Text("use $selected before the image".into()),
+            Content::Image {
+                path: "images/input.webp".into(),
+                url: "https://example.test/input.webp".into(),
+                media_type: "image/webp".into(),
+                width: 17,
+                height: 29,
+                bytes: Some(vec![0, 127, 255]),
+            },
+            Content::Text("after the image".into()),
+        ],
+        provider_id: "native-provider".into(),
+        provider_content: " { \"opaque\" : 1.2300 } ".into(),
+        ..Message::default()
+    };
+    state.pending_messages.push_back((
+        PendingMessage {
+            input_id: "promoted-input".into(),
+            message_id: "original-message".into(),
+            delivery: Delivery::Steer,
+        },
+        message.clone(),
+    ));
+
+    assert_eq!(
+        finish(state.promote_input(InputAdmission::SteersOnly)),
+        Ok(vec![PromotedInput {
+            input_id: "promoted-input".into(),
+            message_id: "original-message".into(),
+            message: message.clone(),
+        }])
+    );
+    assert!(state.pending_messages.is_empty());
+    assert_eq!(state.last_turn.as_ref().unwrap().messages, [message]);
+    assert!(state.skill_lookups.lock().unwrap().is_empty());
+    assert!(state.skill_reads.lock().unwrap().is_empty());
+    assert!(state.request().rendered_instructions.is_empty());
+    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.provider.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn skill_read_and_recording_failures_preserve_promoted_inputs_without_invoking_provider() {
+    for stage in [
+        "get_skills",
+        "read_skill_content",
+        "render_template",
+        "record_input_context",
+    ] {
+        let mut state = MemoryState::new([Reply::final_response("not invoked")]);
+        state.pending_messages.clear();
+        state.enqueue_message(Delivery::Steer, "use $selected");
+        state.fail_at = Some(stage);
+        state.skill_rows.push((
+            Skill {
+                id: "selected-row".into(),
+                name: "selected".into(),
+                path: "skills/selected/SKILL.md".into(),
+            },
+            SkillContent::Text("prepared skill body".into()),
+        ));
+
+        assert_eq!(state.run(), Err(Error::failed(stage)));
+        assert!(state.pending_messages.is_empty());
+        assert_eq!(
+            state.last_turn.as_ref().unwrap().messages[0].contents,
+            [Content::Text("use $selected".into())]
+        );
+        assert!(state.recorded_input_contexts.is_empty());
+        assert!(state.request().rendered_instructions.is_empty());
+        assert!(state.request().messages.is_empty());
+        assert!(state.provider.requests.lock().unwrap().is_empty());
+        assert!(state.tools.requests.lock().unwrap().is_empty());
+        assert!(!state.trace.values().iter().any(|step| step == "complete"));
+        assert_eq!(state.trace.values().last().unwrap(), stage);
+    }
+}
+
+#[test]
+fn empty_derived_context_records_no_message_or_loaded_paths() {
+    let mut state = MemoryState::new([]);
+    let original = state.last_turn.clone();
+    assert_eq!(
+        finish(state.record_input_context(&DerivedContext {
+            content: String::new(),
+            loaded_paths: vec!["unused/SKILL.md".into()],
+        })),
+        Ok(())
+    );
+    assert_eq!(state.last_turn, original);
+    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.request().messages.is_empty());
+    assert!(state.trace.values().is_empty());
+}
+
+#[test]
+fn core_loads_skill_rows_without_native_input_preparation() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.pending_messages.clear();
+    state.enqueue_message(Delivery::Steer, "use $selected");
+    state.skill_rows.push((
+        Skill {
+            id: "row-1".into(),
+            name: "selected".into(),
+            path: "/skills/selected/SKILL.md".into(),
+        },
+        SkillContent::Text("instructions from the skill row".into()),
+    ));
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.recorded_input_contexts.len(), 1);
+    assert_eq!(
+        state.recorded_input_contexts[0].content,
+        "<skill>\n<name>selected</name>\n<path>/skills/selected/SKILL.md</path>\ninstructions from the skill row\n</skill>"
+    );
+    assert_eq!(
+        state.recorded_input_contexts[0].loaded_paths,
+        ["/skills/selected/SKILL.md"]
     );
 }

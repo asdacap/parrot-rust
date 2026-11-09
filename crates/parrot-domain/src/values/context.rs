@@ -40,10 +40,16 @@ impl ContextSize {
     }
 
     pub fn resolve_tokens(&self, context_window: i32) -> Option<i64> {
-        if self.is_percentage {
-            (context_window > 0).then(|| i64::from(context_window) * self.value / 100)
+        parrot_core::ContextLimit::from(self).resolve_tokens(context_window)
+    }
+}
+
+impl From<&ContextSize> for parrot_core::ContextLimit {
+    fn from(size: &ContextSize) -> Self {
+        if size.is_percentage {
+            Self::Percentage(size.value)
         } else {
-            Some(self.value)
+            Self::Tokens(size.value)
         }
     }
 }
@@ -94,39 +100,21 @@ impl ContextCompactionPolicy {
         target_percent: i32,
         output_reserved_input_limit: Option<i64>,
     ) -> Self {
-        let trigger_tokens = match context_limit {
-            Some(limit) => cap_tokens(limit.resolve_tokens(context_window), input_limit),
-            None => {
-                (input_limit > 0).then(|| i64::from(input_limit) * i64::from(trigger_percent) / 100)
-            }
-        };
-        let target_tokens = match target_context_size {
-            Some(target) => cap_tokens(target.resolve_tokens(context_window), input_limit),
-            None if context_limit.is_none() => {
-                (input_limit > 0).then(|| i64::from(input_limit) * i64::from(target_percent) / 100)
-            }
-            None => trigger_tokens.map(|trigger| {
-                (trigger / 100)
-                    .wrapping_mul(i64::from(target_percent))
-                    .wrapping_add((trigger % 100) * i64::from(target_percent) / 100)
-            }),
-        };
-        let trigger_tokens = match (trigger_tokens, output_reserved_input_limit) {
-            (Some(trigger), Some(safe_input_limit)) => Some(trigger.min(safe_input_limit)),
-            (trigger, _) => trigger,
-        };
+        let context_limit = context_limit.map(Into::into);
+        let target_context_size = target_context_size.map(Into::into);
+        let policy = parrot_core::compaction::CompactionPolicy::resolve(
+            context_limit.as_ref(),
+            target_context_size.as_ref(),
+            context_window,
+            input_limit,
+            trigger_percent,
+            target_percent,
+            output_reserved_input_limit,
+        );
         Self {
-            trigger_tokens,
-            target_tokens,
+            trigger_tokens: policy.trigger_tokens,
+            target_tokens: policy.target_tokens,
         }
-    }
-}
-
-fn cap_tokens(tokens: Option<i64>, input_limit: i32) -> Option<i64> {
-    if input_limit > 0 {
-        tokens.map(|tokens| tokens.min(i64::from(input_limit)))
-    } else {
-        tokens
     }
 }
 

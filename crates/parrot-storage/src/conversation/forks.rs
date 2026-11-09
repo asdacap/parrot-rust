@@ -178,7 +178,6 @@ impl ConversationRepository {
             .transaction(move |tx| {
                 for table in [
                     "history_checkpoint",
-                    "final_provider_request_prompt",
                     "compaction_status",
                     "compaction_snapshot",
                     "tool_execution_terminal",
@@ -392,15 +391,21 @@ fn initialize_fork(
         if let Some(status) = &effective.status {
             let sequence =
                 projection::project(tx, destination, &status.message, &clock())?.sequence;
+            tx.execute(
+                "UPDATE conversation_item SET final_phase = ?1 WHERE sequence = ?2;",
+                params![status.final_phase, sequence],
+            )?;
             tx.execute("INSERT INTO compaction_status (agent_session, watermark, status_conversation_sequence) VALUES (?1, 0, ?2);", params![destination,sequence])?;
         }
     }
     for group in selected {
         for item in &group.items {
-            sequences.insert(
-                item.sequence,
-                projection::project(tx, destination, &item.message, &clock())?.sequence,
-            );
+            let sequence = projection::project(tx, destination, &item.message, &clock())?.sequence;
+            tx.execute(
+                "UPDATE conversation_item SET final_phase = ?1 WHERE sequence = ?2;",
+                params![item.final_phase, sequence],
+            )?;
+            sequences.insert(item.sequence, sequence);
         }
         if group.assistant_sequence == 0 {
             continue;

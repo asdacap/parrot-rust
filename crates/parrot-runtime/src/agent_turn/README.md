@@ -166,6 +166,13 @@ turn, injected survivor-only final tools and current selection/restoration on
 the next queued turn. Their inert `Security` and cloned definitions are not
 production tool-object identity or fresh per-invocation authority proof.
 
+`TurnFlags` carries `final_phase` without a separate entry flag. Each stored
+conversation item carries the current `final_phase` value, which ordinary appends
+inherit from the latest message. Final-request and tool-restoration notices check
+only that message and append a changed flag with the notice in one transaction.
+Duplicate notices append and publish nothing. Existing databases transfer any
+outstanding marker onto the latest message and remove the old marker table.
+
 ### Tool results after interruption or process death
 
 Historical tool calls are never scheduled for execution again. State restores saved
@@ -175,11 +182,18 @@ default, `The process crashed before the tool completed.`), with the existing
 `tool-result.error` formatting. Persistence precedes publication, and repeating
 restoration neither replaces completed results nor republishes their terminals.
 
-Only a newly recorded model response can stage a live execution batch. Interrupted
-or failed batches lose that live execution context; any missing results are closed
-as crash errors when conversation processing resumes. External effects may already
-have happened before the missing result, so the error does not imply a rollback.
-This policy supersedes earlier tool-replay behavior described in historical reports.
+`States::record_tool_calls` returns a `ToolCallReceipt` containing the durable
+assistant sequence. Core passes the receipt and turn flags to
+`Tools::execute`. `RuntimeTools` owns the original executable snapshots and stages
+the live batch when execution begins. Recording does not prepare the executor.
+Each execution chunk settles durably before the next chunk starts. Final result
+recording validates the complete batch and advances the conversation watermark.
+
+Interrupted or failed batches lose their live execution context. Any missing
+results are closed as crash errors when conversation processing resumes. External
+effects may already have happened before the missing result, so the error does not
+imply a rollback. This policy supersedes earlier tool-replay behavior described in
+historical reports.
 
 ### External versus inline context operations
 
@@ -224,10 +238,17 @@ surviving pending input. A new turn captures selection, begins the request budge
 and provider turn, durably emits `TurnStarted`, awaits epoch preparation, injects
 status/recaptures selection if requested, begins skills/restores tools and then
 promotes input. Steers promote together; one queue input promotes only with no
-steer and a nonanswerable conversation. Nonempty selected skill context follows
-its input in the implementation. The added bounded nonempty rendering fixture
-now proves exact body/steer/new-turn history and content-free event/path ordering
-without rerunning T44 discovery/parsing/security algorithms.
+steer and a nonanswerable conversation. Promotion returns the original inputs
+without selecting or rendering skills. Core parses skill mentions, reads metadata
+through `States::get_skills`, and deduplicates stable identities before reading
+bodies through `States::read_skill_content`. Native backing owns catalog lookup
+and authorized file reads. Core owns skill-context formatting, limits, and loaded
+paths. `Preparation` supplies instruction construction, token estimates, and
+primitive configured-template expansion. Core records the derived skill context
+through `States::record_input_context` before request-budget admission. Nonempty
+selected skill context follows its input. The placement fixture supplies raw
+records and proves core preparation, per-turn body-read deduplication, exact
+body/steer/new-turn history, and content-free event/path ordering.
 
 The lifecycle owns its drain independently of unary observers. FIFO reservations
 include predecessor callbacks; cancelled reservations retain position. Incoming
@@ -370,7 +391,7 @@ judgments, rather than inventing extra direct runs:
   Actual valid-JSON admission proves count1/durability and A003 supplies
   downstream ToolStarted; literal3 is the same direct length conversion.
 * **R07 restore/reopen:** actual T45
-  `compaction/context_lifecycle.rs::final_request_marker_restores_tools_once_after_projection_commit_and_reopen`
+  `compaction/context_lifecycle.rs::final_request_flag_restores_tools_once_after_projection_commit_and_reopen`
   plus T46's exact before-new-request controller call and actual next-turn
   budget/selection restoration prove the composition; no duplicate reopen suite.
 * **R09 failure propagation:** `RuntimeBackend::snapshot` directly propagates

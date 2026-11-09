@@ -27,17 +27,15 @@ pub use skills_discovery::{
     resolve_skill_roots,
 };
 mod agent_skills;
-pub use agent_skills::{AgentSkillPromptProvider, AgentSkills, SkillRendering};
+pub use agent_skills::{AgentSkillPromptProvider, AgentSkills};
 mod skills_rendering;
-pub use skills_rendering::{
-    MAXIMUM_CATALOG_BYTES, MAXIMUM_SKILL_BYTES, MAXIMUM_TURN_BYTES, render_skill_catalog,
-};
+pub use skills_rendering::{MAXIMUM_CATALOG_BYTES, render_skill_catalog};
 mod skills_parsing;
+pub use parrot_core::{SkillMention, parse_skill_mentions};
 pub use skills_parsing::{
-    SkillDisplayMetadata, SkillMention, SkillMetadata, SkillParseError, SkillRoot,
-    SkillRootLocation, SkillScope, normalize_skill_match_path, normalize_skill_path,
-    parse_skill_display_metadata, parse_skill_frontmatter, parse_skill_mentions, select_skills,
-    select_skills_in_directory, select_skills_on_platform,
+    SkillDisplayMetadata, SkillMetadata, SkillParseError, SkillRoot, SkillRootLocation, SkillScope,
+    normalize_skill_match_path, normalize_skill_path, parse_skill_display_metadata,
+    parse_skill_frontmatter,
 };
 
 pub use composition::{

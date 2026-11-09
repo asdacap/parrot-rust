@@ -470,7 +470,7 @@ async fn session_mode_status_rechecks_exact_version_and_rolls_back_projection_fa
 }
 
 #[tokio::test]
-async fn final_provider_marker_and_tool_restoration_roll_back_with_projected_messages() {
+async fn final_request_messages_and_tool_restoration_roll_back_with_projected_messages() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     assert!(
@@ -483,9 +483,10 @@ async fn final_provider_marker_and_tool_restoration_roll_back_with_projected_mes
         .await
         .unwrap();
     assert!(
-        repo.append_final_provider_request_prompt(event("same"), "duplicate".into())
+        !repo
+            .append_final_provider_request_prompt(event("same"), "duplicate".into())
             .await
-            .is_err()
+            .unwrap()
     );
     assert_eq!(count(&repo, "message").await, 1);
     fail_projection(&repo).await;
@@ -494,7 +495,14 @@ async fn final_provider_marker_and_tool_restoration_roll_back_with_projected_mes
             .await
             .is_err()
     );
-    assert_eq!(count(&repo, "final_provider_request_prompt").await, 1);
+    assert!(
+        repo.conversation("agent".into())
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .final_phase
+    );
     assert_eq!(count(&repo, "message").await, 1);
     resume_projection(&repo).await;
     assert!(
@@ -514,6 +522,71 @@ async fn final_provider_marker_and_tool_restoration_roll_back_with_projected_mes
     assert_eq!(count(&repo, "message").await, 3);
     assert_eq!(count(&repo, "event").await, 0);
     repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn final_request_state_survives_later_messages_and_reopen_without_duplicate_prompts() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    repo.append_final_provider_request_prompt(event("final"), "final".into())
+        .await
+        .unwrap();
+    for (id, role) in [
+        ("assistant", MessageRole::Assistant),
+        ("tool", MessageRole::Tool),
+        ("user", MessageRole::User),
+        ("system", MessageRole::System),
+    ] {
+        append(&repo, id, role, id).await;
+    }
+    repo.append_final_provider_request_prompt(event("duplicate"), "duplicate".into())
+        .await
+        .unwrap();
+    let messages = repo.conversation("agent".into()).await.unwrap();
+    assert_eq!(messages.len(), 5);
+    assert!(messages.iter().all(|item| item.final_phase));
+    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert_eq!(state.items.len(), 5);
+    assert!(state.items.iter().all(|item| item.item.final_phase));
+    repo.events().database().close().await.unwrap();
+
+    let reopened = fixture.repository();
+    assert_eq!(
+        reopened.conversation("agent".into()).await.unwrap(),
+        messages
+    );
+    assert!(
+        reopened
+            .append_tool_availability_restored_prompt(event("restored"), "restored".into())
+            .await
+            .unwrap()
+    );
+    assert!(
+        !reopened
+            .append_tool_availability_restored_prompt(event("duplicate"), "duplicate".into())
+            .await
+            .unwrap()
+    );
+    let restored = reopened.conversation("agent".into()).await.unwrap();
+    assert_eq!(restored.len(), 6);
+    assert!(!restored.last().unwrap().final_phase);
+    append(&reopened, "later", MessageRole::Assistant, "later").await;
+    assert!(
+        !reopened
+            .conversation("agent".into())
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .final_phase
+    );
+    assert!(
+        reopened
+            .append_final_provider_request_prompt(event("next-final"), "next final".into())
+            .await
+            .unwrap()
+    );
+    reopened.events().database().close().await.unwrap();
 }
 
 #[tokio::test]

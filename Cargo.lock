@@ -1424,6 +1424,7 @@ name = "parrot-domain"
 version = "0.0.0-dev"
 dependencies = [
  "bytes",
+ "parrot-core",
  "home",
  "protobuf",
  "protobuf-codegen",

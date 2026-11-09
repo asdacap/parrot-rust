@@ -396,14 +396,12 @@ impl SystemPrompt for EpochProduct {
     }
 }
 struct Status {
-    content: String,
     fitted: String,
     estimates: Mutex<Vec<ContextSnapshot>>,
 }
 impl Default for Status {
     fn default() -> Self {
         Self {
-            content: "status".into(),
             fitted: "fitted status".into(),
             estimates: Mutex::new(Vec::new()),
         }
@@ -417,7 +415,7 @@ impl ContextStatus for Status {
     ) -> BoxFuture<'a, ContextResult<String>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| ContextError::Cancelled)?;
-            Ok(self.content.clone())
+            Ok(self.fitted.clone())
         })
     }
     fn observe_fitted<'a>(

@@ -69,7 +69,12 @@ impl CompactionEffects for RecordedEffects {
         Ok(chunk_tokens + next_group.len() as i64)
     }
 
-    fn estimate_context_tokens(&self, _: &[Message]) -> Result<i64, NativeError> {
+    fn estimate_context_tokens(
+        &self,
+        _: &str,
+        _: &[parrot_core::ToolDefinition],
+        _: &[Message],
+    ) -> Result<i64, NativeError> {
         self.trace.lock().unwrap().push("fit");
         if self.fail_at == Some("fit") {
             Err(NativeError::Effect("fit"))
@@ -78,11 +83,14 @@ impl CompactionEffects for RecordedEffects {
         }
     }
 
-    fn spill_group(
-        &mut self,
-        _: &[Message],
-        _: CancellationToken<'_>,
-    ) -> Result<Vec<Message>, NativeError> {
+    fn spill_group<'a, 'c>(
+        &'a mut self,
+        _: &'a [Message],
+        _: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<Message>, NativeError>>
+    where
+        'c: 'a,
+    {
         panic!("these complete user groups must never spill")
     }
 
@@ -191,6 +199,8 @@ impl Fixture {
                 input_budget: 100,
                 summary_output_tokens: 10,
                 input_token_limit: 100,
+                instructions: String::new(),
+                tools: Vec::new(),
                 fixed_message: Message::default(),
                 summary_instructions: "summarize".into(),
                 summary_prefix: "summary: ".into(),

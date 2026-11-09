@@ -548,21 +548,11 @@ impl RuntimeStatus {
         mut estimate: impl FnMut(&str) -> Result<ContextSnapshot, StatusError>,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
-        let mut context = estimate("").map_err(OperationError::Failed)?;
-        let mut content = self
-            .observe_with_context(query, profile_prompt, context.clone(), cancellation)
-            .await?;
-        for _ in 0..8 {
-            let rendered = estimate(&content).map_err(OperationError::Failed)?;
-            if rendered == context {
-                break;
-            }
-            context = rendered;
-            content = self
-                .observe_with_context(query, profile_prompt, context.clone(), cancellation)
-                .await?;
-        }
-        Ok(content)
+        parrot_core::compaction::fit_status(
+            |content| estimate(content).map_err(OperationError::Failed),
+            |context| self.observe_with_context(query, profile_prompt, context, cancellation),
+        )
+        .await
     }
 }
 

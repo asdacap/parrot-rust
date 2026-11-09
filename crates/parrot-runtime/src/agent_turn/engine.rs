@@ -127,6 +127,7 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     selection: Arc<dyn SelectionSource<S>>,
     tools: Arc<T>,
     skills: Arc<dyn TurnSkills>,
+    templates: Arc<PromptTemplateCatalog>,
     status: Arc<dyn TurnStatus<S>>,
     completion_sources: Vec<Arc<dyn CompletionStateSource>>,
     output: Arc<dyn SessionOutput>,
@@ -141,7 +142,7 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     prompt: SessionPrompt,
     conversation: ConversationReadView,
     materialized_tools: std::sync::Mutex<Option<T::Snapshot>>,
-    planner: Arc<crate::compaction::CompactionPlanner>,
+    compactor: crate::compaction::Compactor,
     notices: Notices,
     execution_activity: std::sync::Mutex<Option<i64>>,
 }
@@ -213,6 +214,7 @@ where
             selection: config.selection,
             tools: config.tools,
             skills: config.skills,
+            templates: config.templates,
             status: config.status,
             completion_sources: config.completion_sources,
             output: config.output,
@@ -226,7 +228,7 @@ where
             prompt: SessionPrompt::new(config.prompt),
             conversation: conversation.read_view(),
             materialized_tools: std::sync::Mutex::new(None),
-            planner: config.context.compactor().planner_handle(),
+            compactor: config.context.compactor().clone(),
             state: Mutex::new(State {
                 conversation,
                 tool_conversation,
@@ -264,7 +266,8 @@ where
                     .iter()
                     .map(provider_message)
                     .collect::<Vec<_>>();
-                self.planner
+                self.compactor
+                    .planner()
                     .estimate_selected_context(&selection.model, instructions, &tools, &messages)
                     .map_err(TurnError::Planning)
             })
@@ -381,7 +384,7 @@ where
         state: &mut State,
         admission: parrot_core::InputAdmission,
         cancellation: &dyn Cancellation,
-    ) -> Result<(), TurnError> {
+    ) -> Result<Vec<parrot_core::PromotedInput>, TurnError> {
         let agent = self.identity.session_id.clone();
         let ids = self.event_id.clone();
         let mut promotions = self
@@ -420,51 +423,25 @@ where
                 })
                 .await?;
         }
+        let mut inputs = Vec::with_capacity(promotions.len());
         for promotion in promotions {
-            self.skills
-                .select(&promotion.input.parts, cancellation)
-                .await?;
             let contents = self.history.materialize(promotion.input.parts).await?;
-            state.conversation.add(ModelMessage {
+            let message = ModelMessage {
                 role: MessageRole::User,
                 contents,
                 tool_calls: Vec::new(),
                 tool_call_id: String::new(),
                 provider_content: ProviderContent::default(),
+            };
+            inputs.push(parrot_core::PromotedInput {
+                input_id: promotion.input.id,
+                message_id: promotion.input.message_id,
+                message: provider_message(&message).into(),
             });
+            state.conversation.add(message);
             self.publish(promotion.published, cancellation).await?;
         }
-        let rendering = self.skills.render(cancellation).await?;
-        if !rendering.content.is_empty() {
-            let mut event = self.event();
-            event.set_agent_notice(protocol::AgentNotice {
-                kind: "skill_context".into(),
-                ..Default::default()
-            });
-            self.history
-                .append_message(
-                    event.clone(),
-                    Some(ConversationMessage::text(
-                        MessageRole::User,
-                        &rendering.content,
-                    )),
-                    ConversationOrigin::System,
-                )
-                .await?;
-            state
-                .conversation
-                .add(text_message(MessageRole::User, rendering.content));
-            self.publish(event, cancellation).await?;
-            for path in rendering.loaded_paths {
-                let mut event = self.event();
-                event.set_skill_loaded(protocol::SkillLoadedEvent {
-                    path,
-                    ..Default::default()
-                });
-                self.emit(event, cancellation).await?;
-            }
-        }
-        Ok(())
+        Ok(inputs)
     }
     async fn retry_notice(
         &self,

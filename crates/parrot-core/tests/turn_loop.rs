@@ -1,15 +1,16 @@
 use parrot_core::{
     BoxFuture, CancellationToken, CompletionFeedback, Content, ContextCadence, ContextCompaction,
     ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
-    ConversationTurn, Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message,
-    Outcome, PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason,
-    Role, States, TokenCalibration, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult,
-    ToolStatus, Tools, TurnOptions,
-    budget::{TurnBudget, TurnRequestPhase},
-    run, run_turn,
+    ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, FinishReason,
+    InputAdmission, Message, Outcome, PendingMessage, Preparation, PromotedInput, Provider,
+    ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role, Skill, SkillContent,
+    SkillMention, SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
+    ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
+    budget::{TurnBudget, TurnFlags},
+    parse_skill_mentions, run, run_turn,
 };
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     future::Future,
     sync::{
         Arc, Mutex,
@@ -21,12 +22,16 @@ use std::{
 
 #[path = "turn_loop/cancellation.rs"]
 mod cancellation;
+#[path = "turn_loop/compaction_dependencies.rs"]
+mod compaction_dependencies;
 #[path = "turn_loop/completion_policy.rs"]
 mod completion_policy;
 #[path = "turn_loop/context_preparation.rs"]
 mod context_preparation;
 #[path = "turn_loop/request_assembly.rs"]
 mod request_assembly;
+#[path = "turn_loop/skills.rs"]
+mod skills;
 #[path = "turn_loop/tool_execution.rs"]
 mod tool_execution;
 #[path = "turn_loop/turn_state.rs"]
@@ -36,6 +41,7 @@ mod turn_state;
 mod compaction_support;
 
 use cancellation::CancellationSource;
+use compaction_dependencies::MemoryCompaction;
 
 struct ThreadWake(thread::Thread);
 impl Wake for ThreadWake {
@@ -130,6 +136,8 @@ struct MemoryTools {
     fail_at: Arc<Mutex<Option<&'static str>>>,
     requests: Arc<Mutex<Vec<Vec<ToolCall>>>>,
     replies: Arc<Mutex<VecDeque<Vec<ToolResult>>>>,
+    receipts: Arc<Mutex<Vec<ToolCallReceipt>>>,
+    flags: Arc<Mutex<Vec<TurnFlags>>>,
 }
 impl Tools for MemoryTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
@@ -154,11 +162,15 @@ impl Tools for MemoryTools {
     fn execute<'a>(
         &'a self,
         calls: Vec<ToolCall>,
+        receipt: ToolCallReceipt,
+        flags: TurnFlags,
         _cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             assert!(!calls.is_empty());
             self.requests.lock().unwrap().push(calls.clone());
+            self.receipts.lock().unwrap().push(receipt);
+            self.flags.lock().unwrap().push(flags);
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
                 return Ok(reply);
@@ -233,18 +245,39 @@ struct CompactedContext {
     reduced: bool,
 }
 
-struct MemoryState {
+struct MemoryRequestData {
+    rendered_instructions: Vec<String>,
+    estimates: Vec<InputEstimate>,
+    estimate_script: VecDeque<i64>,
+    estimated_input_tokens: i64,
+    context: MemoryContext,
+    instructions: String,
+    messages: Vec<Message>,
+    renderings: VecDeque<RenderedContext>,
+}
+
+#[derive(Clone)]
+struct MemoryPreparation {
     trace: Trace,
+    request: Arc<Mutex<MemoryRequestData>>,
+    skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
+    fail_at: Option<&'static str>,
+}
+
+struct MemoryState {
+    skill_rows: Vec<(Skill, SkillContent)>,
+    steers_after_results: VecDeque<String>,
+    skill_lookups: Mutex<Vec<SkillReference>>,
+    skill_reads: Mutex<Vec<String>>,
+    trace: Trace,
+    request: Arc<Mutex<MemoryRequestData>>,
+    skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
+    recorded_input_contexts: Vec<DerivedContext>,
     tools: MemoryTools,
     provider: MemoryProvider,
     exit_blockers: VecDeque<Vec<String>>,
     completion_feedback: Vec<CompletionFeedback>,
-    rendered_instructions: Vec<String>,
     final_requests: Vec<usize>,
-    recorded_phases: Vec<TurnRequestPhase>,
-    estimates: Mutex<Vec<InputEstimate>>,
-    estimate_script: Mutex<VecDeque<i64>>,
-    estimated_input_tokens: i64,
     retries: Vec<(RetryReason, i32)>,
     recorded_tools: Vec<ProviderResponse>,
     applied_results: Vec<ToolResult>,
@@ -253,10 +286,6 @@ struct MemoryState {
     reasoning: Option<Reasoning>,
     provider_preferences: String,
     include_router_metadata: bool,
-    context: MemoryContext,
-    instructions: String,
-    messages: Vec<Message>,
-    renderings: VecDeque<RenderedContext>,
     compactions: VecDeque<CompactedContext>,
     compacted_definitions: Vec<Vec<ToolDefinition>>,
     checkpoint: Option<ContextReminderCheckpoint>,
@@ -284,41 +313,28 @@ struct MemoryState {
     compaction_plan: Option<parrot_core::compaction::CompactionPlan>,
     summary_provider: compaction_support::Provider,
     recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
+    fitted_statuses: Vec<String>,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
+    fn request(&self) -> std::sync::MutexGuard<'_, MemoryRequestData> {
+        self.request.lock().unwrap()
+    }
+    fn preparation(&self) -> MemoryPreparation {
+        MemoryPreparation {
+            trace: self.trace.clone(),
+            request: self.request.clone(),
+            skill_templates: self.skill_templates.clone(),
+            fail_at: self.fail_at,
+        }
+    }
     fn new(replies: impl IntoIterator<Item = Reply>) -> Self {
         let trace = Trace::default();
-        let mut state = Self {
-            trace: trace.clone(),
-            tools: MemoryTools {
-                trace: trace.clone(),
-                fail_at: Arc::default(),
-                requests: Arc::default(),
-                replies: Arc::default(),
-            },
-            provider: MemoryProvider {
-                trace,
-                replies: Arc::new(Mutex::new(replies.into_iter().collect())),
-                fail_at: Arc::default(),
-                requests: Arc::default(),
-            },
-            exit_blockers: VecDeque::new(),
-            completion_feedback: Vec::new(),
+        let request = Arc::new(Mutex::new(MemoryRequestData {
             rendered_instructions: Vec::new(),
-            final_requests: Vec::new(),
-            recorded_phases: Vec::new(),
-            estimates: Mutex::default(),
-            estimate_script: Mutex::default(),
+            estimates: Vec::new(),
+            estimate_script: VecDeque::new(),
             estimated_input_tokens: 0,
-            retries: Vec::new(),
-            recorded_tools: Vec::new(),
-            applied_results: Vec::new(),
-            recorded_catalogs: Vec::new(),
-            model: "memory/model".into(),
-            reasoning: None,
-            provider_preferences: String::new(),
-            include_router_metadata: false,
             context: MemoryContext {
                 configuration: ContextConfiguration {
                     model: ContextModel {
@@ -336,6 +352,54 @@ impl MemoryState {
             instructions: "core request".into(),
             messages: Vec::new(),
             renderings: VecDeque::new(),
+        }));
+        let mut state = Self {
+            skill_rows: Vec::new(),
+            steers_after_results: VecDeque::new(),
+            skill_lookups: Mutex::default(),
+            skill_reads: Mutex::default(),
+            request,
+            skill_templates: Arc::new(Mutex::new([
+                (
+                    "context.skill-selected".into(),
+                    "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
+                ),
+                (
+                    "context.skill-unavailable".into(),
+                    "<skill-unavailable>\n<name>{name}</name>\n<message>{message}</message>\n</skill-unavailable>".into(),
+                ),
+                (
+                    "context.skill-too-large".into(),
+                    "<skill-too-large>\n<name>{name}</name>\n<path>{path}</path>\n<message>The skill instructions exceed the {limit_bytes}-byte injection limit and were not loaded.</message>\n</skill-too-large>".into(),
+                ),
+            ].into())),
+            recorded_input_contexts: Vec::new(),
+            trace: trace.clone(),
+            tools: MemoryTools {
+                trace: trace.clone(),
+                fail_at: Arc::default(),
+                requests: Arc::default(),
+                replies: Arc::default(),
+                receipts: Arc::default(),
+                flags: Arc::default(),
+            },
+            provider: MemoryProvider {
+                trace,
+                replies: Arc::new(Mutex::new(replies.into_iter().collect())),
+                fail_at: Arc::default(),
+                requests: Arc::default(),
+            },
+            exit_blockers: VecDeque::new(),
+            completion_feedback: Vec::new(),
+            final_requests: Vec::new(),
+            retries: Vec::new(),
+            recorded_tools: Vec::new(),
+            applied_results: Vec::new(),
+            recorded_catalogs: Vec::new(),
+            model: "memory/model".into(),
+            reasoning: None,
+            provider_preferences: String::new(),
+            include_router_metadata: false,
             compactions: VecDeque::new(),
             compacted_definitions: Vec::new(),
             checkpoint: None,
@@ -363,6 +427,7 @@ impl MemoryState {
             compaction_plan: None,
             summary_provider: compaction_support::Provider::new([]),
             recorded_compactions: Vec::new(),
+            fitted_statuses: Vec::new(),
             fail_at: None,
         };
         state.enqueue_message(Delivery::Queue, "question");
@@ -424,20 +489,24 @@ impl MemoryState {
         }
     }
     fn prime_context(&mut self, estimate: i64) {
-        self.context.configuration.model.context_window = 1000;
-        self.context.configuration.model.maximum_output_tokens = 1;
-        self.messages = vec![Message {
+        let mut request = self.request();
+        request.context.configuration.model.context_window = 1000;
+        request.context.configuration.model.maximum_output_tokens = 1;
+        request.messages = vec![Message {
             role: Role::User,
             contents: vec![Content::Text("question".into())],
             ..Message::default()
         }];
-        self.context.cadence.restore(None);
-        self.context
+        request.context.cadence.restore(None);
+        let configuration = request.context.configuration.clone();
+        let message_count = request.messages.len() as i64;
+        request
+            .context
             .cadence
             .observe(
-                &ContextSnapshot::estimate(estimate, &self.context.configuration),
-                &self.context.configuration.model.canonical_model,
-                self.messages.len() as i64,
+                &ContextSnapshot::estimate(estimate, &configuration),
+                &configuration.model.canonical_model,
+                message_count,
             )
             .unwrap();
     }
@@ -451,8 +520,9 @@ impl MemoryState {
             .collect()
     }
     fn capture_request_estimates(&self) -> Vec<InputEstimate> {
-        let estimates = self.estimates.lock().unwrap();
-        (0..self.rendered_instructions.len())
+        let request = self.request();
+        let estimates = &request.estimates;
+        (0..request.rendered_instructions.len())
             .map(|request_index| {
                 estimates
                     .iter()
@@ -471,13 +541,36 @@ impl MemoryState {
         self.run_with(&tools, &provider)
     }
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
+        let mut compaction =
+            MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
+        self.run_with_dependencies(tools, provider, &mut compaction.dependencies())
+    }
+    fn run_with_compaction(
+        &mut self,
+        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
+    ) -> Result<Outcome, Error> {
+        let tools = self.tools.clone();
+        let provider = self.provider.clone();
+        self.run_with_dependencies(&tools, &provider, compaction)
+    }
+    fn run_with_dependencies(
+        &mut self,
+        tools: &dyn Tools,
+        provider: &dyn Provider,
+        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
+    ) -> Result<Outcome, Error> {
         let cancellation = self.cancellation.clone();
         let is_cancelled = || cancellation.is_cancelled();
         let cancelled = || cancellation.cancelled();
         let options = self.capture_options();
         let mut budget = TurnBudget::new(self.unlimited);
+        let mut preparation = self.preparation();
         finish(run(
             self,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction,
+            },
             tools,
             provider,
             &options,
@@ -486,6 +579,60 @@ impl MemoryState {
         ))
     }
 }
+impl Preparation for MemoryPreparation {
+    fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error> {
+        self.trace.step("render_template", self.fail_at)?;
+        let templates = self.skill_templates.lock().unwrap();
+        let template = templates
+            .get(key)
+            .ok_or_else(|| Error::failed("unknown template"))?;
+        Ok(arguments
+            .iter()
+            .fold(template.clone(), |text, (name, value)| {
+                text.replace(&format!("{{{name}}}"), value)
+            }))
+    }
+    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async move {
+            self.trace.step("render", self.fail_at)?;
+            let mut request = self.request.lock().unwrap();
+            if let Some(rendered) = request.renderings.pop_front() {
+                request.instructions = rendered.instructions;
+                request.context.configuration.model.maximum_output_tokens =
+                    rendered.maximum_output_tokens;
+                request.messages = rendered.messages;
+            }
+            let instructions = request.instructions.clone();
+            request.rendered_instructions.push(instructions);
+            Ok(request.instructions.clone())
+        })
+    }
+    fn estimate_input_tokens<'a>(
+        &'a self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
+        messages: &'a [Message],
+    ) -> BoxFuture<'a, Result<i64, Error>> {
+        Box::pin(async move {
+            self.trace.step("estimate", self.fail_at)?;
+            let mut request = self.request.lock().unwrap();
+            let tokens = request
+                .estimate_script
+                .pop_front()
+                .unwrap_or(request.estimated_input_tokens);
+            let request_index = request.rendered_instructions.len().saturating_sub(1);
+            request.estimates.push(InputEstimate {
+                request_index,
+                instructions: instructions.into(),
+                definitions: definitions.to_vec(),
+                messages: messages.to_vec(),
+                tokens,
+            });
+            Ok(tokens)
+        })
+    }
+}
+
 impl States for MemoryState {
     fn record_tool_results<'a>(
         &'a mut self,
@@ -512,6 +659,9 @@ impl States for MemoryState {
                     ..Message::default()
                 });
             }
+            if let Some(steer) = self.steers_after_results.pop_front() {
+                self.enqueue_message(Delivery::Steer, &steer);
+            }
             Ok(())
         })
     }
@@ -537,7 +687,10 @@ impl States for MemoryState {
                 .map(|(message, _)| message.clone()))
         })
     }
-    fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>> {
+    fn promote_input(
+        &mut self,
+        admission: InputAdmission,
+    ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>> {
         Box::pin(async move {
             self.step("promote")?;
             self.admissions.push(admission);
@@ -547,16 +700,84 @@ impl States for MemoryState {
                 .iter()
                 .position(|(message, _)| message.delivery == Delivery::Steer)
             {
-                promoted.push(self.pending_messages.remove(index).unwrap().1);
+                promoted.push(self.pending_messages.remove(index).unwrap());
             }
             if promoted.is_empty() && admission == InputAdmission::SteersOrNextQueued {
-                promoted.extend(
-                    self.pending_messages
-                        .pop_front()
-                        .map(|(_, message)| message),
-                );
+                promoted.extend(self.pending_messages.pop_front());
             }
-            for message in promoted {
+            Ok(promoted
+                .into_iter()
+                .map(|(input, message)| {
+                    self.append_turn_message(message.clone());
+                    PromotedInput {
+                        input_id: input.input_id,
+                        message_id: input.message_id,
+                        message,
+                    }
+                })
+                .collect())
+        })
+    }
+    fn get_skills<'a>(
+        &'a self,
+        references: &'a [SkillReference],
+    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
+        Box::pin(async move {
+            self.trace.step("get_skills", self.fail_at)?;
+            self.skill_lookups
+                .lock()
+                .unwrap()
+                .extend_from_slice(references);
+            if self.fail_at == Some("cancel_get_skills") {
+                self.cancellation.cancel();
+            }
+            Ok(references
+                .iter()
+                .map(|reference| {
+                    self.skill_rows
+                        .iter()
+                        .find(|(skill, _)| {
+                            skill.name == reference.name
+                                && reference
+                                    .path
+                                    .as_ref()
+                                    .is_none_or(|path| path == &skill.path || path == &skill.id)
+                        })
+                        .map(|(skill, _)| skill.clone())
+                })
+                .collect())
+        })
+    }
+    fn read_skill_content<'a>(
+        &'a self,
+        skill: &'a Skill,
+    ) -> BoxFuture<'a, Result<SkillContent, Error>> {
+        Box::pin(async move {
+            self.trace.step("read_skill_content", self.fail_at)?;
+            self.skill_reads.lock().unwrap().push(skill.id.clone());
+            Ok(self
+                .skill_rows
+                .iter()
+                .find(|(row, _)| row.id == skill.id)
+                .unwrap()
+                .1
+                .clone())
+        })
+    }
+    fn record_input_context<'a>(
+        &'a mut self,
+        context: &'a DerivedContext,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            if !context.content.is_empty() {
+                self.step("record_input_context")?;
+                self.recorded_input_contexts.push(context.clone());
+                let message = Message {
+                    role: Role::User,
+                    contents: vec![Content::Text(context.content.clone())],
+                    ..Message::default()
+                };
+                self.request().messages.push(message.clone());
                 self.append_turn_message(message);
             }
             Ok(())
@@ -565,56 +786,20 @@ impl States for MemoryState {
     fn read_context_configuration(&self) -> BoxFuture<'_, Result<ContextConfiguration, Error>> {
         Box::pin(async move {
             self.trace.step("context_configuration", self.fail_at)?;
-            Ok(self.context.configuration.clone())
+            Ok(self.request().context.configuration.clone())
         })
     }
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
         Box::pin(async move {
             self.trace.step("token_calibration", self.fail_at)?;
-            Ok(self.context.calibration.clone())
-        })
-    }
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async move {
-            self.step("render")?;
-            if let Some(rendered) = self.renderings.pop_front() {
-                self.instructions = rendered.instructions;
-                self.context.configuration.model.maximum_output_tokens =
-                    rendered.maximum_output_tokens;
-                self.messages = rendered.messages;
-            }
-            self.rendered_instructions.push(self.instructions.clone());
-            Ok(self.instructions.clone())
-        })
-    }
-    fn estimate_input_tokens<'a>(
-        &'a self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
-        messages: &'a [Message],
-    ) -> BoxFuture<'a, Result<i64, Error>> {
-        Box::pin(async move {
-            self.trace.step("estimate", self.fail_at)?;
-            let tokens = self
-                .estimate_script
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or(self.estimated_input_tokens);
-            self.estimates.lock().unwrap().push(InputEstimate {
-                request_index: self.rendered_instructions.len().saturating_sub(1),
-                instructions: instructions.into(),
-                definitions: definitions.to_vec(),
-                messages: messages.to_vec(),
-                tokens,
-            });
-            Ok(tokens)
+            Ok(self.request().context.calibration.clone())
         })
     }
     fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.step("final_request")?;
-            self.final_requests.push(self.rendered_instructions.len());
+            let request_count = self.request().rendered_instructions.len();
+            self.final_requests.push(request_count);
             Ok(())
         })
     }
@@ -632,19 +817,22 @@ impl States for MemoryState {
                 return Ok(self.pending_prompt.clone());
             }
             self.step("context_cadence")?;
-            let mut cadence = self.context.cadence.clone();
+            let mut cadence = self.request().context.cadence.clone();
             if !cadence.is_restored() {
                 self.step("checkpoint")?;
                 cadence.restore(self.checkpoint.clone());
             }
-            let observation = cadence.observe(
-                context,
-                &self.context.configuration.model.canonical_model,
-                self.messages.len() as i64,
-            );
+            let (canonical_model, message_count) = {
+                let request = self.request();
+                (
+                    request.context.configuration.model.canonical_model.clone(),
+                    request.messages.len() as i64,
+                )
+            };
+            let observation = cadence.observe(context, &canonical_model, message_count);
             self.step("cadence")?;
             self.cadence_writes.push(cadence.clone());
-            self.context.cadence = cadence;
+            self.request().context.cadence = cadence;
             let Some(percentage) = observation? else {
                 return Ok(None);
             };
@@ -653,9 +841,16 @@ impl States for MemoryState {
                 .lock()
                 .unwrap()
                 .push((context.clone(), percentage));
+            let canonical_model = self
+                .request()
+                .context
+                .configuration
+                .model
+                .canonical_model
+                .clone();
             self.pending_reminder = Some((
                 ContextReminderCheckpoint {
-                    canonical_model: self.context.configuration.model.canonical_model.clone(),
+                    canonical_model,
                     context_limit: context.context_limit,
                     percentage,
                 },
@@ -685,7 +880,7 @@ impl States for MemoryState {
             }
             let message = self.pending_prompt.clone().unwrap();
             self.recorded_prompts.push(message.clone());
-            self.messages.push(message.clone());
+            self.request().messages.push(message.clone());
             self.append_turn_message(message);
             self.prompt_inserted = true;
             Ok(true)
@@ -699,15 +894,18 @@ impl States for MemoryState {
             self.step("acknowledge_prompt")?;
             self.acknowledged_prompts.push(context.clone());
             if self.pending_reminder.take().is_some() {
-                let mut cadence = self.context.cadence.clone();
-                cadence.acknowledge(
-                    context,
-                    &self.context.configuration.model.canonical_model,
-                    self.messages.len() as i64,
-                )?;
+                let mut cadence = self.request().context.cadence.clone();
+                let (canonical_model, message_count) = {
+                    let request = self.request();
+                    (
+                        request.context.configuration.model.canonical_model.clone(),
+                        request.messages.len() as i64,
+                    )
+                };
+                cadence.acknowledge(context, &canonical_model, message_count)?;
                 self.step("cadence")?;
                 self.cadence_writes.push(cadence.clone());
-                self.context.cadence = cadence;
+                self.request().context.cadence = cadence;
                 if self.prompt_inserted {
                     self.reminder_publications += 1;
                     self.step("publish_reminder")?;
@@ -722,42 +920,79 @@ impl States for MemoryState {
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async move {
             self.trace.step("messages", self.fail_at)?;
-            Ok(self.messages.clone())
+            Ok(self.request().messages.clone())
         })
     }
-    fn prepare_compaction<'a>(
-        &'a mut self,
-        definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<parrot_core::compaction::PreparedCompaction<'a>, Error>> {
+    fn read_conversation_state(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, Error>> {
         Box::pin(async move {
-            self.step("prepare_compaction")?;
-            self.compacted_definitions.push(definitions.to_vec());
-            Ok(parrot_core::compaction::PreparedCompaction {
-                plan: self.compaction_plan.clone(),
-                effects: Box::new(compaction_support::Effects::default()),
-                provider: Box::new(self.summary_provider.clone()),
+            self.trace.step("conversation_state", self.fail_at)?;
+            let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
+                (
+                    plan.groups
+                        .iter()
+                        .flat_map(|group| group.messages.clone())
+                        .collect::<Vec<_>>(),
+                    plan.watermark - plan.keep_group_from as i64 + 1,
+                )
+            } else {
+                (self.request().messages.clone(), 1)
+            };
+            let mut owners = std::collections::BTreeMap::new();
+            let history = messages
+                .into_iter()
+                .enumerate()
+                .map(|(index, message)| {
+                    let sequence = first_sequence + index as i64;
+                    let tool_owner_sequence = owners.get(&message.tool_call_id).copied();
+                    for call in &message.tool_calls {
+                        owners.insert(call.id.clone(), sequence);
+                    }
+                    parrot_core::compaction::ConversationHistoryItem {
+                        sequence,
+                        tool_owner_sequence,
+                        is_compaction_status: false,
+                        message,
+                    }
+                })
+                .collect();
+            Ok(parrot_core::compaction::ConversationState {
+                history,
+                messages: self.request().messages.clone(),
+                ..Default::default()
             })
         })
     }
-    fn record_compaction(
-        &mut self,
-        result: Result<Option<parrot_core::compaction::CompactionResult>, Error>,
-    ) -> BoxFuture<'_, Result<ContextCompaction, Error>> {
+    fn record_compaction<'a>(
+        &'a mut self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
+        result: Result<Option<parrot_core::compaction::FittedCompaction>, Error>,
+    ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async move {
             self.step("compact")?;
-            self.recorded_compactions.push(result.clone());
-            result?;
+            self.compacted_definitions.push(definitions.to_vec());
+            self.request().instructions = instructions.into();
+            self.recorded_compactions.push(
+                result
+                    .clone()
+                    .map(|result| result.map(|fitted| fitted.result)),
+            );
+            if let Some(fitted) = result? {
+                self.fitted_statuses.push(fitted.status);
+            }
             if let Some(compacted) = self.compactions.pop_front() {
-                self.instructions = compacted.instructions;
-                self.messages = compacted.messages;
-                self.context = compacted.state;
+                self.request().instructions = compacted.instructions;
+                self.request().messages = compacted.messages;
+                self.request().context = compacted.state;
                 return Ok(ContextCompaction {
-                    instructions: self.instructions.clone(),
+                    instructions: self.request().instructions.clone(),
                     reduced: compacted.reduced,
                 });
             }
             Ok(ContextCompaction {
-                instructions: self.instructions.clone(),
+                instructions: self.request().instructions.clone(),
                 reduced: self.reduced,
             })
         })
@@ -776,25 +1011,24 @@ impl States for MemoryState {
     fn record_tool_calls<'a>(
         &'a mut self,
         response: &'a ProviderResponse,
-        phase: TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<(), Error>> {
+    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>> {
         Box::pin(async move {
             self.step("record_tools")?;
-            self.recorded_phases.push(phase);
             self.recorded_tools.push(response.clone());
             self.append_response(response);
-            self.recorded_catalogs.push(
-                self.estimates
-                    .lock()
-                    .unwrap()
-                    .last()
-                    .expect("estimated provider request")
-                    .definitions
-                    .iter()
-                    .map(|definition| definition.name.clone())
-                    .collect(),
-            );
-            Ok(())
+            let catalog = self
+                .request()
+                .estimates
+                .last()
+                .expect("estimated provider request")
+                .definitions
+                .iter()
+                .map(|definition| definition.name.clone())
+                .collect();
+            self.recorded_catalogs.push(catalog);
+            Ok(ToolCallReceipt {
+                assistant_sequence: i64::try_from(self.recorded_tools.len()).unwrap(),
+            })
         })
     }
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
@@ -908,8 +1142,16 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
     let mut state = MemoryState::new((0..5).map(|_| Reply::tools("call")));
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.rendered_instructions.len(), 5);
-    assert!(state.recorded_phases.iter().all(|phase| phase.final_phase));
+    assert_eq!(state.request().rendered_instructions.len(), 5);
+    assert!(
+        state
+            .tools
+            .flags
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|flags| flags.final_phase)
+    );
     assert!(
         state
             .capture_catalogs()
@@ -917,7 +1159,7 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
             .all(|tools| tools == &["read"])
     );
     assert!(state.final_requests.contains(&0));
-    assert_eq!(state.final_requests, [0]);
+    assert_eq!(state.final_requests, [0, 1, 2, 3, 4]);
     assert_eq!(
         state
             .trace
@@ -944,7 +1186,7 @@ fn malformed_final_response_exhausts_the_request_limit_without_a_settlement_exte
     let mut state = MemoryState::new([Reply::invalid("bad")]);
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.rendered_instructions.len(), 1);
+    assert_eq!(state.request().rendered_instructions.len(), 1);
 }
 
 #[test]
@@ -959,9 +1201,14 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         let cancelled = || source.cancelled();
         let options = state.capture_options();
         let mut budget = TurnBudget::new(disable_limits);
+        let mut preparation = state.preparation();
         assert_eq!(
             finish(run(
                 &mut state,
+                &mut parrot_core::PreparationDependencies {
+                    request: &mut preparation,
+                    compaction: &mut MemoryCompaction::default().dependencies(),
+                },
                 &tools,
                 &provider,
                 &options,
@@ -976,7 +1223,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         );
         assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
         assert_eq!(
-            state.rendered_instructions.len(),
+            state.request().rendered_instructions.len(),
             if disable_limits { 2 } else { 1 }
         );
         assert!(state.capture_catalogs().iter().all(|tools| {
@@ -1038,7 +1285,7 @@ fn disabled_request_limits_keep_every_request_in_normal_phase() {
     state.unlimited = true;
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.rendered_instructions.len(), 3);
+    assert_eq!(state.request().rendered_instructions.len(), 3);
     assert!(
         state
             .capture_catalogs()
@@ -1048,9 +1295,12 @@ fn disabled_request_limits_keep_every_request_in_normal_phase() {
     assert!(state.final_requests.is_empty());
     assert!(
         state
-            .recorded_phases
+            .tools
+            .flags
+            .lock()
+            .unwrap()
             .iter()
-            .all(|phase| !phase.final_phase && !phase.enters_final_phase)
+            .all(|flags| !flags.final_phase)
     );
     assert_eq!(state.applied_results.len(), 2);
     assert!(
@@ -1105,7 +1355,7 @@ fn cleared_completion_blockers_close_only_the_final_candidate() {
     ]);
     state.exit_blockers.push_back(vec!["answer the ask".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("candidate2".into())));
-    assert_eq!(state.rendered_instructions.len(), 2);
+    assert_eq!(state.request().rendered_instructions.len(), 2);
     assert_eq!(state.completion_feedback.len(), 1);
     assert_eq!(
         state.completion_feedback[0].candidate.assistant_text,
@@ -1144,7 +1394,7 @@ fn successive_blocker_lists_retain_each_candidate_and_preserve_continuation() {
     state.exit_blockers.push_back(vec!["answer the ask".into()]);
     state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.rendered_instructions.len(), 3);
+    assert_eq!(state.request().rendered_instructions.len(), 3);
     assert_eq!(state.completion_feedback.len(), 2);
     assert_eq!(
         state.completion_feedback[0].candidate.assistant_text,
@@ -1176,7 +1426,7 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
             .count(),
         2
     );
-    assert_eq!(state.rendered_instructions.len(), 4);
+    assert_eq!(state.request().rendered_instructions.len(), 4);
 }
 
 #[test]
@@ -1200,7 +1450,7 @@ fn compaction_that_does_not_reduce_context_returns_the_original_provider_error()
     let mut state = MemoryState::new([Reply::TooLarge("original")]);
     state.reduced = false;
     assert_eq!(state.run(), Err(Error::request_too_large("original")));
-    assert_eq!(state.rendered_instructions.len(), 1);
+    assert_eq!(state.request().rendered_instructions.len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
 }
 
@@ -1234,18 +1484,23 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         include_router_metadata: true,
     };
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("first answer".into()))
     );
-    assert_eq!(state.rendered_instructions.len(), 5);
+    assert_eq!(state.request().rendered_instructions.len(), 5);
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 5);
     assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
     assert_eq!(state.applied_results.len(), 1);
@@ -1269,14 +1524,19 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         include_router_metadata: false,
     };
     state.enqueue_message(Delivery::Queue, "second question");
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("second answer".into()))
     );
@@ -1300,14 +1560,19 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 2);
 
     *tools.fail_at.lock().unwrap() = Some("catalog");
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed(String::new()))
     );
@@ -1333,9 +1598,14 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
@@ -1398,9 +1668,9 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
     state.maximum = 1;
     state.enqueue_message(Delivery::Queue, "second question");
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.rendered_instructions.len(), 6);
+    assert_eq!(state.request().rendered_instructions.len(), 6);
     assert!(state.final_requests.contains(&0));
-    assert_eq!(state.final_requests, [0]);
+    assert_eq!(state.final_requests, [0, 1, 2, 3, 4, 5]);
     assert_eq!(
         state
             .trace
@@ -1437,19 +1707,19 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     state.maximum = 2;
     state.exit_blockers.push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.rendered_instructions.len(), 9);
+    assert_eq!(state.request().rendered_instructions.len(), 9);
     let catalogs = state.capture_catalogs();
     assert_eq!(catalogs[0], ["read", "write"]);
     assert_eq!(catalogs[1], ["read"]);
     assert_eq!(catalogs[2], ["read"]);
     assert_eq!(catalogs[3], ["read", "write"]);
-    assert_eq!(state.final_requests, [1, 4]);
+    assert_eq!(state.final_requests, [1, 2, 4, 5, 6, 7, 8]);
     assert!(catalogs[4..].iter().all(|tools| tools == &["read"]));
-    assert!(state.recorded_phases[3].enters_final_phase);
+    assert!(state.tools.flags.lock().unwrap()[3].final_phase);
     assert!(
-        state.recorded_phases[4..]
+        state.tools.flags.lock().unwrap()[4..]
             .iter()
-            .all(|phase| phase.final_phase && !phase.enters_final_phase)
+            .all(|flags| flags.final_phase)
     );
     assert_eq!(state.completion_feedback.len(), 1);
     assert_eq!(
@@ -1483,7 +1753,15 @@ fn tools_and_provider_operate_without_states() {
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
     let cancellation = CancellationToken::new(&is_cancelled, &cancelled);
-    let results = finish(tools.execute(calls.clone(), cancellation)).unwrap();
+    let results = finish(tools.execute(
+        calls.clone(),
+        ToolCallReceipt {
+            assistant_sequence: 41,
+        },
+        TurnFlags { final_phase: false },
+        cancellation,
+    ))
+    .unwrap();
     assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(
         results,
@@ -1555,7 +1833,7 @@ fn different_provider_implementations_share_the_same_states_tools_and_protocol()
         Ok(Outcome::Completed("core request".into()))
     );
     assert!(states.provider.replies.lock().unwrap().is_empty());
-    assert_eq!(states.rendered_instructions.len(), 2);
+    assert_eq!(states.request().rendered_instructions.len(), 2);
 }
 
 #[test]
@@ -1563,8 +1841,8 @@ fn core_selects_phase_and_estimates_the_exact_advertised_tools() {
     let mut states = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     states.maximum = 2;
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(states.rendered_instructions.len(), 2);
-    assert!(!states.recorded_phases[0].final_phase);
+    assert_eq!(states.request().rendered_instructions.len(), 2);
+    assert!(!states.tools.flags.lock().unwrap()[0].final_phase);
     assert_eq!(states.final_requests, [1]);
     let requests = states.provider.requests.lock().unwrap();
     let estimates = states.capture_request_estimates();

@@ -93,6 +93,47 @@ async fn legacy_usage_keys_first_lineage_and_raw_bytes_survive_upgrade_reopen() 
     }
 }
 
+#[tokio::test]
+async fn final_request_marker_migrates_to_latest_message_and_is_removed() {
+    let fixture = Fixture::new();
+    let connection = Connection::open(fixture.0.join("session.db")).unwrap();
+    connection.execute_batch(
+        "CREATE TABLE conversation_item (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_session TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            role TEXT NOT NULL,
+            tool_call_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+         );
+         INSERT INTO conversation_item VALUES
+            (1, 'agent', 'system', 'system', '', 'first'),
+            (2, 'agent', 'model', 'assistant', '', 'last'),
+            (3, 'other', 'model', 'assistant', '', 'other');
+         CREATE TABLE final_provider_request_prompt (agent_session TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+         INSERT INTO final_provider_request_prompt VALUES ('agent', 'first');",
+    ).unwrap();
+    drop(connection);
+
+    for _ in 0..2 {
+        let database = SessionDatabase::open(fixture.root()).unwrap();
+        database.admit("flags", &active(), |tx| {
+            let mut read = tx.prepare("SELECT sequence, final_phase FROM conversation_item ORDER BY sequence;")?;
+            let flags = read.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(flags, [(1, false), (2, true), (3, false)]);
+            let marker_exists: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'final_provider_request_prompt');",
+                [],
+                |row| row.get(0),
+            )?;
+            assert!(!marker_exists);
+            Ok(())
+        }).unwrap().into_completion().await.unwrap();
+        database.close().await.unwrap();
+    }
+}
+
 #[test]
 fn key_presence_is_oneof_specific_including_empty_keys() {
     let mut event = Event::new();

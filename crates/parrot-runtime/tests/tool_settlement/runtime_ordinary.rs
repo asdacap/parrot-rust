@@ -102,6 +102,50 @@ async fn actual_runtime_invokes_retained_domain_tool_alias_and_next_provider_see
 }
 
 #[tokio::test]
+async fn actual_runtime_correlates_each_tool_batch_with_its_recorded_assistant() {
+    let fixture = Fixture::new();
+    let tool = Arc::new(RecordingTool::new(
+        &fixture,
+        "read",
+        ParallelSafety::Sequential,
+    ));
+    let [first, second] = ["first", "second"].map(|id| {
+        let mut step = Step::complete(id);
+        step.completion.as_mut().unwrap().tool_calls = vec![call(id, "read")];
+        step
+    });
+    let provider = Scripted::new(vec![first, second, Step::complete("answer")]);
+    let (session, _) = runtime::runtime(&fixture, &provider, vec![tool.clone().handle()]).await;
+    let sent = runtime::send(&session).await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let history = fixture.history.conversation().await.unwrap();
+    let recorded: Vec<_> = history
+        .iter()
+        .filter(|item| !item.message.tool_calls.is_empty())
+        .map(|item| (item.message.tool_calls[0].id.clone(), item.sequence))
+        .collect();
+    assert_eq!(recorded.len(), 2);
+    assert_ne!(recorded[0].1, recorded[1].1);
+    let executed: Vec<_> = fixture
+        .events()
+        .await
+        .into_iter()
+        .filter(|event| event.has_tool_execution_started())
+        .map(|event| {
+            let started = event.tool_execution_started();
+            (started.tool_call_id.clone(), started.assistant_sequence)
+        })
+        .collect();
+    assert_eq!(executed, recorded);
+    assert_eq!(tool.calls.lock().unwrap().len(), 2);
+    assert_eq!(provider.requests.lock().unwrap().len(), 3);
+    bounded(session.close()).await.unwrap();
+}
+
+#[tokio::test]
 async fn actual_runtime_executes_whole_mixed_batch_with_parallel_and_sequential_barriers() {
     let fixture = Fixture::new();
     let mut handles = Vec::new();

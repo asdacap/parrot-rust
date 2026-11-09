@@ -60,15 +60,68 @@ pub trait Tools: Send + Sync {
     /// Captures permitted definitions backed by the original executable identities
     /// for this turn. The final catalog is the subset permitted in the final phase.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
-    /// Executes the complete supplied batch using retained executable identities,
-    /// returning results in call order and joining all admitted work before returning,
-    /// including on failure. Scheduling and batch-local bookkeeping stay internal;
-    /// result recording belongs to [`States`].
+    /// Executes the recorded batch using retained executable identities for the
+    /// supplied turn flags and explicit durable assistant correlation. Returns results
+    /// in call order and joins all admitted work, including on failure. Native
+    /// adapters may settle chunks durably before returning the complete batch to [`States`].
     fn execute<'a>(
         &'a self,
         calls: Vec<ToolCall>,
+        receipt: ToolCallReceipt,
+        flags: budget::TurnFlags,
         cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromotedInput {
+    pub input_id: String,
+    pub message_id: String,
+    pub message: Message,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkillReference {
+    pub name: String,
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Skill {
+    /// Opaque, stable canonical identity used for turn-wide deduplication.
+    pub id: String,
+    pub name: String,
+    /// Presentation or discovery path, not the record identity or read authority.
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SkillContent {
+    Text(String),
+    Unavailable(String),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DerivedContext {
+    pub content: String,
+    pub loaded_paths: Vec<String>,
+}
+
+/// Prepares request content without recording conversation effects or invoking a model.
+pub trait Preparation: Send {
+    /// Expands one configured prompt template from supplied string arguments.
+    /// Does not look up or select skills, read their content, or persist context.
+    fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error>;
+    /// Renders current instructions while retaining native request-scoped bindings.
+    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
+    /// Estimates exactly the supplied request content using native tokenizer and
+    /// provider-specific costs, without choosing context or output limits.
+    fn estimate_input_tokens<'a>(
+        &'a self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
+        messages: &'a [Message],
+    ) -> BoxFuture<'a, Result<i64, Error>>;
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
@@ -84,23 +137,37 @@ pub trait States: Send {
     /// or materializing its content.
     fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>>;
     /// Promotes all currently pending steers, or one queued input when permitted,
-    /// preserving atomic native admission and batching its content effects.
-    fn promote_input(&mut self, admission: InputAdmission) -> BoxFuture<'_, Result<(), Error>>;
+    /// preserving atomic native admission and returning the promoted content explicitly.
+    /// Does not discover skills or prepare prompts.
+    fn promote_input(
+        &mut self,
+        admission: InputAdmission,
+    ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>>;
+    /// Retrieves skill metadata in one batch without reading instruction bodies.
+    /// Returns one result per reference in the supplied order, preserving backing-store
+    /// precedence and name/path matching semantics.
+    fn get_skills<'a>(
+        &'a self,
+        references: &'a [SkillReference],
+    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>>;
+    /// Reads the selected record's complete instruction body or unavailable diagnostic.
+    /// Does not format prompt text, update turn deduplication, or record context.
+    fn read_skill_content<'a>(
+        &'a self,
+        skill: &'a Skill,
+    ) -> BoxFuture<'a, Result<SkillContent, Error>>;
+    /// Records supplied derived content and loaded-path facts after preparation.
+    /// Empty content records and publishes nothing.
+    fn record_input_context<'a>(
+        &'a mut self,
+        context: &'a DerivedContext,
+    ) -> BoxFuture<'a, Result<(), Error>>;
     /// Reads raw model limits and context overrides without deciding whether to compact.
     fn read_context_configuration(&self) -> BoxFuture<'_, Result<ContextConfiguration, Error>>;
     /// Reads the current token calibration without choosing context or output limits.
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>>;
-    /// Renders current instructions while retaining native request-scoped bindings.
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
-    /// Estimates exactly the supplied request content using native tokenizer and
-    /// provider-specific costs, without choosing context or output limits.
-    fn estimate_input_tokens<'a>(
-        &'a self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
-        messages: &'a [Message],
-    ) -> BoxFuture<'a, Result<i64, Error>>;
-    /// Records and publishes the configured final-request context before preparation.
+    /// Ensures the configured final-request context is recorded before preparation.
+    /// Repeated calls do not append or publish duplicate notices.
     fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>>;
     /// Observes readiness and retains an optional steer or status prompt for fitting,
     /// without appending or publishing it. Source-specific cadence and rendering stay native.
@@ -119,31 +186,31 @@ pub trait States: Send {
     ) -> BoxFuture<'a, Result<(), Error>>;
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
-    /// Prepares a safe-prefix plan and scoped native effects for core-selected compaction.
-    /// Core constructs and invokes every summary request before recording the outcome.
-    fn prepare_compaction<'a>(
+    /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot,
+    /// plus current messages, without sampling prompts or preparing compaction input.
+    fn read_conversation_state(
+        &self,
+    ) -> BoxFuture<'_, Result<crate::compaction::ConversationState, Error>>;
+    /// Persists the fitted compaction with the supplied sampled instructions and tools,
+    /// awaiting terminal lifecycle effects on success or failure.
+    fn record_compaction<'a>(
         &'a mut self,
+        instructions: &'a str,
         definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<crate::compaction::PreparedCompaction<'a>, Error>>;
-    /// Applies the completed compaction and awaits terminal lifecycle effects on success
-    /// or failure, returning the sampled instructions and whether context was reduced.
-    fn record_compaction(
-        &mut self,
-        result: Result<Option<crate::compaction::CompactionResult>, Error>,
-    ) -> BoxFuture<'_, Result<ContextCompaction, Error>>;
+        result: Result<Option<crate::compaction::FittedCompaction>, Error>,
+    ) -> BoxFuture<'a, Result<ContextCompaction, Error>>;
     /// Records why a malformed or truncated tool response must be retried.
     fn record_retry(
         &mut self,
         reason: RetryReason,
         attempt: i32,
     ) -> BoxFuture<'_, Result<(), Error>>;
-    /// Durably records the assistant's tool calls before execution begins, retaining
-    /// the actual executable bindings for the supplied core-selected phase.
+    /// Durably records the assistant's tool calls and returns their correlation
+    /// for execution without preparing executable bindings or a live batch.
     fn record_tool_calls<'a>(
         &'a mut self,
         response: &'a ProviderResponse,
-        phase: budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<(), Error>>;
+    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>>;
     /// Reads ordered exit-blocker messages after accepted mutations have settled.
     /// Any nonempty list blocks completion, even when its messages are empty strings.
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>>;
@@ -265,6 +332,12 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments_json: String,
+}
+
+/// Correlates tool execution with the durably recorded assistant message.
+#[derive(Debug, Eq, PartialEq)]
+pub struct ToolCallReceipt {
+    pub assistant_sequence: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

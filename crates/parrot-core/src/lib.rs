@@ -4,13 +4,23 @@ pub mod budget;
 pub mod compaction;
 mod context;
 mod protocol;
+mod skills;
+use compaction::CompactionDependencies;
 pub use context::*;
 pub use protocol::*;
+pub use skills::{SkillMention, parse_skill_mentions};
+
+/// Borrows request preparation and independently configured compaction services.
+pub struct PreparationDependencies<'a, 'c> {
+    pub request: &'a mut dyn Preparation,
+    pub compaction: &'a mut CompactionDependencies<'c>,
+}
 
 /// Runs admission, response validation, retry, and completion using the caller-owned budget.
 /// The supplied settings apply to every execution turn drained by this call.
 pub async fn run<'a>(
     states: &mut dyn States,
+    preparation: &mut PreparationDependencies<'_, '_>,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
     options: &TurnOptions,
@@ -28,7 +38,17 @@ pub async fn run<'a>(
         {
             return Ok(Outcome::Completed(answer));
         }
-        match run_turn(states, tools, provider, options, budget, cancellation).await? {
+        match run_turn(
+            states,
+            preparation,
+            tools,
+            provider,
+            options,
+            budget,
+            cancellation,
+        )
+        .await?
+        {
             Outcome::Completed(completed) => answer = completed,
             Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
         }
@@ -38,6 +58,7 @@ pub async fn run<'a>(
 /// Runs one active execution turn using supplied settings and tools captured once.
 pub async fn run_turn<'a>(
     states: &mut dyn States,
+    preparation: &mut PreparationDependencies<'_, '_>,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
     options: &TurnOptions,
@@ -50,6 +71,7 @@ pub async fn run_turn<'a>(
     budget.begin_turn();
     let catalog = tools.capture_catalog().await?;
     let mut compacted_oversized = false;
+    let mut skills = skills::SkillPreparation::default();
     loop {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
@@ -60,25 +82,41 @@ pub async fn run_turn<'a>(
         } else {
             InputAdmission::SteersOrNextQueued
         };
-        states.promote_input(admission).await?;
-        let Some(phase) = budget.admit(options.maximum_requests) else {
+        let inputs = states.promote_input(admission).await?;
+        let context = skills
+            .prepare(states, preparation.request, &inputs, cancellation)
+            .await?;
+        states.record_input_context(&context).await?;
+        let Some(flags) = budget.admit(options.maximum_requests) else {
             return Ok(Outcome::BudgetExhausted);
         };
-        let definitions = if phase.final_phase {
+        let definitions = if flags.final_phase {
             &catalog.final_phase
         } else {
             &catalog.normal
         };
-        let request =
-            context::prepare_request(states, definitions, phase, options, cancellation).await?;
+        let request = context::prepare_request(
+            states,
+            preparation,
+            definitions,
+            flags,
+            options,
+            cancellation,
+        )
+        .await?;
         let attempt = budget.count_request();
         let response = match provider.invoke(request).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(states, definitions, cancellation)
-                    .await?
-                    .reduced
+                if !context::compact_context(
+                    states,
+                    preparation.compaction,
+                    definitions,
+                    cancellation,
+                )
+                .await?
+                .reduced
                 {
                     return Err(error);
                 }
@@ -104,15 +142,15 @@ pub async fn run_turn<'a>(
             continue;
         }
         if !response.tool_calls.is_empty() {
-            states.record_tool_calls(&response, phase).await?;
+            let receipt = states.record_tool_calls(&response).await?;
             let results = tools
-                .execute(response.tool_calls.clone(), cancellation)
+                .execute(response.tool_calls.clone(), receipt, flags, cancellation)
                 .await?;
             if results.is_empty() {
                 return Err(Error::failed("tool execution returned no results"));
             }
             states.record_tool_results(&results).await?;
-            if phase.final_phase && !budget.try_extend_settlement() {
+            if flags.final_phase && !budget.try_extend_settlement() {
                 return Ok(Outcome::BudgetExhausted);
             }
             continue;

@@ -32,6 +32,7 @@ fn read_message(
     origin: &str,
     role: &str,
     tool_call_id: String,
+    final_phase: bool,
 ) -> Result<ConversationItem, EventError> {
     let origin = parse_origin(origin)?;
     let role = parse_role(role)?;
@@ -61,6 +62,7 @@ fn read_message(
         .unwrap_or_default();
     Ok(ConversationItem {
         sequence,
+        final_phase,
         message: ConversationMessage {
             origin,
             role,
@@ -78,21 +80,22 @@ pub fn read_conversation_item(
 ) -> Result<ConversationItem, EventError> {
     let item = tx
         .query_row(
-            "SELECT origin, role, tool_call_id FROM conversation_item WHERE sequence = ?1;",
+            "SELECT origin, role, tool_call_id, final_phase FROM conversation_item WHERE sequence = ?1;",
             [sequence],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
                 ))
             },
         )
         .optional()?;
-    let (origin, role, call) = item.ok_or_else(|| {
+    let (origin, role, call, final_phase) = item.ok_or_else(|| {
         EventError::Invalid(format!("Conversation item {sequence} does not exist."))
     })?;
-    read_message(tx, sequence, &origin, &role, call)
+    read_message(tx, sequence, &origin, &role, call, final_phase)
 }
 fn read_selected(
     tx: &Transaction<'_>,
@@ -101,9 +104,9 @@ fn read_selected(
     tail: bool,
 ) -> Result<Vec<ConversationItem>, EventError> {
     let sql = if tail {
-        "SELECT item.sequence, item.origin, item.role, item.tool_call_id FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence;"
+        "SELECT item.sequence, item.origin, item.role, item.tool_call_id, item.final_phase FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence;"
     } else {
-        "SELECT sequence, origin, role, tool_call_id FROM conversation_item WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;"
+        "SELECT sequence, origin, role, tool_call_id, final_phase FROM conversation_item WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;"
     };
     let mut read = tx.prepare(sql)?;
     let mut rows = read.query(params![agent, watermark])?;
@@ -115,6 +118,7 @@ fn read_selected(
             &row.get::<_, String>(1)?,
             &row.get::<_, String>(2)?,
             row.get(3)?,
+            row.get(4)?,
         )?);
     }
     Ok(items)
@@ -135,6 +139,55 @@ pub fn read_compaction_tail(
 }
 
 impl ConversationRepository {
+    /// Captures a summary and its flat durable tail with stored ownership and checkpoint facts.
+    pub async fn read_conversation_state(
+        &self,
+        agent: String,
+    ) -> Result<ConversationHistorySnapshot, EventError> {
+        self.events
+            .transaction(move |tx| {
+                ensure_conversation_projection(tx)?;
+                let snapshot = super::compaction::read_snapshot(tx, &agent)?;
+                let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
+                let mut owners = std::collections::BTreeMap::new();
+                let mut read = tx.prepare("SELECT assistant_sequence, item_sequence FROM tool_batch_result WHERE agent_session = ?1 AND item_sequence > ?2 UNION ALL SELECT assistant_sequence, item_sequence FROM tool_batch_synthetic WHERE agent_session = ?1 AND item_sequence > ?2;")?;
+                for row in read.query_map(params![agent, watermark], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                })? {
+                    let (owner, child) = row?;
+                    owners.insert(child, owner);
+                }
+                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence), item.final_phase FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
+                let mut rows = read.query(params![agent, watermark])?;
+                let mut items = Vec::new();
+                while let Some(row) = rows.next()? {
+                    let sequence = row.get(0)?;
+                    items.push(ConversationHistoryItem {
+                        item: read_message(
+                            tx,
+                            sequence,
+                            &row.get::<_, String>(1)?,
+                            &row.get::<_, String>(2)?,
+                            row.get(3)?,
+                            row.get(5)?,
+                        )?,
+                        tool_owner_sequence: owners.get(&sequence).copied(),
+                        is_compaction_status: row.get(4)?,
+                    });
+                }
+                let mut read = tx.prepare("SELECT DISTINCT checkpoint.assistant_sequence FROM history_checkpoint AS checkpoint JOIN (SELECT title, MAX(sequence) AS sequence FROM history_checkpoint WHERE agent_session = ?1 GROUP BY title) AS latest ON latest.sequence = checkpoint.sequence WHERE checkpoint.agent_session = ?1 AND checkpoint.assistant_sequence > ?2 ORDER BY checkpoint.assistant_sequence;")?;
+                let checkpoint_sequences = read
+                    .query_map(params![agent, watermark], |row| row.get(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(ConversationHistorySnapshot {
+                    snapshot,
+                    items,
+                    checkpoint_sequences,
+                })
+            })
+            .await
+    }
+
     /// Captures the current conversation boundary for a new public execution.
     pub async fn execution_watermark(&self, agent: String) -> Result<i64, EventError> {
         self.events.transaction(move |tx| {
