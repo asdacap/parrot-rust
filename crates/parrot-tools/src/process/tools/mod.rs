@@ -66,6 +66,7 @@ pub struct ProcessToolServices<L: CapturedProcessLauncher<Request = CommandReque
     pub resolver: Arc<dyn ProcessResolver>,
     pub workspace: Arc<dyn ProcessWorkspace>,
     pub read_only_prefixes: Vec<String>,
+    pub exec_command_yield_after: Duration,
     pub templates: Arc<PromptTemplateCatalog>,
     pub monitor_sink: Arc<dyn MonitorSink>,
 }
@@ -294,7 +295,11 @@ where
                     .await?;
                 let outcome = process
                     .wait(
-                        input.yield_after_ms.map(Duration::from_millis),
+                        Some(if input.run_async {
+                            Duration::ZERO
+                        } else {
+                            self.services.exec_command_yield_after
+                        }),
                         cancellation,
                     )
                     .await?;

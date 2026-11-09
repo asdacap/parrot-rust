@@ -188,6 +188,7 @@ pub struct RuntimeSettings {
     /// -1 denotes the source's infinite timeout; all other values are positive milliseconds.
     pub user_input_timeout_ms: i32,
     pub agent_ask_timeout_ms: i32,
+    pub exec_command_yield_after_ms: i32,
     pub request_limits: RequestLimitsConfig,
     pub web_fetch_allow_private: bool,
     pub image_upload: Option<ImageUploadConfig>,
@@ -232,6 +233,11 @@ impl RuntimeSettings {
         let user_input_timeout_ms = read_input_timeout(root, user_root)?;
         let agent_ask_timeout_ms =
             positive_integer(root, "agent_ask_timeout_ms", "agent_ask_timeout_ms")?;
+        let exec_command_yield_after_ms = positive_integer(
+            root,
+            "exec_command_yield_after_ms",
+            "exec_command_yield_after_ms",
+        )?;
         let live_buffer_rows = positive_integer(root, "live_buffer_rows", "live_buffer_rows")?;
         let compaction = read_compaction(root)?;
         let agent_tasks = read_agent_tasks(root)?;
@@ -266,6 +272,7 @@ impl RuntimeSettings {
             live_buffer_rows,
             user_input_timeout_ms,
             agent_ask_timeout_ms,
+            exec_command_yield_after_ms,
             request_limits,
             web_fetch_allow_private,
             image_upload,
@@ -308,6 +315,7 @@ impl RuntimeSettings {
             "agentSend":{"toParent":self.agent_send_to_parent},"toolDefinitions":tools,
             "agentLimits":{"disableMaxTurns":self.agent_limits.disable_max_turns,"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
             "liveBufferRows":self.live_buffer_rows,"userInputTimeoutMs":self.user_input_timeout_ms,
+            "execCommandYieldAfterMs":self.exec_command_yield_after_ms,
             "requestLimits":{"imageBytesPerToolCycle":self.request_limits.image_bytes_per_tool_cycle,"imageBytesPerRead":self.request_limits.image_bytes_per_read,"providerRequestBytes":self.request_limits.provider_request_bytes},
             "webFetch":{"allowPrivate":self.web_fetch_allow_private},"imageUpload":upload,
             "skills":{"enabled":self.skills.enabled,"entries":self.skills.entries.iter().map(|entry|json!({"path":entry.path,"enabled":entry.enabled})).collect::<Vec<_>>()}

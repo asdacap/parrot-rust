@@ -318,11 +318,15 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_configuration("")
+    }
+
+    fn with_configuration(content: &str) -> Self {
         let directory = Directory::new();
         let environment =
             BTreeMap::from([("HOME".into(), directory.0.to_string_lossy().into_owned())]);
         let (configuration, templates) =
-            PromptTemplateCatalog::from_content("", &environment).unwrap();
+            PromptTemplateCatalog::from_content(content, &environment).unwrap();
         let definitions = ToolDefinitionCatalog::new(
             &configuration
                 .runtime
@@ -415,6 +419,9 @@ impl Fixture {
                 .read_only_exec_command_prefixes
                 .as_slice()
                 .to_vec(),
+            exec_command_yield_after: Duration::from_millis(
+                configuration.runtime.exec_command_yield_after_ms as u64,
+            ),
             templates,
             monitor_sink: sink.clone(),
         });
@@ -537,9 +544,9 @@ async fn factory_uses_actual_configured_definitions_names_aliases_and_schemas() 
                     "string"
                 );
                 assert_eq!(schema["properties"]["tty"]["default"], false);
-                assert_eq!(schema["properties"]["yield_after_ms"]["default"], 1000);
-                assert_eq!(schema["properties"]["yield_after_ms"]["minimum"], 500);
-                assert_eq!(schema["properties"]["yield_after_ms"]["maximum"], 10000);
+                assert_eq!(schema["properties"]["run_async"]["type"], "boolean");
+                assert_eq!(schema["properties"]["run_async"]["default"], false);
+                assert!(schema["properties"].get("yield_after_ms").is_none());
             }
             ProcessToolKind::WriteStdin => {
                 assert_eq!(schema["required"], json!(["name", "input"]));
@@ -560,6 +567,60 @@ async fn factory_uses_actual_configured_definitions_names_aliases_and_schemas() 
                 assert_eq!(schema["properties"]["timeout_ms"]["maximum"], 1800000);
             }
         }
+    }
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_default_waits_for_completion_beyond_one_second() {
+    let fixture = Fixture::new();
+    let result = fixture
+        .exec(json!({"command":"printf started; sleep 1.2; printf done"}))
+        .await;
+    assert!(result.yielded_process.is_none());
+    completed(&result.text, 0, "s\n[stdout]\nstarteddone");
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_default_yields_after_ten_seconds() {
+    let fixture = Fixture::new();
+    let started = tokio::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(15),
+        fixture.exec(json!({
+            "command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done"
+        })),
+    )
+    .await
+    .expect("exec did not automatically yield");
+    assert!(started.elapsed() >= Duration::from_secs(10));
+    assert!(result.yielded_process.is_some());
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_run_async_false_uses_the_configured_wait() {
+    let fixture = Fixture::with_configuration("exec_command_yield_after_ms: 150\n");
+    let completed_result = fixture
+        .exec(json!({"command":"printf done","run_async":false}))
+        .await;
+    assert!(completed_result.yielded_process.is_none());
+    completed(&completed_result.text, 0, "s\n[stdout]\ndone");
+
+    for run_async in [None, Some(false)] {
+        let mut arguments = json!({
+            "command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; printf done"
+        });
+        if let Some(value) = run_async {
+            arguments["run_async"] = json!(value);
+        }
+        let started = tokio::time::Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(2), fixture.exec(arguments))
+            .await
+            .expect("exec ignored the configured automatic yield time");
+        assert!(started.elapsed() >= Duration::from_millis(150));
+        assert!(result.yielded_process.is_some());
     }
     fixture.finish().await;
 }
@@ -708,7 +769,7 @@ async fn exec_stderr_summary_yielded_completion_preserves_live_stderr() {
             .exec(json!({
                 "command":"printf answer; printf '%s' \"$ERR\" >&2; while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; exit \"$STATUS\"",
                 "name":"summary-background",
-                "yield_after_ms":0,
+                "run_async":true,
                 "env":{"ERR":stderr,"STATUS":exit.to_string()}
             }))
             .await;
@@ -772,7 +833,7 @@ async fn exec_stderr_summary_uses_invocation_templates_after_yielding() {
         };
         let mut invocation = ProcessInvocation::new(
             "summary-override",
-            json!({"command":command,"name":"custom-summary","yield_after_ms":if yielded { 0 } else { 10000 }}).to_string(),
+            json!({"command":command,"name":"custom-summary","run_async":yielded}).to_string(),
         );
         invocation.prompt_templates = Some(Arc::new(templates));
         let result = fixture
@@ -885,7 +946,7 @@ async fn invalid_wrapper_arguments_have_source_exact_errors_and_never_launch() {
         (
             ProcessToolKind::ExecCommand,
             r#"{"command":"true","yield_after_ms":10001}"#,
-            "error: Tool argument 'yield_after_ms' must be a non-negative integer no greater than 10000.",
+            "error: Tool argument 'yield_after_ms' is not supported.",
         ),
         (
             ProcessToolKind::ExecCommand,
@@ -1016,7 +1077,7 @@ async fn redundant_cd_and_leading_sleep_rejections_do_not_reserve_names() {
         "sleep 1\nprintf done",
     ] {
         let result = fixture
-            .exec(json!({"command":command,"name":"not-reserved","yield_after_ms":0}))
+            .exec(json!({"command":command,"name":"not-reserved","run_async":true}))
             .await;
         assert_eq!(
             result.text,
@@ -1118,9 +1179,7 @@ async fn metadata_reminder_uses_real_default_template_for_completion_and_yield()
         );
     }
     let yielded = fixture
-        .exec(
-            json!({"command":"printf begun;\nsleep 30","name":"metadata-yield","yield_after_ms":0}),
-        )
+        .exec(json!({"command":"printf begun;\nsleep 30","name":"metadata-yield","run_async":true}))
         .await;
     assert!(
         yielded
@@ -1146,7 +1205,7 @@ async fn metadata_reminder_uses_real_default_template_for_completion_and_yield()
 async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner_state() {
     let fixture = Fixture::new();
     let command = "printf before; printf problem >&2; while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; printf after";
-    let initial = fixture.exec(json!({"command":command,"name":" live-pipe ","description":"stable streams","yield_after_ms":0})).await;
+    let initial = fixture.exec(json!({"command":command,"name":" live-pipe ","description":"stable streams","run_async":true})).await;
     let yielded = initial.yielded_process.unwrap();
     assert_eq!(yielded.name, "live-pipe");
     assert_eq!(yielded.activity_kind, ActivityKind::Execution);
@@ -1227,8 +1286,13 @@ async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner
 
 #[tokio::test]
 async fn yielded_exec_delivers_real_completion_and_generates_an_omitted_name() {
-    let fixture = Fixture::new();
-    let result = fixture.exec(json!({"command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; printf done; exit 7","description":"background job","yield_after_ms":0})).await;
+    let fixture = Fixture::with_configuration("exec_command_yield_after_ms: 20000\n");
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        fixture.exec(json!({"command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; printf done; exit 7","description":"background job","run_async":true})),
+    )
+    .await
+    .expect("run_async waited for the configured automatic yield time");
     let yielded = result.yielded_process.unwrap();
     assert!(yielded.name.starts_with("shell-"));
     assert_eq!(fixture.owner.active().await.len(), 1);
@@ -1260,7 +1324,7 @@ async fn qualification_routes_only_slash_names_and_signal_targets_fixture_proces
     let target = Fixture::new();
     let caller = Fixture::new();
     target
-        .exec(json!({"command":"printf ''; sleep 30","name":"qualified-signal","yield_after_ms":0}))
+        .exec(json!({"command":"printf ''; sleep 30","name":"qualified-signal","run_async":true}))
         .await;
     caller.resolver.route(
         "/root/target/qualified-signal",
@@ -1331,7 +1395,7 @@ async fn qualification_routes_only_slash_names_and_signal_targets_fixture_proces
 #[tokio::test]
 async fn environment_survives_yield_and_the_completed_name_can_be_reused() {
     let fixture = Fixture::new();
-    let initial = fixture.exec(json!({"command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; printf '%s' \"$LATER_VALUE\"","env":{"LATER_VALUE":"later"},"name":"later","yield_after_ms":0})).await;
+    let initial = fixture.exec(json!({"command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; printf '%s' \"$LATER_VALUE\"","env":{"LATER_VALUE":"later"},"name":"later","run_async":true})).await;
     assert!(
         initial
             .text
@@ -1370,7 +1434,7 @@ async fn interrupt_default_two_and_explicit_seventeen_then_nine_reach_real_proce
             "command":r#"exec env --default-signal=INT "$T57_SIGNAL_SHELL" --noprofile --norc -c 'trap "printf interrupted; exit 42" INT; printf ready; while :; do sleep 0.02; done'"#,
             "env":{"T57_SIGNAL_SHELL":fixture.launcher.shell.to_str().unwrap()},
             "name":"default-signal",
-            "yield_after_ms":0
+            "run_async":true
         }))
         .await;
     let yielded = started.yielded_process.unwrap();
@@ -1393,7 +1457,7 @@ async fn interrupt_default_two_and_explicit_seventeen_then_nine_reach_real_proce
     assert!(message.text.contains("Process exited with code 42 after "));
     assert!(message.text.ends_with("s\n[stdout]\nreadyinterrupted"));
     fixture
-        .exec(json!({"command":"printf ''; sleep 30","name":"running","yield_after_ms":0}))
+        .exec(json!({"command":"printf ''; sleep 30","name":"running","run_async":true}))
         .await;
     let signal = fixture
         .invoke(
@@ -1425,9 +1489,7 @@ async fn interrupt_default_two_and_explicit_seventeen_then_nine_reach_real_proce
 async fn cancellation_releases_observation_but_keeps_the_real_process_owned() {
     let fixture = Fixture::new();
     fixture
-        .exec(
-            json!({"command":"printf ''; sleep 30","name":"cancel-observation","yield_after_ms":0}),
-        )
+        .exec(json!({"command":"printf ''; sleep 30","name":"cancel-observation","run_async":true}))
         .await;
     let cancellation = ProcessLifetime::default();
     cancellation.cancel();
@@ -1505,8 +1567,8 @@ async fn parallel_safety_uses_configured_read_only_prefixes_not_names_or_environ
 
 #[tokio::test]
 async fn real_pty_stdin_and_empty_poll_consume_each_output_segment_once() {
-    let fixture = Fixture::new();
-    let initial = fixture.exec(json!({"command":"printf first; IFS= read -r line; printf 'received:%s' \"$line\"; exit 7","name":"interactive","yield_after_ms":500,"tty":true})).await;
+    let fixture = Fixture::with_configuration("exec_command_yield_after_ms: 500\n");
+    let initial = fixture.exec(json!({"command":"printf first; IFS= read -r line; printf 'received:%s' \"$line\"; exit 7","name":"interactive","tty":true})).await;
     let yielded = initial.yielded_process.unwrap();
     assert!(yielded.stdout_path.is_none() && yielded.stderr_path.is_none());
     assert!(initial.text.contains("first"));
@@ -1532,7 +1594,7 @@ async fn real_pty_stdin_and_empty_poll_consume_each_output_segment_once() {
         TerminalMode::PseudoTerminal
     );
 
-    let initial = fixture.exec(json!({"command":"printf first; while [ ! -f \"$WORKDIR/release-second\" ]; do sleep 0.02; done; printf second; sleep 30","name":"poll","yield_after_ms":500,"tty":true})).await;
+    let initial = fixture.exec(json!({"command":"printf first; while [ ! -f \"$WORKDIR/release-second\" ]; do sleep 0.02; done; printf second; sleep 30","name":"poll","tty":true})).await;
     assert!(initial.text.contains("first"));
     fs::write(fixture.directory.0.join("release-second"), "").unwrap();
     let poll = fixture
@@ -1558,7 +1620,7 @@ async fn real_pty_stdin_and_empty_poll_consume_each_output_segment_once() {
 async fn pipe_stdin_error_preserves_the_process_claim_for_later_signal() {
     let fixture = Fixture::new();
     fixture
-        .exec(json!({"command":"printf ''; sleep 30","name":"pipe-input","yield_after_ms":0}))
+        .exec(json!({"command":"printf ''; sleep 30","name":"pipe-input","run_async":true}))
         .await;
     let result = fixture
         .invoke(
@@ -1608,7 +1670,7 @@ async fn oversized_exec_output_is_really_spilled_into_the_fixture_blob_directory
 async fn qualified_stdin_uses_the_resolved_real_pty_owner() {
     let target = Fixture::new();
     let caller = Fixture::new();
-    let initial = target.exec(json!({"command":"IFS= read -r line; printf 'qualified:%s' \"$line\"","name":"qualified-input","yield_after_ms":0,"tty":true})).await;
+    let initial = target.exec(json!({"command":"IFS= read -r line; printf 'qualified:%s' \"$line\"","name":"qualified-input","run_async":true,"tty":true})).await;
     assert!(initial.yielded_process.is_some());
     caller.resolver.route(
         "parent/parent/target/qualified-input",
@@ -1831,7 +1893,7 @@ async fn precancelled_exec_keeps_the_started_process_owned_until_observed() {
 #[tokio::test]
 async fn precancelled_interrupt_does_not_signal_or_consume_the_owner() {
     let fixture = Fixture::new();
-    fixture.exec(json!({"command":"while true; do sleep 0.05; done","name":"no-signal","yield_after_ms":0})).await;
+    fixture.exec(json!({"command":"while true; do sleep 0.05; done","name":"no-signal","run_async":true})).await;
     let cancellation = ProcessLifetime::default();
     cancellation.cancel();
     let result = fixture
@@ -1934,8 +1996,8 @@ async fn startup_failures_are_returned_without_fallback_and_do_not_reserve_names
 
 #[tokio::test]
 async fn completed_pty_spilled_suffix_survives_incremental_transcript_cleanup() {
-    let fixture = Fixture::new();
-    let initial = fixture.exec(json!({"command":"printf prefix; while [ ! -f \"$WORKDIR/release-spill\" ]; do sleep 0.01; done; for ((i=0;i<70000;i++)); do printf x; done","name":"spill","tty":true,"yield_after_ms":100})).await;
+    let fixture = Fixture::with_configuration("exec_command_yield_after_ms: 100\n");
+    let initial = fixture.exec(json!({"command":"printf prefix; while [ ! -f \"$WORKDIR/release-spill\" ]; do sleep 0.01; done; for ((i=0;i<70000;i++)); do printf x; done","name":"spill","tty":true})).await;
     assert!(initial.text.contains("prefix"));
     assert!(initial.yielded_process.is_some());
     let claim = fixture.owner.claim("spill").await.unwrap();

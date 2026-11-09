@@ -190,6 +190,9 @@ user_input_timeout_ms: 1200000
 # Milliseconds an agent ask waits for a reply before timing out.
 agent_ask_timeout_ms: 300000
 
+# Milliseconds exec_command waits before yielding when run_async is false or omitted.
+exec_command_yield_after_ms: 10000
+
 # Limits for each compaction request.
 compaction:
   trigger_percent: 95
@@ -367,12 +370,10 @@ tools:
         description:
           type: string
           description: Short description of what the command does.
-        yield_after_ms:
-          type: integer
-          minimum: 500
-          maximum: 10000
-          default: 1000
-          description: Return the process name if still running after this many milliseconds. 0 mean yield immediately. Defaults to 1000 milliseconds.
+        run_async:
+          type: boolean
+          default: false
+          description: Yield immediately if true. Otherwise wait for completion up to the configured automatic yield time, which defaults to 10 seconds.
         tty:
           type: boolean
           default: false
@@ -414,7 +415,7 @@ tools:
   monitor:
     description: |-
       Start a background monitor whose stdout lines stream to you as notifications while you keep working. Each stdout line is an event; lines arriving within 200ms are batched into one notification; exit ends the watch and reports the exit code. Like exec_command, a running monitor keeps the turn open. Notifications are not replies from the user.
-      For a single notification ("tell me when the build finishes"), use exec_command with yield_after_ms instead. Use a monitor for one notification per occurrence, such as `tail -f app.log | grep --line-buffered ERROR` or a poll loop that prints one line per new item.
+      For a single notification ("tell me when the build finishes"), use exec_command with run_async: true instead. Use a monitor for one notification per occurrence, such as `tail -f app.log | grep --line-buffered ERROR` or a poll loop that prints one line per new item.
       Every pipe stage must flush per line (grep --line-buffered, awk fflush()); `| head` delivers nothing until it ends. Only stdout is the event stream, so merge stderr with 2>&1 when the command's own failures matter. In poll loops tolerate transient failures (`|| true`) and poll remote APIs at 30s or slower.
       Silence is not success: the filter must match every terminal state (for example `Traceback|Error|FAILED|Killed`), not just the happy path. Filter to the lines you would act on; a monitor that emits too many events is stopped automatically.
       Every monitor is stopped at timeout_ms and you get one notice; start it again to keep watching. Stop it early with interrupt_process using its name.

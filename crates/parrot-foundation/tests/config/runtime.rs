@@ -72,6 +72,7 @@ fn root() -> Node {
         ),
         ("user_input_timeout_ms", scalar("120000")),
         ("agent_ask_timeout_ms", scalar("300000")),
+        ("exec_command_yield_after_ms", scalar("10000")),
         ("live_buffer_rows", scalar("20")),
         (
             "compaction",
@@ -200,6 +201,18 @@ fn environment_templates_reject_invalid_syntax_even_in_dormant_branches() {
             .to_string(),
         "field template nesting is too deep"
     );
+}
+
+#[test]
+fn exec_automatic_yield_time_requires_a_positive_integer() {
+    for value in ["0", "-1", "1.5", "null", "true", "2147483648"] {
+        let mut node = root();
+        node.set("exec_command_yield_after_ms", scalar(value));
+        assert_eq!(
+            error(&node),
+            "exec_command_yield_after_ms must be a positive integer"
+        );
+    }
 }
 
 #[test]

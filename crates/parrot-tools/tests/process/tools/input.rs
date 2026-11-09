@@ -13,12 +13,11 @@ fn exec_defaults_and_nullable_optional_fields() {
     assert!(input.environment.is_empty());
     assert_eq!(input.name, None);
     assert_eq!(input.description, None);
-    assert_eq!(input.yield_after_ms, Some(1000));
+    assert!(!input.run_async);
     assert!(!input.tty);
-    let nullable = ExecInput::parse(
-        r#"{"command":"true","env":null,"name":null,"description":null,"yield_after_ms":null}"#,
-    )
-    .unwrap();
+    let nullable =
+        ExecInput::parse(r#"{"command":"true","env":null,"name":null,"description":null}"#)
+            .unwrap();
     assert_eq!(nullable, input);
 }
 
@@ -228,47 +227,22 @@ fn environment_rejects_invalid_names_and_nul_values_with_exact_message() {
 }
 
 #[test]
-fn exec_yield_delay_defaults_to_one_second_and_accepts_inclusive_bounds() {
-    for json in [
-        r#"{"command":"true"}"#,
-        r#"{"command":"true","yield_after_ms":null}"#,
-    ] {
-        assert_eq!(ExecInput::parse(json).unwrap().yield_after_ms, Some(1000));
-    }
-    for (lexeme, expected) in [
-        ("0", 0),
-        ("-0", 0),
-        ("1", 1),
-        ("499", 499),
-        ("500", 500),
-        ("10000", 10_000),
-    ] {
+fn exec_run_async_defaults_to_false_and_accepts_only_booleans() {
+    assert!(!ExecInput::parse(r#"{"command":"true"}"#).unwrap().run_async);
+    for (value, expected) in [("true", true), ("false", false)] {
         assert_eq!(
-            ExecInput::parse(&format!(
-                r#"{{"command":"true","yield_after_ms":{lexeme}}}"#
-            ))
-            .unwrap()
-            .yield_after_ms,
-            Some(expected)
+            ExecInput::parse(&format!(r#"{{"command":"true","run_async":{value}}}"#))
+                .unwrap()
+                .run_async,
+            expected
         );
     }
-}
-
-#[test]
-fn exec_yield_delay_rejects_out_of_bounds_with_exact_message() {
-    for lexeme in [
-        "-1",
-        "10001",
-        "4294967294",
-        "4294967295",
-        "9223372036854775807",
-        "-9223372036854775808",
-    ] {
+    for value in ["null", "0", "1", r#""true""#, "[]", "{}"] {
         assert_eq!(
             error(ExecInput::parse(&format!(
-                r#"{{"command":"true","yield_after_ms":{lexeme}}}"#
+                r#"{{"command":"true","run_async":{value}}}"#
             ))),
-            "Tool argument 'yield_after_ms' must be a non-negative integer no greater than 10000."
+            "Tool argument 'run_async' must be a boolean."
         );
     }
 }
@@ -331,12 +305,6 @@ fn integer_properties_do_not_coerce_number_lexemes_or_types() {
         "[]",
         "{}",
     ] {
-        assert!(
-            ExecInput::parse(&format!(
-                r#"{{"command":"true","yield_after_ms":{lexeme}}}"#
-            ))
-            .is_err()
-        );
         assert!(
             WriteStdinInput::parse(&format!(
                 r#"{{"name":"p","input":"","yield_after_ms":{lexeme}}}"#
@@ -435,10 +403,10 @@ fn monitor_defaults_nullable_fields_and_wrapper_validation_values() {
 
 #[test]
 fn duplicate_properties_use_last_value_without_changing_alias_precedence() {
-    let exec = ExecInput::parse(r#"{"command":"first","command":null,"cmd":"alias","tty":true,"tty":false,"yield_after_ms":1,"yield_after_ms":2}"#).unwrap();
+    let exec = ExecInput::parse(r#"{"command":"first","command":null,"cmd":"alias","tty":true,"tty":false,"run_async":true,"run_async":false}"#).unwrap();
     assert_eq!(exec.command, "alias");
     assert!(!exec.tty);
-    assert_eq!(exec.yield_after_ms, Some(2));
+    assert!(!exec.run_async);
     let write =
         WriteStdinInput::parse(r#"{"name":"first","name":"last","input":"first","input":"last"}"#)
             .unwrap();
@@ -467,7 +435,7 @@ fn invalid_earlier_duplicates_are_not_hidden_by_valid_replacements() {
         r#""cmd":7,"cmd":"ok""#,
         r#""name":7,"name":"p""#,
         r#""description":7,"description":"d""#,
-        r#""yield_after_ms":1.0,"yield_after_ms":2"#,
+        r#""run_async":null,"run_async":true"#,
         r#""tty":null,"tty":true"#,
         r#""env":[],"env":{}"#,
     ] {
@@ -556,12 +524,6 @@ fn environment_identifier_and_nul_validation_only_checks_final_dictionary() {
 #[test]
 fn semantic_bounds_apply_only_after_all_valid_typed_assignments() {
     assert_eq!(
-        ExecInput::parse(r#"{"command":"ok","yield_after_ms":-1,"yield_after_ms":2}"#)
-            .unwrap()
-            .yield_after_ms,
-        Some(2)
-    );
-    assert_eq!(
         WriteStdinInput::parse(r#"{"name":"p","input":"","yield_after_ms":-1,"yield_after_ms":2}"#)
             .unwrap()
             .yield_after_ms,
@@ -621,6 +583,14 @@ fn interrupt_final_signal_precheck_precedes_typed_member_validation() {
         )),
         "Tool argument 'signal' must be an integer."
     );
+}
+
+#[test]
+fn exec_accepts_run_async_and_rejects_removed_yield_after_ms() {
+    for value in ["true", "false"] {
+        assert!(ExecInput::parse(&format!(r#"{{"command":"true","run_async":{value}}}"#)).is_ok());
+    }
+    assert!(ExecInput::parse(r#"{"command":"true","yield_after_ms":1000}"#).is_err());
 }
 
 #[test]

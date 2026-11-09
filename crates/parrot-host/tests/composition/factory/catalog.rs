@@ -922,6 +922,7 @@ mod fixture_support {
                 resolver: Arc::new(self.clone()),
                 workspace: Arc::new(self.clone()),
                 read_only_prefixes: vec!["printf".into()],
+                exec_command_yield_after: std::time::Duration::from_secs(10),
                 templates,
                 monitor_sink: Arc::new(self.clone()),
             })

@@ -1755,6 +1755,12 @@ where
                         .iter()
                         .cloned()
                         .collect(),
+                    exec_command_yield_after: std::time::Duration::from_millis(
+                        self.config
+                            .configuration
+                            .runtime
+                            .exec_command_yield_after_ms as u64,
+                    ),
                     templates: self.user.templates.clone(),
                     monitor_sink: Arc::new(ScopedMonitor {
                         link: link.clone(),

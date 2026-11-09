@@ -31,7 +31,7 @@ pub struct ExecInput {
     pub environment: BTreeMap<String, String>,
     pub name: Option<String>,
     pub description: Option<String>,
-    pub yield_after_ms: Option<u64>,
+    pub run_async: bool,
     pub tty: bool,
 }
 
@@ -42,7 +42,7 @@ impl ExecInput {
         let mut environment = BTreeMap::new();
         let mut name = None;
         let mut description = None;
-        let mut milliseconds = None;
+        let mut run_async = false;
         let mut tty = false;
         for (property, value) in object(json, "command")?.0 {
             match property.as_str() {
@@ -51,7 +51,10 @@ impl ExecInput {
                 "env" => environment = environment_value(&value)?,
                 "name" => name = optional_string(&value, &property)?,
                 "description" => description = optional_string(&value, &property)?,
-                "yield_after_ms" => milliseconds = optional_integer(&value, &property)?,
+                "run_async" => {
+                    run_async = serde_json::from_str::<bool>(value.get())
+                        .map_err(|_| argument_type("run_async", "a boolean"))?;
+                }
                 "tty" => {
                     tty = serde_json::from_str::<bool>(value.get())
                         .map_err(|_| argument_type("tty", "a boolean"))?;
@@ -66,16 +69,7 @@ impl ExecInput {
             environment,
             name,
             description,
-            yield_after_ms: match milliseconds {
-                None => Some(1000),
-                Some(value) if (0..=10_000).contains(&value) => Some(value as u64),
-                Some(_) => {
-                    return Err(InputError(
-                        "Tool argument 'yield_after_ms' must be a non-negative integer no greater than 10000."
-                            .into(),
-                    ));
-                }
-            },
+            run_async,
             tty,
         })
     }
