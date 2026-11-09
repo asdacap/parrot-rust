@@ -1075,6 +1075,25 @@ async fn actual_uploaded_image_reaches_provider_through_same_session_resources()
     );
     assert!(events.iter().any(|e| e.has_turn_ended()));
     assert!(!events.iter().any(|e| e.has_turn_failed()));
+    let admitted = events
+        .iter()
+        .find(|event| {
+            event.has_input_admitted() && event.input_admitted().message_id == "rpc-with-image"
+        })
+        .unwrap()
+        .input_admitted();
+    assert_eq!(
+        admitted
+            .parts
+            .iter()
+            .filter(|part| matches!(
+                part.content,
+                Some(wire::message_content_part::Content::ArtifactId(_))
+            ))
+            .map(|part| part.display_name.as_str())
+            .collect::<Vec<_>>(),
+        ["first.png", "second.png"]
+    );
     assert_provider_image_bytes(&f, 0);
     let original_user = f.user();
     let foreign = f.create().await;
