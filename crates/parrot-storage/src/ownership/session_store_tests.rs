@@ -108,6 +108,7 @@ struct Factory {
     log_path: Mutex<Option<PathBuf>>,
     pending_log: Mutex<String>,
     session_id: Mutex<Option<String>>,
+    metadata_at_creation: Mutex<Option<Vec<u8>>>,
 }
 impl StoredUserSessionFactory for Factory {
     fn create(
@@ -118,6 +119,8 @@ impl StoredUserSessionFactory for Factory {
         Box::pin(async move {
             assert!(lease.selected_root().path().join("session.db").is_file());
             assert!(!lease.is_cancelled());
+            *self.metadata_at_creation.lock().unwrap() =
+                fs::read(lease.selected_root().path().join("meta.json")).ok();
             *self.lease.lock().unwrap() = Some(lease.clone());
             *self.session_id.lock().unwrap() = Some(initialization.id.value().to_owned());
             if let Some(path) = self.log_path.lock().unwrap().as_ref() {
@@ -134,7 +137,7 @@ impl StoredUserSessionFactory for Factory {
                 )));
             }
             if self.block_publication.swap(false, Ordering::AcqRel) {
-                fs::create_dir(lease.selected_root().path().join("meta.json")).unwrap();
+                fs::create_dir(lease.selected_root().path().join("meta.json.staging")).unwrap();
             }
             Ok(Box::new(Session {
                 initialization,
@@ -268,7 +271,7 @@ async fn publication_failure_disposes_session_cancels_lifetime_and_preserves_ori
     assert!(log.contains("event=\"open\""));
     assert!(log.contains("event=\"cleanup\""));
     assert!(log.contains("outcome=\"failed\""));
-    fs::remove_dir(root.join("meta.json")).unwrap();
+    fs::remove_dir(root.join("meta.json.staging")).unwrap();
     factory.fail_cleanup.store(false, Ordering::Release);
     let mut retry = store.open(model(), "default", false).await.unwrap();
     assert_eq!(retry.initialization.id, fixture.id());
@@ -451,7 +454,9 @@ async fn legacy_resume_preserves_selected_root_and_metadata_and_uses_selector_fa
     metadata.root_agent_name = Some("legacy-root".into());
     metadata.mode = Some("query".into());
     metadata.selector = None;
-    index.publish(&metadata).unwrap();
+    index
+        .initialize(metadata.clone(), "legacy-root-id".into())
+        .unwrap();
     let stabilized = crate::ownership::WorkingDirectoryClaim::new(
         fixture.root.join("old"),
         fixture.runtime.clone(),
@@ -575,14 +580,15 @@ async fn startup_stages_keep_selected_session_and_one_resource_correlation() {
                 )
                 .unwrap();
                 let index = SessionIndex::new(root, fixture.id(), &fixture.workspace).unwrap();
-                index
-                    .publish(&SessionMeta::new(
-                        fixture.id().value(),
-                        fixture.workspace.to_str().unwrap(),
-                        "provider",
-                        "model",
-                    ))
-                    .unwrap();
+                let mut metadata = SessionMeta::new(
+                    fixture.id().value(),
+                    fixture.workspace.to_str().unwrap(),
+                    "provider",
+                    "model",
+                );
+                metadata.root_agent_name = Some("main".into());
+                metadata.mode = Some("default".into());
+                index.initialize(metadata, "root-id".into()).unwrap();
             }
             let result = if resume {
                 store.resume(&fixture.id(), false, false).await
@@ -1800,13 +1806,21 @@ async fn same_owned_metadata_index_preserves_identity_timestamps_and_serializes_
         .unwrap();
     let original = opened.resources.index.find().unwrap().unwrap();
     let mut supported = original.clone();
-    supported.root_agent_name = None;
     supported.created_at = None;
     supported.last_opened_at = Some("retained-time".into());
-    opened.resources.index.publish(&supported).unwrap();
+    fs::write(
+        opened.resources.index.metadata_path(),
+        serde_json::to_vec(&supported).unwrap(),
+    )
+    .unwrap();
     opened
         .resources
-        .update_selection_metadata("other", "other/model", "alias", "mode")
+        .metadata()
+        .update_model_selection(&SessionModelSelection {
+            provider_id: "other".into(),
+            canonical_model: "other/model".into(),
+            selector: "alias".into(),
+        })
         .unwrap();
     let changed = opened.resources.index.find().unwrap().unwrap();
     assert_eq!(changed.id, supported.id);
@@ -1817,11 +1831,16 @@ async fn same_owned_metadata_index_preserves_identity_timestamps_and_serializes_
     assert_eq!(changed.provider_id.as_deref(), Some("other"));
     assert_eq!(changed.model.as_deref(), Some("other/model"));
     assert_eq!(changed.selector.as_deref(), Some("alias"));
-    assert_eq!(changed.mode.as_deref(), Some("mode"));
+    assert_eq!(changed.mode, original.mode);
     opened.record_opened().unwrap();
     opened
         .resources
-        .update_selection_metadata("latest", "latest/model", "latest", "latest-mode")
+        .metadata()
+        .update_model_selection(&SessionModelSelection {
+            provider_id: "latest".into(),
+            canonical_model: "latest/model".into(),
+            selector: "latest".into(),
+        })
         .unwrap();
     let latest = opened.resources.index.find().unwrap().unwrap();
     assert_eq!(latest.last_opened_at, Some((opened.clock)()));
@@ -1845,15 +1864,18 @@ async fn task_limit_updates_preserve_other_metadata_and_survive_reopening() {
         .unwrap();
     assert_eq!(opened.initialization.extra_concurrent_tasks, None);
     let original = opened.resources.index.find().unwrap().unwrap();
-    opened.resources.update_task_limit_metadata(0).unwrap();
+    opened.resources.metadata().update_task_limit(0).unwrap();
     let changed = opened.resources.index.find().unwrap().unwrap();
     assert_eq!(changed.extra_concurrent_tasks, Some(0));
-    let mut expected = original;
+    let mut expected = original.clone();
     expected.extra_concurrent_tasks = Some(0);
     assert_eq!(changed, expected);
     assert!(matches!(
-        opened.resources.update_task_limit_metadata(-1),
-        Err(SessionStoreError::InvalidMetadata)
+        opened.resources.metadata().update_task_limit(-1),
+        Err(crate::history_files::Error {
+            kind: crate::history_files::ErrorKind::InvalidInput,
+            ..
+        })
     ));
     assert_eq!(opened.resources.index.find().unwrap().unwrap(), expected);
 
@@ -1861,13 +1883,18 @@ async fn task_limit_updates_preserve_other_metadata_and_survive_reopening() {
     std::thread::scope(|scope| {
         scope.spawn(|| {
             barrier.wait();
-            opened.resources.update_task_limit_metadata(4).unwrap();
+            opened.resources.metadata().update_task_limit(4).unwrap();
         });
         scope.spawn(|| {
             barrier.wait();
             opened
                 .resources
-                .update_selection_metadata("other", "other/model", "alias", "mode")
+                .metadata()
+                .update_model_selection(&SessionModelSelection {
+                    provider_id: "other".into(),
+                    canonical_model: "other/model".into(),
+                    selector: "alias".into(),
+                })
                 .unwrap();
         });
         barrier.wait();
@@ -1877,8 +1904,8 @@ async fn task_limit_updates_preserve_other_metadata_and_survive_reopening() {
     assert_eq!(concurrent.provider_id.as_deref(), Some("other"));
     assert_eq!(concurrent.model.as_deref(), Some("other/model"));
     assert_eq!(concurrent.selector.as_deref(), Some("alias"));
-    assert_eq!(concurrent.mode.as_deref(), Some("mode"));
-    opened.resources.update_task_limit_metadata(0).unwrap();
+    assert_eq!(concurrent.mode.as_deref(), Some("query"));
+    opened.resources.metadata().update_task_limit(0).unwrap();
     opened.record_opened().unwrap();
     opened.close().await.unwrap();
     let mut resumed = store.resume(&fixture.id(), false, false).await.unwrap();
@@ -1910,19 +1937,19 @@ async fn failed_task_limit_publication_retains_existing_metadata_and_malformed_v
         )
         .await
         .unwrap();
-    opened.resources.update_task_limit_metadata(1).unwrap();
+    opened.resources.metadata().update_task_limit(1).unwrap();
     let path = opened.resources.index.metadata_path();
     let bytes = fs::read(path).unwrap();
     let staging = path.with_file_name("meta.json.staging");
     fs::create_dir(&staging).unwrap();
-    assert!(opened.resources.update_task_limit_metadata(2).is_err());
+    assert!(opened.resources.metadata().update_task_limit(2).is_err());
     assert_eq!(fs::read(path).unwrap(), bytes);
     fs::remove_dir(staging).unwrap();
     let mut malformed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     malformed["ExtraConcurrentTasks"] = serde_json::json!(-1);
     fs::write(path, serde_json::to_vec(&malformed).unwrap()).unwrap();
     assert!(opened.resources.index.find().is_err());
-    assert!(opened.resources.update_task_limit_metadata(2).is_err());
+    assert!(opened.resources.metadata().update_task_limit(2).is_err());
     opened.close().await.unwrap();
     assert!(store.resume(&fixture.id(), false, false).await.is_err());
 }
@@ -1944,7 +1971,11 @@ async fn fast_mode_updates_preserve_other_metadata_and_survive_reopening() {
     assert_eq!(opened.initialization.fast_mode, None);
     let original = opened.resources.index.find().unwrap().unwrap();
     for enabled in [true, false] {
-        opened.resources.update_fast_mode_metadata(enabled).unwrap();
+        opened
+            .resources
+            .metadata()
+            .update_fast_mode(enabled)
+            .unwrap();
         let mut expected = original.clone();
         expected.fast_mode = Some(enabled);
         assert_eq!(opened.resources.index.find().unwrap().unwrap(), expected);
@@ -1953,12 +1984,17 @@ async fn fast_mode_updates_preserve_other_metadata_and_survive_reopening() {
     let bytes = fs::read(path).unwrap();
     let staging = path.with_file_name("meta.json.staging");
     fs::create_dir(&staging).unwrap();
-    assert!(opened.resources.update_fast_mode_metadata(true).is_err());
+    assert!(opened.resources.metadata().update_fast_mode(true).is_err());
     assert_eq!(fs::read(path).unwrap(), bytes);
     fs::remove_dir(staging).unwrap();
     opened
         .resources
-        .update_selection_metadata("other", "other/model", "alias", "mode")
+        .metadata()
+        .update_model_selection(&SessionModelSelection {
+            provider_id: "other".into(),
+            canonical_model: "other/model".into(),
+            selector: "alias".into(),
+        })
         .unwrap();
     opened.record_opened().unwrap();
     let metadata = opened.resources.index.find().unwrap().unwrap();
@@ -1990,39 +2026,18 @@ async fn metadata_updater_uses_record_opened_gate_and_preserves_failures() {
         .await
         .unwrap();
     std::thread::scope(|scope| {
-        let guard = opened.resources.metadata_gate.lock().unwrap();
-        let (entered, ready) = std::sync::mpsc::channel();
-        let (completed, done) = std::sync::mpsc::channel();
-        let record = &opened;
-        let entered2 = entered.clone();
-        let completed2 = completed.clone();
-        scope.spawn(move || {
-            entered.send(()).unwrap();
-            record.record_opened().unwrap();
-            completed.send(()).unwrap();
+        scope.spawn(|| opened.record_opened().unwrap());
+        scope.spawn(|| {
+            opened
+                .resources
+                .metadata()
+                .update_model_selection(&SessionModelSelection {
+                    provider_id: "gate-provider".into(),
+                    canonical_model: "gate-model".into(),
+                    selector: "gate-selector".into(),
+                })
+                .unwrap()
         });
-        let lease = opened.resources.clone();
-        scope.spawn(move || {
-            entered2.send(()).unwrap();
-            lease
-                .update_selection_metadata(
-                    "gate-provider",
-                    "gate-model",
-                    "gate-selector",
-                    "gate-mode",
-                )
-                .unwrap();
-            completed2.send(()).unwrap();
-        });
-        ready.recv_timeout(Duration::from_secs(5)).unwrap();
-        ready.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(matches!(
-            done.recv_timeout(Duration::from_millis(20)),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-        ));
-        drop(guard);
-        done.recv_timeout(Duration::from_secs(5)).unwrap();
-        done.recv_timeout(Duration::from_secs(5)).unwrap();
     });
     let latest = opened.resources.index.find().unwrap().unwrap();
     assert_eq!(latest.last_opened_at, Some((opened.clock)()));
@@ -2034,8 +2049,16 @@ async fn metadata_updater_uses_record_opened_gate_and_preserves_failures() {
     assert!(matches!(
         opened
             .resources
-            .update_selection_metadata("p", "m", "s", "q"),
-        Err(SessionStoreError::InvalidMetadata)
+            .metadata()
+            .update_model_selection(&SessionModelSelection {
+                provider_id: "p".into(),
+                canonical_model: "m".into(),
+                selector: "s".into()
+            }),
+        Err(crate::history_files::Error {
+            kind: crate::history_files::ErrorKind::InvalidData,
+            ..
+        })
     ));
     assert!(!path.exists());
     fs::rename(saved, path).unwrap();
@@ -2045,7 +2068,12 @@ async fn metadata_updater_uses_record_opened_gate_and_preserves_failures() {
     assert!(
         opened
             .resources
-            .update_selection_metadata("p", "m", "s", "q")
+            .metadata()
+            .update_model_selection(&SessionModelSelection {
+                provider_id: "p".into(),
+                canonical_model: "m".into(),
+                selector: "s".into()
+            })
             .is_err()
     );
     assert_eq!(
@@ -2057,7 +2085,12 @@ async fn metadata_updater_uses_record_opened_gate_and_preserves_failures() {
     assert!(
         opened
             .resources
-            .update_selection_metadata("p", "m", "s", "q")
+            .metadata()
+            .update_model_selection(&SessionModelSelection {
+                provider_id: "p".into(),
+                canonical_model: "m".into(),
+                selector: "s".into()
+            })
             .is_err()
     );
     assert_eq!(fs::read(path).unwrap(), bytes);
@@ -2399,4 +2432,39 @@ async fn worker_disposer_panic_still_joins_registered_close_and_fences_resources
     assert_eq!(lease.close().await.unwrap_err().to_string(), first);
     assert_live(&fixture);
     std::mem::forget(fixture);
+}
+
+#[tokio::test]
+async fn canonical_identity_exists_before_factory_creates_any_history() {
+    let fixture = Fixture::new();
+    let factory = Arc::new(Factory::default());
+    let store = fixture.store(factory.clone());
+    let mut opened = store
+        .open_admitted(
+            fixture.workspace.clone(),
+            fixture.admission(),
+            Some(model()),
+            "query",
+            true,
+        )
+        .await
+        .unwrap();
+    opened.close().await.unwrap();
+    let bytes = factory
+        .metadata_at_creation
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("canonical identity must exist before factory construction");
+    let metadata: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        metadata["RootAgentSessionId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+    assert_eq!(metadata["ModeRevision"], 0);
+    assert_eq!(
+        metadata["AgentLineage"][0]["SessionId"],
+        metadata["RootAgentSessionId"]
+    );
 }

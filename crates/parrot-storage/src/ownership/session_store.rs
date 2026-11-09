@@ -7,7 +7,7 @@ use crate::events::{EventRepository, RepositoryContext};
 use crate::history_files::{SessionCatalogEntry, SessionIndex, SessionMeta};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::paths::SelectedSessionRoot;
-use parrot_domain::values::identifiers::UserSessionId;
+use parrot_domain::values::identifiers::{Identifier, UserSessionId};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
@@ -133,7 +133,6 @@ pub struct SessionResourceLease {
     pub events: EventRepository,
     pub images: ImageArtifactRepository,
     cleanup: ResourceCleanup,
-    metadata_gate: Mutex<()>,
     index: SessionIndex,
 }
 
@@ -528,7 +527,6 @@ impl SessionResourceLease {
             images,
             root,
             cleanup,
-            metadata_gate: Mutex::new(()),
             index,
         });
         if let Err(error) = lease
@@ -609,62 +607,8 @@ impl SessionResourceLease {
     pub fn confirm_producers_settled(&self) {
         self.cleanup.shared.producers_settled.send_replace(true);
     }
-    pub fn update_selection_metadata(
-        &self,
-        provider_id: &str,
-        model: &str,
-        selector: &str,
-        mode: &str,
-    ) -> Result<(), SessionStoreError> {
-        let _guard = self
-            .metadata_gate
-            .lock()
-            .expect("session metadata poisoned");
-        let mut metadata = self
-            .index
-            .find()
-            .map_err(SessionStoreError::failure)?
-            .ok_or(SessionStoreError::InvalidMetadata)?;
-        metadata.provider_id = Some(provider_id.to_owned());
-        metadata.model = Some(model.to_owned());
-        metadata.selector = Some(selector.to_owned());
-        metadata.mode = Some(mode.to_owned());
-        self.index
-            .publish(&metadata)
-            .map_err(SessionStoreError::failure)
-    }
-    pub fn update_task_limit_metadata(&self, limit: i32) -> Result<(), SessionStoreError> {
-        if limit < 0 {
-            return Err(SessionStoreError::InvalidMetadata);
-        }
-        let _guard = self
-            .metadata_gate
-            .lock()
-            .expect("session metadata poisoned");
-        let mut metadata = self
-            .index
-            .find()
-            .map_err(SessionStoreError::failure)?
-            .ok_or(SessionStoreError::InvalidMetadata)?;
-        metadata.extra_concurrent_tasks = Some(limit);
-        self.index
-            .publish(&metadata)
-            .map_err(SessionStoreError::failure)
-    }
-    pub fn update_fast_mode_metadata(&self, enabled: bool) -> Result<(), SessionStoreError> {
-        let _guard = self
-            .metadata_gate
-            .lock()
-            .expect("session metadata poisoned");
-        let mut metadata = self
-            .index
-            .find()
-            .map_err(SessionStoreError::failure)?
-            .ok_or(SessionStoreError::InvalidMetadata)?;
-        metadata.fast_mode = Some(enabled);
-        self.index
-            .publish(&metadata)
-            .map_err(SessionStoreError::failure)
+    pub fn metadata(&self) -> &SessionIndex {
+        &self.index
     }
     async fn close_with_session(
         &self,
@@ -709,21 +653,9 @@ impl OpenedSession {
     }
     /// Explicit successful-open publication; updating a session does not call it.
     pub fn record_opened(&self) -> Result<(), SessionStoreError> {
-        let _guard = self
-            .resources
-            .metadata_gate
-            .lock()
-            .expect("session metadata poisoned");
-        let mut metadata = self
-            .resources
-            .index
-            .find()
-            .map_err(SessionStoreError::failure)?
-            .ok_or(SessionStoreError::InvalidMetadata)?;
-        metadata.last_opened_at = Some((self.clock)());
         self.resources
             .index
-            .publish(&metadata)
+            .record_opened(&(self.clock)())
             .map_err(SessionStoreError::failure)
     }
     pub async fn close(&mut self) -> Result<(), SessionStoreError> {
@@ -889,6 +821,7 @@ impl SessionStore {
         mode: &str,
         interactive: bool,
     ) -> Result<OpenedSession, SessionStoreError> {
+        let fresh = admission.admission.disposition == ClaimDisposition::Fresh;
         let id = admission
             .admission
             .session_id
@@ -951,29 +884,31 @@ impl SessionStore {
         self.stage(&context, "metadata_read", "start", started, None);
         let selected = (|| {
             let existing = lease.index.find().map_err(SessionStoreError::failure)?;
-            if existing.is_none() && (model.is_none() || lease.index.metadata_path().is_file()) {
+            if (fresh && existing.is_some()) || (!fresh && existing.is_none()) {
                 return Err(SessionStoreError::InvalidMetadata);
             }
+            let state = existing
+                .as_ref()
+                .map(|_| lease.index.read_session_state())
+                .transpose()
+                .map_err(SessionStoreError::failure)?;
             let initialization = SessionInitialization {
                 id: id.clone(),
-                root_agent_name: nonempty(
-                    existing
-                        .as_ref()
-                        .and_then(|meta| meta.root_agent_name.as_deref()),
-                )
-                .unwrap_or("main")
-                .to_owned(),
+                root_agent_name: state
+                    .as_ref()
+                    .map(|state| state.root_agent_name.as_str())
+                    .unwrap_or("main")
+                    .to_owned(),
                 model: if let Some(existing) = &existing {
                     self.router.resolve(&stored_selector(existing))?
                 } else {
                     model.ok_or(SessionStoreError::InvalidMetadata)?
                 },
-                mode: if let Some(existing) = &existing {
-                    nonempty(existing.mode.as_deref()).unwrap_or(&self.default_mode)
-                } else {
-                    mode
-                }
-                .to_owned(),
+                mode: state
+                    .as_ref()
+                    .map(|state| state.mode.mode.as_str())
+                    .unwrap_or(mode)
+                    .to_owned(),
                 extra_concurrent_tasks: existing
                     .as_ref()
                     .and_then(|metadata| metadata.extra_concurrent_tasks),
@@ -1021,6 +956,27 @@ impl SessionStore {
         self.stage(&context, stage, "start", started, None);
         let mut session = None;
         let result = async {
+            if existing.is_none() {
+                let mut metadata = SessionMeta::new(
+                    initialization.id.value(),
+                    workspace.to_string_lossy(),
+                    &initialization.model.provider_id,
+                    &initialization.model.canonical_model,
+                );
+                metadata.root_agent_name = Some(initialization.root_agent_name.clone());
+                metadata.selector = Some(initialization.model.selector.clone());
+                metadata.mode = Some(initialization.mode.clone());
+                metadata.extra_concurrent_tasks = initialization.extra_concurrent_tasks;
+                metadata.fast_mode = initialization.fast_mode;
+                metadata.created_at = Some((self.clock)());
+                lease
+                    .index
+                    .initialize(
+                        metadata,
+                        Identifier::agent_session().map_err(SessionStoreError::failure)?,
+                    )
+                    .map_err(SessionStoreError::failure)?;
+            }
             session = Some(
                 self.factory
                     .create(lease.clone(), initialization.clone())
@@ -1031,36 +987,14 @@ impl SessionStore {
             started = Instant::now();
             self.stage(&context, stage, "start", started, None);
             let constructed = session.as_ref().expect("constructed session");
-            let selected = constructed.model();
-            let metadata = SessionMeta {
-                id: Some(initialization.id.value().into()),
-                working_directory: existing
-                    .as_ref()
-                    .and_then(|meta| meta.working_directory.clone())
-                    .or_else(|| Some(workspace.to_string_lossy().into_owned())),
-                root_agent_name: Some(initialization.root_agent_name.clone()),
-                provider_id: Some(selected.provider_id),
-                model: Some(selected.canonical_model),
-                selector: Some(selected.selector),
-                mode: Some(constructed.mode()),
-                extra_concurrent_tasks: initialization.extra_concurrent_tasks,
-                fast_mode: initialization.fast_mode,
-                last_opened_at: Some((self.clock)()),
-                created_at: existing
-                    .as_ref()
-                    .and_then(|meta| meta.created_at.clone())
-                    .or_else(|| Some((self.clock)())),
-            };
-            {
-                let _guard = lease
-                    .metadata_gate
-                    .lock()
-                    .expect("session metadata poisoned");
-                lease
-                    .index
-                    .publish(&metadata)
-                    .map_err(SessionStoreError::failure)?;
-            }
+            lease
+                .index
+                .update_model_selection(&constructed.model())
+                .map_err(SessionStoreError::failure)?;
+            lease
+                .index
+                .record_opened(&(self.clock)())
+                .map_err(SessionStoreError::failure)?;
             self.stage(&context, stage, "complete", started, None);
             let mut event = DiagnosticEvent::new(
                 "session",

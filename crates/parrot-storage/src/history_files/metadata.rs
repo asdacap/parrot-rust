@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// PascalCase `meta.json` listing metadata. Conversation state remains in SQLite.
+/// PascalCase session identity, preference, and listing metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionMeta {
     #[serde(rename = "Id", deserialize_with = "deserialize_present_nullable")]
@@ -10,6 +10,24 @@ pub struct SessionMeta {
         deserialize_with = "deserialize_present_nullable"
     )]
     pub working_directory: Option<String>,
+    #[serde(
+        rename = "RootAgentSessionId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub root_agent_session_id: Option<String>,
+    #[serde(
+        rename = "ModeRevision",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mode_revision: Option<i64>,
+    #[serde(
+        rename = "AgentLineage",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub agent_lineage: Option<Vec<parrot_domain::values::lineage::AgentLineageRecord>>,
     #[serde(rename = "RootAgentName", default)]
     pub root_agent_name: Option<String>,
     #[serde(
@@ -48,6 +66,9 @@ impl SessionMeta {
         Self {
             id: Some(id.into()),
             working_directory: Some(working_directory.into()),
+            root_agent_session_id: None,
+            mode_revision: None,
+            agent_lineage: None,
             root_agent_name: Some(String::new()),
             provider_id: Some(provider_id.into()),
             model: Some(model.into()),

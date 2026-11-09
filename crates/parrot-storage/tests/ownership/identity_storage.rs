@@ -329,7 +329,7 @@ fn owner_bound_index_refuses_metadata_for_another_session_before_creating_direct
         "provider/model",
     );
     assert_eq!(
-        index.publish(&metadata).unwrap_err().kind,
+        index.initialize(metadata, "root".into()).unwrap_err().kind,
         ErrorKind::Unowned
     );
     assert!(!resources.root().exists());
@@ -339,15 +339,18 @@ fn owner_bound_index_refuses_metadata_for_another_session_before_creating_direct
 fn catalog_isolates_corrupt_entries_and_omits_unsafe_directory_names() {
     let fixture = Fixture::new();
     let resources = fixture.resources("session-valid");
-    fixture
-        .index(&resources)
-        .publish(&SessionMeta::new(
+    fs::create_dir_all(resources.root()).unwrap();
+    fs::write(
+        resources.root().join("meta.json"),
+        serde_json::to_vec(&SessionMeta::new(
             resources.id().value(),
             fixture.workspace.to_str().unwrap(),
             "provider",
             "provider/model",
         ))
-        .unwrap();
+        .unwrap(),
+    )
+    .unwrap();
     let corrupt = fixture.paths.state().join("sessions/session-corrupt");
     fs::create_dir_all(&corrupt).unwrap();
     fs::write(corrupt.join("meta.json"), "not json").unwrap();

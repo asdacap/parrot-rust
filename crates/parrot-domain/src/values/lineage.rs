@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct AgentLineageRecord {
     pub session_id: String,
     pub parent_session_id: String,

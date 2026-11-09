@@ -259,7 +259,8 @@ async fn selected_legacy_resources_and_writes_remain_in_place_after_duplicate_an
     let index = SessionIndex::new(selected.clone(), target.clone(), &fixture.workspace).unwrap();
     let mut meta = index.find().unwrap().unwrap();
     meta.last_opened_at = Some("opened-in-legacy".into());
-    index.publish(&meta).unwrap();
+    fs::create_dir_all(index.selected_root().path()).unwrap();
+    fs::write(index.metadata_path(), serde_json::to_vec(&meta).unwrap()).unwrap();
     let scratch = resources.agent_scratch(&["main"]).unwrap();
     fs::write(scratch.blob_directory().join("owned.txt"), b"legacy-only").unwrap();
     fs::create_dir_all(scratch.queue_directory()).unwrap();
