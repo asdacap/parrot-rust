@@ -1,17 +1,17 @@
 # Configuration, legacy state and rollback
 
-**A legacy resume is write-capable, not a read-only import.** With the default
-compatibility setting enabled, selecting an old session can open and **mutate its
-old `session.db` and directory in place**. Back up before the first Rust write,
-not after the first prompt. No bulk migration, automatic root copy, merge or
-schema downgrade/rollback command is provided.
+**Existing databases are not migrated.** This build supports only its current
+SQLite format. An incompatible session fails to resume instead of being
+converted, reset, or deleted. Its database and session artifacts remain in place.
 
-Current local session creation/resume requiring a new local ParrotService remains
-unavailable/fail-closed. The rules below document the approved selected-root
-contract and implemented components; they do not claim the missing end-to-end
-production capability is available. Attachment to an already running owner may
-still affect that owner's session; an unavailable local creator is not a backup
-strategy.
+Use `parrot chat --new-session` to start a different local session without
+resuming or replacing the old one. Normal session creation and ownership checks
+still apply. `/clear` is available only after chat starts, so it cannot resolve a
+startup refusal.
+
+Filesystem-root fallback remains supported. It selects a directory, not a
+compatible database format. See
+[database formats and fresh startup](#database-formats-and-fresh-startup).
 
 ## Roots and manual configuration/credential copy
 
@@ -137,18 +137,18 @@ References do not load arbitrary filesystem paths. The generated
 overrides in `config.yaml`. Editing installed Markdown does not change the
 binary; source Markdown changes require rebuilding and are not hot-reloaded.
 
-## Default setting and disabling compatibility
+## Filesystem-root fallback
 
 The top-level YAML boolean **`legacy_path_read_fallback` defaults to `true`**.
-Despite its name, enabled legacy-session resume can write old state in place.
-To disable compatibility discovery/read fallback, edit the new-root `config.yaml`
-(top-level key, not a CLI switch; do not append a duplicate key):
+It enables old-root discovery and eligible file fallback, not support for old
+database formats. To disable this fallback, edit the top-level key in the new-root
+`config.yaml`. Do not append a duplicate key. This is not a CLI switch:
 
 ```yaml
 legacy_path_read_fallback: false
 ```
 
-This disables future old-session discovery and compatibility read fallback. It
+This disables future old-root session discovery and eligible file fallback. It
 is **not** a filesystem deny rule for explicit, normally authorized access to an
 old pathname. It does not undo earlier writes, relocate/close an already selected
 session, or split its resources. Ownership safety still checks both current and
@@ -160,7 +160,7 @@ legacy roots even when discovery fallback is disabled.
 | --- | --- |
 | Fresh session | Always new state root. No automatic migration. |
 | Existing session / duplicate ID | Select the new-root session directory if present; only if absent and fallback enabled consider the legacy directory. Never merge duplicates. |
-| Selected legacy session | Resume and write its existing old-root DB/resources **in place**. It does not become a new-root session. |
+| Selected legacy-root session | Keep its DB and resources in that root. Resume requires the current database format. Refuse an incompatible DB without converting it or trying the other root. |
 | Selected session's missing internal file | Stay in that selected root; report the error or use source-defined recovery. Never substitute the other root's artifact/queue/DB. |
 | Eligible general state/data read or historical absolute old-root reference | New corresponding file first, old file only when the primary is absent and fallback enabled. Preserve the stored historical text. |
 | Permission error, malformed/corrupt primary or invalid session root | Report it; do not hide it by trying the other root. |
@@ -176,6 +176,39 @@ other root. A session-root directory that is a symlink/file is rejected; general
 read fallback must still authorize the actual resolved target, including symlinks.
 Root selection/fallback itself grants **no access permission** and does not repair
 the unresolved production filesystem/security capability.
+
+## Database formats and fresh startup
+
+New sessions use Parrot database format version `1` in SQLite, with 15 application
+tables. SQLite's internal tables are not part of that count. Existing nonempty
+unversioned databases and unknown format versions are unsupported. The same
+format check applies in both current and legacy filesystem roots.
+
+By default, `parrot` and `parrot chat` load or join the workspace's latest session.
+If resume encounters an unsupported database, startup reports the incompatibility
+and does not create a replacement. There is no automatic migration, reset, or
+session deletion.
+
+To start a different local session explicitly, run:
+
+```sh
+parrot chat --new-session
+```
+
+This option skips discovery, attachment, and resume of the previous session. It
+uses the existing create-session path and normal ownership checks. The previous
+session's database and artifacts remain intact. `/clear` cannot resolve a refusal
+that occurs before the interactive chat starts.
+
+An older binary can continue to use its untouched old sessions after all current
+owners have stopped. Opening a new-format session with an older binary is
+unsupported. Keep complete session backups and follow the
+[rollback checklist](#backup-and-rollback-checklist) when switching binaries.
+
+Durable accounting uses individual recorded facts. Live aggregate usage
+publications remain available, but aggregate SQL usage APIs are retired.
+Explicit image claim and release APIs are also retired. Input, conversation, and
+tool-terminal part references retain their images.
 
 ## Managed task concurrency
 
@@ -392,10 +425,9 @@ important. Establish exclusive use operationally before switching versions.
   deleted to force admission. Do not delete claim/socket files by hand while an
   owner may still be running.
 
-Takeover describes admission behavior, **not a currently working local resume
-recipe**: the required local production service is still unavailable. A remote
-connection or existing-owner attach likewise needs separate authorization and is
-not permission to operate another process's workspace.
+Takeover does not bypass database-format checks. A remote connection or
+existing-owner attach needs separate authorization and is not permission to
+operate another process's workspace.
 
 ## Backup and rollback checklist
 
@@ -403,22 +435,22 @@ not permission to operate another process's workspace.
    no writer is using the workspace/state being backed up. Do not use takeover
    as a stopping mechanism; an ownership record alone is not a host-wide
    quiescence proof.
-2. Before any Rust use of old state, make a consistent backup of **both complete
-   state roots**, not just `session.db`: include ownership ledgers, session DBs
-   and any SQLite journal/sidecar files, queues, artifacts, metadata, scratch,
-   history projections and logs. Preserve config/data separately and snapshot
-   workspace files that agent tools may modify. Protect backups as secret data.
+2. Before switching binaries or opening existing state, make a consistent backup
+   of **both complete state roots**, not just `session.db`. Include ownership
+   ledgers, session DBs and any SQLite journal/sidecar files, queues, artifacts,
+   metadata, scratch, history projections and logs. Preserve config/data
+   separately and snapshot workspace files that agent tools may modify. Protect backups as secret data.
    Copying a live SQLite file alone is not a consistent backup procedure.
 3. Keep the exact older binary/package and note the selected paths. An isolated
    Nix profile lets you select an older executable without deleting newer output;
    it does **not** restore databases or workspace files.
-4. If returning before Rust has written state, retain the untouched backup and
-   resume only after all Rust owners are closed. After Rust has written an old
-   DB/session, do **not** assume .NET can read/reverse every mutation. There is no
-   automatic schema downgrade or transaction merger. Retain a separate snapshot
-   of the post-Rust state for recovery, then restore the complete consistent
-   pre-Rust backup and corresponding workspace snapshot while both apps are
-   closed. This discards post-backup changes; plan recovery explicitly.
+4. An older binary can use its untouched old sessions after all current owners
+   have stopped. Do not open new-format sessions with an older binary. Database
+   downgrade and transaction merging are unsupported. If you restore a backup,
+   first retain a separate snapshot of the current state for recovery. Restore
+   the complete consistent backup and corresponding workspace snapshot while
+   both apps are closed. Restoring discards post-backup changes, so plan recovery
+   explicitly.
 5. Do not merge individual SQLite/history/queue files across versions or roots,
    point .NET at the Rust root, or treat setting the flag false as rollback.
    Validate recovery on an isolated copy before using the only original state.

@@ -1,10 +1,11 @@
 # Installation and bounded offline operation
 
 See [state and rollback](state-and-rollback.md) **before opening existing state**.
-These are experimental native artifacts, not a released application. Local
-session creation (`/new`), local resume requiring a new service, `serve` and `web`
-remain unavailable/fail-closed. Installing dependencies or passing an artifact
-check does not supply the missing production capability bundle.
+These are experimental native artifacts, not a released application. Local chat
+uses the native production service to create or resume current-format sessions.
+An incompatible database is refused without migration or reset. Use
+`parrot chat --new-session` to create a different local session while keeping the
+old database and artifacts. See [database formats and fresh startup](state-and-rollback.md#database-formats-and-fresh-startup).
 
 ## Build prerequisites
 
@@ -110,9 +111,9 @@ not environment variables or replacements for paths in tool calls. Failure
 details retain the original request path.
 
 `parrot chat --connect <address> [--token-file <owner-only-file>]` is an explicit
-experimental attach interface for a separately authorized compatible server, not
-a way to start the missing local service. Addresses include `unix:/path`, HTTP
-and HTTPS. TCP uses an owner-only token file; plaintext non-loopback listening
+experimental attach interface for a separately authorized compatible server. It
+is separate from local chat startup. Addresses include `unix:/path`, HTTP and
+HTTPS. TCP uses an owner-only token file; plaintext non-loopback listening
 also requires `--unsafe-allow-external`. HTTPS serving additionally requires
 `--tls-cert-file <PEM-chain>` and `--tls-key-file <unencrypted-PEM-key>`; see
 [HTTPS provisioning](../../README.md#https-certificates-for-serve).

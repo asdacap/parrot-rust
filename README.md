@@ -13,8 +13,9 @@ remote `chat --connect` remain experimental; this is not a claim of complete
 .NET behavior parity. Do not substitute an unrestricted or test/denying backend.
 Templates use MiniJinja; existing Scriban templates require manual conversion.
 
-**Before using existing state:** resuming a selected legacy session can **mutate
-its old database and session directory in place**. Back up before any Rust write.
+**Back up before opening existing state.** Incompatible databases are refused,
+not migrated or reset. Use `parrot chat --new-session` to start fresh without
+replacing the old session. See [state and rollback](docs/operator/state-and-rollback.md).
 Never run .NET and Rust against the same workspace concurrently. Existing .NET
 cannot observe ownership records in the new Rust root, so there is **no global
 cross-version locking or simultaneous same-workspace safety guarantee**.
