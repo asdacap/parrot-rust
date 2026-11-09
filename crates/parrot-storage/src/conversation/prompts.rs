@@ -33,23 +33,18 @@ impl ConversationRepository {
             Ok(tx.query_row("SELECT agent_session, mode FROM session_state WHERE user_session = ?1;", [user_session], |row| Ok((row.get(0)?, row.get(1)?)))?)
         }).await
     }
-    pub async fn update_mode(
-        &self,
-        user_session: String,
-        agent: String,
-        mode: String,
-    ) -> Result<(), EventError> {
-        let context = self.events.context().clone();
+    pub async fn update_mode(&self, user_session: String, mode: String) -> Result<(), EventError> {
         self.events.transaction(move |tx| {
-            tx.execute("UPDATE session_state SET mode = ?1 WHERE user_session = ?2;", params![mode, user_session])?;
-            tx.execute("INSERT INTO mode_change (agent_session, mode, created_at) VALUES (?1, ?2, ?3);", params![agent, mode, (context.timestamp)()])?;
+            let revision: Option<i64> = tx.query_row("SELECT mode_revision FROM session_state WHERE user_session = ?1;", [&user_session], |row| row.get(0)).optional()?;
+            let revision = revision.ok_or_else(|| EventError::Invalid("session state does not exist".into()))?
+                .checked_add(1).ok_or_else(|| EventError::Invalid("mode revision overflow".into()))?;
+            tx.execute("UPDATE session_state SET mode = ?1, mode_revision = ?2 WHERE user_session = ?3;", params![mode, revision, user_session])?;
             Ok(())
         }).await
     }
     pub async fn pending_status(&self, agent: String) -> Result<Option<PendingStatus>, EventError> {
         self.events.transaction(move |tx| {
-            let row: Option<(String, i64, i64)> = tx.query_row("SELECT state.mode, COALESCE((SELECT MAX(sequence) FROM mode_change WHERE agent_session = ?1), -1) AS version, COALESCE((SELECT MAX(mode_change_sequence) FROM status_prompt WHERE agent_session = ?1), -2) AS consumed FROM session_state AS state WHERE state.agent_session = ?1;", [&agent], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
-            Ok(row.and_then(|(mode,version,consumed)| (version > consumed).then_some(PendingStatus {mode,version})))
+            Ok(tx.query_row("SELECT mode, mode_revision FROM session_state WHERE agent_session = ?1 AND (status_revision IS NULL OR mode_revision > status_revision);", [agent], |row| Ok(PendingStatus { mode: row.get(0)?, version: row.get(1)? })).optional()?)
         }).await
     }
     pub async fn append_status_prompt(
@@ -63,10 +58,10 @@ impl ConversationRepository {
         let refresh_agent = agent.clone();
         let context = self.events.context().clone();
         let appended = self.events.transaction(move |tx| {
-            let pending: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM session_state WHERE agent_session = ?1 AND mode = ?2) AND COALESCE((SELECT MAX(sequence) FROM mode_change WHERE agent_session = ?1), -1) = ?3 AND ?3 > COALESCE((SELECT MAX(mode_change_sequence) FROM status_prompt WHERE agent_session = ?1), -2);", params![agent, expected.mode, expected.version], |row| row.get(0))?;
+            let pending: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM session_state WHERE agent_session = ?1 AND mode = ?2 AND mode_revision = ?3 AND (status_revision IS NULL OR mode_revision > status_revision));", params![agent, expected.mode, expected.version], |row| row.get(0))?;
             if !pending { return Ok(false); }
             project_system(tx, &context, &agent, content)?;
-            tx.execute("INSERT INTO status_prompt (agent_session, mode_change_sequence, created_at) VALUES (?1, ?2, ?3);", params![agent, expected.version, (context.timestamp)()])?;
+            tx.execute("UPDATE session_state SET status_revision = ?1 WHERE agent_session = ?2;", params![expected.version, agent])?;
             Ok(true)
         }).await?;
         if appended {

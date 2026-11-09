@@ -167,17 +167,6 @@ pub struct ToolExecutionTerminal {
     pub result_parts: Vec<ConversationPart>,
     pub message: String,
 }
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SessionUsage {
-    pub revision: u64,
-    pub input_tokens: i64,
-    pub cached_input_tokens: i64,
-    pub output_tokens: i64,
-    pub context_size: i64,
-    pub context_limit: i64,
-    pub input_cost: f64,
-    pub output_cost: f64,
-}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentLineageRecord {
     pub agent_session_id: String,

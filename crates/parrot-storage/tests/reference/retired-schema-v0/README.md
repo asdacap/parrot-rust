@@ -30,6 +30,25 @@ Paths in this inventory refer to their former locations under `crates/parrot-sto
 | `artifacts/image.rs` | `inconsistent_content_fields_conflict_without_mutation` | Public raw metadata recording is retired. Callers can no longer persist fabricated hashes, media types, or dimensions. The original case remains unchanged in the archived `artifacts/image.rs`. | Real-byte persistence retains inspection limits, upload conflicts, first labels, and transactional metadata rollback. |
 | `artifacts/image.rs` | `references_block_stale_cleanup_and_release_allows_it` | Explicit image claims and releases are retired. The original case remains unchanged in the archived `artifacts/image.rs`. | `each_part_owner_retains_images_until_its_reference_is_deleted` checks input, conversation, and terminal retention and cleanup after owner deletion. |
 | `artifacts/image.rs` | `existing_conversation_image_reference_prevents_cleanup` | Its raw-record setup is replaced by real image persistence. The original source remains archived. | The generalized part-owner case keeps conversation retention active and adds the other two owner types. |
+| `conversation/compaction.rs` | `session_mode_status_rechecks_exact_version_and_rolls_back_projection_failure` | Global mode sequences, orphan mode rows, and separate status-history layout are retired. The exact case is archived in `conversation/mode_status.rs`. | Active `conversation/mode_status.rs` verifies initial delivery, local revisions, stale rejection, rollback, concurrent consumption, missing state, overflow, and reopen. |
+
+## Retired aggregate accounting checks
+
+The unchanged original `events/statistics.rs` and `events/upstream_storage.rs` files are retained in this directory. Their supported cases remain active in the current test files.
+
+| Original path | Test | Retirement reason | Replacement coverage |
+|---|---|---|---|
+| `events/statistics.rs` | `usage_projection_rebuilds_last_snapshots_replaces_and_aggregates_with_main_context` | Aggregate SQL projection, lazy backfill, and storage-only usage snapshots are removed. | Active fact replay and runtime coordinator checks cover totals, costs, context, descendants, and reopen. |
+| `events/statistics.rs` | `usage_projection_failures_roll_back_and_checked_totals_reject_overflow` | Aggregate projection rollback is retired. | Active fact overflow checks and `runtime_statistics::append_failure_never_applies_or_publishes` retain checked totals and failed-commit behavior. |
+| `events/statistics.rs` | `replay_preserves_last_baseline_request_dedup_tool_counts_and_nonusage_revision` | Aggregate events no longer replace earlier request facts. | `replay_ignores_aggregate_publications_and_preserves_fact_dedup_tools_and_revision` keeps deduplication, tool counts, and revision behavior. |
+| `events/statistics.rs` | `replay_rejects_conflicting_missing_ancestor_and_cyclic_lineage_exactly` | Only its orphan aggregate-baseline subcase is retired. Aggregate publications carry no accounting facts. | The active case retains conflicting parents, missing ancestors, and cycle rejection. |
+| `events/statistics.rs` | `replay_uses_finished_failed_lineage_and_main_session_fallback_and_checks_overflow` | Its aggregate-baseline fixture is retired. | `replay_uses_finished_failed_lineage_and_main_session_and_checks_fact_overflow` uses individual request facts. |
+| `events/upstream_storage.rs` | `usage_projection_replaces_agent_totals_and_aggregates_agents` | Usage-bearing append results and the aggregate usage API are removed. | Active runtime coordinator checks preserve fact totals and reopen equivalence. |
+| `events/upstream_storage.rs` | `usage_projection_backfills_latest_legacy_statistics_once` | Legacy aggregate backfill is removed. | Current fact statistics restore directly from durable facts. |
+| `events/upstream_storage.rs` | `failed_event_insert_does_not_change_usage_projection` | The aggregate SQL projection is removed. | `runtime_statistics::append_failure_never_applies_or_publishes` checks failed commits without state or publication changes. |
+| `events/upstream_storage.rs` | `opening_legacy_database_keeps_original_usage_identity_and_first_lineage` | Opening an old database no longer migrates usage keys or lineage. | Current-format identity, exact event bytes, lineage, and fact reopen checks remain active. Database bootstrap tests nonmutating refusal. |
+
+`events/statistics.rs::aggregate_publications_are_raw_events_not_accounting_baselines` checks exact aggregate event bytes, individual-fact totals, recorded costs, context, and reopen. Live `AgentStatisticsUpdatedEvent` and `SessionUsageSnapshot` publications remain supported.
 
 ## Retained current behavior
 
