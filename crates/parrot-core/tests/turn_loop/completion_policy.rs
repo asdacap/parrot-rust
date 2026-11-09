@@ -60,7 +60,7 @@ fn an_empty_blocker_list_closes_the_candidate_without_reading_another_snapshot()
         state.run(),
         Ok(Outcome::Completed("accepted answer".into()))
     );
-    assert_eq!(state.rendered_instructions.len(), 1);
+    assert_eq!(state.request().rendered_instructions.len(), 1);
     assert!(state.completion_feedback.is_empty());
     assert_eq!(state.exit_blockers.len(), 1);
     assert_eq!(
@@ -97,7 +97,7 @@ fn nonempty_lists_with_empty_messages_still_require_a_retry() {
         ]);
         state.exit_blockers.push_back(messages.clone());
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert_eq!(state.rendered_instructions.len(), 2);
+        assert_eq!(state.request().rendered_instructions.len(), 2);
         assert_eq!(state.completion_feedback.len(), 1);
         assert_eq!(state.completion_feedback[0].messages, messages);
         assert_eq!(
@@ -126,7 +126,7 @@ fn every_blocker_list_retains_the_exact_candidate_and_forces_continuation() {
         ]);
         state.exit_blockers.push_back(messages.clone());
         assert_eq!(state.run(), Err(Error::failed("forced request")));
-        assert_eq!(state.rendered_instructions.len(), 2);
+        assert_eq!(state.request().rendered_instructions.len(), 2);
         assert!(state.pending_messages.is_empty());
         assert_eq!(state.completion_feedback.len(), 1);
         assert_eq!(state.completion_feedback[0].messages, messages);
@@ -169,7 +169,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
         state.run(),
         Ok(Outcome::Completed("accepted answer".into()))
     );
-    assert_eq!(state.rendered_instructions.len(), 4);
+    assert_eq!(state.request().rendered_instructions.len(), 4);
     assert_eq!(state.final_requests, [0, 1, 2, 3]);
     assert!(
         state
@@ -237,19 +237,23 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     let cancelled = || source.cancelled();
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
-            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled)
+            CancellationToken::new(&is_cancelled, &cancelled),
         )),
         Err(Error::failed("completion_feedback"))
     );
-    assert_eq!(state.rendered_instructions.len(), 1);
+    assert_eq!(state.request().rendered_instructions.len(), 1);
     assert!(state.completion_feedback.is_empty());
     let turn = state.last_turn.as_ref().unwrap();
     assert_eq!(turn.messages.len(), 1);
@@ -282,19 +286,23 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     let cancelled = || source.cancelled();
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
-            &mut MemoryCompaction::default().dependencies(),
             &options,
             &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled)
+            CancellationToken::new(&is_cancelled, &cancelled),
         )),
         Err(Error::failed("exit_blockers"))
     );
-    assert_eq!(state.rendered_instructions.len(), 1);
+    assert_eq!(state.request().rendered_instructions.len(), 1);
     assert!(state.completion_feedback.is_empty());
     assert_eq!(state.exit_blockers.len(), 1);
     assert_eq!(state.last_turn.as_ref().unwrap().messages.len(), 1);

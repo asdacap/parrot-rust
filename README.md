@@ -31,13 +31,17 @@ ported from the .NET repository. Repository contributor guidance is in
 `parrot-core` owns the agent turn protocol, loop, and shared compaction algorithm.
 Its turn contracts are:
 
-- `States`: factual conversation turns and pending-message headers, context
-  configuration/calibration, explicit messages, estimates, result recording,
-  observed completion context, and explicit persistence/rendering effects.
+- `States`: factual conversation turns and pending-message headers, skill records
+  and content, context configuration/calibration, explicit messages, result
+  recording, observed completion context, and explicit persistence effects.
+- `Preparation`: live instruction construction, exact token estimates, and
+  expansion of explicitly supplied templates and arguments.
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
-Compaction receives configuration and native effects through `CompactionDependencies`.
+Turn calls borrow request preparation and compaction services together through
+`PreparationDependencies`. Compaction receives configuration and native effects
+through `CompactionDependencies`.
 Core samples instructions, assembles durable conversation groups, computes target
 limits, selects the safe prefix, runs summaries, and fits the actual replacement
 status. `CompactionPreparationEffects` supplies prompt sampling, instruction
@@ -77,6 +81,8 @@ The core specifies and implements:
 - Conversation readiness and input-admission decisions from actual turn/message
   state, recording assistant calls before execution, and completion ordering before
   closing a turn.
+- Skill mention parsing, turn-scoped deduplication, selected-skill ordering, prompt
+  composition, and skill-context size limits.
 
 For core-selected automatic compaction and oversized recovery,
 `States::read_conversation_state` returns one raw summary and its durable tail,
@@ -110,7 +116,17 @@ precomputed work flag. A no-tool assistant candidate can be present while durabl
 turn closure is still pending. Pending-message peeks return stable identities and
 delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
-native promotion rechecks the queue and keeps all steers in one batch.
+native promotion rechecks the queue and keeps all steers in one batch. Promotion
+returns the admitted inputs with their identities and content. It does not select
+or render skills. Core parses their skill mentions and resolves references in one
+batch per input through `States::get_skills`. That read returns metadata without
+loading instruction bodies and permits one fallback catalog refresh per batch.
+Core deduplicates records by stable identity before calling
+`States::read_skill_content`, then applies formatting and injection limits.
+`Preparation::render_template` only expands the configured template and supplied
+arguments. Core explicitly persists the resulting context through
+`States::record_input_context`. State implementations can supply skill records
+from files or a database without preparing a prompt themselves.
 
 There is no `States::prepare_context` workflow hook. Core reads raw model limits
 and context overrides through `read_context_configuration` and token calibration
@@ -119,9 +135,11 @@ through `read_token_calibration`, then directs explicit native effects.
 or status message, retaining its source identity for idempotent recording. Core fits
 that exact message before insertion or compaction, acknowledges the fitted or
 persisted context, and calculates the output budget from the final messages and
-tool definitions. Native state owns reminder checkpoint restoration, cadence,
-prompt/template rendering, exact token estimates, idempotent persistence, and
-acknowledgement before uncancelled post-commit notice publication.
+tool definitions. `Preparation` owns instruction rendering and exact token
+estimation. The runtime preparation adapter retains request-status bindings and
+uses the live prompt services. Native state owns reminder checkpoint restoration,
+cadence, reminder rendering, idempotent persistence, and acknowledgement before
+uncancelled post-commit notice publication.
 Calibration survives later stream/publication failures and resets only after
 successful compaction persistence.
 

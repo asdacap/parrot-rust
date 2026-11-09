@@ -1,6 +1,6 @@
 use super::*;
+use parrot_core::{Skill, SkillContent, SkillReference};
 use parrot_domain::contracts::security::SecurityProvider;
-use parrot_storage::events::ConversationPart;
 use std::sync::atomic::AtomicUsize;
 
 struct Captures(AtomicUsize);
@@ -46,75 +46,86 @@ fn skills_fixture() -> (
     (reader, catalog, state)
 }
 #[tokio::test]
-async fn selected_skills_use_actual_conversation_text_order_turn_dedup_and_full_file_bytes() {
+async fn metadata_lookup_does_not_read_body_and_content_reads_keep_full_bytes_and_fresh_authority()
+{
     let (reader, _, mut skills) = skills_fixture();
     skills.begin_turn(&Cancel::no()).await.unwrap();
-    skills
-        .select(
-            &[
-                ConversationPart::image("$one", "image/png", "$one"),
-                ConversationPart::text("😀 $two"),
-                ConversationPart::text("$one $two"),
-            ],
+    let before = reader.calls.lock().unwrap().len();
+    let one = skills
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "one".into(),
+                path: None,
+            }),
             &Cancel::no(),
         )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
+        .unwrap()
         .unwrap();
-    let rendered = skills.render(&Cancel::no()).await.unwrap();
     assert_eq!(
-        rendered.loaded_paths,
-        ["/skills/two/SKILL.md", "/skills/one/SKILL.md"]
+        one,
+        Skill {
+            id: "/skills/one/SKILL.md".into(),
+            name: "one".into(),
+            path: "/skills/one/SKILL.md".into(),
+        }
     );
-    assert!(
-        rendered.content.find("<name>two</name>").unwrap()
-            < rendered.content.find("<name>one</name>").unwrap()
-    );
-    assert!(
-        rendered
-            .content
-            .contains("---\nname: two\ndescription: description\n---\nbody")
-    );
-    skills
-        .select(&[ConversationPart::text("$two")], &Cancel::no())
-        .await
-        .unwrap();
-    assert!(
+    assert_eq!(reader.calls.lock().unwrap().len(), before);
+    let original = "---\nname: one\ndescription: description\n---\nbody";
+    assert_eq!(
         skills
-            .render(&Cancel::no())
+            .read_skill_content(&one, &Cancel::no())
             .await
-            .unwrap()
-            .content
-            .is_empty()
+            .unwrap(),
+        SkillContent::Text(original.into())
     );
-    skills.end_turn();
-    skills
-        .select(&[ConversationPart::text("$two")], &Cancel::no())
-        .await
-        .unwrap();
+    let large = "界".repeat(3000);
+    reader.file(&one.path, large.clone());
     assert_eq!(
-        skills.render(&Cancel::no()).await.unwrap().loaded_paths,
-        ["/skills/two/SKILL.md"]
+        skills
+            .read_skill_content(&one, &Cancel::no())
+            .await
+            .unwrap(),
+        SkillContent::Text(large)
     );
     let calls = reader.calls.lock().unwrap();
-    assert!(
-        calls
-            .iter()
-            .filter_map(|call| call.request.as_ref())
-            .all(|request| request.max_bytes == Some(1024 * 1024)
-                && request.expected_physical.is_some())
-    );
+    let first = &calls[before];
+    let second = &calls[before + 1];
+    for call in [first, second] {
+        let request = call.request.as_ref().unwrap();
+        assert_eq!(call.operation, "read");
+        assert_eq!(request.requested.as_path(), Path::new(&one.path));
+        assert_eq!(
+            request.expected_physical.as_deref(),
+            Some(Path::new(&one.id))
+        );
+        assert_eq!(request.links, LinkPolicy::Follow);
+        assert_eq!(request.max_bytes, Some(1024 * 1024));
+    }
+    assert_ne!(first.policy, second.policy);
 }
+
 #[tokio::test]
-async fn unknown_mentions_refresh_catalog_and_rendered_catalog_uses_actual_snapshot_identity() {
+async fn unknown_lookup_refreshes_catalog_and_keeps_the_active_snapshot_until_end_turn() {
     let (reader, catalog, mut skills) = skills_fixture();
     let before = skills.build_catalog(&Cancel::no()).await.unwrap();
     skills.begin_turn(&Cancel::no()).await.unwrap();
     reader.skill("/skills/three/SKILL.md", "three");
     assert_eq!(skills.build_catalog(&Cancel::no()).await.unwrap(), before);
-    skills
-        .select(&[ConversationPart::text("$three")], &Cancel::no())
+    let three = skills
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "three".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
+        .unwrap()
         .unwrap();
+    assert_eq!(three.id, "/skills/three/SKILL.md");
     assert!(
         skills
             .build_catalog(&Cancel::no())
@@ -122,13 +133,8 @@ async fn unknown_mentions_refresh_catalog_and_rendered_catalog_uses_actual_snaps
             .unwrap()
             .contains("$three:")
     );
-    assert_eq!(
-        skills.render(&Cancel::no()).await.unwrap().loaded_paths,
-        ["/skills/three/SKILL.md"]
-    );
     reader.skill("/skills/four/SKILL.md", "four");
     catalog.invalidate().await;
-    // An active turn keeps its captured catalog even if the external catalog is invalidated.
     assert!(
         !skills
             .build_catalog(&Cancel::no())
@@ -145,87 +151,105 @@ async fn unknown_mentions_refresh_catalog_and_rendered_catalog_uses_actual_snaps
             .contains("$four:")
     );
 }
+
 #[tokio::test]
-async fn denied_invalid_utf8_and_too_large_skill_reads_render_notices_not_loaded_paths() {
+async fn content_reads_return_raw_diagnostics_and_do_not_apply_prompt_escaping_or_limits() {
     let (reader, _, mut skills) = skills_fixture();
-    skills
-        .select(&[ConversationPart::text("$one $two")], &Cancel::no())
+    let one = skills
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "one".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
+        .unwrap()
         .unwrap();
-    reader.error(
-        "read",
-        "/skills/one/SKILL.md",
+    let two = skills
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "two".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
+        .await
+        .map(|rows| rows.into_iter().next().unwrap())
+        .unwrap()
+        .unwrap();
+    let diagnostic = "  actual\n denied <target> & details  ";
+    for kind in [
         FileReadErrorKind::Denied,
-        "  actual\n denied <target> & details  ",
-    );
-    reader.file("/skills/two/SKILL.md", vec![0xff]);
-    let rendered = skills.render(&Cancel::no()).await.unwrap();
-    assert!(rendered.loaded_paths.is_empty());
-    assert!(
-        rendered
-            .content
-            .contains("actual denied &lt;target&gt; &amp; details")
-    );
-    assert!(rendered.content.contains("not valid UTF-8"));
-    skills.end_turn();
-    reader.errors.lock().unwrap().clear();
-    reader.skill("/skills/one/SKILL.md", "one");
-    skills
-        .select(&[ConversationPart::text("$one")], &Cancel::no())
-        .await
-        .unwrap();
-    reader.file("/skills/one/SKILL.md", "界".repeat(3000));
-    let rendered = skills.render(&Cancel::no()).await.unwrap();
-    assert!(rendered.content.contains("<skill-too-large>"));
-    assert!(rendered.loaded_paths.is_empty());
-}
-#[tokio::test]
-async fn active_turn_byte_budget_reserves_summary_and_does_not_truncate_loaded_content() {
-    let (reader, catalog, mut skills) = skills_fixture();
-    for index in 0..150 {
-        let name = format!("large-{index}");
-        reader.skill(&format!("/skills/{name}/SKILL.md"), &name);
-        reader.file(
-            &format!("/skills/{name}/SKILL.md"),
-            format!(
-                "---\nname: {name}\ndescription: description\n---\n{}",
-                "x".repeat(7900)
-            ),
+        FileReadErrorKind::Io,
+        FileReadErrorKind::InvalidOperation,
+    ] {
+        reader.error("read", &one.path, kind, diagnostic);
+        assert_eq!(
+            skills
+                .read_skill_content(&one, &Cancel::no())
+                .await
+                .unwrap(),
+            SkillContent::Unavailable(diagnostic.into())
         );
     }
-    catalog.invalidate().await;
-    let text = (0..150)
-        .map(|index| format!("$large-{index}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    skills
-        .select(&[ConversationPart::text(text)], &Cancel::no())
-        .await
-        .unwrap();
-    let rendered = skills.render(&Cancel::no()).await.unwrap();
-    assert!(rendered.content.len() <= MAXIMUM_TURN_BYTES);
-    assert!(rendered.loaded_paths.len() < 150);
-    assert!(!rendered.loaded_paths.is_empty());
-    assert!(rendered.content.contains("active-turn prompt budget"));
-    assert!(rendered.content.contains(&"x".repeat(7900)));
+    reader.file(&two.path, vec![0xff]);
+    assert_eq!(
+        skills
+            .read_skill_content(&two, &Cancel::no())
+            .await
+            .unwrap(),
+        SkillContent::Unavailable("Skill source '/skills/two/SKILL.md' is not valid UTF-8.".into())
+    );
+    reader.error(
+        "read",
+        &one.path,
+        FileReadErrorKind::InvalidPath,
+        "invalid read path",
+    );
+    assert_eq!(
+        skills
+            .read_skill_content(&one, &Cancel::no())
+            .await
+            .unwrap_err(),
+        PromptError::Read(FileReadError::new(
+            FileReadErrorKind::InvalidPath,
+            "invalid read path"
+        ))
+    );
 }
+
 #[tokio::test]
 async fn skill_prompt_provider_async_sampling_joins_catalog_and_cancellation_is_not_a_notice() {
     let (reader, _, mut skills) = skills_fixture();
-    skills
-        .select(&[ConversationPart::text("$one")], &Cancel::no())
+    let one = skills
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "one".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
+        .unwrap()
         .unwrap();
     *reader.cancel_at.lock().unwrap() = Some(("read", "/skills/one/SKILL.md".into()));
     assert_eq!(
-        skills.render(&Cancel::no()).await.unwrap_err(),
+        skills
+            .read_skill_content(&one, &Cancel::no())
+            .await
+            .unwrap_err(),
         PromptError::Cancelled
     );
     reader.cancel_at.lock().unwrap().take();
-    // A failed render leaves the actual selection pending, as source RenderSelection does.
     assert_eq!(
-        skills.render(&Cancel::no()).await.unwrap().loaded_paths,
-        ["/skills/one/SKILL.md"]
+        skills
+            .read_skill_content(&one, &Cancel::no())
+            .await
+            .unwrap(),
+        SkillContent::Text("---\nname: one\ndescription: description\n---\nbody".into())
     );
     let provider = AgentSkillPromptProvider::new(Arc::new(tokio::sync::Mutex::new(skills))).await;
     let mut prompt = provider.materialize(&crate::identity()).unwrap();
@@ -237,7 +261,7 @@ async fn skill_prompt_provider_async_sampling_joins_catalog_and_cancellation_is_
 }
 
 #[tokio::test]
-async fn same_prompt_product_observes_select_refresh_without_another_epoch_sample() {
+async fn same_prompt_product_observes_lookup_refresh_without_another_epoch_sample() {
     let (reader, _, skills) = skills_fixture();
     let skills = Arc::new(tokio::sync::Mutex::new(skills));
     let provider = AgentSkillPromptProvider::new(skills.clone()).await;
@@ -252,8 +276,15 @@ async fn same_prompt_product_observes_select_refresh_without_another_epoch_sampl
     skills
         .lock()
         .await
-        .select(&[ConversationPart::text("$three")], &Cancel::no())
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "three".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
         .unwrap();
     let refreshed = prompt.build(&selection).unwrap();
     assert!(refreshed.contains("$three:"));
@@ -262,8 +293,15 @@ async fn same_prompt_product_observes_select_refresh_without_another_epoch_sampl
         skills
             .lock()
             .await
-            .select(&[ConversationPart::text("$missing")], &Cancel::no())
+            .get_skills(
+                std::slice::from_ref(&SkillReference {
+                    name: "missing".into(),
+                    path: None
+                }),
+                &Cancel::no()
+            )
             .await
+            .map(|rows| rows.into_iter().next().unwrap())
             .unwrap_err(),
         PromptError::Cancelled
     );
@@ -273,7 +311,7 @@ async fn same_prompt_product_observes_select_refresh_without_another_epoch_sampl
 }
 
 #[tokio::test]
-async fn catalog_template_failure_is_reported_by_build_not_selection_or_begin_turn() {
+async fn catalog_template_failure_is_reported_by_build_not_lookup_or_begin_turn() {
     let (reader, catalog, _) = skills_fixture();
     let content = format!(
         "prompt_templates:\n  context.skills:\n    template: '{}{{skills}}'\n",
@@ -294,8 +332,15 @@ async fn catalog_template_failure_is_reported_by_build_not_selection_or_begin_tu
     skills
         .lock()
         .await
-        .select(&[ConversationPart::text("$one")], &Cancel::no())
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "one".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
         .unwrap();
     let (_, router) = crate::route(Vec::new());
     let selection = router.resolve("unused/vendor/model").unwrap();
@@ -482,8 +527,15 @@ async fn live_skill_build_keeps_active_snapshot_and_captures_actual_catalog_outs
     skills
         .lock()
         .await
-        .select(&[ConversationPart::text("$four")], &Cancel::no())
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "four".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
         .unwrap();
     assert!(
         prompt
@@ -594,20 +646,187 @@ async fn sampled_live_skill_build_can_cancel_while_waiting_for_actual_skill_owne
 }
 
 #[tokio::test]
-async fn actual_turn_linked_selection_uses_catalog_platform_aliases_without_spurious_refresh() {
+async fn linked_lookup_uses_catalog_platform_aliases_without_spurious_refresh() {
+    for platform in [PathPlatform::MacOs, PathPlatform::Unix] {
+        for alias in ["tmp", "var", "etc"] {
+            let physical = format!("/private/{alias}/skills/review/SKILL.md");
+            let root = format!("/private/{alias}/skills");
+            let reader = Arc::new(Fake::default());
+            reader.dir(&root);
+            reader.skill(&physical, "review");
+            let catalog = Arc::new(SkillCatalog::new(
+                reader.clone(),
+                vec![SkillRoot {
+                    path: root,
+                    scope: SkillScope::Repo,
+                    follow_directory_links: true,
+                }],
+                SkillDiscoveryContext {
+                    working_directory: "/private/tmp/work".into(),
+                    platform,
+                },
+                Arc::new(|| (SkillConfiguration::default(), 0)),
+            ));
+            let mut skills = AgentSkills::new(
+                catalog,
+                reader.clone(),
+                Arc::new(Captures(AtomicUsize::new(0))),
+                crate::templates(""),
+                "/tmp/work".into(),
+            )
+            .unwrap();
+            skills.begin_turn(&Cancel::no()).await.unwrap();
+            let before = reader.calls.lock().unwrap().len();
+            let found = skills
+                .get_skills(
+                    std::slice::from_ref(&SkillReference {
+                        name: "review".into(),
+                        path: Some(format!("/{alias}/skills/review/SKILL.md")),
+                    }),
+                    &Cancel::no(),
+                )
+                .await
+                .map(|rows| rows.into_iter().next().unwrap())
+                .unwrap();
+            if platform == PathPlatform::MacOs {
+                let found = found.unwrap();
+                assert_eq!(found.id, physical);
+                assert_eq!(reader.calls.lock().unwrap().len(), before);
+            } else {
+                assert!(found.is_none());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn disabled_known_lookup_does_not_refresh_and_next_enabled_duplicate_is_returned() {
     let reader = Arc::new(Fake::default());
-    reader.dir("/private/tmp/skills");
-    reader.skill("/private/tmp/skills/review/SKILL.md", "review");
+    reader.dir("/skills");
+    reader.skill("/skills/a/SKILL.md", "same");
+    reader.skill("/skills/b/SKILL.md", "same");
     let catalog = Arc::new(SkillCatalog::new(
         reader.clone(),
         vec![SkillRoot {
-            path: "/private/tmp/skills".into(),
+            path: "/skills".into(),
             scope: SkillScope::Repo,
             follow_directory_links: true,
         }],
         SkillDiscoveryContext {
-            working_directory: "/private/tmp/work".into(),
-            platform: PathPlatform::MacOs,
+            working_directory: "/work".into(),
+            platform: PathPlatform::Unix,
+        },
+        Arc::new(|| {
+            (
+                SkillConfiguration::new(
+                    true,
+                    vec![SkillConfigEntry::new("/skills/a/SKILL.md", false)],
+                ),
+                0,
+            )
+        }),
+    ));
+    let mut skills = AgentSkills::new(
+        catalog,
+        reader.clone(),
+        Arc::new(Captures(AtomicUsize::new(0))),
+        crate::templates(""),
+        "/work".into(),
+    )
+    .unwrap();
+    skills.begin_turn(&Cancel::no()).await.unwrap();
+    let before = reader.calls.lock().unwrap().len();
+    assert_eq!(
+        skills
+            .get_skills(
+                std::slice::from_ref(&SkillReference {
+                    name: "same".into(),
+                    path: None
+                }),
+                &Cancel::no()
+            )
+            .await
+            .map(|rows| rows.into_iter().next().unwrap())
+            .unwrap()
+            .unwrap()
+            .id,
+        "/skills/b/SKILL.md"
+    );
+    assert!(
+        skills
+            .get_skills(
+                std::slice::from_ref(&SkillReference {
+                    name: "same".into(),
+                    path: Some("/skills/a/SKILL.md".into())
+                }),
+                &Cancel::no()
+            )
+            .await
+            .map(|rows| rows.into_iter().next().unwrap())
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(reader.calls.lock().unwrap().len(), before);
+}
+
+#[tokio::test]
+async fn metadata_and_content_reads_observe_prior_cancellation_without_filesystem_work() {
+    let (reader, _, mut skills) = skills_fixture();
+    let one = skills
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "one".into(),
+                path: None,
+            }),
+            &Cancel::no(),
+        )
+        .await
+        .map(|rows| rows.into_iter().next().unwrap())
+        .unwrap()
+        .unwrap();
+    let before = reader.calls.lock().unwrap().len();
+    let cancelled = Cancel(AtomicBool::new(true));
+    assert_eq!(
+        skills
+            .get_skills(
+                std::slice::from_ref(&SkillReference {
+                    name: "one".into(),
+                    path: None
+                }),
+                &cancelled
+            )
+            .await
+            .map(|rows| rows.into_iter().next().unwrap())
+            .unwrap_err(),
+        PromptError::Cancelled
+    );
+    assert_eq!(
+        skills
+            .read_skill_content(&one, &cancelled)
+            .await
+            .unwrap_err(),
+        PromptError::Cancelled
+    );
+    assert_eq!(reader.calls.lock().unwrap().len(), before);
+}
+
+#[tokio::test]
+async fn metadata_lookup_matches_physical_discovery_and_relative_paths_without_retargeting_content()
+{
+    let reader = Arc::new(Fake::default());
+    reader.dir("/physical");
+    reader.skill("/physical/one/SKILL.md", "one");
+    reader.link("/logical", "/physical");
+    let catalog = Arc::new(SkillCatalog::new(
+        reader.clone(),
+        vec![SkillRoot {
+            path: "/logical".into(),
+            scope: SkillScope::Repo,
+            follow_directory_links: true,
+        }],
+        SkillDiscoveryContext {
+            working_directory: "/working".into(),
+            platform: PathPlatform::Unix,
         },
         Arc::new(|| (SkillConfiguration::default(), 0)),
     ));
@@ -616,23 +835,101 @@ async fn actual_turn_linked_selection_uses_catalog_platform_aliases_without_spur
         reader.clone(),
         Arc::new(Captures(AtomicUsize::new(0))),
         crate::templates(""),
-        "/tmp/work".into(),
+        "/working".into(),
     )
     .unwrap();
     skills.begin_turn(&Cancel::no()).await.unwrap();
     let before = reader.calls.lock().unwrap().len();
-    skills
-        .select(
-            &[ConversationPart::text(
-                "[$review](/tmp/skills/review/SKILL.md)",
-            )],
+    let expected = Skill {
+        id: "/physical/one/SKILL.md".into(),
+        name: "one".into(),
+        path: "/logical/one/SKILL.md".into(),
+    };
+    for path in [
+        "/physical/one/SKILL.md",
+        "/logical/../logical/one/SKILL.md",
+        "../logical/one/SKILL.md",
+    ] {
+        assert_eq!(
+            skills
+                .get_skills(
+                    std::slice::from_ref(&SkillReference {
+                        name: "one".into(),
+                        path: Some(path.into()),
+                    }),
+                    &Cancel::no(),
+                )
+                .await
+                .map(|rows| rows.into_iter().next().unwrap())
+                .unwrap(),
+            Some(expected.clone())
+        );
+    }
+    assert_eq!(reader.calls.lock().unwrap().len(), before);
+    reader.dir("/replacement");
+    reader.skill("/replacement/one/SKILL.md", "one");
+    reader.link("/logical", "/replacement");
+    assert_eq!(
+        skills
+            .read_skill_content(&expected, &Cancel::no())
+            .await
+            .unwrap(),
+        SkillContent::Unavailable("fixture opened target changed".into())
+    );
+}
+
+#[tokio::test]
+async fn authorized_content_reads_keep_the_native_one_mib_read_cap() {
+    let (reader, _, mut skills) = skills_fixture();
+    let skill = skills
+        .get_skills(
+            std::slice::from_ref(&SkillReference {
+                name: "one".into(),
+                path: None,
+            }),
             &Cancel::no(),
         )
         .await
+        .map(|rows| rows.into_iter().next().unwrap())
+        .unwrap()
         .unwrap();
-    assert_eq!(reader.calls.lock().unwrap().len(), before);
+    reader.file(&skill.path, vec![b'x'; 1024 * 1024 + 1]);
     assert_eq!(
-        skills.render(&Cancel::no()).await.unwrap().loaded_paths,
-        ["/private/tmp/skills/review/SKILL.md"]
+        skills
+            .read_skill_content(&skill, &Cancel::no())
+            .await
+            .unwrap(),
+        SkillContent::Unavailable("fixture exceeds 1 MiB limit".into())
     );
+}
+
+#[tokio::test]
+async fn missing_references_refresh_catalog_once_per_input_batch() {
+    let (reader, _, mut skills) = skills_fixture();
+    skills.begin_turn(&Cancel::no()).await.unwrap();
+    reader.calls.lock().unwrap().clear();
+    let references = ["missing", "missing", "another-missing"].map(|name| SkillReference {
+        name: name.into(),
+        path: None,
+    });
+    assert_eq!(
+        skills.get_skills(&references, &Cancel::no()).await.unwrap(),
+        [None, None, None]
+    );
+    let root_scans = reader
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|call| call.operation == "list" && call.path == Path::new("/skills"))
+        .count();
+    assert_eq!(
+        root_scans, 1,
+        "missing references share one catalog refresh"
+    );
+    reader.skill("/skills/missing/SKILL.md", "missing");
+    let next = skills.get_skills(&references, &Cancel::no()).await.unwrap();
+    assert!(next[0].is_some());
+    assert_eq!(next[0], next[1]);
+    assert!(next[2].is_none());
 }

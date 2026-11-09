@@ -10,8 +10,8 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
         value
     }
 
-    let mut state = MemoryState::new([]);
-    state.messages = vec![compaction_support::message("saved conversation")];
+    let state = MemoryState::new([]);
+    state.request().messages = vec![compaction_support::message("saved conversation")];
     let provider = state.summary_provider.clone();
     let input = retain_owned(finish(state.read_conversation_state()).unwrap());
     drop(state);
@@ -27,9 +27,9 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
-struct MemoryPreparation;
+struct MemoryCompactionPreparation;
 
-impl CompactionPreparationEffects for MemoryPreparation {
+impl CompactionPreparationEffects for MemoryCompactionPreparation {
     type Error = Error;
 
     fn report_started(&self) -> BoxFuture<'_, Result<(), Error>> {
@@ -150,7 +150,7 @@ impl MemoryCompaction {
     pub(super) fn dependencies(&mut self) -> CompactionDependencies<'_> {
         CompactionDependencies {
             configuration: &self.configuration,
-            preparation: &MemoryPreparation,
+            preparation: &MemoryCompactionPreparation,
             effects: &mut self.effects,
             provider: &self.provider,
             status: &self.status,

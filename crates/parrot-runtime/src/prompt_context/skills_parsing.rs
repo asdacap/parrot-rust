@@ -1,8 +1,7 @@
-//! Pure skill metadata and mention parsing; no filesystem access or authorization.
+//! Pure skill metadata parsing and path normalization; no filesystem access or authorization.
 
 use parrot_domain::values::config::{PathPlatform, PlatformPath};
 use parrot_foundation::config::{node::Node, yaml};
-use std::collections::HashSet;
 use std::fmt;
 use std::path::{Component, Path};
 
@@ -44,14 +43,6 @@ pub struct SkillDisplayMetadata {
     pub display_name: Option<String>,
     pub short_description: Option<String>,
     pub allow_implicit_invocation: Option<bool>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SkillMention {
-    pub name: String,
-    pub path: Option<String>,
-    /// Source-compatible UTF-16 code-unit offset, not a UTF-8 byte index.
-    pub position: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -214,118 +205,6 @@ pub fn parse_skill_display_metadata(content: &str) -> SkillDisplayMetadata {
     }
 }
 
-fn word(character: u8) -> bool {
-    character.is_ascii_alphanumeric() || character == b'_'
-}
-
-fn name_character(character: u8) -> bool {
-    word(character) || matches!(character, b':' | b'-')
-}
-
-fn linked_mention(text: &str, start: usize) -> Option<(usize, &str, &str)> {
-    let rest = text.get(start..)?.strip_prefix("[$")?;
-    let name_end = rest.find([']', '\r', '\n'])?;
-    if name_end == 0 || !rest[name_end..].starts_with("](") {
-        return None;
-    }
-    let path = &rest[name_end + 2..];
-    let path_end = path.find(')')?;
-    if path_end == 0 {
-        return None;
-    }
-    let end = start + 2 + name_end + 2 + path_end + 1;
-    if text
-        .as_bytes()
-        .get(end)
-        .copied()
-        .is_some_and(name_character)
-    {
-        return None;
-    }
-    Some((end, rest[..name_end].trim(), path[..path_end].trim()))
-}
-
-/// Mirrors the source regex, including matches inside Markdown/code. No Markdown
-/// exclusion, escaping rule or Unicode identifier expansion is invented here.
-pub fn parse_skill_mentions(text: &str) -> Vec<SkillMention> {
-    const ENVIRONMENT_NAMES: &[&str] = &[
-        "HOME",
-        "PATH",
-        "USER",
-        "SHELL",
-        "PWD",
-        "TMP",
-        "TMPDIR",
-        "TEMP",
-        "LANG",
-        "TERM",
-        "XDG_CONFIG_HOME",
-    ];
-    let mut mentions = Vec::new();
-    let mut start = 0;
-    let mut position = 0;
-    while start < text.len() {
-        let previous_is_word = start > 0 && word(text.as_bytes()[start - 1]);
-        let matched = if previous_is_word {
-            None
-        } else if let Some((end, name, path)) = linked_mention(text, start) {
-            Some((end, name, Some(path.to_owned())))
-        } else if text.as_bytes()[start] == b'$' {
-            let mut end = start + 1;
-            while text
-                .as_bytes()
-                .get(end)
-                .copied()
-                .is_some_and(name_character)
-            {
-                end += 1;
-            }
-            (end > start + 1).then(|| (end, &text[start + 1..end], None))
-        } else {
-            None
-        };
-        if let Some((end, name, path)) = matched {
-            if path.is_some() || !ENVIRONMENT_NAMES.contains(&name) {
-                mentions.push(SkillMention {
-                    name: name.into(),
-                    path,
-                    position,
-                });
-            }
-            position += text[start..end].encode_utf16().count();
-            start = end;
-        } else {
-            let character = text[start..].chars().next().expect("in-bounds character");
-            position += character.len_utf16();
-            start += character.len_utf8();
-        }
-    }
-    mentions
-}
-
-/// Selects by ordered mention, first enabled matching name, and canonical-path
-/// deduplication. Relative linked paths require the explicit-directory variant.
-pub fn select_skills(skills: &[SkillMetadata], mentions: &[SkillMention]) -> Vec<SkillMetadata> {
-    select_skills_in_directory(skills, mentions, None)
-}
-
-pub fn select_skills_in_directory(
-    skills: &[SkillMetadata],
-    mentions: &[SkillMention],
-    working_directory: Option<&str>,
-) -> Vec<SkillMetadata> {
-    select_skills_on_platform(
-        skills,
-        mentions,
-        working_directory,
-        if cfg!(target_os = "macos") {
-            PathPlatform::MacOs
-        } else {
-            PathPlatform::Unix
-        },
-    )
-}
-
 pub fn normalize_skill_match_path(
     path: &str,
     working_directory: Option<&str>,
@@ -341,44 +220,4 @@ pub fn normalize_skill_match_path(
             }
         })
         .map_err(|error| error.to_string())
-}
-
-pub fn select_skills_on_platform(
-    skills: &[SkillMetadata],
-    mentions: &[SkillMention],
-    working_directory: Option<&str>,
-    platform: PathPlatform,
-) -> Vec<SkillMetadata> {
-    let mut ordered: Vec<_> = mentions.iter().collect();
-    ordered.sort_by_key(|mention| mention.position);
-    let mut paths = HashSet::new();
-    let mut selected = Vec::new();
-    for mention in ordered {
-        let requested = mention
-            .path
-            .as_deref()
-            .map(|path| normalize_skill_match_path(path, working_directory, platform));
-        if let Some(skill) = skills.iter().find(|skill| {
-            skill.enabled
-                && skill.name == mention.name
-                && match &requested {
-                    None => true,
-                    Some(Err(_)) => false,
-                    Some(Ok(path)) => {
-                        [&skill.path, &skill.discovery_path]
-                            .iter()
-                            .any(|candidate| {
-                                normalize_skill_match_path(candidate, working_directory, platform)
-                                    .as_ref()
-                                    == Ok(path)
-                            })
-                    }
-                }
-        }) {
-            if paths.insert(skill.path.clone()) {
-                selected.push(skill.clone());
-            }
-        }
-    }
-    selected
 }

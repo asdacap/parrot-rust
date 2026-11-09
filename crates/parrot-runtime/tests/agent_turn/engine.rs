@@ -30,7 +30,7 @@ use parrot_runtime::{
     },
     compaction::*,
     event_broker::{BrokerError, EventBroker},
-    prompt_context::{PromptResult, SkillRendering, SystemPrompt},
+    prompt_context::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     artifacts::compaction::CompactionGroupBlobStore,
@@ -605,27 +605,22 @@ impl TurnSkills for Skills {
             Ok(())
         })
     }
-    fn select<'a>(
+    fn get_skills<'a>(
         &'a self,
-        _: &'a [ConversationPart],
+        references: &'a [parrot_core::SkillReference],
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<()>> {
+    ) -> BoxFuture<'a, PromptResult<Vec<Option<parrot_core::Skill>>>> {
         Box::pin(async move {
-            self.0.push("skills-select");
-            Ok(())
+            self.0.push("skills-get");
+            Ok(references.iter().map(|_| None).collect())
         })
     }
-    fn render<'a>(
+    fn read_skill_content<'a>(
         &'a self,
+        _: &'a parrot_core::Skill,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<SkillRendering>> {
-        Box::pin(async move {
-            self.0.push("skills-render");
-            Ok(SkillRendering {
-                content: String::new(),
-                loaded_paths: vec![],
-            })
-        })
+    ) -> BoxFuture<'a, PromptResult<parrot_core::SkillContent>> {
+        Box::pin(async { panic!("empty skill store has no content") })
     }
     fn end_turn(&self) -> BoxFuture<'_, ()> {
         Box::pin(async move {
@@ -977,7 +972,7 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
         .runtime(provider.clone(), tools, vec![], Arc::new(Signal::new()), 0)
         .await;
     let sent = runtime
-        .send("question", protocol::Delivery::DELIVERY_STEER)
+        .send("question $example", protocol::Delivery::DELIVERY_STEER)
         .await;
     assert_eq!(
         bounded(sent.execution.join()).await.unwrap().status,
@@ -988,8 +983,7 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
     assert!(position("epoch-start") < position("epoch-done"));
     assert!(position("epoch-done") < position("status-fitted"));
     assert!(position("status-fitted") < position("skills-begin"));
-    assert!(position("skills-begin") < position("skills-select"));
-    assert!(position("skills-select") < position("skills-render"));
+    assert!(position("skills-begin") < position("skills-get"));
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 1);
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 1);

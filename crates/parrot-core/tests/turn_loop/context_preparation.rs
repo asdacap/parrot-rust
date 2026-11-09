@@ -12,14 +12,15 @@ fn pending_steer_and_status_prompts_are_fitted_without_a_context_reminder() {
             ..Message::default()
         };
         state.pending_prompts.push_back(prompt.clone());
-        *state.estimate_script.lock().unwrap() = [100, 150, 160, 160].into();
+        state.request().estimate_script = [100, 150, 160, 160].into();
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert!(state.rendered_reminders.lock().unwrap().is_empty());
         assert!(state.reminder_appends.is_empty());
         assert_eq!(state.recorded_prompts, [prompt.clone()]);
         assert_eq!(state.acknowledged_prompts[0].estimated_tokens, 160);
-        let estimates = state.estimates.lock().unwrap();
+        let request = state.request();
+        let estimates = &request.estimates;
         assert_eq!(estimates[1].messages.last(), Some(&prompt));
         assert_eq!(estimates[1].tokens, 150);
         let requests = state.provider.requests.lock().unwrap();
@@ -72,16 +73,17 @@ fn oversized_pending_status_prompt_compacts_without_recording_or_acknowledging_i
         contents: vec![Content::Text("oversized status".into())],
         ..Message::default()
     });
-    *state.estimate_script.lock().unwrap() = [100, 910, 100, 100].into();
+    state.request().estimate_script = [100, 910, 100, 100].into();
     let messages = vec![Message {
         role: Role::System,
         contents: vec![Content::Text("compacted status".into())],
         ..Message::default()
     }];
+    let context = state.request().context.clone();
     state.compactions.push_back(CompactedContext {
         instructions: "compacted instructions".into(),
         messages: messages.clone(),
-        state: state.context.clone(),
+        state: context,
         reduced: true,
     });
 
@@ -140,27 +142,32 @@ fn core_records_final_request_once_before_rendering_and_retains_final_catalogs()
 fn raw_and_calibrated_triggers_compact_before_checkpoint_restore_and_use_returned_epoch() {
     for calibrated in [false, true] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.context.configuration.model.context_window = 1000;
-        state.context.configuration.model.maximum_output_tokens = 100;
-        state.context.configuration.trigger_percent = 80;
-        state.estimated_input_tokens = 100;
+        state.request().context.configuration.model.context_window = 1000;
+        state
+            .request()
+            .context
+            .configuration
+            .model
+            .maximum_output_tokens = 100;
+        state.request().context.configuration.trigger_percent = 80;
+        state.request().estimated_input_tokens = 100;
         if calibrated {
             state
+                .request()
                 .context
                 .calibration
                 .observe_usage("memory/model", 0, 950);
         }
         state
+            .request()
             .estimate_script
-            .lock()
-            .unwrap()
             .push_back(if calibrated { 10 } else { 801 });
         let messages = vec![Message {
             role: Role::System,
             contents: vec![Content::Text("compacted history".into())],
             ..Message::default()
         }];
-        let mut compacted_state = state.context.clone();
+        let mut compacted_state = state.request().context.clone();
         compacted_state.calibration.reset();
         compacted_state
             .cadence
@@ -182,7 +189,7 @@ fn raw_and_calibrated_triggers_compact_before_checkpoint_restore_and_use_returne
             reduced: true,
         });
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert_eq!(state.rendered_instructions, ["core request"]);
+        assert_eq!(state.request().rendered_instructions, ["core request"]);
         assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
         let compacted = state.recorded_compactions[0]
             .as_ref()
@@ -213,14 +220,20 @@ fn raw_and_calibrated_triggers_compact_before_checkpoint_restore_and_use_returne
 #[test]
 fn separate_context_reads_use_compaction_configuration_calibration_and_cadence() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.context.configuration.model.context_window = 1000;
-    state.context.configuration.model.maximum_output_tokens = 100;
-    state.estimated_input_tokens = 100;
+    state.request().context.configuration.model.context_window = 1000;
     state
+        .request()
+        .context
+        .configuration
+        .model
+        .maximum_output_tokens = 100;
+    state.request().estimated_input_tokens = 100;
+    state
+        .request()
         .context
         .calibration
         .observe_usage("memory/model", 0, 950);
-    let mut compacted = state.context.clone();
+    let mut compacted = state.request().context.clone();
     compacted.configuration.model.context_window = 2000;
     compacted.configuration.model.maximum_output_tokens = 200;
     compacted.calibration.reset();
@@ -259,7 +272,7 @@ fn separate_context_reads_use_compaction_configuration_calibration_and_cadence()
 fn automatic_summary_failure_is_recorded_before_context_preparation_stops() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.prime_context(490);
-    state.estimated_input_tokens = 901;
+    state.request().estimated_input_tokens = 901;
     state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
     let error = Error::failed("automatic summary failed");
     state
@@ -279,10 +292,15 @@ fn automatic_summary_failure_is_recorded_before_context_preparation_stops() {
 #[test]
 fn equality_at_the_raw_trigger_does_not_compact_or_discard_requested_output() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.context.configuration.model.context_window = 1000;
-    state.context.configuration.model.maximum_output_tokens = 100;
-    state.context.configuration.trigger_percent = 80;
-    state.estimated_input_tokens = 800;
+    state.request().context.configuration.model.context_window = 1000;
+    state
+        .request()
+        .context
+        .configuration
+        .model
+        .maximum_output_tokens = 100;
+    state.request().context.configuration.trigger_percent = 80;
+    state.request().estimated_input_tokens = 800;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.compacted_definitions.is_empty());
     assert_eq!(
@@ -294,14 +312,25 @@ fn equality_at_the_raw_trigger_does_not_compact_or_discard_requested_output() {
 #[test]
 fn post_compaction_raw_input_failure_precedes_checkpoint_or_provider_effects() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.context.configuration.model.context_window = 1000;
-    state.context.configuration.model.maximum_input_tokens = 700;
-    state.context.configuration.model.maximum_output_tokens = 100;
-    state.estimated_input_tokens = 701;
+    state.request().context.configuration.model.context_window = 1000;
+    state
+        .request()
+        .context
+        .configuration
+        .model
+        .maximum_input_tokens = 700;
+    state
+        .request()
+        .context
+        .configuration
+        .model
+        .maximum_output_tokens = 100;
+    state.request().estimated_input_tokens = 701;
+    let context = state.request().context.clone();
     state.compactions.push_back(CompactedContext {
         instructions: "compacted but too large".into(),
         messages: vec![],
-        state: state.context.clone(),
+        state: context,
         reduced: false,
     });
     let error = state.run().unwrap_err();
@@ -319,7 +348,7 @@ fn post_compaction_raw_input_failure_precedes_checkpoint_or_provider_effects() {
 fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.prime_context(490);
-    *state.estimate_script.lock().unwrap() = [550, 630, 630, 630].into();
+    state.request().estimate_script = [550, 630, 630, 630].into();
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.reminder_appends.len(), 1);
     assert_eq!(state.reminder_appends[0].0.percentage, 50);
@@ -327,7 +356,8 @@ fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage
     let rendered = state.rendered_reminders.lock().unwrap();
     assert_eq!(rendered[0].0.usage_percent, Some(55));
     assert_eq!(rendered[0].1, 50);
-    let estimates = state.estimates.lock().unwrap();
+    let request = state.request();
+    let estimates = &request.estimates;
     assert_eq!(estimates[1].tokens, 630);
     assert_eq!(estimates[1].messages.len(), 2);
     assert_eq!(state.reminder_publications, 1);
@@ -359,15 +389,15 @@ fn duplicate_reminder_acknowledges_candidate_tokens_with_unchanged_history_witho
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.prime_context(490);
     state.append_reminder = false;
-    *state.estimate_script.lock().unwrap() = [550, 630, 550].into();
+    state.request().estimate_script = [550, 630, 550].into();
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.reminder_appends.len(), 1);
-    assert_eq!(state.messages.len(), 1);
+    assert_eq!(state.request().messages.len(), 1);
     assert_eq!(state.reminder_publications, 0);
-    let mut cadence = state.context.cadence.clone();
+    let mut cadence = state.request().context.cadence.clone();
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(690, &state.context.configuration),
+            &ContextSnapshot::estimate(690, &state.request().context.configuration),
             "memory/model",
             1
         ),
@@ -375,7 +405,7 @@ fn duplicate_reminder_acknowledges_candidate_tokens_with_unchanged_history_witho
     );
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(700, &state.context.configuration),
+            &ContextSnapshot::estimate(700, &state.request().context.configuration),
             "memory/model",
             2
         ),
@@ -383,7 +413,7 @@ fn duplicate_reminder_acknowledges_candidate_tokens_with_unchanged_history_witho
     );
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].messages,
-        state.messages
+        state.request().messages
     );
 }
 
@@ -392,16 +422,16 @@ fn cadence_is_acknowledged_before_failed_reminder_publication_and_provider_is_no
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.prime_context(490);
     state.fail_at = Some("publish_reminder");
-    *state.estimate_script.lock().unwrap() = [550, 630, 630].into();
+    state.request().estimate_script = [550, 630, 630].into();
     assert_eq!(state.run(), Err(Error::failed("publish_reminder")));
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert_eq!(state.reminder_publications, 1);
-    assert_eq!(state.messages.len(), 2);
+    assert_eq!(state.request().messages.len(), 2);
     assert_eq!(state.checkpoint.as_ref().unwrap().percentage, 50);
-    let mut cadence = state.context.cadence.clone();
+    let mut cadence = state.request().context.cadence.clone();
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(690, &state.context.configuration),
+            &ContextSnapshot::estimate(690, &state.request().context.configuration),
             "memory/model",
             2
         ),
@@ -409,7 +439,7 @@ fn cadence_is_acknowledged_before_failed_reminder_publication_and_provider_is_no
     );
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(700, &state.context.configuration),
+            &ContextSnapshot::estimate(700, &state.request().context.configuration),
             "memory/model",
             3
         ),
@@ -424,15 +454,15 @@ fn cadence_is_acknowledged_before_failed_reminder_publication_and_provider_is_no
 fn cadence_observation_is_saved_before_reminder_rendering_can_fail() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.prime_context(490);
-    state.estimated_input_tokens = 550;
+    state.request().estimated_input_tokens = 550;
     state.fail_at = Some("reminder");
     assert_eq!(state.run(), Err(Error::failed("reminder")));
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert!(state.reminder_appends.is_empty());
-    let mut cadence = state.context.cadence.clone();
+    let mut cadence = state.request().context.cadence.clone();
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(590, &state.context.configuration),
+            &ContextSnapshot::estimate(590, &state.request().context.configuration),
             "memory/model",
             1
         ),
@@ -440,7 +470,7 @@ fn cadence_observation_is_saved_before_reminder_rendering_can_fail() {
     );
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(600, &state.context.configuration),
+            &ContextSnapshot::estimate(600, &state.request().context.configuration),
             "memory/model",
             2
         ),
@@ -452,13 +482,13 @@ fn cadence_observation_is_saved_before_reminder_rendering_can_fail() {
 fn crossing_reminder_candidate_compacts_without_append_or_a_second_cadence_observation() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.prime_context(490);
-    *state.estimate_script.lock().unwrap() = [550, 910, 100, 100].into();
+    state.request().estimate_script = [550, 910, 100, 100].into();
     let messages = vec![Message {
         role: Role::System,
         contents: vec![Content::Text("compacted".into())],
         ..Message::default()
     }];
-    let mut compacted_state = state.context.clone();
+    let mut compacted_state = state.request().context.clone();
     compacted_state
         .cadence
         .acknowledge(
@@ -482,7 +512,7 @@ fn crossing_reminder_candidate_compacts_without_append_or_a_second_cadence_obser
     assert!(state.reminder_appends.is_empty());
     assert_eq!(state.reminder_publications, 0);
     assert_eq!(state.cadence_writes.len(), 1);
-    assert_eq!(state.rendered_instructions.len(), 1);
+    assert_eq!(state.request().rendered_instructions.len(), 1);
     assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
     let compacted = state.recorded_compactions[0]
         .as_ref()
@@ -501,7 +531,7 @@ fn crossing_reminder_candidate_compacts_without_append_or_a_second_cadence_obser
 #[test]
 fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compaction() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.estimated_input_tokens = i64::MAX;
+    state.request().estimated_input_tokens = i64::MAX;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.compacted_definitions.is_empty());
     assert!(state.rendered_reminders.lock().unwrap().is_empty());
@@ -540,17 +570,17 @@ fn reminder_append_failure_keeps_observed_band_without_acknowledging_or_publishi
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.prime_context(490);
     state.fail_at = Some("append_reminder");
-    *state.estimate_script.lock().unwrap() = [550, 630].into();
+    state.request().estimate_script = [550, 630].into();
     assert_eq!(state.run(), Err(Error::failed("append_reminder")));
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert!(state.reminder_appends.is_empty());
     assert!(state.checkpoint.is_none());
-    assert_eq!(state.messages.len(), 1);
+    assert_eq!(state.request().messages.len(), 1);
     assert_eq!(state.reminder_publications, 0);
-    let mut cadence = state.context.cadence.clone();
+    let mut cadence = state.request().context.cadence.clone();
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(590, &state.context.configuration),
+            &ContextSnapshot::estimate(590, &state.request().context.configuration),
             "memory/model",
             1
         ),
@@ -558,7 +588,7 @@ fn reminder_append_failure_keeps_observed_band_without_acknowledging_or_publishi
     );
     assert_eq!(
         cadence.observe(
-            &ContextSnapshot::estimate(600, &state.context.configuration),
+            &ContextSnapshot::estimate(600, &state.request().context.configuration),
             "memory/model",
             2
         ),
@@ -569,14 +599,14 @@ fn reminder_append_failure_keeps_observed_band_without_acknowledging_or_publishi
 #[test]
 fn restored_cadence_is_saved_even_when_the_observation_is_invalid() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.context.configuration.model.canonical_model = " \t".into();
+    state.request().context.configuration.model.canonical_model = " \t".into();
     let error = state.run().unwrap_err();
     assert_eq!(error.code, ErrorCode::Unexpected);
     assert_eq!(
         error.message,
         "canonical model must not be empty or whitespace"
     );
-    assert!(state.context.cadence.is_restored());
+    assert!(state.request().context.cadence.is_restored());
     assert_eq!(state.cadence_writes.len(), 1);
     assert!(state.provider.requests.lock().unwrap().is_empty());
 }
