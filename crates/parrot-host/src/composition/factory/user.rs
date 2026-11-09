@@ -1075,11 +1075,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             .map_err(invalid)?;
         if previous_mode != next_mode.profile().id() {
             self.repository
-                .update_mode(
-                    self.services.id.clone(),
-                    self.services.root_identity.session.session_id.clone(),
-                    next_mode.profile().id().into(),
-                )
+                .update_mode(self.services.id.clone(), next_mode.profile().id().into())
                 .await
                 .map_err(internal)?;
         }
