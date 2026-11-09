@@ -90,7 +90,12 @@ impl ImageArtifactRepository {
         artifact_id: &str,
         cancellation: &dyn Cancellation,
     ) -> Result<std::fs::File> {
-        cancellation.check().map_err(|_| Error::task_cancelled())?;
+        if self.resolve(artifact_id, cancellation).await?.is_none() {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "The image artifact does not exist.",
+            ));
+        }
         self.store.open(artifact_id)
     }
 

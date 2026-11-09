@@ -500,6 +500,14 @@ async fn cleanup_collects_unbound_corrupt_hash_files_but_preserves_unrelated_ent
     std::fs::create_dir(&unrelated_directory).unwrap();
     assert_eq!(
         repository
+            .open(&orphan, &NeverCancelled)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::NotFound,
+    );
+    assert_eq!(
+        repository
             .remove_stale_unreferenced_before(
                 SystemTime::now() + Duration::from_secs(60),
                 &NeverCancelled,
