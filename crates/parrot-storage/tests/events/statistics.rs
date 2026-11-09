@@ -3,7 +3,7 @@ use parrot_domain::protocol::messages::parrot::{
     AgentFailed, AgentFinished, AgentStarted, AgentStatisticsUpdatedEvent, Event,
     RequestUsageRecorded, ToolExecutionStarted, ToolFinished, ToolStarted,
 };
-use parrot_storage::events::{EventError, EventLoadProgress, SessionUsage, record, statistics::*};
+use parrot_storage::events::{EventError, EventLoadProgress, record, statistics::*};
 use protobuf::Message;
 use rusqlite::params;
 use std::sync::{Arc, Mutex};
@@ -242,97 +242,6 @@ async fn request_history_anchor_uses_agent_max_and_lookup_uses_latest_matching_r
 }
 
 #[tokio::test]
-async fn usage_projection_rebuilds_last_snapshots_replaces_and_aggregates_with_main_context() {
-    let fixture = Fixture::new();
-    let repository = fixture.repository();
-    repository
-        .transaction(|tx| {
-            tx.execute(
-                "INSERT INTO session_state VALUES('user','main','default');",
-                [],
-            )?;
-            record(tx, &baseline("main-old", "main", 90), None, AT)?;
-            record(tx, &baseline("child", "child", 12), None, AT)?;
-            record(tx, &baseline("main-new", "main", 10), None, AT)?;
-            project_usage(tx, "stale", 99, &AgentStatisticsUpdatedEvent::default())?;
-            ensure_usage_projection(tx)?;
-            let usage = capture_usage(tx)?;
-            assert_eq!(
-                usage,
-                SessionUsage {
-                    revision: 3,
-                    input_tokens: 22,
-                    cached_input_tokens: 8,
-                    output_tokens: 10,
-                    context_size: 60,
-                    context_limit: 100,
-                    input_cost: 7.0,
-                    output_cost: 9.0
-                }
-            );
-            assert_eq!(
-                tx.query_row("SELECT COUNT(*) FROM agent_usage;", [], |row| row
-                    .get::<_, i64>(0))?,
-                2
-            );
-            let replacement = AgentStatisticsUpdatedEvent {
-                input_tokens: 2,
-                context_size: 3,
-                context_limit: 4,
-                ..Default::default()
-            };
-            project_usage(tx, "main", 4, &replacement)?;
-            ensure_usage_projection(tx)?;
-            assert_eq!(capture_usage(tx)?.input_tokens, 14);
-            assert_eq!(capture_usage(tx)?.context_size, 3);
-            assert_eq!(capture_usage(tx)?.revision, 4);
-            tx.execute("DELETE FROM session_state;", [])?;
-            assert_eq!(capture_usage(tx)?.context_size, 0);
-            assert_eq!(capture_usage(tx)?.context_limit, 0);
-            Ok(())
-        })
-        .await
-        .unwrap();
-    repository.database().close().await.unwrap();
-}
-
-#[tokio::test]
-async fn usage_projection_failures_roll_back_and_checked_totals_reject_overflow() {
-    let fixture = Fixture::new();
-    let repository = fixture.repository();
-    let failure = repository.transaction(|tx| {
-        record(tx, &baseline("valid", "agent", 2), None, AT)?;
-        tx.execute("INSERT INTO event(id,agent_session,payload,created_at) VALUES('bad','agent',?1,?2);", params![vec![0xff_u8], AT])?;
-        ensure_usage_projection(tx)
-    }).await;
-    assert!(failure.is_err());
-    assert!(repository.replay().await.unwrap().is_empty());
-    repository
-        .transaction(|tx| {
-            assert_eq!(capture_usage(tx)?, SessionUsage::default());
-            let max = AgentStatisticsUpdatedEvent {
-                input_tokens: i64::MAX,
-                ..Default::default()
-            };
-            project_usage(tx, "a", 1, &max)?;
-            project_usage(
-                tx,
-                "b",
-                2,
-                &AgentStatisticsUpdatedEvent {
-                    input_tokens: 1,
-                    ..Default::default()
-                },
-            )?;
-            assert!(matches!(capture_usage(tx), Err(EventError::Overflow)));
-            Ok(())
-        })
-        .await
-        .unwrap();
-    repository.database().close().await.unwrap();
-}
-
-#[tokio::test]
 async fn replay_progress_observes_each_decoded_row_without_changing_statistics() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
@@ -451,7 +360,7 @@ async fn replay_progress_counts_are_not_a_replay_success_marker() {
 }
 
 #[tokio::test]
-async fn replay_preserves_last_baseline_request_dedup_tool_counts_and_nonusage_revision() {
+async fn replay_ignores_aggregate_publications_and_preserves_fact_dedup_tools_and_revision() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     repository
@@ -473,11 +382,11 @@ async fn replay_preserves_last_baseline_request_dedup_tool_counts_and_nonusage_r
             let replay = replay_statistics(tx)?;
             let agent = &replay.agents["agent"];
             assert_eq!(replay.revision, 9);
-            assert_eq!(agent.own.totals.input_tokens, 13);
-            assert_eq!(agent.own.totals.cached_input_tokens, 6);
-            assert_eq!(agent.own.totals.output_tokens, 8);
+            assert_eq!(agent.own.totals.input_tokens, 103);
+            assert_eq!(agent.own.totals.cached_input_tokens, 4);
+            assert_eq!(agent.own.totals.output_tokens, 6);
             assert_eq!(agent.own.totals.tool_calls, 1);
-            assert_eq!(agent.own.models.len(), 3);
+            assert_eq!(agent.own.models.len(), 2);
             assert_eq!((agent.context_size, agent.context_limit), (17, 99));
             assert_eq!(agent.own, agent.cumulative);
             assert!(replay.agents["observer"].own.models.is_empty());
@@ -623,10 +532,6 @@ async fn replay_rejects_conflicting_missing_ancestor_and_cyclic_lineage_exactly(
             "Historical ancestor absent has no parent lineage.",
         ),
         (
-            vec![baseline("legacy", "orphan", 1)],
-            "Historical usage has no parent lineage for agent orphan.",
-        ),
-        (
             vec![start("one", "a", "b"), start("two", "b", "a")],
             "Historical agent lineage contains a cycle.",
         ),
@@ -643,16 +548,16 @@ async fn replay_rejects_conflicting_missing_ancestor_and_cyclic_lineage_exactly(
 }
 
 #[tokio::test]
-async fn replay_uses_finished_failed_lineage_and_main_session_fallback_and_checks_overflow() {
+async fn replay_uses_finished_failed_lineage_and_main_session_and_checks_fact_overflow() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     repository
         .transaction(|tx| {
             tx.execute(
-                "INSERT INTO session_state VALUES('user','root','default');",
+                "INSERT INTO session_state (user_session, agent_session, mode) VALUES('user','root','default');",
                 [],
             )?;
-            record(tx, &baseline("legacy-root", "root", 2), None, AT)?;
+            record(tx, &request("root-fact", "root", "", "root", 2), None, AT)?;
             let mut finished = envelope("finished", "child");
             finished.set_agent_finished(AgentFinished {
                 parent_agent_session_id: "root".into(),
@@ -665,7 +570,7 @@ async fn replay_uses_finished_failed_lineage_and_main_session_fallback_and_check
                 ..Default::default()
             });
             record(tx, &failed, None, AT)?;
-            record(tx, &baseline("legacy-leaf", "leaf", 3), None, AT)?;
+            record(tx, &request("leaf-fact", "leaf", "child", "leaf", 3), None, AT)?;
             let replay = replay_statistics(tx)?;
             assert_eq!(replay.parents["root"], "");
             assert_eq!(replay.parents["leaf"], "child");
@@ -762,5 +667,40 @@ async fn usage_fact_embedded_anchors_survive_history_deletion_and_retry_without_
     assert!(
         matches!(&other[..], [AgentHistoryEntry::Message { sequence: 20, .. }, AgentHistoryEntry::Request { sequence: 20, request_id, .. }] if request_id == "other")
     );
+    reopened.database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn aggregate_publications_are_raw_events_not_accounting_baselines() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    repository
+        .append_usage_fact(request("before", "agent", "", "before", 2))
+        .await
+        .unwrap();
+    let publication = baseline("publication", "agent", 900);
+    let bytes = publication.write_to_bytes().unwrap();
+    let appended = repository.append_raw(bytes.clone(), None).await.unwrap();
+    assert_eq!(appended.stored.raw, bytes);
+    repository
+        .append_usage_fact(request("after", "agent", "", "after", 3))
+        .await
+        .unwrap();
+    let before = repository.replay_statistics().await.unwrap();
+    assert_eq!(before.agents["agent"].own.totals.input_tokens, 5);
+    assert_eq!(before.agents["agent"].own.totals.input_cost, 2.5);
+    assert_eq!(
+        (
+            before.agents["agent"].context_size,
+            before.agents["agent"].context_limit
+        ),
+        (17, 99)
+    );
+    repository.database().close().await.unwrap();
+    let reopened = fixture.repository();
+    let after = reopened.replay_statistics().await.unwrap();
+    assert_eq!(after.agents, before.agents);
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(reopened.replay_raw().await.unwrap()[1].raw, bytes);
     reopened.database().close().await.unwrap();
 }

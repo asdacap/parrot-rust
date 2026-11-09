@@ -189,13 +189,6 @@ impl EventRepository {
             .map_err(rejected)?;
         Ok(ticket.into_completion().await?.into_value().into_output())
     }
-    pub async fn usage(&self) -> Result<SessionUsage, EventError> {
-        self.transaction(|tx| {
-            statistics::ensure_usage_projection(tx)?;
-            statistics::capture_usage(tx)
-        })
-        .await
-    }
     pub async fn append_usage_fact(&self, event: Event) -> Result<i64, EventError> {
         let context = self.context().clone();
         self.transaction(move |tx| {
@@ -302,7 +295,6 @@ impl EventRepository {
 pub struct AppendOutcome {
     pub stored: StoredEvent,
     pub conversation: Option<ConversationItem>,
-    pub usage: Option<SessionUsage>,
 }
 pub fn append(
     tx: &Transaction<'_>,
@@ -311,30 +303,15 @@ pub fn append(
     raw: Option<&[u8]>,
     message: Option<&ConversationMessage>,
 ) -> Result<AppendOutcome, EventError> {
-    if event.has_agent_statistics_updated() {
-        statistics::ensure_usage_projection(tx)?;
-    }
     let stored = record(tx, event, raw, &(context.timestamp)())?;
     let conversation = message
         .map(|message| {
             projection::project(tx, &event.agent_session_id, message, &(context.timestamp)())
         })
         .transpose()?;
-    let usage = if event.has_agent_statistics_updated() {
-        statistics::project_usage(
-            tx,
-            &event.agent_session_id,
-            stored.sequence,
-            event.agent_statistics_updated(),
-        )?;
-        Some(statistics::capture_usage(tx)?)
-    } else {
-        None
-    };
     Ok(AppendOutcome {
         stored,
         conversation,
-        usage,
     })
 }
 fn rejected(error: AdmissionError<EventError>) -> EventError {

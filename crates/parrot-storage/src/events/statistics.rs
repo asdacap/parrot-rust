@@ -1,11 +1,9 @@
-//! Durable usage facts, legacy replacement projections and source replay.
+//! Durable usage facts and source replay.
 //! All functions execute inside the caller's whole repository transaction.
 
-use super::{AgentLineageRecord, EventError, EventLoadProgress, SessionUsage};
+use super::{AgentLineageRecord, EventError, EventLoadProgress};
 use crate::diagnostics::statistics::AgentStatisticsReplay;
-use parrot_domain::protocol::messages::parrot::{
-    AgentStatisticsUpdatedEvent, Event, RequestUsageRecorded,
-};
+use parrot_domain::protocol::messages::parrot::{Event, RequestUsageRecorded};
 use parrot_domain::values::accounting::{
     AgentSessionStatistics, AgentSessionStatisticsSnapshot, AgentUsageIncrement, AgentUsageKey,
     AgentUsageTotals,
@@ -223,9 +221,7 @@ pub fn replay_statistics_with_progress(
     // .NET dictionaries enumerate in insertion order. Preserve that order for
     // floating-point accumulation and source-first validation diagnostics.
     let mut agent_order = Vec::new();
-    let mut baselines = HashMap::<String, (i64, AgentStatisticsUpdatedEvent)>::new();
-    let mut baseline_order = Vec::new();
-    for (revision, event) in &facts {
+    for (_, event) in &facts {
         let agent = &event.agent_session_id;
         ensure_agent(&mut agents, &mut agent_order, agent);
         let parent = if event.has_agent_started() {
@@ -254,43 +250,14 @@ pub fn replay_statistics_with_progress(
         if let Some(parent) = parent {
             record_parent(&mut parents, &mut parent_order, agent, parent)?;
         }
-        if event.has_agent_statistics_updated() {
-            if !baselines.contains_key(agent) {
-                baseline_order.push(agent.clone());
-            }
-            baselines.insert(
-                agent.clone(),
-                (*revision, event.agent_statistics_updated().clone()),
-            );
-        }
-    }
-    for agent in &baseline_order {
-        let value = &baselines[agent].1;
-        agents[agent].add_own(&AgentUsageIncrement {
-            key: AgentUsageKey::legacy(),
-            totals: AgentUsageTotals {
-                input_tokens: value.input_tokens,
-                cached_input_tokens: value.cached_input_tokens,
-                output_tokens: value.output_tokens,
-                input_cost: value.input_cost,
-                output_cost: value.output_cost,
-                tool_calls: 0,
-            },
-            context_size: Some(value.context_size),
-            context_limit: Some(value.context_limit),
-        })?;
     }
     let mut requests = HashSet::new();
     let mut tools = HashSet::new();
-    for (revision, event) in &facts {
+    for (_, event) in &facts {
         let agent = &event.agent_session_id;
         if event.has_request_usage_recorded() {
             let request = event.request_usage_recorded();
-            if requests.insert((agent.clone(), request.request_id.clone()))
-                && baselines
-                    .get(agent)
-                    .is_none_or(|(baseline, _)| revision > baseline)
-            {
+            if requests.insert((agent.clone(), request.request_id.clone())) {
                 agents[agent].add_own(&AgentUsageIncrement {
                     key: AgentUsageKey::from_request(
                         &request.provider,
@@ -403,98 +370,4 @@ pub fn replay_statistics_with_progress(
         parents,
         incomplete_legacy_tool_counts,
     })
-}
-
-pub fn ensure_usage_projection(tx: &Transaction<'_>) -> Result<(), EventError> {
-    let current: Option<i64> = tx
-        .query_row(
-            "SELECT version FROM projection_version WHERE name = 'agent-usage';",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if current.is_some_and(|version| version >= 1) {
-        return Ok(());
-    }
-    let mut latest = HashMap::new();
-    let mut order = Vec::new();
-    let mut read =
-        tx.prepare("SELECT sequence, agent_session, payload FROM event ORDER BY sequence;")?;
-    let mut rows = read.query([])?;
-    while let Some(row) = rows.next()? {
-        let event = Event::parse_from_bytes(&row.get::<_, Vec<u8>>(2)?)?;
-        if event.has_agent_statistics_updated() {
-            let agent: String = row.get(1)?;
-            if !latest.contains_key(&agent) {
-                order.push(agent.clone());
-            }
-            latest.insert(
-                agent,
-                (
-                    row.get::<_, i64>(0)?,
-                    event.agent_statistics_updated().clone(),
-                ),
-            );
-        }
-    }
-    tx.execute("DELETE FROM agent_usage;", [])?;
-    for agent in order {
-        let (revision, value) = &latest[&agent];
-        project_usage(tx, &agent, *revision, value)?;
-    }
-    tx.execute(
-        "INSERT OR REPLACE INTO projection_version (name, version) VALUES ('agent-usage', 1);",
-        [],
-    )?;
-    Ok(())
-}
-
-pub fn project_usage(
-    tx: &Transaction<'_>,
-    agent: &str,
-    revision: i64,
-    value: &AgentStatisticsUpdatedEvent,
-) -> Result<(), EventError> {
-    tx.execute("INSERT INTO agent_usage (agent_session, revision, input_tokens, cached_input_tokens, output_tokens, context_size, context_limit, input_cost, output_cost) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ON CONFLICT(agent_session) DO UPDATE SET revision = excluded.revision, input_tokens = excluded.input_tokens, cached_input_tokens = excluded.cached_input_tokens, output_tokens = excluded.output_tokens, context_size = excluded.context_size, context_limit = excluded.context_limit, input_cost = excluded.input_cost, output_cost = excluded.output_cost;", params![agent, revision, value.input_tokens, value.cached_input_tokens, value.output_tokens, value.context_size, value.context_limit, value.input_cost, value.output_cost])?;
-    Ok(())
-}
-
-pub fn capture_usage(tx: &Transaction<'_>) -> Result<SessionUsage, EventError> {
-    let main: Option<String> = tx
-        .query_row(
-            "SELECT agent_session FROM session_state LIMIT 1;",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let mut usage = SessionUsage::default();
-    let mut revision = 0_i64;
-    let mut read = tx.prepare("SELECT agent_session, revision, input_tokens, cached_input_tokens, output_tokens, context_size, context_limit, input_cost, output_cost FROM agent_usage;")?;
-    let mut rows = read.query([])?;
-    while let Some(row) = rows.next()? {
-        revision = revision.max(row.get(1)?);
-        usage.input_tokens = usage
-            .input_tokens
-            .checked_add(row.get(2)?)
-            .ok_or(EventError::Overflow)?;
-        usage.cached_input_tokens = usage
-            .cached_input_tokens
-            .checked_add(row.get(3)?)
-            .ok_or(EventError::Overflow)?;
-        usage.output_tokens = usage
-            .output_tokens
-            .checked_add(row.get(4)?)
-            .ok_or(EventError::Overflow)?;
-        usage.input_cost += row.get::<_, f64>(7)?;
-        usage.output_cost += row.get::<_, f64>(8)?;
-        if main.as_deref() == Some(row.get::<_, String>(0)?.as_str()) {
-            usage.context_size = row.get(5)?;
-            usage.context_limit = row.get(6)?;
-        }
-    }
-    if revision == 0 {
-        return Ok(SessionUsage::default());
-    }
-    usage.revision = u64::try_from(revision).map_err(|_| EventError::Overflow)?;
-    Ok(usage)
 }

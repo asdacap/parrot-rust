@@ -1,7 +1,5 @@
 use super::*;
-use crate::events::{
-    Admission, AdmittedInput, NeverCancelled, Promotion, SessionUsage, ToolExecutionTerminal,
-};
+use crate::events::{Admission, AdmittedInput, NeverCancelled, Promotion, ToolExecutionTerminal};
 use parrot_domain::protocol::messages::parrot::{Delivery, Event, RequestUsageRecorded};
 
 impl ConversationRepository {
@@ -10,7 +8,7 @@ impl ConversationRepository {
         event: Event,
         role: Option<String>,
         content: Option<String>,
-    ) -> Result<Option<SessionUsage>, EventError> {
+    ) -> Result<(), EventError> {
         let origin = match role.as_deref() {
             Some("system") => ConversationOrigin::System,
             Some("user") => ConversationOrigin::UserInput,
@@ -40,18 +38,18 @@ impl ConversationRepository {
         event: Event,
         mut message: Option<ConversationMessage>,
         origin: ConversationOrigin,
-    ) -> Result<Option<SessionUsage>, EventError> {
+    ) -> Result<(), EventError> {
         self.validate(&event.agent_session_id)?;
         if let Some(message) = &mut message {
             message.origin = origin;
         }
         let projected = message.is_some();
         let agent = event.agent_session_id.clone();
-        let result = self.events.append(event, message).await?;
+        self.events.append(event, message).await?;
         if projected {
             self.refresh_agent_history(&agent).await?;
         }
-        Ok(result.usage)
+        Ok(())
     }
     pub async fn append_conversation(
         &self,
@@ -100,7 +98,7 @@ impl AgentHistoryView {
         event: Event,
         role: Option<String>,
         content: Option<String>,
-    ) -> Result<Option<SessionUsage>, EventError> {
+    ) -> Result<(), EventError> {
         self.repository.append(event, role, content).await
     }
     pub async fn append_message(
@@ -108,7 +106,7 @@ impl AgentHistoryView {
         event: Event,
         message: Option<ConversationMessage>,
         origin: ConversationOrigin,
-    ) -> Result<Option<SessionUsage>, EventError> {
+    ) -> Result<(), EventError> {
         self.repository.append_message(event, message, origin).await
     }
     pub async fn append_conversation(
