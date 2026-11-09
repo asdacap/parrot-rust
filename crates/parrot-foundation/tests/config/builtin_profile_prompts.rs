@@ -11,15 +11,13 @@ fn defaults_resolve_to_profile_prompt_text() {
         assert!(!profile.prompt.trim().is_empty());
         assert!(!profile.prompt.starts_with("@builtin:"));
     }
-    assert!(
-        configuration.runtime.profiles["general"]
-            .prompt
-            .starts_with("You are Parrot's general-purpose mode.")
+    assert_eq!(
+        configuration.runtime.profiles["general"].prompt,
+        include_str!("../../../../assets/config/profile-prompts/general.md")
     );
-    assert!(
-        configuration.runtime.profiles["agent-task-payload"]
-            .prompt
-            .starts_with("You are an AgentTask payload executor.")
+    assert_eq!(
+        configuration.runtime.profiles["agent-task-payload"].prompt,
+        include_str!("../../../../assets/config/profile-prompts/agent-task-payload.md")
     );
 }
 

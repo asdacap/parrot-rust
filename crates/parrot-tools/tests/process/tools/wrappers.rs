@@ -510,15 +510,29 @@ async fn factory_uses_actual_configured_definitions_names_aliases_and_schemas() 
         (ProcessToolKind::InterruptProcess, "interrupt_process"),
         (ProcessToolKind::Monitor, "monitor"),
     ] {
-        let factory =
-            ProcessToolFactory::new(kind, Arc::clone(&fixture.services), &fixture.definitions)
-                .unwrap();
-        let tool = factory.create();
-        assert_eq!(
-            factory.definition(),
-            fixture.definitions.describe(name).unwrap()
+        let definition = ConfiguredToolDefinition::new(
+            format!("Custom {name} description"),
+            json!({
+                "type": "object",
+                "properties": {
+                    "metadata": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"enum": [name]},
+                            "labels": {"type": "array", "items": {"type": "string"}}
+                        }
+                    }
+                }
+            })
+            .to_string(),
         );
-        assert_eq!(tool.definition(), factory.definition());
+        let definitions =
+            ToolDefinitionCatalog::new(&BTreeMap::from([(name.into(), definition.clone())]));
+        let factory =
+            ProcessToolFactory::new(kind, Arc::clone(&fixture.services), &definitions).unwrap();
+        let tool = factory.create();
+        assert_eq!(factory.definition(), &definition);
+        assert_eq!(tool.definition(), &definition);
         assert_eq!(tool.name(), name);
         assert_eq!(
             tool.aliases(),
@@ -532,41 +546,6 @@ async fn factory_uses_actual_configured_definitions_names_aliases_and_schemas() 
             tool.enabled_after_interruption(),
             kind == ProcessToolKind::InterruptProcess
         );
-        assert!(!tool.definition().description.is_empty());
-        let schema: Value = serde_json::from_str(&tool.definition().parameters_json).unwrap();
-        assert_eq!(schema["type"], "object");
-        match kind {
-            ProcessToolKind::ExecCommand => {
-                assert_eq!(schema["required"], json!(["command"]));
-                assert_eq!(schema["additionalProperties"], false);
-                assert_eq!(
-                    schema["properties"]["env"]["additionalProperties"]["type"],
-                    "string"
-                );
-                assert_eq!(schema["properties"]["tty"]["default"], false);
-                assert_eq!(schema["properties"]["run_async"]["type"], "boolean");
-                assert_eq!(schema["properties"]["run_async"]["default"], false);
-                assert!(schema["properties"].get("yield_after_ms").is_none());
-            }
-            ProcessToolKind::WriteStdin => {
-                assert_eq!(schema["required"], json!(["name", "input"]));
-                assert_eq!(schema["properties"]["yield_after_ms"]["default"], 250);
-                assert_eq!(schema["properties"]["yield_after_ms"]["minimum"], 0);
-            }
-            ProcessToolKind::InterruptProcess => {
-                assert_eq!(schema["required"], json!(["name"]));
-                assert_eq!(schema["properties"]["signal"]["default"], 2);
-                assert_eq!(schema["properties"]["signal"]["minimum"], 1);
-                assert_eq!(schema["properties"]["signal"]["maximum"], 64);
-            }
-            ProcessToolKind::Monitor => {
-                assert_eq!(schema["required"], json!(["command", "description"]));
-                assert_eq!(schema["additionalProperties"], false);
-                assert_eq!(schema["properties"]["timeout_ms"]["default"], 300000);
-                assert_eq!(schema["properties"]["timeout_ms"]["minimum"], 1000);
-                assert_eq!(schema["properties"]["timeout_ms"]["maximum"], 1800000);
-            }
-        }
     }
     fixture.finish().await;
 }

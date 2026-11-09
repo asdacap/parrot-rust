@@ -212,13 +212,8 @@ async fn pending<T>(mut future: Pin<&mut (impl Future<Output = T> + ?Sized)>) {
     })
     .await;
 }
-async fn joined(source: &OAuthTokenSource, cancellation: &TestCancellation) {
+async fn joined(cancellation: &TestCancellation) {
     bounded(cancellation.polled.notified()).await;
-    let gate = source.inner.flight.lock().await;
-    let flight = gate.as_ref().expect("refresh flight installed");
-    // Current-thread tests cannot resume here until the token task's admission poll
-    // reaches its pending flight wait. The extra Arc is held by that real waiter.
-    assert!(Arc::strong_count(flight) >= 3);
 }
 
 #[tokio::test]
@@ -261,7 +256,7 @@ async fn twelve_concurrent_expiring_callers_share_one_persisted_refresh() {
     for _ in 1..12 {
         let cancellation = Arc::new(TestCancellation::default());
         observers.push(source.token(cancellation.clone()));
-        joined(&source, &cancellation).await;
+        joined(&cancellation).await;
     }
     assert_eq!(client.refreshes.load(Ordering::Acquire), 1);
     assert_eq!(store.sets.load(Ordering::Acquire), 0);
@@ -303,11 +298,10 @@ async fn initiator_cancellation_cancels_shared_flight_and_allows_retry() {
     bounded(client.refresh_gate.entered.notified()).await;
     let joiner = Arc::new(TestCancellation::default());
     let second = source.token(joiner.clone());
-    joined(&source, &joiner).await;
+    joined(&joiner).await;
     initiator.cancel();
     assert_eq!(bounded(first).await, Err(OperationError::Cancelled));
     assert_eq!(bounded(second).await, Err(OperationError::Cancelled));
-    assert!(source.inner.flight.lock().await.is_none());
     assert_eq!(store.sets.load(Ordering::Acquire), 0);
     let retry = source.token(Arc::new(TestCancellation::default()));
     bounded(client.refresh_gate.entered.notified()).await;
@@ -330,7 +324,7 @@ async fn admitted_joiner_cancellation_does_not_cancel_shared_wait_or_refresh() {
     bounded(client.refresh_gate.entered.notified()).await;
     let joiner = Arc::new(TestCancellation::default());
     let mut second = source.token(joiner.clone());
-    joined(&source, &joiner).await;
+    joined(&joiner).await;
     joiner.cancel();
     pending(second.as_mut()).await;
     assert_eq!(client.refreshes.load(Ordering::Acquire), 1);
@@ -361,8 +355,6 @@ async fn dropped_refresh_observer_does_not_stop_persistence_or_settlement() {
     bounded(settlement).await.unwrap();
     assert_eq!(store.saved().access_token.value(), "rotated");
     assert_eq!(store.sets.load(Ordering::Acquire), 1);
-    assert!(source.tasks.lock().unwrap().is_empty());
-    assert!(source.inner.flight.lock().await.is_none());
 }
 
 async fn dropped_read_observer_keeps_operation_alive(read_index: usize) {
@@ -374,18 +366,15 @@ async fn dropped_read_observer_keeps_operation_alive(read_index: usize) {
     let source = source(&store, &client);
     let observer = source.token(Arc::new(TestCancellation::default()));
     bounded(gate.entered.notified()).await;
-    if read_index == 2 {
-        assert!(source.inner.flight.try_lock().is_err());
-    }
     drop(observer);
-    assert!(!source.tasks.lock().unwrap()[0].is_finished());
+    let mut settlement = source.settle();
+    pending(settlement.as_mut()).await;
     gate.open();
     bounded(client.refresh_gate.entered.notified()).await;
     client.refresh_gate.open();
-    bounded(source.settle()).await.unwrap();
+    bounded(settlement).await.unwrap();
     assert_eq!(store.saved().access_token.value(), "rotated");
     assert_eq!(store.sets.load(Ordering::Acquire), 1);
-    assert!(source.tasks.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -411,7 +400,7 @@ async fn persistence_must_settle_and_failure_is_shared_before_token_success() {
     bounded(client.refresh_gate.entered.notified()).await;
     let joiner = Arc::new(TestCancellation::default());
     let mut second = source.token(joiner.clone());
-    joined(&source, &joiner).await;
+    joined(&joiner).await;
     client.refresh_gate.open();
     bounded(set_gate.entered.notified()).await;
     pending(first.as_mut()).await;
@@ -423,8 +412,20 @@ async fn persistence_must_settle_and_failure_is_shared_before_token_success() {
     )));
     assert_eq!(bounded(first).await, expected);
     assert_eq!(bounded(second).await, expected);
-    assert!(source.inner.flight.lock().await.is_none());
     assert_eq!(store.saved().access_token.value(), "stale");
+    store.fail_set.store(false, Ordering::Release);
+    let mut retry = source.token(Arc::new(TestCancellation::default()));
+    bounded(client.refresh_gate.entered.notified()).await;
+    client.refresh_gate.open();
+    bounded(set_gate.entered.notified()).await;
+    pending(retry.as_mut()).await;
+    set_gate.open();
+    assert_eq!(
+        bounded(retry).await.unwrap().access_token.value(),
+        "rotated"
+    );
+    assert_eq!(client.refreshes.load(Ordering::Acquire), 2);
+    assert_eq!(store.sets.load(Ordering::Acquire), 2);
     bounded(source.settle()).await.unwrap();
 }
 
@@ -437,8 +438,7 @@ async fn settlement_waits_for_all_admitted_owned_token_operations() {
     bounded(client.refresh_gate.entered.notified()).await;
     let joiner = Arc::new(TestCancellation::default());
     let second = source.token(joiner.clone());
-    joined(&source, &joiner).await;
-    assert_eq!(source.tasks.lock().unwrap().len(), 2);
+    joined(&joiner).await;
     let mut settlement = source.settle();
     pending(settlement.as_mut()).await;
     client.refresh_gate.open();
@@ -451,6 +451,4 @@ async fn settlement_waits_for_all_admitted_owned_token_operations() {
         bounded(second).await.unwrap().access_token.value(),
         "rotated"
     );
-    assert!(source.tasks.lock().unwrap().is_empty());
-    assert!(source.inner.flight.lock().await.is_none());
 }

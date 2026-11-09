@@ -89,20 +89,29 @@ mod tests {
                     let first = owner.acquire(false).unwrap();
                     barrier.wait();
                     let extra = owner.acquire(false);
+                    let admitted = extra.is_some();
                     barrier.wait();
                     barrier.wait();
                     drop((first, extra));
+                    admitted
                 })
             })
             .collect::<Vec<_>>();
         barrier.wait();
         barrier.wait();
-        assert_eq!(budget.state.lock().unwrap().used, 2);
         barrier.wait();
-        for thread in threads {
-            thread.join().unwrap();
-        }
-        assert_eq!(budget.state.lock().unwrap().used, 0);
+        let admitted = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .filter(|admitted| *admitted)
+            .count();
+        assert_eq!(admitted, 2);
+        let owner = budget.owner();
+        let admissions = (0..3)
+            .map(|_| owner.acquire(false).unwrap())
+            .collect::<Vec<_>>();
+        assert!(owner.acquire(false).is_none());
+        drop(admissions);
     }
 
     #[tokio::test]
@@ -119,9 +128,13 @@ mod tests {
         changed.changed().await.unwrap();
         let other_extra = other.acquire(false).unwrap();
         drop((second, other_first));
-        assert_eq!(budget.state.lock().unwrap().used, 0);
+        let reacquired_first = owner.acquire(false).unwrap();
+        let reacquired_extra = owner.acquire(false).unwrap();
+        assert!(other.acquire(false).is_none());
         drop(other_extra);
-        assert_eq!(*owner.running.lock().unwrap(), 0);
+        let reacquired_other = other.acquire(false).unwrap();
+        assert!(other.acquire(false).is_none());
+        drop((reacquired_first, reacquired_extra, reacquired_other));
     }
 
     #[tokio::test]
@@ -135,8 +148,6 @@ mod tests {
         budget.set_limit(0);
         changed.changed().await.unwrap();
         assert_eq!(budget.get_limit(), 0);
-        assert_eq!(budget.state.lock().unwrap().used, 2);
-        assert_eq!(*owner.running.lock().unwrap(), 3);
         assert!(owner.acquire(false).is_none());
         let free = budget.owner().acquire(false).unwrap();
         drop(first);
@@ -147,7 +158,10 @@ mod tests {
         assert_eq!(budget.get_limit(), 1);
         let extra = owner.acquire(false).unwrap();
         drop((third, extra, free));
-        assert_eq!(budget.state.lock().unwrap().used, 0);
+        let first = owner.acquire(false).unwrap();
+        let extra = owner.acquire(false).unwrap();
+        assert!(owner.acquire(false).is_none());
+        drop((first, extra));
     }
 
     #[test]
@@ -163,6 +177,10 @@ mod tests {
         drop(second);
         assert!(owner.acquire(false).is_some());
         drop(another);
-        assert_eq!(budget.state.lock().unwrap().used, 0);
+        budget.set_limit(1);
+        let first = owner.acquire(false).unwrap();
+        let extra = owner.acquire(false).unwrap();
+        assert!(owner.acquire(false).is_none());
+        drop((first, extra));
     }
 }

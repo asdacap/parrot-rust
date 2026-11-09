@@ -6,44 +6,37 @@ use parrot_foundation::template_catalog::PromptTemplateCatalog;
 fn defaults_resolve_to_prompt_text() {
     let (configuration, _) =
         PromptTemplateCatalog::from_content("", &fixtures::environment()).unwrap();
-    assert_eq!(configuration.system_prompts.len(), 6);
     for text in configuration.system_prompts.values() {
         assert!(!text.trim().is_empty());
         assert!(!text.starts_with("@builtin:"));
     }
-    assert!(
-        configuration.system_prompts["runtime:system-context:01-base"]
-            .starts_with("You are parrot, a coding agent.")
+    assert_eq!(
+        configuration.system_prompts["runtime:system-context:01-base"],
+        include_str!("../../../../assets/config/system-prompts/base.md")
     );
-    assert!(
-        configuration.system_prompts["runtime:system-context:02a-agent-tasks"]
-            .starts_with("## Agent Tasks")
+    assert_eq!(
+        configuration.system_prompts["runtime:system-context:02a-agent-tasks"],
+        include_str!("../../../../assets/config/system-prompts/agent-tasks.md")
     );
 }
 
 #[test]
 fn inline_overrides_replace_only_the_selected_prompt() {
     let environment = fixtures::environment();
-    let (inherited, _) = PromptTemplateCatalog::from_content("", &environment).unwrap();
+    let (mut inherited, _) = PromptTemplateCatalog::from_content("", &environment).unwrap();
     let (configuration, _) = PromptTemplateCatalog::from_content(
         "system_prompts:\n  runtime:system-context:01-base: Custom base prompt.\n  custom:guidance: Additional guidance.\n",
         &environment,
     )
     .unwrap();
-    assert_eq!(configuration.system_prompts.len(), 7);
-    assert_eq!(
-        configuration.system_prompts["runtime:system-context:01-base"],
-        "Custom base prompt."
+    inherited.system_prompts.insert(
+        "runtime:system-context:01-base".into(),
+        "Custom base prompt.".into(),
     );
-    assert_eq!(
-        configuration.system_prompts["custom:guidance"],
-        "Additional guidance."
-    );
-    for (key, text) in inherited.system_prompts {
-        if key != "runtime:system-context:01-base" {
-            assert_eq!(configuration.system_prompts[&key], text);
-        }
-    }
+    inherited
+        .system_prompts
+        .insert("custom:guidance".into(), "Additional guidance.".into());
+    assert_eq!(configuration.system_prompts, inherited.system_prompts);
 }
 
 #[test]
@@ -188,13 +181,13 @@ fn loading_keeps_references_in_generated_yaml_and_preserves_user_bytes() {
             Some(reference)
         );
     }
-    assert!(
-        configuration.system_prompts["runtime:system-context:01-base"]
-            .starts_with("You are parrot, a coding agent.")
+    assert_eq!(
+        configuration.system_prompts["runtime:system-context:01-base"],
+        include_str!("../../../../assets/config/system-prompts/base.md")
     );
-    assert!(
-        configuration.system_prompts["runtime:system-context:02a-agent-tasks"]
-            .starts_with("## Agent Tasks")
+    assert_eq!(
+        configuration.system_prompts["runtime:system-context:02a-agent-tasks"],
+        include_str!("../../../../assets/config/system-prompts/agent-tasks.md")
     );
     assert!(
         configuration
