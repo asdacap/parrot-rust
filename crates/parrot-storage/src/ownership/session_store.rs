@@ -907,7 +907,11 @@ impl SessionStore {
                 mode: state
                     .as_ref()
                     .map(|state| state.mode.mode.as_str())
-                    .unwrap_or(mode)
+                    .unwrap_or(if mode.trim().is_empty() {
+                        &self.default_mode
+                    } else {
+                        mode
+                    })
                     .to_owned(),
                 extra_concurrent_tasks: existing
                     .as_ref()

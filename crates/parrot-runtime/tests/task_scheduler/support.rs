@@ -37,7 +37,7 @@ use parrot_storage::{
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
     database::SessionDatabase,
     events::{ConversationPart, EventRepository, NeverCancelled},
-    history_files::AgentHistoryFile,
+    history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -194,19 +194,36 @@ pub struct Histories {
 }
 impl Histories {
     pub fn new() -> Arc<Self> {
-        let path = std::env::current_dir().unwrap().join(".tmp").join(format!(
-            "children-{}-{}",
-            std::process::id(),
-            id()
-        ));
+        let path = std::env::temp_dir().join(format!("children-{}-{}", std::process::id(), id()));
         std::fs::create_dir_all(path.join("scratch/blobs")).unwrap();
         let database = SessionDatabase::open(
             SelectedSessionRoot::new(path.clone(), RootOrigin::Current).unwrap(),
         )
         .unwrap();
+        let root = database.selected_root().clone();
+        let session_id = root.path().file_name().unwrap().to_str().unwrap();
+        let launch_directory = std::env::current_dir().unwrap();
+        let metadata = SessionIndex::new(
+            root.clone(),
+            parrot_domain::values::identifiers::UserSessionId::parse(session_id).unwrap(),
+            launch_directory.clone(),
+        )
+        .unwrap();
+        if metadata.find().unwrap().is_none() {
+            let mut session = SessionMeta::new(
+                session_id,
+                launch_directory.to_str().unwrap(),
+                "provider",
+                "model",
+            );
+            session.root_agent_name = Some("main".into());
+            session.mode = Some("initial".into());
+            metadata.initialize(session, "fixture-root".into()).unwrap();
+        }
         Arc::new(Self {
             path,
-            repository: ConversationRepository::new(EventRepository::new(database)),
+            repository: ConversationRepository::new(EventRepository::new(database), metadata)
+                .unwrap(),
         })
     }
     pub fn history(&self, identity: &AgentIdentity) -> AgentHistoryView {

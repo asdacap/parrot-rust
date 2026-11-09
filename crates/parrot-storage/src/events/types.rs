@@ -167,12 +167,6 @@ pub struct ToolExecutionTerminal {
     pub result_parts: Vec<ConversationPart>,
     pub message: String,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentLineageRecord {
-    pub agent_session_id: String,
-    pub parent_agent_session_id: String,
-    pub name: String,
-}
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoredEvent {
     pub sequence: i64,

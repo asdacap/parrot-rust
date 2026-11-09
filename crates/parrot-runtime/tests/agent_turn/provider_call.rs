@@ -29,7 +29,7 @@ use parrot_storage::{
     conversation::{AgentHistoryView, ConversationRepository},
     database::SessionDatabase,
     events::{EventError, EventRepository, NeverCancelled},
-    history_files::AgentHistoryFile,
+    history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 use tokio::sync::{Notify, Semaphore};
 
@@ -48,9 +48,30 @@ impl Fixture {
         ));
         std::fs::create_dir_all(&path).unwrap();
         let root = SelectedSessionRoot::new(path.clone(), RootOrigin::Current).unwrap();
-        let repository = ConversationRepository::new(EventRepository::new(
-            SessionDatabase::open(root.clone()).unwrap(),
-        ));
+        let session_id = root.path().file_name().unwrap().to_str().unwrap();
+        let launch_directory = std::env::current_dir().unwrap();
+        let metadata = SessionIndex::new(
+            root.clone(),
+            parrot_domain::values::identifiers::UserSessionId::parse(session_id).unwrap(),
+            launch_directory.clone(),
+        )
+        .unwrap();
+        if metadata.find().unwrap().is_none() {
+            let mut session = SessionMeta::new(
+                session_id,
+                launch_directory.to_str().unwrap(),
+                "provider",
+                "model",
+            );
+            session.root_agent_name = Some("main".into());
+            session.mode = Some("initial".into());
+            metadata.initialize(session, "fixture-root".into()).unwrap();
+        }
+        let repository = ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+            metadata,
+        )
+        .unwrap();
         let projection =
             AgentHistoryFile::new(root, path.join("history.jsonl"), vec!["agent".into()]).unwrap();
         let history = repository

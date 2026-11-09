@@ -20,8 +20,9 @@ describe("Timeline", () => {
       { kind: "assistant", agentSessionId: "explorer", text: "explorer fourth" },
     ]
 
-    const headers = [...renderToStaticMarkup(<Timeline items={items} agents={agents} />).matchAll(/<header[^>]*>.*?<\/svg>([^<]*)<\/header>/g)]
+    const headers = [...renderToStaticMarkup(<Timeline items={items} agents={agents} />).matchAll(/<header\b[^>]*>([\s\S]*?)<\/header>/g)]
+    const names = headers.map(([, content = ""]) => content.replace(/<[^>]*>/g, "").trim())
 
-    expect(headers.map(([, name]) => name)).toEqual(["explorer", "reviewer", "explorer"])
+    expect(names).toEqual(["explorer", "reviewer", "explorer"])
   })
 })

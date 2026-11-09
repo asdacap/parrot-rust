@@ -58,7 +58,7 @@ fn unversioned_tables_and_views_are_rejected_without_writes() {
 
 #[test]
 fn unknown_versions_are_rejected_without_writes() {
-    for version in [1, 2, 4, 7] {
+    for version in [1, 2, 3, 5, 7] {
         let fixture = Fixture::new();
         let path = fixture.0.join("session.db");
         let connection = Connection::open(&path).unwrap();
@@ -99,7 +99,7 @@ async fn empty_unversioned_file_initializes_the_current_format() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (3, 13));
+    assert_eq!(state, (4, 11));
     database.close().await.unwrap();
 }
 
@@ -128,7 +128,7 @@ async fn current_format_reopens_without_schema_repair() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (3, 13, false));
+    assert_eq!(state, (4, 11, false));
     reopened.close().await.unwrap();
 }
 
@@ -193,13 +193,12 @@ async fn mode_revisions_and_history_anchor_constraints_match_the_current_contrac
     let fixture = Fixture::new();
     let database = SessionDatabase::open(fixture.root()).unwrap();
     database.admit("revisions", &active(), |tx| {
-        tx.execute("INSERT INTO session_state(user_session,agent_session,mode) VALUES('user','agent','mode')", [])?;
-        let revisions: (i64,Option<i64>) = tx.query_row("SELECT mode_revision,status_revision FROM session_state", [], |row| Ok((row.get(0)?,row.get(1)?)))?;
-        assert_eq!(revisions,(0,None));
-        assert!(tx.execute("UPDATE session_state SET status_revision=1", []).is_err());
-        assert!(tx.execute("UPDATE session_state SET mode_revision=-1", []).is_err());
-        tx.execute("UPDATE session_state SET mode_revision=1,status_revision=1", [])?;
-        assert!(tx.execute("INSERT INTO session_state(user_session,agent_session,mode) VALUES('other','agent','mode')", []).is_err());
+        tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,mode_status_revision) VALUES('agent','system','system','','at',0)", [])?;
+        let revision: Option<i64> = tx.query_row("SELECT mode_status_revision FROM conversation_item", [], |row| row.get(0))?;
+        assert_eq!(revision,Some(0));
+        assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,mode_status_revision) VALUES('agent','system','system','','at',0)", []).is_err());
+        assert!(tx.execute("UPDATE conversation_item SET mode_status_revision=-1", []).is_err());
+        tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','system','system','','at'),('agent','system','system','','at')", [])?;
         tx.execute("INSERT INTO event(id,agent_session,payload,created_at,history_anchor) VALUES('anchored','agent',X'','at',42)", [])?;
         let anchor: i64 = tx.query_row("SELECT history_anchor FROM event WHERE id='anchored'", [], |row| row.get(0))?;
         assert_eq!(anchor,42);

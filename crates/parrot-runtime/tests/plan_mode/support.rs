@@ -15,6 +15,12 @@ use parrot_foundation::{
     template_catalog::PromptTemplateCatalog,
 };
 use parrot_runtime::plan_mode::*;
+use parrot_storage::{
+    conversation::ConversationRepository,
+    database::SessionDatabase,
+    events::EventRepository,
+    history_files::{SessionIndex, SessionMeta},
+};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fmt, io,
@@ -49,6 +55,30 @@ impl Fixture {
         )
         .unwrap();
         Self { root, resources }
+    }
+    pub fn repository(&self) -> ConversationRepository {
+        let root = self.resources.selected_root().clone();
+        let launch_directory = self.root.join("workspace");
+        let metadata = SessionIndex::new(
+            root.clone(),
+            UserSessionId::parse("session").unwrap(),
+            launch_directory.clone(),
+        )
+        .unwrap();
+        let mut session = SessionMeta::new(
+            "session",
+            launch_directory.to_str().unwrap(),
+            "provider",
+            "model",
+        );
+        session.root_agent_name = Some("main".into());
+        session.mode = Some("initial".into());
+        metadata.initialize(session, "fixture-root".into()).unwrap();
+        ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root).unwrap()),
+            metadata,
+        )
+        .unwrap()
     }
     pub fn scratch(&self, name: &str) -> AgentScratchDirectory {
         self.resources.agent_scratch(&[name]).unwrap()

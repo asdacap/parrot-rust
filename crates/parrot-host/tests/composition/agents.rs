@@ -781,19 +781,36 @@ mod fixture {
         pub(super) async fn new() -> Self {
             // This module and the queue cases reuse the runtime helpers, whose
             // module-local counters would otherwise select the same directory.
-            let path = std::env::current_dir().unwrap().join(".tmp").join(format!(
-                "host-agents-{}-{}",
-                std::process::id(),
-                id()
-            ));
+            let path =
+                std::env::temp_dir().join(format!("host-agents-{}-{}", std::process::id(), id()));
             std::fs::create_dir_all(path.join("scratch/blobs")).unwrap();
             let database = SessionDatabase::open(
                 SelectedSessionRoot::new(path.clone(), RootOrigin::Current).unwrap(),
             )
             .unwrap();
+            let session_id = parrot_domain::values::identifiers::UserSessionId::parse(
+                path.file_name().unwrap().to_str().unwrap(),
+            )
+            .unwrap();
+            let metadata = parrot_storage::history_files::SessionIndex::new(
+                database.selected_root().clone(),
+                session_id.clone(),
+                &path,
+            )
+            .unwrap();
+            let mut initial = parrot_storage::history_files::SessionMeta::new(
+                session_id.value(),
+                path.to_string_lossy(),
+                "local",
+                "model",
+            );
+            initial.root_agent_name = Some("main".into());
+            initial.mode = Some("initial".into());
+            metadata.initialize(initial, "fixture-root".into()).unwrap();
             let histories = Arc::new(super::support::Histories {
                 path,
-                repository: ConversationRepository::new(EventRepository::new(database)),
+                repository: ConversationRepository::new(EventRepository::new(database), metadata)
+                    .unwrap(),
             });
             let factory = Arc::new(Factory {
                 registry: Mutex::new(std::sync::Weak::new()),

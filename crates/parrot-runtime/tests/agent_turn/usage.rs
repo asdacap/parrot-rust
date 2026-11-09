@@ -18,7 +18,7 @@ use parrot_storage::{
     conversation::{AgentHistoryView, ConversationRepository},
     database::SessionDatabase,
     events::{EventError, EventRepository},
-    history_files::AgentHistoryFile,
+    history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 use std::{
     path::PathBuf,
@@ -32,7 +32,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
-        let path = std::env::current_dir().unwrap().join(".tmp").join(format!(
+        let path = std::env::temp_dir().join(format!(
             "t46-usage-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
@@ -42,7 +42,30 @@ impl Fixture {
     }
     fn repository(&self) -> ConversationRepository {
         let root = SelectedSessionRoot::new(self.0.clone(), RootOrigin::Current).unwrap();
-        ConversationRepository::new(EventRepository::new(SessionDatabase::open(root).unwrap()))
+        let session_id = root.path().file_name().unwrap().to_str().unwrap();
+        let launch_directory = std::env::current_dir().unwrap();
+        let metadata = SessionIndex::new(
+            root.clone(),
+            parrot_domain::values::identifiers::UserSessionId::parse(session_id).unwrap(),
+            launch_directory.clone(),
+        )
+        .unwrap();
+        if metadata.find().unwrap().is_none() {
+            let mut session = SessionMeta::new(
+                session_id,
+                launch_directory.to_str().unwrap(),
+                "provider",
+                "model",
+            );
+            session.root_agent_name = Some("main".into());
+            session.mode = Some("initial".into());
+            metadata.initialize(session, "fixture-root".into()).unwrap();
+        }
+        ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+            metadata,
+        )
+        .unwrap()
     }
     fn history(&self, repository: &ConversationRepository, agent: &str) -> AgentHistoryView {
         repository

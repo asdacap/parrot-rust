@@ -127,9 +127,11 @@ async fn observe(root: PathBuf) -> Value {
     std::fs::create_dir(&root).unwrap();
     let selected =
         SelectedSessionRoot::new(root.join("sessions/listed"), RootOrigin::Current).unwrap();
-    let repository = ConversationRepository::new(EventRepository::new(
-        SessionDatabase::open(selected.clone()).unwrap(),
-    ));
+    let repository = ConversationRepository::new(
+        EventRepository::new(SessionDatabase::open(selected.clone()).unwrap()),
+        crate::history_files::tests::metadata(&selected),
+    )
+    .unwrap();
     repository
         .append_conversation(
             Event {
@@ -225,15 +227,19 @@ async fn observe(root: PathBuf) -> Value {
     );
     let final_sql = sql(&repository).await;
     repository.events().database().close().await.unwrap();
-    let corrupting = ConversationRepository::new(EventRepository::new(
-        SessionDatabase::open(selected.clone()).unwrap(),
-    ));
+    let corrupting = ConversationRepository::new(
+        EventRepository::new(SessionDatabase::open(selected.clone()).unwrap()),
+        crate::history_files::tests::metadata(&selected),
+    )
+    .unwrap();
     payload(&corrupting, vec![0x0a, 0x05, 0x61]).await;
     let corrupted_at_close = sql(&corrupting).await;
     corrupting.events().database().close().await.unwrap();
-    let reopened = ConversationRepository::new(EventRepository::new(
-        SessionDatabase::open(selected.clone()).unwrap(),
-    ));
+    let reopened = ConversationRepository::new(
+        EventRepository::new(SessionDatabase::open(selected.clone()).unwrap()),
+        crate::history_files::tests::metadata(&selected),
+    )
+    .unwrap();
     let malformed_before = sql(&reopened).await;
     assert_eq!(corrupted_at_close, malformed_before);
     let projection = AgentHistoryFile::new(selected, &path, vec!["agent".into()]).unwrap();

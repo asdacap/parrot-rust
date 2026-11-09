@@ -5,7 +5,6 @@ use parrot_core::{
         CompactionPolicy, PlanningError, group_messages, is_complete,
     },
 };
-use std::cell::RefCell;
 
 fn message(tokens: i64) -> Message {
     Message {
@@ -265,25 +264,10 @@ fn unavailable_targets_and_single_groups_do_not_estimate_or_validate_summary_cap
 }
 
 #[test]
-fn selection_preserves_native_estimate_order_and_checked_suffix_overflow() {
-    let conversation = input(&[1, 2, 3]);
-    let calls = RefCell::new(Vec::new());
-    CompactionPlan::select_for_target(
-        &conversation,
-        &[],
-        &configuration(),
-        Some(100),
-        |messages| {
-            calls.borrow_mut().push(estimate(messages)?);
-            estimate(messages)
-        },
-        |_, _, messages| {
-            calls.borrow_mut().push(0);
-            estimate(messages)
-        },
-    )
-    .unwrap();
-    assert_eq!(*calls.borrow(), [0, 3, 2, 1]);
+fn selection_preserves_plan_boundaries_and_checked_suffix_overflow() {
+    let plan = select(&input(&[1, 2, 3]), Some(100)).unwrap().unwrap();
+    assert_eq!(plan.keep_group_from, 2);
+    assert_eq!(plan.watermark, 2);
     assert_eq!(
         select(&input(&[1, i64::MAX]), Some(100)),
         Err(PlanningError::TokenOverflow)

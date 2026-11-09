@@ -35,9 +35,11 @@ impl Fixture {
         SelectedSessionRoot::new(self.0.clone(), RootOrigin::Current).unwrap()
     }
     fn repository(&self) -> ConversationRepository {
-        ConversationRepository::new(EventRepository::new(
-            SessionDatabase::open(self.root()).unwrap(),
-        ))
+        ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(self.root()).unwrap()),
+            crate::history_files::tests::metadata(&self.root()),
+        )
+        .unwrap()
     }
     fn projection(&self, name: &str, occupants: &[&str]) -> Arc<AgentHistoryFile> {
         Arc::new(

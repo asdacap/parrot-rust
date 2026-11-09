@@ -7,9 +7,22 @@ use parrot_storage::events::{ConversationMessage, EventRepository, MessageRole};
 #[tokio::test]
 async fn repository_workflows_keep_current_schema_after_reopen() {
     let fixture = Fixture::new();
-    let repository = ConversationRepository::new(EventRepository::new(
-        SessionDatabase::open(fixture.root()).unwrap(),
-    ));
+    let repository = {
+        let events = EventRepository::new(SessionDatabase::open(fixture.root()).unwrap());
+        let root = events.database().selected_root().clone();
+        let id = parrot_domain::values::identifiers::UserSessionId::parse(
+            root.path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .unwrap();
+        let metadata =
+            parrot_storage::history_files::SessionIndex::new(root.clone(), id, root.path())
+                .unwrap();
+        ConversationRepository::new(events, metadata).unwrap()
+    };
     repository
         .events()
         .append(
@@ -51,12 +64,11 @@ async fn repository_workflows_keep_current_schema_after_reopen() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!((version, tables.len()), (3, 13));
+    assert_eq!((version, tables.len()), (4, 11));
     assert_eq!(
         tables,
         [
             "agent_history",
-            "agent_lineage",
             "conversation_item",
             "conversation_part",
             "event",
@@ -65,7 +77,6 @@ async fn repository_workflows_keep_current_schema_after_reopen() {
             "image_upload",
             "input",
             "input_part",
-            "session_state",
             "tool_execution_result_part",
             "tool_execution_terminal",
         ]

@@ -179,13 +179,13 @@ the unresolved production filesystem/security capability.
 
 ## Database formats and fresh startup
 
-New sessions use Parrot database format version `3` in SQLite, with 13 application
+New sessions use Parrot database format version `4` in SQLite, with 11 application
 tables. Tool calls are stored as `tool_call` rows in `conversation_part`, alongside
 text and image parts. Context reminders use the `context_reminder` conversation
 kind. Their checkpoint data stays on the same record. SQLite's internal tables
-are not part of that count. Versions `1` and `2`, existing nonempty unversioned
-databases, and unknown format versions are unsupported. The same format check
-applies in both current and legacy filesystem roots.
+are not part of that count. Versions `1`, `2`, and `3`, existing nonempty
+unversioned databases, and unknown format versions are unsupported. The same
+format check applies in both current and legacy filesystem roots.
 
 By default, `parrot` and `parrot chat` load or join the workspace's latest session.
 If resume encounters an unsupported database, startup reports the incompatibility
@@ -212,6 +212,36 @@ Durable accounting uses individual recorded facts. Live aggregate usage
 publications remain available, but aggregate SQL usage APIs are retired.
 Explicit image claim and release APIs are also retired. Input, conversation, and
 tool-terminal part references retain their images.
+
+## Session identity metadata
+
+The selected session's `meta.json` owns the stable root agent ID and name, current
+mode, mode revision, and permanent agent lineage. Model selection, fast mode,
+and the task-limit override remain in the same file. Keep this file with its
+session database. Missing or corrupt identity metadata is an opening error, not
+permission to generate a new root ID.
+
+Lineage retains retired identities and successive occupants of a reused agent
+name. Retiring an agent removes its current `agent-state.json`, not its permanent
+lineage record. Lineage alone does not restore a retired agent or run its work.
+
+SQLite owns the status message and its consumed mode revision in one transaction.
+A failed message projection leaves status pending. Reopening does not insert a
+second status for a consumed revision. Metadata replacement is not a transaction
+with SQLite or the recovery snapshots.
+
+To inspect the actual artifacts of a closed format-4 session, run from the source
+checkout inside the development shell:
+
+```sh
+python3 scripts/verify-session-storage /absolute/path/to/session
+```
+
+The read-only check verifies the database format, all 11 application table names,
+JSON identity and lineage, and consumed status revisions.
+Add `--reused-path main/worker` to require multiple historical occupants of that
+name-based directory.
+See [session storage ownership](../session-storage.md) for the design rationale.
 
 ## Managed task concurrency
 
@@ -286,20 +316,18 @@ the local production-creation limitations noted above.
   service to restored agents. Old queue files remain untouched and unused;
   see [File-based work queues](#file-based-work-queues).
 
-An existing session **without a root snapshot** uses root-only legacy recovery
-and emits a visible `legacy_root_only_resume` notice (text configured by
-`session.legacy-resume-warning`). It begins writing new snapshots, but cannot
-reconstruct historical child/task runtime state that was never saved. Fresh
-sessions do not emit this warning. This snapshot compatibility case is distinct
-from the old-path fallback setting: it can also apply to an older Rust session in
-the current root.
+Resuming a format-4 session requires its root snapshot. A missing root snapshot
+fails opening instead of using root-only legacy recovery. An interrupted initial
+creation can leave canonical identity metadata without a complete recovery
+snapshot. Preserve that session and start a separate session explicitly rather
+than deleting identity metadata to force creation.
 
-Once a parent references a child, that child's missing snapshot is damaged
-new-format state, **not** a root-only fallback. Corrupt/unsupported snapshots,
-wrong owner IDs, invalid parent references, duplicate retained names/cyclic IDs,
-and unavailable selectors fail opening before provider activation. Preserve the
-session and error for diagnosis; deleting snapshots to bypass the error loses
-recoverable state. No repair/migration command is provided.
+Once a parent references a child, that child's missing snapshot also fails
+opening. Corrupt or unsupported snapshots, wrong owner IDs, invalid parent
+references, duplicate retained names, cyclic IDs, and unavailable selectors fail
+opening before provider activation. Preserve the session and error for diagnosis.
+Deleting snapshots to bypass the error loses recoverable state. No repair or
+migration command is provided.
 
 SQLite `session.db` remains authoritative for conversation/event history and
 settlements; agent `history.jsonl` files remain projections. Back up the whole

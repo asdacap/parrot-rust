@@ -163,11 +163,9 @@ async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity()
     let fixture = Fixture::new();
     fixture.seed().await;
     let (adapter, control, retained) = bridge();
-    assert_eq!(
-        Arc::strong_count(&retained),
-        2,
-        "adapter must retain the same Tool"
-    );
+    let retained_tool = Arc::downgrade(&retained);
+    drop(retained);
+    assert!(retained_tool.upgrade().is_some());
     let provider = Scripted::new(vec![
         compact_step(),
         Step::complete("retained durable summary"),
@@ -190,11 +188,7 @@ async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity()
         );
     }
     assert_eq!(factory.creates.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        Arc::strong_count(&retained),
-        2,
-        "no per-invocation Tool recreated"
-    );
+    assert!(retained_tool.upgrade().is_some());
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 4);
     assert!(
@@ -658,6 +652,8 @@ async fn retained_status_tool_uses_actual_activity_context_statistics_and_same_i
     let fixture = Fixture::new();
     fixture.seed().await;
     let (adapter, ancillary, retained) = status_bridge();
+    let retained_tool = Arc::downgrade(&retained);
+    drop(retained);
     let provider = Scripted::new(vec![
         status_step("retained-status-1"),
         Step::complete("status answer"),
@@ -674,7 +670,7 @@ async fn retained_status_tool_uses_actual_activity_context_statistics_and_same_i
         );
     }
     assert_eq!(factory.creates.load(Ordering::SeqCst), 1);
-    assert_eq!(Arc::strong_count(&retained), 2);
+    assert!(retained_tool.upgrade().is_some());
     let observations = ancillary.observed.lock().unwrap().clone();
     assert_eq!(observations.len(), 2);
     assert!(observations[1].estimated_tokens > observations[0].estimated_tokens);

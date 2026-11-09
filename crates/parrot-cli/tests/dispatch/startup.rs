@@ -159,7 +159,8 @@ impl Context {
             "stored-model",
         );
         metadata.mode = Some("stored-mode".into());
-        index.publish(&metadata).unwrap();
+        metadata.root_agent_name = Some("main".into());
+        index.initialize(metadata, "existing-root".into()).unwrap();
         Arc::new(admission.activation_lease.expect("real claim activation"))
     }
     fn admit_legacy(&self) -> Arc<SessionActivationLease> {
@@ -183,7 +184,8 @@ impl Context {
             "stored-model",
         );
         metadata.mode = Some("stored-mode".into());
-        index.publish(&metadata).unwrap();
+        metadata.root_agent_name = Some("main".into());
+        index.initialize(metadata, "existing-root".into()).unwrap();
         Arc::new(admission.activation_lease.expect("real legacy activation"))
     }
     fn owner_socket(&self) -> PathBuf {

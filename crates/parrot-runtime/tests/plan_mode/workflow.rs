@@ -213,18 +213,15 @@ fn blank_missing_unreadable_and_invalid_inputs_require_repair_without_partial_co
 #[tokio::test]
 async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner_pair() {
     use parrot_storage::{
-        conversation::{ConversationMessage, ConversationRepository, MessageRole, ToolCall},
-        database::SessionDatabase,
-        events::{EventRepository, projection},
+        conversation::{ConversationMessage, MessageRole, ToolCall},
+        events::projection,
         history_files::AgentHistoryFile,
     };
     use std::sync::Arc;
     let fixture = Fixture::new();
     let scratch = fixture.scratch("main");
     let root = fixture.resources.selected_root().clone();
-    let repository = ConversationRepository::new(EventRepository::new(
-        SessionDatabase::open(root.clone()).unwrap(),
-    ));
+    let repository = fixture.repository();
     let history = repository
         .bind_agent_history(
             "main".into(),

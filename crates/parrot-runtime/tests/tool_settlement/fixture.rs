@@ -33,7 +33,7 @@ pub use parrot_storage::{
     },
     database::SessionDatabase,
     events::{ConversationPart, EventRepository, NeverCancelled},
-    history_files::AgentHistoryFile,
+    history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 pub use std::{
     collections::{BTreeMap, VecDeque},
@@ -91,11 +91,7 @@ pub struct Fixture {
 }
 impl Fixture {
     pub fn new() -> Self {
-        let path = std::env::current_dir().unwrap().join(".tmp").join(format!(
-            "settlement-{}-{}",
-            std::process::id(),
-            id()
-        ));
+        let path = std::env::temp_dir().join(format!("settlement-{}-{}", std::process::id(), id()));
         std::fs::create_dir_all(path.join("scratch/blobs")).unwrap();
         let repository = Self::open(&path);
         let history = Self::history_for(&path, &repository);
@@ -108,9 +104,30 @@ impl Fixture {
     }
     pub fn open(path: &Path) -> ConversationRepository {
         let root = SelectedSessionRoot::new(path.into(), RootOrigin::Current).unwrap();
-        ConversationRepository::new(EventRepository::new(
-            SessionDatabase::open(root.clone()).unwrap(),
-        ))
+        let session_id = root.path().file_name().unwrap().to_str().unwrap();
+        let launch_directory = std::env::current_dir().unwrap();
+        let metadata = SessionIndex::new(
+            root.clone(),
+            parrot_domain::values::identifiers::UserSessionId::parse(session_id).unwrap(),
+            launch_directory.clone(),
+        )
+        .unwrap();
+        if metadata.find().unwrap().is_none() {
+            let mut session = SessionMeta::new(
+                session_id,
+                launch_directory.to_str().unwrap(),
+                "provider",
+                "model",
+            );
+            session.root_agent_name = Some("main".into());
+            session.mode = Some("initial".into());
+            metadata.initialize(session, "fixture-root".into()).unwrap();
+        }
+        ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+            metadata,
+        )
+        .unwrap()
         .with_image_store(
             parrot_storage::artifacts::ImageArtifactStore::for_session(&root, "resources").unwrap(),
         )

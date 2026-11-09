@@ -41,10 +41,29 @@ fn event(id: &str, agent: &str) -> Event {
     }
 }
 
+pub(super) fn metadata(root: &SelectedSessionRoot) -> SessionIndex {
+    let id = UserSessionId::parse(root.path().file_name().unwrap().to_str().unwrap()).unwrap();
+    let index = SessionIndex::new(root.clone(), id.clone(), root.path()).unwrap();
+    if !index.metadata_path().exists() {
+        let mut metadata = SessionMeta::new(
+            id.value(),
+            root.path().to_string_lossy(),
+            "provider",
+            "model",
+        );
+        metadata.root_agent_name = Some("main".into());
+        metadata.mode = Some("initial".into());
+        index.initialize(metadata, "agent".into()).unwrap();
+    }
+    index
+}
+
 fn repository(root: &SelectedSessionRoot) -> ConversationRepository {
-    ConversationRepository::new(EventRepository::new(
-        SessionDatabase::open(root.clone()).unwrap(),
-    ))
+    ConversationRepository::new(
+        EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+        metadata(root),
+    )
+    .unwrap()
 }
 
 #[tokio::test]

@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Check the actual JSON identity and SQLite artifacts of a closed session."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sqlite3
+from urllib.parse import quote_from_bytes
+
+
+TABLES = {
+    "agent_history",
+    "conversation_item",
+    "conversation_part",
+    "event",
+    "history_checkpoint",
+    "image_artifact",
+    "image_upload",
+    "input",
+    "input_part",
+    "tool_execution_result_part",
+    "tool_execution_terminal",
+}
+
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("session_root", type=Path)
+    parser.add_argument("--root-id")
+    parser.add_argument("--mode")
+    parser.add_argument("--revision", type=int)
+    parser.add_argument("--reused-path")
+    parser.add_argument("--expect-current-status", action="store_true")
+    args = parser.parse_args()
+    root = args.session_root.resolve()
+    uri = "file:" + quote_from_bytes(os.fsencode(root / "session.db"), safe="/") + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as database:
+        version = database.execute("PRAGMA user_version").fetchone()[0]
+        tables = {
+            row[0]
+            for row in database.execute(
+                "SELECT name FROM sqlite_schema "
+                "WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            )
+        }
+        require(
+            version == 4 and tables == TABLES,
+            f"Expected format 4 and 11 application tables. Observed format {version} "
+            f"and {len(tables)} tables {sorted(tables)}.",
+        )
+        require(database.execute("PRAGMA integrity_check").fetchall() == [("ok",)], "Database integrity failed.")
+        require(not database.execute("PRAGMA foreign_key_check").fetchall(), "Foreign keys are inconsistent.")
+        consumed = database.execute(
+            "SELECT agent_session, mode_status_revision FROM conversation_item "
+            "WHERE mode_status_revision IS NOT NULL ORDER BY sequence"
+        ).fetchall()
+
+    metadata = json.loads((root / "meta.json").read_text(encoding="utf-8"))
+    root_id = metadata.get("RootAgentSessionId")
+    root_name = metadata.get("RootAgentName")
+    mode = metadata.get("Mode")
+    revision = metadata.get("ModeRevision")
+    require(isinstance(root_id, str) and bool(root_id), "Root identity is missing.")
+    require(isinstance(root_name, str) and bool(root_name), "Root name is missing.")
+    require(isinstance(mode, str) and bool(mode), "Mode is missing.")
+    require(type(revision) is int and revision >= 0, "Mode revision is invalid.")
+    for expected, actual, label in [
+        (args.root_id, root_id, "root identity"),
+        (args.mode, mode, "mode"),
+        (args.revision, revision, "mode revision"),
+    ]:
+        require(expected is None or expected == actual, f"Unexpected {label}. Expected {expected!r}, observed {actual!r}.")
+
+    lineage = metadata.get("AgentLineage")
+    require(isinstance(lineage, list) and bool(lineage), "Permanent lineage is missing.")
+    paths = {}
+    occupants = {}
+    for record in lineage:
+        agent = record["SessionId"]
+        parent = record["ParentSessionId"]
+        name = record["Name"]
+        require(agent not in paths, f"Duplicate lineage identity {agent!r}.")
+        require(bool(agent) and bool(name), "A lineage identity or name is empty.")
+        if not parent:
+            require(agent == root_id and name == root_name, "Lineage root disagrees with canonical identity.")
+            path = name
+        else:
+            require(parent in paths, f"Parent {parent!r} does not precede {agent!r}.")
+            path = paths[parent] + "/" + name
+        paths[agent] = path
+        occupants.setdefault(path, []).append(agent)
+    require(root_id in paths, "Canonical root has no lineage record.")
+    if args.reused_path is not None:
+        require(len(occupants.get(args.reused_path, [])) >= 2, "The requested reused directory has fewer than two occupants.")
+
+    require(len(consumed) == len(set(consumed)), "A mode revision was consumed twice.")
+    require(all(agent == root_id and 0 <= value <= revision for agent, value in consumed), "A conversation checkpoint disagrees with canonical mode state.")
+    if args.expect_current_status:
+        require((root_id, revision) in consumed, "The current mode status has not been consumed.")
+    print(json.dumps({
+        "format_version": version,
+        "application_tables": sorted(tables),
+        "root_agent_session_id": root_id,
+        "mode": mode,
+        "mode_revision": revision,
+        "directory_occupants": occupants,
+        "consumed_mode_revisions": consumed,
+    }, indent=2))
+
+
+if __name__ == "__main__":
+    main()

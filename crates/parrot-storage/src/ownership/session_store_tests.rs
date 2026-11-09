@@ -322,7 +322,7 @@ async fn database_open_failure_closes_diagnostics_and_releases_activation() {
 
 #[tokio::test]
 async fn unsupported_schema_refusal_preserves_data_and_releases_activation() {
-    for version in [0_i64, 7] {
+    for version in [0_i64, 1, 7] {
         let fixture = Fixture::new();
         let factory = Arc::new(Factory::default());
         let store = fixture.store(factory.clone());
@@ -341,8 +341,11 @@ async fn unsupported_schema_refusal_preserves_data_and_releases_activation() {
             connection
                 .execute_batch(
                     "CREATE TABLE retained(value TEXT); \
-                     INSERT INTO retained VALUES ('kept'); PRAGMA user_version=7;",
+                     INSERT INTO retained VALUES ('kept');",
                 )
+                .unwrap();
+            connection
+                .pragma_update(None, "user_version", version)
                 .unwrap();
         }
         fs::write(root.join("artifacts/retained.bin"), b"retained artifact").unwrap();
