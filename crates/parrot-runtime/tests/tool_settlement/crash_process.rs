@@ -141,7 +141,7 @@ async fn process_kill_does_not_replay_an_unfinished_tool_effect() {
         .unwrap();
     assert_eq!(terminals.len(), 1);
     assert_eq!(terminals[0].status, ToolExecutionStatus::Error);
-    assert!(terminals[0].message.contains(CRASH_MESSAGE));
+    assert!(terminals[0].content().contains(CRASH_MESSAGE));
     let events = restarted.events().await;
     assert_eq!(
         events

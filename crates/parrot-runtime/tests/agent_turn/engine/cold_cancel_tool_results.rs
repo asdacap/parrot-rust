@@ -75,7 +75,7 @@ async fn saved_canceled_checkpoint_closes_unfinished_tools_without_activating_pr
     assert!(terminals.iter().all(|terminal| {
         terminal.status == parrot_storage::events::ToolExecutionStatus::Error
             && terminal
-                .message
+                .content()
                 .contains("The process crashed before the tool completed.")
     }));
     let tool_results: Vec<_> = fixture

@@ -79,7 +79,6 @@ async fn child_launch_uses_actual_empty_full_and_named_checkpoint_sqlite_forks()
                     tool_name: "set_checkpoint".into(),
                     status: ToolExecutionStatus::Finished,
                     result_parts: vec![ConversationPart::text("checkpoint done")],
-                    message: String::new(),
                 },
             )
             .await

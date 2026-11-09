@@ -377,7 +377,7 @@ async fn actual_runtime_state_initialization_repairs_a_failed_batch_before_the_n
     assert_eq!(restored.len(), 2);
     assert_eq!(restored[0], saved[0]);
     assert_eq!(restored[1].status, ToolExecutionStatus::Error);
-    assert!(restored[1].message.contains(CRASH_MESSAGE));
+    assert!(restored[1].content().contains(CRASH_MESSAGE));
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 2);
     assert!(
@@ -429,7 +429,7 @@ async fn actual_runtime_terminal_publication_failure_stops_tail_and_restart_neve
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].tool_call_id, "first");
     assert_eq!(saved[0].status, ToolExecutionStatus::Finished);
-    assert_eq!(saved[0].message, "result:first");
+    assert_eq!(saved[0].content(), "result:first");
     bounded(session.close()).await.unwrap();
 
     let repository = Fixture::open(&fixture.path);
@@ -457,7 +457,7 @@ async fn actual_runtime_terminal_publication_failure_stops_tail_and_restart_neve
     assert_eq!(restored[0], saved[0]);
     assert_eq!(restored[1].tool_call_id, "tail");
     assert_eq!(restored[1].status, ToolExecutionStatus::Error);
-    assert!(restored[1].message.contains(CRASH_MESSAGE));
+    assert!(restored[1].content().contains(CRASH_MESSAGE));
     let requests = resumed_provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 1);
     assert!(

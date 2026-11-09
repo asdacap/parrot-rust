@@ -6,7 +6,8 @@ use parrot_domain::{
 use parrot_runtime::{children::*, task_scheduler::*};
 use parrot_storage::{
     conversation::{
-        AgentHistoryView, ConversationMessage, HistoryForkBoundary, MessageRole, ToolCall,
+        AgentHistoryView, ConversationMessage, ConversationPart, HistoryForkBoundary, MessageRole,
+        ToolCall,
     },
     events::{ToolExecutionStatus, ToolExecutionTerminal},
 };
@@ -337,8 +338,7 @@ async fn compacted_original_boundary_fails_deferred_task_without_creating_a_work
                 tool_call_id: "launch".into(),
                 tool_name: "set_agent_tasks".into(),
                 status: ToolExecutionStatus::Finished,
-                result_parts: vec![],
-                message: "declared".into(),
+                result_parts: vec![ConversationPart::text("declared")],
             },
         )
         .await

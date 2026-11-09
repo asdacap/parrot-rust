@@ -196,7 +196,6 @@ async fn restored_cancelled_terminal_is_preserved_and_unfinished_tail_gets_crash
         tool_name: "safe".into(),
         status: ToolExecutionStatus::Cancelled,
         result_parts: vec![ConversationPart::text("old interrupted")],
-        message: "old interrupted".into(),
     };
     let mut event = Event::new();
     event.id = id();
@@ -204,7 +203,7 @@ async fn restored_cancelled_terminal_is_preserved_and_unfinished_tail_gets_crash
     fixture
         .repository
         .events()
-        .append_tool_terminal(event, terminal)
+        .append_tool_settlement(event, sequence, terminal)
         .await
         .unwrap();
     let tool = Arc::new(RecordingTool::new(
@@ -228,9 +227,9 @@ async fn restored_cancelled_terminal_is_preserved_and_unfinished_tail_gets_crash
         .await
         .unwrap();
     assert_eq!(terminals[0].status, ToolExecutionStatus::Cancelled);
-    assert_eq!(terminals[0].message, "old interrupted");
+    assert_eq!(terminals[0].content(), "old interrupted");
     assert_eq!(terminals[1].status, ToolExecutionStatus::Error);
-    assert!(terminals[1].message.contains(CRASH_MESSAGE));
+    assert!(terminals[1].content().contains(CRASH_MESSAGE));
     let events = fixture.events().await;
     assert!(
         !events
@@ -299,7 +298,7 @@ async fn configured_actual_catalog_renders_success_error_and_interrupted_result(
     assert_eq!(
         terminals
             .iter()
-            .map(|terminal| terminal.message.as_str())
+            .map(ToolExecutionTerminal::content)
             .collect::<Vec<_>>(),
         vec![
             "SUCCESS [result:success]",
@@ -529,7 +528,7 @@ async fn restoration_closes_every_unfinished_call_with_configured_durable_errors
         terminals
             .iter()
             .all(|terminal| terminal.status == ToolExecutionStatus::Error
-                && terminal.message == format!("ERROR [{message}]"))
+                && terminal.content() == format!("ERROR [{message}]"))
     );
     let events = fixture.events().await;
     assert!(

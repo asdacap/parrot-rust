@@ -262,7 +262,6 @@ impl ToolConversation {
                     )
                 }))
                 .collect(),
-            message: result.text.clone(),
         };
         let mut event = self.event();
         match result.status {

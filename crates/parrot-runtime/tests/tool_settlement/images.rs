@@ -113,22 +113,23 @@ async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
             result_parts: if overflow {
                 vec![ConversationPart::text("budget exceeded")]
             } else {
-                vec![ConversationPart::image(
-                    &image.artifact_id,
-                    &image.media_type,
-                    &image.display_name,
-                )]
+                vec![
+                    ConversationPart::text("restored"),
+                    ConversationPart::image(
+                        &image.artifact_id,
+                        &image.media_type,
+                        &image.display_name,
+                    ),
+                ]
             },
-            message: "restored".into(),
         };
         let mut event = Event::new();
         event.id = id();
         event.agent_session_id = "agent".into();
-        // Terminal-only commit deliberately leaves the real conversation projection absent.
         fixture
             .repository
             .events()
-            .append_tool_terminal(event, terminal.clone())
+            .append_tool_settlement(event, sequence, terminal.clone())
             .await
             .unwrap();
         let tool = image_tool(&fixture, "image", &image);
@@ -140,6 +141,25 @@ async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
         .await;
         harness.restore(&fixture).await.unwrap();
         harness.restore(&fixture).await.unwrap();
+        let messages = harness.conversation.messages();
+        assert!(
+            messages
+                .iter()
+                .filter(|message| message.role == MessageRole::Tool)
+                .flat_map(|message| &message.contents)
+                .all(|part| matches!(part, parrot_storage::conversation::ModelContent::Text(_)))
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .flat_map(|message| &message.contents)
+                .filter(|part| matches!(
+                    part,
+                    parrot_storage::conversation::ModelContent::ImageFile { .. }
+                ))
+                .count(),
+            usize::from(!overflow)
+        );
         let terminals = fixture
             .history
             .tool_terminals_of_calls(vec!["restored".into(), "pending".into()])
@@ -147,7 +167,7 @@ async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
             .unwrap();
         assert_eq!(terminals[0], terminal);
         assert_eq!(terminals[1].status, ToolExecutionStatus::Error);
-        assert!(terminals[1].message.contains(CRASH_MESSAGE));
+        assert!(terminals[1].content().contains(CRASH_MESSAGE));
         assert!(tool.calls.lock().unwrap().is_empty());
         assert_eq!(
             harness
@@ -222,12 +242,10 @@ async fn restored_missing_image_metadata_is_visible_error_and_does_not_advance_w
                 tool_call_id: "missing".into(),
                 tool_name: "image".into(),
                 status: ToolExecutionStatus::Finished,
-                result_parts: vec![ConversationPart::image(
-                    "missing-artifact",
-                    "image/png",
-                    "missing.png",
-                )],
-                message: "image".into(),
+                result_parts: vec![
+                    ConversationPart::text("image"),
+                    ConversationPart::image("missing-artifact", "image/png", "missing.png"),
+                ],
             },
         )
         .await
@@ -243,7 +261,7 @@ async fn restored_missing_image_metadata_is_visible_error_and_does_not_advance_w
         .await
         .unwrap();
     assert_eq!(pending[0].status, ToolExecutionStatus::Error);
-    assert!(pending[0].message.contains(CRASH_MESSAGE));
+    assert!(pending[0].content().contains(CRASH_MESSAGE));
     assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert!(tool.calls.lock().unwrap().is_empty());
 }

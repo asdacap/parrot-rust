@@ -401,7 +401,7 @@ async fn failed_started_publication_is_outside_tool_catch_but_joins_all_admitted
         restored
             .iter()
             .all(|terminal| terminal.status == ToolExecutionStatus::Error
-                && terminal.message.contains(CRASH_MESSAGE))
+                && terminal.content().contains(CRASH_MESSAGE))
     );
     let events = fixture.events().await;
     assert_eq!(
@@ -472,14 +472,10 @@ async fn utf8_output_spills_only_above_64kib_and_preserves_actual_blob_bytes() {
         let mut harness = Harness::new(&fixture, vec![Arc::new(tool).handle()]).await;
         harness.run(&fixture, &NeverCancelled).await.unwrap();
         let terminal = terminals(&fixture, &["large"]).await.remove(0);
+        let content = terminal.content();
         if spilled {
-            assert!(
-                terminal
-                    .message
-                    .starts_with("Tool output exceeded 64 KiB and was saved to ")
-            );
-            let path = terminal
-                .message
+            assert!(content.starts_with("Tool output exceeded 64 KiB and was saved to "));
+            let path = content
                 .strip_prefix("Tool output exceeded 64 KiB and was saved to ")
                 .unwrap()
                 .strip_suffix('.')
@@ -487,7 +483,7 @@ async fn utf8_output_spills_only_above_64kib_and_preserves_actual_blob_bytes() {
             assert_eq!(std::fs::read_to_string(path).unwrap(), text);
             assert!(!fixture.jsonl().contains(&text));
         } else {
-            assert_eq!(terminal.message, text);
+            assert_eq!(terminal.content(), text);
         }
     }
 }
@@ -503,7 +499,6 @@ async fn close_reopen_partial_batch_preserves_saved_result_and_closes_pending_as
         tool_name: "read".into(),
         status: ToolExecutionStatus::Finished,
         result_parts: vec![ConversationPart::text("durable first")],
-        message: "durable first".into(),
     };
     let mut event = Event::new();
     event.id = id();
@@ -549,7 +544,7 @@ async fn close_reopen_partial_batch_preserves_saved_result_and_closes_pending_as
     let restored = terminals(&reopened_fixture, &["settled", "pending"]).await;
     assert_eq!(restored[0], terminal);
     assert_eq!(restored[1].status, ToolExecutionStatus::Error);
-    assert!(restored[1].message.contains(CRASH_MESSAGE));
+    assert!(restored[1].content().contains(CRASH_MESSAGE));
     let events = reopened_fixture.events().await;
     assert!(
         !events
@@ -578,7 +573,7 @@ async fn close_reopen_partial_batch_preserves_saved_result_and_closes_pending_as
     assert_eq!(results[0].message.tool_call_id, "settled");
     assert_eq!(results[1].message.tool_call_id, "pending");
     let mut conflict = terminal;
-    conflict.message = "different".into();
+    conflict.result_parts = vec![ConversationPart::text("different")];
     let mut event = Event::new();
     event.id = id();
     event.agent_session_id = "agent".into();

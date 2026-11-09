@@ -150,11 +150,11 @@ async fn retry_after_recording_failure_closes_unfinished_calls_without_spending_
     assert_eq!(terminals[0].status, ToolExecutionStatus::Error);
     assert!(
         terminals[0]
-            .message
+            .content()
             .contains("failure after consuming image bytes")
     );
     assert_eq!(terminals[1].status, ToolExecutionStatus::Error);
-    assert!(terminals[1].message.contains(CRASH_MESSAGE));
+    assert!(terminals[1].content().contains(CRASH_MESSAGE));
     let events = fixture.events().await;
     assert_eq!(
         events

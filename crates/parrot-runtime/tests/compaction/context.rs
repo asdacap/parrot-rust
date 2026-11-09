@@ -209,7 +209,6 @@ async fn tool_group(history: &AgentHistoryView, ids: &[&str]) -> i64 {
                     result_parts: vec![parrot_storage::conversation::ConversationPart::text(
                         format!("result-{id}"),
                     )],
-                    message: format!("result-{id}"),
                 },
             )
             .await

@@ -114,7 +114,7 @@ async fn uncommitted_tool_effect_is_not_repeated_and_crash_error_survives_reopen
         .unwrap();
     assert_eq!(terminals.len(), 1);
     assert_eq!(terminals[0].status, ToolExecutionStatus::Error);
-    assert!(terminals[0].message.contains(CRASH_MESSAGE));
+    assert!(terminals[0].content().contains(CRASH_MESSAGE));
     let events = restarted.events().await;
     assert_eq!(
         events
@@ -222,7 +222,7 @@ async fn owned_recovery_preserves_settled_result_and_closes_unfinished_without_i
         .await
         .unwrap();
     seed.close().await.unwrap();
-    fixture
+    let sequence = fixture
         .batch(vec![
             call("settled-owned", "read"),
             call("pending-owned", "read"),
@@ -242,13 +242,13 @@ async fn owned_recovery_preserves_settled_result_and_closes_unfinished_without_i
     fixture
         .repository
         .events()
-        .append_tool_terminal(
+        .append_tool_settlement(
             event,
+            sequence,
             ToolExecutionTerminal {
                 tool_call_id: "settled-owned".into(),
                 tool_name: "read".into(),
                 status: ToolExecutionStatus::Finished,
-                message: "saved first result".into(),
                 result_parts: vec![ConversationPart::text("saved first result")],
             },
         )
@@ -362,9 +362,9 @@ async fn owned_recovery_preserves_settled_result_and_closes_unfinished_without_i
         .await
         .unwrap();
     assert_eq!(restored[0].status, ToolExecutionStatus::Finished);
-    assert_eq!(restored[0].message, "saved first result");
+    assert_eq!(restored[0].content(), "saved first result");
     assert_eq!(restored[1].status, ToolExecutionStatus::Error);
-    assert!(restored[1].message.contains(CRASH_MESSAGE));
+    assert!(restored[1].content().contains(CRASH_MESSAGE));
     let messages = restarted.history.conversation().await.unwrap();
     assert_eq!(
         messages
