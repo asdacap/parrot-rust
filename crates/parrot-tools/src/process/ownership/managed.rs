@@ -54,6 +54,7 @@ impl ProcessDiagnostics for NoProcessDiagnostics {
     fn write(&self, _: ProcessDiagnostic) {}
 }
 
+/// Reports process activity and completion without owning its execution.
 pub trait ProcessReport: Send + Sync {
     fn blocks_turn(&self) -> bool;
     fn activity_kind(&self) -> ActivityKind;
@@ -63,6 +64,10 @@ pub trait ProcessReport: Send + Sync {
         execution: Arc<dyn Execution>,
         lifetime: &'a dyn Cancellation,
     ) -> BoxFuture<'a, io::Result<()>>;
+    /// Renders a response without changing the captured process result.
+    fn format_result(&self, result: &ProcessResult) -> io::Result<String> {
+        Ok(result.format())
+    }
     fn complete(&self, state: &ActiveShellProcessState, output: &str) -> io::Result<String>;
 }
 
@@ -503,7 +508,7 @@ impl ManagedShellProcess {
                 let state = self.inner.lock().expect("process state");
                 let start_cursor = state.cursor;
                 let (cursor, result) = self.execution()?.read_result(start_cursor)?;
-                let output = result.format();
+                let output = self.report.format_result(&result)?;
                 speculative = Some((start_cursor, cursor, result));
                 output
             };

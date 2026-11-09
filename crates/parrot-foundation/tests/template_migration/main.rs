@@ -117,8 +117,8 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
     .map(str::to_owned)
     .collect();
     assert_eq!(approved, expected);
-    assert_eq!(mapping(old_templates).len(), 75);
-    assert_eq!(mapping(new_templates).len(), 80);
+    assert_eq!(mapping(old_templates).len(), 76);
+    assert_eq!(mapping(new_templates).len(), 81);
     let legacy_warning = field(new_templates, "session.legacy-resume-warning");
     assert_eq!(mapping(legacy_warning).len(), 3);
     assert!(sequence(field(legacy_warning, "allowed_arguments")).is_empty());
@@ -230,7 +230,7 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
                 .unwrap_or("scalar")
                 == "scalar")
             .count(),
-        69
+        70
     );
 }
 
@@ -285,9 +285,10 @@ const CONSOLIDATED_IDS: [&str; 2] = [
     "agent-task.assignment-context",
     "compact-context-tool.result",
 ];
-const NATIVE_SCALAR_IDS: [&str; 5] = [
+const NATIVE_SCALAR_IDS: [&str; 6] = [
     "agent-session.crashed-tool-result",
     "agent-session.progress-reminder",
+    "exec-command.stderr-summary",
     "progress-tool.already-closed",
     "progress-tool.closed",
     "progress-tool.updated",
@@ -362,8 +363,8 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let new = yaml::parse_root(&compose(system_new)).unwrap();
     let old_templates = mapping(field(&old, "prompt_templates"));
     let new_templates = mapping(field(&new, "prompt_templates"));
-    assert_eq!(old_templates.len(), 100);
-    assert_eq!(new_templates.len(), 105);
+    assert_eq!(old_templates.len(), 101);
+    assert_eq!(new_templates.len(), 106);
     let expected_ids = expected
         .iter()
         .map(|row| row["id"].as_str().unwrap())

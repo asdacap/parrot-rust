@@ -67,9 +67,10 @@ pub const AGENT_COMMUNICATION_IDS: [&str; 8] = [
     "agent-session.final-request-interrupted",
 ];
 
-pub const NATIVE_SCALAR_IDS: [&str; 5] = [
+pub const NATIVE_SCALAR_IDS: [&str; 6] = [
     "agent-session.crashed-tool-result",
     "agent-session.progress-reminder",
+    "exec-command.stderr-summary",
     "progress-tool.already-closed",
     "progress-tool.closed",
     "progress-tool.updated",

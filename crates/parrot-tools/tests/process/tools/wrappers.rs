@@ -635,6 +635,230 @@ async fn real_completion_environment_and_owned_security_capture_reach_the_launch
 }
 
 #[tokio::test]
+async fn exec_stderr_summary_counts_inline_lines_without_changing_capture() {
+    let fixture = Fixture::new();
+    let stdout = "answer\n[stderr]\nstdout stays";
+    for (stderr, lines) in [
+        ("warning one\nwarning two\n", 2),
+        ("warning one\nwarning two", 2),
+        ("warning one\r\nwarning two\r\n", 2),
+        ("warning one\n\nwarning two\n", 3),
+        ("unterminated warning", 1),
+        ("\n", 1),
+    ] {
+        let result = fixture
+            .exec(json!({
+                "command":"printf '%s' \"$OUT\"; printf '%s' \"$ERR\" >&2",
+                "env":{"OUT":stdout,"ERR":stderr}
+            }))
+            .await;
+        let execution = fixture
+            .launcher
+            .executions
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .clone();
+        let raw = execution.wait().await.unwrap();
+        assert_eq!(raw.stdout, stdout);
+        assert_eq!(raw.stderr, stderr);
+        assert_eq!(
+            fs::read_to_string(execution.stderr_path().unwrap()).unwrap(),
+            stderr
+        );
+        completed(
+            &result.text,
+            0,
+            &format!(
+                "s\n[stdout]\n{stdout}\n[stderr]\n<{lines} lines truncated to conserved context>"
+            ),
+        );
+        if !stderr.trim().is_empty() {
+            assert!(!result.text.contains(stderr), "{}", result.text);
+        }
+    }
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_stderr_summary_preserves_empty_and_nonzero_stderr() {
+    let fixture = Fixture::new();
+    let empty = fixture.exec(json!({"command":"printf answer"})).await;
+    completed(&empty.text, 0, "s\n[stdout]\nanswer");
+    assert!(!empty.text.contains("[stderr]"));
+    let failed = fixture
+        .exec(json!({"command":"printf answer; printf 'warning one\\nwarning two\\n' >&2; exit 7"}))
+        .await;
+    completed(
+        &failed.text,
+        7,
+        "s\n[stdout]\nanswer\n[stderr]\nwarning one\nwarning two\n",
+    );
+    assert!(!failed.text.contains("truncated"));
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_stderr_summary_yielded_completion_preserves_live_stderr() {
+    for exit in [7, 0] {
+        let fixture = Fixture::new();
+        let stderr = "warning one\nwarning two\n";
+        let initial = fixture
+            .exec(json!({
+                "command":"printf answer; printf '%s' \"$ERR\" >&2; while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; exit \"$STATUS\"",
+                "name":"summary-background",
+                "yield_after_ms":0,
+                "env":{"ERR":stderr,"STATUS":exit.to_string()}
+            }))
+            .await;
+        let yielded = initial.yielded_process.unwrap();
+        let stderr_path = yielded.stderr_path.unwrap();
+        live_text(&stderr_path, stderr).await;
+        fs::write(fixture.directory.0.join("release"), "").unwrap();
+        let rows = fixture.sink.rows(1).await;
+        let Row::Completion(message) = &rows[0] else {
+            panic!("exec completion was emitted as monitor event")
+        };
+        let execution = fixture
+            .launcher
+            .executions
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .clone();
+        let raw = execution.wait().await.unwrap();
+        assert_eq!(raw.stdout, "answer");
+        assert_eq!(raw.stderr, stderr);
+        assert_eq!(raw.exit_code, exit);
+        assert_eq!(fs::read_to_string(&stderr_path).unwrap(), stderr);
+        let output = message
+            .text
+            .strip_prefix("Shell process 'summary-background' completed.\n")
+            .unwrap();
+        if exit == 0 {
+            completed(
+                output,
+                0,
+                "s\n[stdout]\nanswer\n[stderr]\n<2 lines truncated to conserved context>",
+            );
+            assert!(!message.text.contains(stderr), "{}", message.text);
+        } else {
+            completed(
+                output,
+                exit,
+                &format!("s\n[stdout]\nanswer\n[stderr]\n{stderr}"),
+            );
+            assert!(!message.text.contains("truncated"));
+        }
+        fixture.finish().await;
+    }
+}
+
+#[tokio::test]
+async fn exec_stderr_summary_uses_invocation_templates_after_yielding() {
+    for yielded in [false, true] {
+        let fixture = Fixture::new();
+        let (_, templates) = PromptTemplateCatalog::from_content(
+            "prompt_templates:\n  exec-command.stderr-summary:\n    template: 'custom-summary<{line_count}>'\n    allowed_arguments: [line_count]\n    required_arguments: [line_count]\n",
+            &BTreeMap::from([("HOME".into(), fixture.directory.0.to_string_lossy().into_owned())]),
+        )
+        .unwrap();
+        let command = if yielded {
+            "printf answer; printf 'warning one\\nwarning two\\n' >&2; while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done"
+        } else {
+            "printf answer; printf 'warning one\\nwarning two\\n' >&2"
+        };
+        let mut invocation = ProcessInvocation::new(
+            "summary-override",
+            json!({"command":command,"name":"custom-summary","yield_after_ms":if yielded { 0 } else { 10000 }}).to_string(),
+        );
+        invocation.prompt_templates = Some(Arc::new(templates));
+        let result = fixture
+            .tool(ProcessToolKind::ExecCommand)
+            .invoke(
+                invocation,
+                InvocationContext::new(fixture.security.clone(), (), &NeverCancelled),
+            )
+            .await
+            .unwrap();
+        let text = if yielded {
+            let process = result.yielded_process.unwrap();
+            live_text(
+                process.stderr_path.as_ref().unwrap(),
+                "warning one\nwarning two\n",
+            )
+            .await;
+            fs::write(fixture.directory.0.join("release"), "").unwrap();
+            let rows = fixture.sink.rows(1).await;
+            let Row::Completion(message) = &rows[0] else {
+                panic!("exec completion was emitted as monitor event")
+            };
+            message
+                .text
+                .strip_prefix("Shell process 'custom-summary' completed.\n")
+                .unwrap()
+                .to_owned()
+        } else {
+            assert!(result.yielded_process.is_none());
+            result.text
+        };
+        completed(&text, 0, "s\n[stdout]\nanswer\n[stderr]\ncustom-summary<2>");
+        assert!(!text.contains("warning"), "{text}");
+        fixture.finish().await;
+    }
+}
+
+#[tokio::test]
+async fn exec_stderr_summary_preserves_combined_output_spill() {
+    let fixture = Fixture::new();
+    let stdout = "o".repeat(33000);
+    let stderr = "e".repeat(33000);
+    let result = fixture
+        .exec(json!({
+            "command":"printf '%s' \"$OUT\"; printf '%s' \"$ERR\" >&2",
+            "env":{"OUT":stdout,"ERR":stderr}
+        }))
+        .await;
+    let execution = fixture
+        .launcher
+        .executions
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    let raw = execution.wait().await.unwrap();
+    let path = raw.blob_path.as_ref().unwrap();
+    completed(
+        &result.text,
+        0,
+        &format!(
+            "s\nTool output exceeded 64 KiB and was saved to {}.",
+            path.display()
+        ),
+    );
+    assert!(!result.text.contains("truncated"));
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        format!(
+            "Process exited with code 0 after {:.2}s\n[stdout]\n{stdout}\n[stderr]\n{stderr}",
+            raw.elapsed_milliseconds as f64 / 1000.0
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(execution.stdout_path().unwrap()).unwrap(),
+        stdout
+    );
+    assert_eq!(
+        fs::read_to_string(execution.stderr_path().unwrap()).unwrap(),
+        stderr
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test]
 async fn invalid_wrapper_arguments_have_source_exact_errors_and_never_launch() {
     let fixture = Fixture::new();
     for (kind, arguments, expected) in [

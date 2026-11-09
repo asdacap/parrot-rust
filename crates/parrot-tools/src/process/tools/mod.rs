@@ -17,10 +17,11 @@ use parrot_domain::values::tools::{ConfiguredToolDefinition, ToolDefinitionCatal
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::Value;
 
+use super::execution::output;
 use super::execution::runner::TerminalMode;
 use super::ownership::domain::CapturedProcessLauncher;
-use super::ownership::execution::NeverCancelled;
-use super::ownership::inventory::YieldedShellProcess;
+use super::ownership::execution::{Execution, NeverCancelled, ProcessResult};
+use super::ownership::inventory::{ActiveShellProcessState, ActivityKind, YieldedShellProcess};
 use super::ownership::managed::{CompletionReport, ProcessReport};
 use super::ownership::monitor::MonitorSink;
 use super::ownership::monitor_report::MonitorProcessReport;
@@ -265,6 +266,14 @@ where
                             .description
                             .as_deref()
                             .is_none_or(|value| value.trim().is_empty()));
+                let report: Arc<dyn ProcessReport> = Arc::new(ExecCommandReport {
+                    templates: Arc::clone(
+                        invocation
+                            .prompt_templates
+                            .as_ref()
+                            .unwrap_or(&self.services.templates),
+                    ),
+                });
                 let process = self
                     .start(
                         invocation,
@@ -280,7 +289,7 @@ where
                             },
                         },
                         security,
-                        Arc::new(CompletionReport),
+                        Arc::clone(&report),
                     )
                     .await?;
                 let outcome = process
@@ -289,7 +298,10 @@ where
                         cancellation,
                     )
                     .await?;
-                let mut text = outcome.format();
+                let mut text = match &outcome.result {
+                    Some(result) => report.format_result(result)?,
+                    None => outcome.format(),
+                };
                 if reminder {
                     text.push_str("\n\n");
                     text.push_str(&render(
@@ -467,6 +479,52 @@ where
                     .map_err(OperationError::Failed),
             }
         })
+    }
+}
+
+struct ExecCommandReport {
+    templates: Arc<PromptTemplateCatalog>,
+}
+
+impl ProcessReport for ExecCommandReport {
+    fn blocks_turn(&self) -> bool {
+        CompletionReport.blocks_turn()
+    }
+
+    fn activity_kind(&self) -> ActivityKind {
+        CompletionReport.activity_kind()
+    }
+
+    fn observe<'a>(
+        &'a self,
+        state: &'a ActiveShellProcessState,
+        execution: Arc<dyn Execution>,
+        lifetime: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, io::Result<()>> {
+        CompletionReport.observe(state, execution, lifetime)
+    }
+
+    fn format_result(&self, result: &ProcessResult) -> io::Result<String> {
+        if result.exit_code != 0 || result.stderr.is_empty() || result.blob_path.is_some() {
+            return Ok(result.format());
+        }
+        let line_count = result.stderr.lines().count().to_string();
+        let summary = render(
+            &self.templates,
+            "exec-command.stderr-summary",
+            &[("line_count", &line_count)],
+        )?;
+        Ok(output::format_result(
+            result.exit_code,
+            result.elapsed_milliseconds,
+            &result.stdout,
+            &summary,
+            result.blob_path.as_deref(),
+        ))
+    }
+
+    fn complete(&self, state: &ActiveShellProcessState, output: &str) -> io::Result<String> {
+        CompletionReport.complete(state, output)
     }
 }
 

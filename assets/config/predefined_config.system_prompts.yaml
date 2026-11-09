@@ -360,6 +360,10 @@ prompt_templates:
     template: 'No exit reminder titled {title}. Active titles: {titles}'
     allowed_arguments: [title, titles]
     required_arguments: [title, titles]
+  exec-command.stderr-summary:
+    template: '<{line_count} lines truncated to conserved context>'
+    allowed_arguments: [line_count]
+    required_arguments: [line_count]
   exec-command.metadata-reminder:
     template: "Reminder: include 'name' and 'description' for multiline commands or commands longer than {command_length} characters."
     allowed_arguments: [command_length]
