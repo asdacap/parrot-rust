@@ -224,8 +224,12 @@ surviving pending input. A new turn captures selection, begins the request budge
 and provider turn, durably emits `TurnStarted`, awaits epoch preparation, injects
 status/recaptures selection if requested, begins skills/restores tools and then
 promotes input. Steers promote together; one queue input promotes only with no
-steer and a nonanswerable conversation. Nonempty selected skill context follows
-its input in the implementation. The added bounded nonempty rendering fixture
+steer and a nonanswerable conversation. Promotion returns the original inputs
+without selecting or rendering skills. A separate `Preparation` adapter prepares
+skill context, renders instructions, and estimates request tokens. Core explicitly
+records the derived skill context through `States::record_input_context` before
+request-budget admission. Nonempty selected skill context follows its input.
+The added bounded nonempty rendering fixture
 now proves exact body/steer/new-turn history and content-free event/path ordering
 without rerunning T44 discovery/parsing/security algorithms.
 

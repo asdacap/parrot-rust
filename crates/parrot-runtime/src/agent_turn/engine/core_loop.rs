@@ -31,6 +31,90 @@ struct PendingCompaction {
     definitions: Vec<sessions::Tool>,
 }
 
+struct RuntimePreparation<'a, S: AccessSnapshot, T: TurnTools<S>> {
+    backend: &'a RuntimeBackend<S, T>,
+    binding: &'a TurnBinding<S, T>,
+    cancellation: &'a dyn Cancellation,
+}
+
+impl<S, T> parrot_core::Preparation for RuntimePreparation<'_, S, T>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    fn prepare_inputs<'a>(
+        &'a mut self,
+        inputs: &'a [parrot_core::PromotedInput],
+    ) -> BoxFuture<'a, Result<parrot_core::DerivedContext, CoreError>> {
+        adapt_operation(async move {
+            for input in inputs {
+                let parts = input
+                    .message
+                    .contents
+                    .iter()
+                    .filter_map(|content| match content {
+                        parrot_core::Content::Text(text) => {
+                            Some(ConversationPart::text(text.clone()))
+                        }
+                        parrot_core::Content::Image { .. } => None,
+                    })
+                    .collect::<Vec<_>>();
+                self.backend
+                    .skills
+                    .select(&parts, self.cancellation)
+                    .await?;
+            }
+            let rendering = self.backend.skills.render(self.cancellation).await?;
+            Ok(parrot_core::DerivedContext {
+                content: rendering.content,
+                loaded_paths: rendering.loaded_paths,
+            })
+        })
+    }
+    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
+        adapt_operation(async move {
+            let backend = self.backend;
+            let mut guard = backend.state.lock().await;
+            let state = &mut *guard;
+            let selection = self.binding.capture_selection()?;
+            state.request_status = Some(backend.status.bind(&selection));
+            let cancellation = self.cancellation;
+            cancellation.check().map_err(|_| ContextError::Cancelled)?;
+            state
+                .context
+                .ensure_epoch(&backend.prompt, cancellation)
+                .await?;
+            Ok(backend
+                .prompt
+                .build(&selection.model, cancellation)
+                .await
+                .map_err(ContextError::from)?)
+        })
+    }
+    fn estimate_input_tokens<'a>(
+        &'a self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
+        messages: &'a [parrot_core::Message],
+    ) -> BoxFuture<'a, Result<i64, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            let definitions: Vec<sessions::Tool> =
+                definitions.iter().cloned().map(Into::into).collect();
+            let messages: Vec<sessions::Message> =
+                messages.iter().cloned().map(Into::into).collect();
+            crate::compaction::CompactionPlanner::estimate_input_tokens(
+                &selection.model.canonical_model,
+                instructions,
+                &definitions,
+                &messages,
+            )
+            .map_err(TurnError::Planning)
+        })
+    }
+}
+
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S, T>,
@@ -246,6 +330,11 @@ where
                 binding: &binding,
                 cancellation,
             };
+            let mut preparation = RuntimePreparation {
+                backend,
+                binding: &binding,
+                cancellation,
+            };
             let provider = RuntimeProvider {
                 backend,
                 binding: &binding,
@@ -330,8 +419,16 @@ where
                     Ok(options)
                 })
                 .await?;
-                parrot_core::run_turn(&mut states, &tools, &provider, &options, &mut budget, token)
-                    .await
+                parrot_core::run_turn(
+                    &mut states,
+                    &mut preparation,
+                    &tools,
+                    &provider,
+                    &options,
+                    &mut budget,
+                    token,
+                )
+                .await
             }
             .await;
             match result {
@@ -447,12 +544,53 @@ where
     fn promote_input(
         &mut self,
         admission: parrot_core::InputAdmission,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::PromotedInput>, CoreError>> {
         adapt_operation(async move {
             let mut state = self.backend.state.lock().await;
             self.backend
                 .promote(&mut state, admission, self.cancellation)
                 .await
+        })
+    }
+    fn record_input_context<'a>(
+        &'a mut self,
+        context: &'a parrot_core::DerivedContext,
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let backend = self.backend;
+            let mut state = backend.state.lock().await;
+            let cancellation = self.cancellation;
+            if !context.content.is_empty() {
+                let mut event = backend.event();
+                event.set_agent_notice(protocol::AgentNotice {
+                    kind: "skill_context".into(),
+                    ..Default::default()
+                });
+                backend
+                    .history
+                    .append_message(
+                        event.clone(),
+                        Some(ConversationMessage::text(
+                            MessageRole::User,
+                            &context.content,
+                        )),
+                        ConversationOrigin::System,
+                    )
+                    .await?;
+                state
+                    .conversation
+                    .add(text_message(MessageRole::User, context.content.clone()));
+                backend.publish(event, cancellation).await?;
+                for path in &context.loaded_paths {
+                    let mut event = backend.event();
+                    event.set_skill_loaded(protocol::SkillLoadedEvent {
+                        path: path.clone(),
+                        ..Default::default()
+                    });
+                    backend.emit(event, cancellation).await?;
+                }
+            }
+            Ok(())
         })
     }
     fn read_context_configuration(
@@ -470,47 +608,6 @@ where
         adapt_operation(async move {
             let state = self.backend.state.lock().await;
             Ok(state.context.budget().capture_state())
-        })
-    }
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let selection = self.binding.capture_selection()?;
-            state.request_status = Some(backend.status.bind(&selection));
-            let cancellation = self.cancellation;
-            cancellation.check().map_err(|_| ContextError::Cancelled)?;
-            state
-                .context
-                .ensure_epoch(&backend.prompt, cancellation)
-                .await?;
-            Ok(backend
-                .prompt
-                .build(&selection.model, cancellation)
-                .await
-                .map_err(ContextError::from)?)
-        })
-    }
-    fn estimate_input_tokens<'a>(
-        &'a self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
-        messages: &'a [parrot_core::Message],
-    ) -> BoxFuture<'a, Result<i64, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            let definitions: Vec<sessions::Tool> =
-                definitions.iter().cloned().map(Into::into).collect();
-            let messages: Vec<sessions::Message> =
-                messages.iter().cloned().map(Into::into).collect();
-            crate::compaction::CompactionPlanner::estimate_input_tokens(
-                &selection.model.canonical_model,
-                instructions,
-                &definitions,
-                &messages,
-            )
-            .map_err(TurnError::Planning)
         })
     }
     fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {

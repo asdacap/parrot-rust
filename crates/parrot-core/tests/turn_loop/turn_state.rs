@@ -76,7 +76,7 @@ fn visible_user_and_tool_results_require_a_response_without_pending_input() {
             contents: vec![Content::Text("context only".into())],
             ..Message::default()
         });
-        state.messages = state.last_turn.as_ref().unwrap().messages.clone();
+        state.request().messages = state.last_turn.as_ref().unwrap().messages.clone();
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
         assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
@@ -132,9 +132,11 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     let token = CancellationToken::new(&is_cancelled, &cancelled);
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut preparation,
             &tools,
             &provider,
             &options,
@@ -146,9 +148,11 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.pending_messages.len(), 1);
     assert_eq!(state.final_requests, [0]);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut preparation,
             &tools,
             &provider,
             &options,
@@ -161,9 +165,11 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert!(state.pending_messages.is_empty());
     assert_eq!(state.capture_catalogs()[1], ["read"]);
     assert_eq!(state.final_requests, [0]);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run(
             &mut state,
+            &mut preparation,
             &tools,
             &provider,
             &options,
@@ -225,9 +231,11 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
     let cancelled = || source.cancelled();
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut preparation,
             &tools,
             &provider,
             &options,
@@ -261,9 +269,11 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     let cancelled = || source.cancelled();
     let options = state.capture_options();
     let mut budget = TurnBudget::new(false);
+    let mut preparation = state.preparation();
     assert_eq!(
         finish(run_turn(
             &mut state,
+            &mut preparation,
             &tools,
             &provider,
             &options,
@@ -307,4 +317,179 @@ fn exit_blockers_retain_the_candidate_and_continue_without_pending_input() {
             .count(),
         1
     );
+}
+
+#[test]
+fn promotion_returns_exact_multimodal_input_without_request_preparation() {
+    let mut state = MemoryState::new([]);
+    state.pending_messages.clear();
+    state.fail_at = Some("render");
+    let message = Message {
+        role: Role::User,
+        contents: vec![
+            Content::Text("use $selected before the image".into()),
+            Content::Image {
+                path: "images/input.webp".into(),
+                url: "https://example.test/input.webp".into(),
+                media_type: "image/webp".into(),
+                width: 17,
+                height: 29,
+                bytes: Some(vec![0, 127, 255]),
+            },
+            Content::Text("after the image".into()),
+        ],
+        provider_id: "native-provider".into(),
+        provider_content: " { \"opaque\" : 1.2300 } ".into(),
+        ..Message::default()
+    };
+    state.pending_messages.push_back((
+        PendingMessage {
+            input_id: "promoted-input".into(),
+            message_id: "original-message".into(),
+            delivery: Delivery::Steer,
+        },
+        message.clone(),
+    ));
+
+    assert_eq!(
+        finish(state.promote_input(InputAdmission::SteersOnly)),
+        Ok(vec![PromotedInput {
+            input_id: "promoted-input".into(),
+            message_id: "original-message".into(),
+            message: message.clone(),
+        }])
+    );
+    assert!(state.pending_messages.is_empty());
+    assert_eq!(state.last_turn.as_ref().unwrap().messages, [message]);
+    assert!(state.prepared_inputs.lock().unwrap().is_empty());
+    assert!(state.request().rendered_instructions.is_empty());
+    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.provider.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn promoted_inputs_are_supplied_to_preparation_and_derived_context_reaches_the_provider() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.pending_messages.clear();
+    state.enqueue_message(Delivery::Queue, "queued for another turn");
+    state.enqueue_message(Delivery::Steer, "use $first");
+    state.enqueue_message(Delivery::Steer, "then $second");
+    let context = DerivedContext {
+        content: "FIRST BODY\nSECOND BODY".into(),
+        loaded_paths: vec![
+            "skills/first/SKILL.md".into(),
+            "skills/second/SKILL.md".into(),
+        ],
+    };
+    state
+        .derived_contexts
+        .lock()
+        .unwrap()
+        .push_back(context.clone());
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+    let options = state.capture_options();
+    let mut budget = TurnBudget::new(false);
+    let source = state.cancellation.clone();
+    let is_cancelled = || source.is_cancelled();
+    let cancelled = || source.cancelled();
+    let mut preparation = state.preparation();
+
+    assert_eq!(
+        finish(run_turn(
+            &mut state,
+            &mut preparation,
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            CancellationToken::new(&is_cancelled, &cancelled),
+        )),
+        Ok(Outcome::Completed("answer".into()))
+    );
+    assert_eq!(
+        *state.prepared_inputs.lock().unwrap(),
+        [vec![
+            PromotedInput {
+                input_id: "input-2".into(),
+                message_id: "message-2".into(),
+                message: Message {
+                    role: Role::User,
+                    contents: vec![Content::Text("use $first".into())],
+                    ..Message::default()
+                },
+            },
+            PromotedInput {
+                input_id: "input-3".into(),
+                message_id: "message-3".into(),
+                message: Message {
+                    role: Role::User,
+                    contents: vec![Content::Text("then $second".into())],
+                    ..Message::default()
+                },
+            },
+        ]]
+    );
+    assert_eq!(state.recorded_input_contexts, [context]);
+    assert_eq!(state.pending_messages.len(), 1);
+    assert_eq!(state.pending_messages[0].0.delivery, Delivery::Queue);
+    assert_eq!(
+        provider.requests.lock().unwrap()[0].messages,
+        [Message {
+            role: Role::User,
+            contents: vec![Content::Text("FIRST BODY\nSECOND BODY".into())],
+            ..Message::default()
+        }]
+    );
+}
+
+#[test]
+fn input_preparation_and_recording_failures_preserve_promoted_inputs_without_invoking_provider() {
+    for stage in ["prepare_inputs", "record_input_context"] {
+        let mut state = MemoryState::new([Reply::final_response("not invoked")]);
+        state.fail_at = Some(stage);
+        state
+            .derived_contexts
+            .lock()
+            .unwrap()
+            .push_back(DerivedContext {
+                content: "prepared skill body".into(),
+                loaded_paths: vec!["skills/selected/SKILL.md".into()],
+            });
+
+        assert_eq!(state.run(), Err(Error::failed(stage)));
+        assert!(state.pending_messages.is_empty());
+        assert_eq!(
+            state.last_turn.as_ref().unwrap().messages[0].contents,
+            [Content::Text("question".into())]
+        );
+        assert_eq!(
+            state.prepared_inputs.lock().unwrap().len(),
+            usize::from(stage == "record_input_context")
+        );
+        assert!(state.recorded_input_contexts.is_empty());
+        assert!(state.request().rendered_instructions.is_empty());
+        assert!(state.request().messages.is_empty());
+        assert!(state.provider.requests.lock().unwrap().is_empty());
+        assert!(state.tools.requests.lock().unwrap().is_empty());
+        assert!(!state.trace.values().iter().any(|step| step == "complete"));
+        assert_eq!(state.trace.values().last().unwrap(), stage);
+    }
+}
+
+#[test]
+fn empty_derived_context_records_no_message_or_loaded_paths() {
+    let mut state = MemoryState::new([]);
+    let original = state.last_turn.clone();
+    assert_eq!(
+        finish(state.record_input_context(&DerivedContext {
+            content: String::new(),
+            loaded_paths: vec!["unused/SKILL.md".into()],
+        })),
+        Ok(())
+    );
+    assert_eq!(state.last_turn, original);
+    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.request().messages.is_empty());
+    assert!(state.trace.values().is_empty());
 }

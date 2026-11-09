@@ -10,7 +10,7 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
     });
     state.provider_preferences = " { \"future\" : [1.2300, true] } \n".into();
     state.include_router_metadata = true;
-    state.messages = vec![Message {
+    state.request().messages = vec![Message {
         contents: vec![Content::Text("stale before preparation".into())],
         ..Message::default()
     }];
@@ -45,7 +45,7 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
         },
     ];
     let instructions = "prepared instructions \n\tunchanged".to_owned();
-    state.renderings.push_back(RenderedContext {
+    state.request().renderings.push_back(RenderedContext {
         instructions: instructions.clone(),
         maximum_output_tokens: 1379,
         messages: messages.clone(),
@@ -92,7 +92,7 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
         contents: vec![Content::Text("compacted summary".into())],
         ..Message::default()
     }];
-    state.renderings = [
+    state.request().renderings = [
         RenderedContext {
             instructions: "before compaction".into(),
             maximum_output_tokens: 91,
@@ -142,7 +142,7 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
         tool_call_id: "call-1".into(),
         ..Message::default()
     }];
-    state.renderings = [
+    state.request().renderings = [
         RenderedContext {
             instructions: "initial".into(),
             maximum_output_tokens: 83,

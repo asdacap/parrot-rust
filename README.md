@@ -86,7 +86,10 @@ precomputed work flag. A no-tool assistant candidate can be present while durabl
 turn closure is still pending. Pending-message peeks return stable identities and
 delivery mode without reserving, promoting, or materializing their bodies. Core
 chooses whether admission allows only steers or also the next queued message;
-native promotion rechecks the queue and keeps all steers in one batch.
+native promotion rechecks the queue and keeps all steers in one batch. Promotion
+returns the admitted inputs with their identities and content. It does not select
+or render skills. Core passes those inputs to `Preparation::prepare_inputs`, then
+explicitly persists the returned context through `States::record_input_context`.
 
 There is no `States::prepare_context` workflow hook. Core reads raw model limits
 and context overrides through `read_context_configuration` and token calibration
@@ -95,9 +98,11 @@ through `read_token_calibration`, then directs explicit native effects.
 or status message, retaining its source identity for idempotent recording. Core fits
 that exact message before insertion or compaction, acknowledges the fitted or
 persisted context, and calculates the output budget from the final messages and
-tool definitions. Native state owns reminder checkpoint restoration, cadence,
-prompt/template rendering, exact token estimates, idempotent persistence, and
-acknowledgement before uncancelled post-commit notice publication.
+tool definitions. `Preparation` owns instruction rendering and exact token
+estimation. The runtime preparation adapter retains request-status bindings and
+uses the live prompt services. Native state owns reminder checkpoint restoration,
+cadence, reminder rendering, idempotent persistence, and acknowledgement before
+uncancelled post-commit notice publication.
 Calibration survives later stream/publication failures and resets only after
 successful compaction persistence.
 

@@ -1,6 +1,6 @@
 use crate::{
-    CancellationToken, ContextCompaction, ContextSnapshot, Error, ProviderRequest, States,
-    ToolDefinition, TurnOptions, budget::TurnRequestPhase,
+    CancellationToken, ContextCompaction, ContextSnapshot, Error, Preparation, ProviderRequest,
+    States, ToolDefinition, TurnOptions, budget::TurnRequestPhase,
 };
 
 pub(crate) async fn compact_context(
@@ -18,6 +18,7 @@ pub(crate) async fn compact_context(
 
 pub(crate) async fn prepare_request(
     states: &mut dyn States,
+    preparation: &mut dyn Preparation,
     definitions: &[ToolDefinition],
     phase: TurnRequestPhase,
     options: &TurnOptions,
@@ -29,11 +30,11 @@ pub(crate) async fn prepare_request(
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let mut instructions = states.render_instructions().await?;
+    let mut instructions = preparation.render_instructions().await?;
     let mut messages = states.read_messages().await?;
     let mut configuration = states.read_context_configuration().await?;
     let calibration = states.read_token_calibration().await?;
-    let estimate = states
+    let estimate = preparation
         .estimate_input_tokens(&instructions, definitions, &messages)
         .await?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
@@ -43,7 +44,7 @@ pub(crate) async fn prepare_request(
             .instructions;
         messages = states.read_messages().await?;
         configuration = states.read_context_configuration().await?;
-        let estimate = states
+        let estimate = preparation
             .estimate_input_tokens(&instructions, definitions, &messages)
             .await?;
         context = ContextSnapshot::estimate(estimate, &configuration);
@@ -52,7 +53,7 @@ pub(crate) async fn prepare_request(
     if let Some(prompt) = states.get_pending_prompt(&context).await? {
         let mut candidate = messages.clone();
         candidate.push(prompt);
-        let estimate = states
+        let estimate = preparation
             .estimate_input_tokens(&instructions, definitions, &candidate)
             .await?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
@@ -62,14 +63,14 @@ pub(crate) async fn prepare_request(
                 .instructions;
             messages = states.read_messages().await?;
             configuration = states.read_context_configuration().await?;
-            let estimate = states
+            let estimate = preparation
                 .estimate_input_tokens(&instructions, definitions, &messages)
                 .await?;
             ContextSnapshot::estimate(estimate, &configuration).ensure_input_fits()?;
         } else {
             let acknowledged = if states.record_pending_prompt().await? {
                 messages = states.read_messages().await?;
-                let estimate = states
+                let estimate = preparation
                     .estimate_input_tokens(&instructions, definitions, &messages)
                     .await?;
                 ContextSnapshot::estimate(estimate, &configuration)
@@ -82,7 +83,7 @@ pub(crate) async fn prepare_request(
     let messages = states.read_messages().await?;
     let configuration = states.read_context_configuration().await?;
     let calibration = states.read_token_calibration().await?;
-    let estimate = states
+    let estimate = preparation
         .estimate_input_tokens(&instructions, definitions, &messages)
         .await?;
     let max_output_tokens =
