@@ -210,7 +210,7 @@ impl SessionHost for PanicHost {
 async fn opening_unwind_retains_returned_session_without_claiming_cleanup() {
     let fixture = super::service::support::Fixture::new();
     let session = fixture.unhosted().await;
-    let before = Arc::strong_count(&session);
+    let retained_session = Arc::downgrade(&session);
     let registry = UserSessionRegistry::new(tokio::runtime::Handle::current());
     let opening = session.clone();
     let error = registry
@@ -226,7 +226,11 @@ async fn opening_unwind_retains_returned_session_without_claiming_cleanup() {
     assert_eq!(registry.close().await.unwrap_err(), error);
     assert_eq!(registry.close().await.unwrap_err(), error);
     assert!(!session.closed.load(Ordering::SeqCst));
-    assert_eq!(Arc::strong_count(&session), before + 1);
+    fixture.factory.created.lock().unwrap().clear();
+    drop(session);
+    let session = retained_session
+        .upgrade()
+        .expect("registry retains the returned session until supplier cleanup");
     // Test teardown performs actual supplier cleanup explicitly; registry loss
     // did not close the returned capability or infer lease settlement.
     session.close().await.unwrap();

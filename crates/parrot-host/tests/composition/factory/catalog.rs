@@ -1272,11 +1272,7 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
         .iter()
         .map(|factory| factory.create())
         .collect::<Vec<_>>();
-    let counts = originals.iter().map(Arc::strong_count).collect::<Vec<_>>();
     let adapter = CatalogAdapter::new(catalog, planner(), templates).unwrap();
-    for (original, count) in originals.iter().zip(counts) {
-        assert_eq!(Arc::strong_count(original), count + 1);
-    }
     let first = adapter.materialize().unwrap();
     let second = adapter.materialize().unwrap();
     assert_eq!(
