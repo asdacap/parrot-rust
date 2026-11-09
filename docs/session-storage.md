@@ -1,13 +1,14 @@
 # Session storage ownership
 
 The user-facing change moves root identity, mode state, and permanent agent
-lineage from SQLite into JSON. Database format 8 combines that change with
+lineage from SQLite into JSON. Database format 9 combines that change with
 conversation-owned context reminders, tool calls, tool results, named history
-checkpoints, compaction summaries, and image metadata. It has 6 application tables
+checkpoints, compaction summaries, and image metadata. It has 5 application tables
 instead of format 1's 15. The removed tables are `session_state`, `agent_lineage`,
 `context_reminder`, `conversation_tool_call`, `tool_execution_terminal`,
-`tool_execution_result_part`, `history_checkpoint`, `agent_history`, and
-`image_artifact`. There are no replacement tables or automatic conversions.
+`tool_execution_result_part`, `history_checkpoint`, `agent_history`,
+`image_artifact`, and `image_upload`. There are no replacement tables or automatic
+conversions.
 
 Named checkpoints come from `set_checkpoint` tool-call parts with valid title
 arguments and a completed successful result. Forking and compaction derive the
@@ -34,16 +35,21 @@ lowercase SHA-256 hash, without a filename extension. Identical bytes share one
 file even when multiple parts carry their metadata. Message admission inspects
 the local file and verifies its hash and image limits before constructing a part.
 
-`image_upload` retains upload IDs, content hashes, original labels, and creation
-times for retry handling. The labels preserve the existing first-reference naming
-policy when a client submits only an artifact ID. Upload records do not store
-image dimensions or other numeric image metadata. Reusing an upload ID with
-different content remains a conflict.
+Uploads have no separate identity or database row. A message image reference
+carries its content hash and display name. Admission inspects the selected
+session's file and assigns the upload origin. It does not query a registry or
+trust client-supplied dimensions, media type, or length. Upload responses and tool
+reads retain each reference's own display name and origin. Identical bytes can
+therefore appear under different names without duplicating the image file.
+
+`AttachmentUploadHeader` reserves the retired upload-ID field and tag. Repeated
+uploads deduplicate by content hash, without upload-ID conflict handling or a
+shared first-label policy. The unrelated S3 provider configuration and credential
+name `image_upload` remain unchanged.
 
 Session opening collects expired image files only when neither part table refers
-to them. File modification time supplies the age, including files left behind by
-an upload whose database write failed. Referenced images remain available even
-without upload records.
+to them. File modification time supplies the age, including completed uploads
+that were never attached to a message.
 
 ## One metadata owner
 
@@ -129,7 +135,7 @@ measured performance improvement.
 
 ## Format boundary and inspection
 
-Formats 1 through 7, populated unversioned databases, and unknown formats use the
+Formats 1 through 8, populated unversioned databases, and unknown formats use the
 existing typed refusal path. Opening does not convert, reset, or delete them.
 Current and legacy filesystem roots use the same check. `parrot chat --new-session`
 selects a separate fresh session.
