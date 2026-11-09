@@ -152,15 +152,7 @@ impl ConversationRepository {
             .transaction(move |tx| {
                 let snapshot = super::compaction::read_snapshot(tx, &agent)?;
                 let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
-                let mut owners = std::collections::BTreeMap::new();
-                let mut read = tx.prepare("SELECT assistant_sequence, item_sequence FROM tool_batch_result WHERE agent_session = ?1 AND item_sequence > ?2 UNION ALL SELECT assistant_sequence, item_sequence FROM tool_batch_synthetic WHERE agent_session = ?1 AND item_sequence > ?2;")?;
-                for row in read.query_map(params![agent, watermark], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-                })? {
-                    let (owner, child) = row?;
-                    owners.insert(child, owner);
-                }
-                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM agent_history AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.status_conversation_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
+                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM agent_history AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.status_conversation_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
                 let mut rows = read.query(params![agent, watermark])?;
                 let mut items = Vec::new();
                 while let Some(row) = rows.next()? {
@@ -178,7 +170,7 @@ impl ConversationRepository {
                                 content: row.get(7)?,
                             },
                         )?,
-                        tool_owner_sequence: owners.get(&sequence).copied(),
+                        tool_owner_sequence: row.get(8)?,
                         is_compaction_status: row.get(4)?,
                     });
                 }

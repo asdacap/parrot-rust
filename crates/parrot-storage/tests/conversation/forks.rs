@@ -130,12 +130,9 @@ async fn row_counts(repo: &ConversationRepository, agent: &str) -> Vec<i64> {
             [
                 "event",
                 "conversation_item",
-                "message",
                 "agent_history",
                 "history_checkpoint",
                 "tool_execution_terminal",
-                "tool_batch_result",
-                "tool_batch_synthetic",
             ]
             .iter()
             .map(|table| {
@@ -200,6 +197,122 @@ async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_arti
         ConversationPart::ImageArtifact { artifact_id, .. } if artifact_id == "artifact"
     ));
     assert!(state.items.iter().all(|item| !item.is_compaction_status));
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let owner = assistant(&repo, "agent", "call", "set_checkpoint").await;
+    repo.record_checkpoint("agent".into(), "handoff".into(), owner, "call".into())
+        .await
+        .unwrap();
+    append(
+        &repo,
+        "agent",
+        message(MessageRole::User, "between owner and result"),
+    )
+    .await;
+    settle(&repo, "agent", owner, "call").await;
+    append(
+        &repo,
+        "agent",
+        message(MessageRole::User, "between result and image"),
+    )
+    .await;
+    repo.events()
+        .append_tool_synthetic(
+            event("synthetic", "agent"),
+            owner,
+            vec![ConversationPart::image("artifact", "image/png", "img")],
+        )
+        .await
+        .unwrap();
+    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert_eq!(state.items.len(), 5);
+    assert_eq!(state.items[2].tool_owner_sequence, Some(owner));
+    assert_eq!(state.items[4].tool_owner_sequence, Some(owner));
+    repo.events().database().close().await.unwrap();
+    let repo = fixture.repository();
+    assert_eq!(
+        repo.read_conversation_state("agent".into()).await.unwrap(),
+        state
+    );
+    let groups = repo
+        .effective_conversation_groups("agent".into())
+        .await
+        .unwrap();
+    assert_eq!(groups.groups[0].items.len(), 3);
+    assert!(groups.groups[0].is_complete);
+    for selection in ["full", "handoff"] {
+        fork(
+            &repo,
+            "agent",
+            selection,
+            HistoryForkBoundary::AfterCompletedHistory,
+            selection,
+        )
+        .await
+        .unwrap();
+        let copied = repo
+            .read_conversation_state(selection.into())
+            .await
+            .unwrap();
+        assert_eq!(copied.items.len(), 5);
+        let copied_owner = copied.items[0].item.sequence;
+        assert_ne!(copied_owner, owner);
+        assert_eq!(copied.items[1].tool_owner_sequence, Some(copied_owner));
+        assert_eq!(copied.items[2].tool_owner_sequence, Some(copied_owner));
+        assert_eq!(copied.items[1].item.message, state.items[2].item.message);
+        assert_eq!(copied.items[2].item.message, state.items[4].item.message);
+        assert!(
+            copied.items[3..]
+                .iter()
+                .all(|item| item.tool_owner_sequence.is_none())
+        );
+    }
+    repo.events()
+        .transaction(move |tx| {
+            tx.execute("DELETE FROM conversation_item WHERE sequence = ?1", [owner])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let remaining = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert_eq!(remaining.items.len(), 4);
+    assert!(
+        remaining
+            .items
+            .iter()
+            .all(|item| item.tool_owner_sequence.is_none())
+    );
+    for (actual, expected) in remaining.items.iter().zip(&state.items[1..]) {
+        assert_eq!(actual.item, expected.item);
+    }
+    assert_eq!(
+        repo.events()
+            .tool_terminals_of_calls("agent".into(), vec!["call".into()])
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    repo.events().database().close().await.unwrap();
+    let repo = fixture.repository();
+    assert_eq!(
+        repo.read_conversation_state("agent".into()).await.unwrap(),
+        remaining
+    );
+    for selection in ["full", "handoff"] {
+        let copied = repo
+            .read_conversation_state(selection.into())
+            .await
+            .unwrap();
+        let copied_owner = copied.items[0].item.sequence;
+        assert_eq!(copied.items[1].tool_owner_sequence, Some(copied_owner));
+        assert_eq!(copied.items[2].tool_owner_sequence, Some(copied_owner));
+    }
     repo.events().database().close().await.unwrap();
 }
 
@@ -586,7 +699,7 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     )
     .await
     .unwrap();
-    assert_eq!(row_counts(&repo, "empty").await, vec![0; 8]);
+    assert_eq!(row_counts(&repo, "empty").await, vec![0; 5]);
     repo.events().database().close().await.unwrap();
 }
 
@@ -665,7 +778,7 @@ async fn fork_failure_after_partial_clone_rolls_back_every_destination_row() {
         .await,
         Err(ForkError::Repository(EventError::Database(_)))
     ));
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 8]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 5]);
     assert_eq!(repo.events().replay_raw().await.unwrap(), before);
     repo.events()
         .transaction(|tx| {
@@ -688,7 +801,7 @@ async fn fork_failure_after_partial_clone_rolls_back_every_destination_row() {
 }
 
 #[tokio::test]
-async fn complete_message_group_without_terminal_and_duplicate_results_roll_back() {
+async fn complete_message_group_without_terminal_rolls_back_and_later_settlement_repairs() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let owner = assistant(&repo, "agent", "call", "read").await;
@@ -698,7 +811,7 @@ async fn complete_message_group_without_terminal_and_duplicate_results_roll_back
     repo.events()
         .transaction(move |tx| {
             tx.execute(
-                "INSERT INTO tool_batch_result VALUES ('agent',?1,'call',?2)",
+                "UPDATE conversation_item SET tool_owner_sequence = ?1 WHERE sequence = ?2",
                 rusqlite::params![owner, result],
             )?;
             Ok(())
@@ -708,25 +821,24 @@ async fn complete_message_group_without_terminal_and_duplicate_results_roll_back
     assert!(
         matches!(fork(&repo,"agent","child",HistoryForkBoundary::AfterCompletedHistory,"full").await,Err(ForkError::Repository(EventError::Invalid(message))) if message=="a complete tool group has no terminal")
     );
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 8]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 5]);
     settle(&repo, "agent", owner, "call").await;
-    let mut duplicate = message(MessageRole::Tool, "duplicate");
-    duplicate.tool_call_id = "call".into();
-    let duplicate = append(&repo, "agent", duplicate).await;
-    repo.events()
-        .transaction(move |tx| {
-            tx.execute(
-                "INSERT INTO tool_batch_result VALUES ('agent',?1,'alias',?2)",
-                rusqlite::params![owner, duplicate],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    assert!(
-        matches!(fork(&repo,"agent","child",HistoryForkBoundary::AfterCompletedHistory,"full").await,Err(ForkError::Repository(EventError::Invalid(message))) if message=="Sequence contains more than one matching element")
+    fork(
+        &repo,
+        "agent",
+        "child",
+        HistoryForkBoundary::AfterCompletedHistory,
+        "full",
+    )
+    .await
+    .unwrap();
+    let copied = repo.read_conversation_state("child".into()).await.unwrap();
+    assert_eq!(copied.items.len(), 2);
+    assert_eq!(
+        copied.items[1].tool_owner_sequence,
+        Some(copied.items[0].item.sequence)
     );
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 8]);
+    assert_eq!(single_text(&copied.items[1].item), "missing terminal");
     repo.events().database().close().await.unwrap();
 }
 

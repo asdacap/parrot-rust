@@ -220,7 +220,7 @@ pub fn read_effective_conversation_groups(
     let items =
         reads::read_compaction_tail(tx, agent, snapshot.as_ref().map_or(0, |s| s.watermark))?;
     let mut owners = BTreeMap::new();
-    let mut read = tx.prepare("SELECT assistant_sequence, item_sequence FROM tool_batch_result WHERE agent_session = ?1 UNION ALL SELECT assistant_sequence, item_sequence FROM tool_batch_synthetic WHERE agent_session = ?1;")?;
+    let mut read = tx.prepare("SELECT tool_owner_sequence, sequence FROM conversation_item WHERE agent_session = ?1 AND tool_owner_sequence IS NOT NULL;")?;
     for row in read.query_map([agent], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
     })? {
@@ -417,7 +417,13 @@ fn initialize_fork(
                 )
                 .into());
             }
-            tx.execute("INSERT INTO tool_batch_result (agent_session, assistant_sequence, tool_call_id, item_sequence) VALUES (?1, ?2, ?3, ?4);", params![destination,sequences[&group.assistant_sequence],call.id,sequences[&result.sequence]])?;
+            tx.execute(
+                "UPDATE conversation_item SET tool_owner_sequence = ?1 WHERE sequence = ?2;",
+                params![
+                    sequences[&group.assistant_sequence],
+                    sequences[&result.sequence]
+                ],
+            )?;
         }
         let mut synthetics = group.items.iter().filter(|item| {
             item.message.role == MessageRole::User
@@ -430,7 +436,13 @@ fn initialize_fork(
                 )
                 .into());
             }
-            tx.execute("INSERT INTO tool_batch_synthetic (agent_session, assistant_sequence, item_sequence) VALUES (?1, ?2, ?3);", params![destination,sequences[&group.assistant_sequence],sequences[&synthetic.sequence]])?;
+            tx.execute(
+                "UPDATE conversation_item SET tool_owner_sequence = ?1 WHERE sequence = ?2;",
+                params![
+                    sequences[&group.assistant_sequence],
+                    sequences[&synthetic.sequence]
+                ],
+            )?;
         }
     }
     for group in selected.iter().filter(|group| group.assistant_sequence > 0) {
