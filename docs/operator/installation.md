@@ -51,10 +51,10 @@ installation must keep the complete `bin/` and `share/` trees together, includin
 `bin/parrot-pty-attach`, resource hashes and notices. Copying only `parrot` is not
 a supported package layout.
 
-Without `--artifact-only`, the **required** smoke retains artifact observations
-but returns **exit3 / BLOCKED_LOCAL_STARTUP**. Do not replace a release gate with
-artifact-only mode or relabel this required failure as a successful skip. No local
-provider or fake production backend is started by the smoke.
+Without `--artifact-only`, the required smoke also runs `parrot-cli`'s
+`local_production` tests against the packaged binary. These tests exercise local
+startup with isolated state and controlled provider responses. Artifact-only mode
+does not run these application checks and cannot replace the required smoke.
 
 ## Native runtime / sandbox dependencies
 
