@@ -21,6 +21,14 @@ async fn fast_mode_updates_session_routing_without_selection_side_effects_or_ses
             .unwrap();
         assert_eq!(hosted.snapshot().fast_mode, enabled);
         assert_eq!(user.fast_mode.is_enabled(), enabled);
+        let status = bounded(hosted.observe_status(&NeverCancelled))
+            .await
+            .unwrap();
+        assert!(status.contains(if enabled {
+            "Fast mode: on (ChatGPT requests only; increased usage)"
+        } else {
+            "Fast mode: off"
+        }));
         assert!(!other.snapshot().fast_mode);
         assert!(!other_user.fast_mode.is_enabled());
         let mut expected = before.clone();

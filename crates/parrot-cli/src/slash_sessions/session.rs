@@ -277,14 +277,15 @@ impl SlashSession for RpcSlashSession {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut options = ChatOptions::default();
-            {
+            let fast_mode = {
                 let configuration = self.configuration.lock().expect("configuration poisoned");
                 options.apply_configuration(
                     &configuration.model,
                     &configuration.runtime.default_profile,
                 );
-            }
-            let replacement = native_call(
+                configuration.fast_mode
+            };
+            let mut replacement = native_call(
                 self.client.create_session(wire::CreateSessionRequest {
                     model: options.model,
                     mode: options.mode,
@@ -294,6 +295,17 @@ impl SlashSession for RpcSlashSession {
                 c,
             )
             .await?;
+            if replacement.fast_mode != fast_mode {
+                replacement = native_call(
+                    self.client.update_session(wire::UpdateSessionRequest {
+                        user_session_id: replacement.id.clone(),
+                        fast_mode: Some(fast_mode),
+                        ..Default::default()
+                    }),
+                    c,
+                )
+                .await?;
+            }
             let rollback = Rollback::new(&mut self.current);
             *rollback.current = replacement.clone();
             self.binding.replace(replacement, c).await?;

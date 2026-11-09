@@ -615,6 +615,53 @@ async fn new_session_uses_fallback_model_and_configured_default_mode() {
 }
 
 #[tokio::test]
+async fn new_session_applies_latest_saved_fast_mode_without_restarting_host() {
+    for enabled in [true, false] {
+        let mut fixture = Fixture::start(move |method, bytes| {
+            let value = match method {
+                "create_session" => wire::UserSession {
+                    id: "fresh".into(),
+                    model: "provider/current".into(),
+                    mode: "build".into(),
+                    fast_mode: !enabled,
+                    ..Default::default()
+                },
+                "update_session" => {
+                    let request = wire::UpdateSessionRequest::parse_from_bytes(bytes).unwrap();
+                    assert_eq!(request.user_session_id, "fresh");
+                    assert_eq!(request.fast_mode, Some(enabled));
+                    assert!(request.model.is_empty());
+                    assert!(request.mode.is_empty());
+                    wire::UserSession {
+                        id: request.user_session_id,
+                        model: "provider/current".into(),
+                        mode: "build".into(),
+                        fast_mode: enabled,
+                        ..Default::default()
+                    }
+                }
+                _ => panic!("unexpected RPC {method}"),
+            };
+            Ok(value.write_to_bytes().unwrap())
+        })
+        .await;
+        let configuration = configuration(&fixture.root);
+        configuration
+            .lock()
+            .unwrap()
+            .set_fast_mode(enabled)
+            .unwrap();
+        let mut session = session(fixture.client(), configuration, inert_binding());
+        session.start_new(&Stop::new()).await.unwrap();
+        assert_eq!(session.id(), "fresh");
+        assert_eq!(session.current_session().fast_mode, enabled);
+        assert_eq!(session.model(), "provider/current");
+        assert_eq!(session.mode(), "build");
+        fixture.close().await;
+    }
+}
+
+#[tokio::test]
 async fn native_session_forwards_all_current_id_operations_and_persists_selected_model() {
     let mut fixture = Fixture::start(|method, bytes| match method {
         "update_session" => {

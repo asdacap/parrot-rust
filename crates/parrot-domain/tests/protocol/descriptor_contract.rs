@@ -171,7 +171,22 @@ fn assert_additive_messages(expected: &[MessageContract], actual: &[MessageContr
             .find(|message| message.name == expected.name)
             .expect("existing message remains present");
         let current = format!("{path}.{}", expected.name);
-        assert_eq!(actual.oneofs, expected.oneofs, "oneofs at {current}");
+        for oneof in &expected.oneofs {
+            assert!(
+                actual.oneofs.contains(oneof),
+                "existing oneof at {current}.{oneof}"
+            );
+        }
+        for oneof in &actual.oneofs {
+            if !expected.oneofs.contains(oneof) {
+                assert!(
+                    actual.fields.iter().any(|field| {
+                        field.proto3_optional && field.oneof_name.as_ref() == Some(oneof)
+                    }),
+                    "new oneof must be synthetic at {current}.{oneof}"
+                );
+            }
+        }
         assert_additive_enums(&expected.enums, &actual.enums, &current);
         for expected_field in &expected.fields {
             let actual_field = actual
@@ -207,6 +222,61 @@ fn additive_enum_contract_preserves_existing_names_and_numbers() {
         );
     }
     assert!(std::panic::catch_unwind(|| assert_additive_enums(&expected, &[], "test")).is_err());
+}
+
+#[test]
+fn additive_optional_fields_preserve_existing_oneofs_and_field_contracts() {
+    let mut legacy = DescriptorProto::new();
+    legacy.set_name("Existing".into());
+    legacy
+        .oneof_decl
+        .push(protobuf::descriptor::OneofDescriptorProto {
+            name: Some("choice".into()),
+            ..Default::default()
+        });
+    let mut field = FieldDescriptorProto::new();
+    field.set_name("existing".into());
+    field.set_number(1);
+    field.set_oneof_index(0);
+    legacy.field.push(field);
+    let expected = [message_contract(&legacy)];
+    let mut current = legacy;
+    current
+        .oneof_decl
+        .push(protobuf::descriptor::OneofDescriptorProto {
+            name: Some("_added".into()),
+            ..Default::default()
+        });
+    let mut added = current.field[0].clone();
+    added.set_name("added".into());
+    added.set_number(2);
+    added.set_oneof_index(1);
+    added.set_proto3_optional(true);
+    current.field.push(added);
+    assert_additive_messages(&expected, &[message_contract(&current)], "test");
+    current.oneof_decl[0].set_name("renamed".into());
+    assert!(
+        std::panic::catch_unwind(|| {
+            assert_additive_messages(&expected, &[message_contract(&current)], "test");
+        })
+        .is_err()
+    );
+    current.oneof_decl[0].set_name("choice".into());
+    current.field[1].set_proto3_optional(false);
+    assert!(
+        std::panic::catch_unwind(|| {
+            assert_additive_messages(&expected, &[message_contract(&current)], "test");
+        })
+        .is_err()
+    );
+    current.field[1].set_proto3_optional(true);
+    current.field[0].set_number(3);
+    assert!(
+        std::panic::catch_unwind(|| {
+            assert_additive_messages(&expected, &[message_contract(&current)], "test");
+        })
+        .is_err()
+    );
 }
 
 #[test]

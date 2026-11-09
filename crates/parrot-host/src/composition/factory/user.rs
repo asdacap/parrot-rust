@@ -1935,7 +1935,7 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                 } else {
                     "Fast mode: off"
                 };
-                Ok([full, statistics, fast_mode.into()]
+                Ok([full, fast_mode.into(), statistics]
                     .into_iter()
                     .filter(|text| !text.trim().is_empty())
                     .collect::<Vec<_>>()
