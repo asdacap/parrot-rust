@@ -157,13 +157,3 @@ CREATE TABLE IF NOT EXISTS input_part (
 );
 
 CREATE INDEX IF NOT EXISTS input_part_by_artifact ON input_part (artifact_id);
-
-CREATE TABLE IF NOT EXISTS image_upload (
-    upload_id   TEXT PRIMARY KEY,
-    artifact_id TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    origin      TEXT NOT NULL,
-    created_at  TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS image_upload_by_artifact ON image_upload (artifact_id);
