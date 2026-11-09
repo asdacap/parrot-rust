@@ -322,7 +322,7 @@ async fn database_open_failure_closes_diagnostics_and_releases_activation() {
 
 #[tokio::test]
 async fn unsupported_schema_refusal_preserves_data_and_releases_activation() {
-    for version in [0_i64, 1, 7] {
+    for version in [0_i64, 1, 2, 3, 4, 7] {
         let fixture = Fixture::new();
         let factory = Arc::new(Factory::default());
         let store = fixture.store(factory.clone());

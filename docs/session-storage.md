@@ -1,11 +1,12 @@
 # Session storage ownership
 
 The user-facing change moves root identity, mode state, and permanent agent
-lineage from SQLite into JSON. Database format 5 has 9 application tables instead
-of format 1's 15. Root identity, mode state, and lineage no longer use the
-`session_state` and `agent_lineage` tables. Tool calls, tool results, and context
-reminders use conversation records instead of separate tables. There are no
-automatic conversions.
+lineage from SQLite into JSON. Database format 5 combines that change with
+conversation-owned context reminders, tool calls, and tool results. It has 9
+application tables instead of format 1's 15. The removed tables are `session_state`,
+`agent_lineage`, `context_reminder`, `conversation_tool_call`,
+`tool_execution_terminal`, and `tool_execution_result_part`. There are no
+replacement tables or automatic conversions.
 
 ## One metadata owner
 

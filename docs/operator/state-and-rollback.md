@@ -180,12 +180,13 @@ the unresolved production filesystem/security capability.
 ## Database formats and fresh startup
 
 New sessions use Parrot database format version `5` in SQLite, with 9 application
-tables. Tool calls are stored as `tool_call` rows in `conversation_part`, alongside
-text and image parts. Context reminders use the `context_reminder` conversation
-kind. Their checkpoint data stays on the same record. SQLite's internal tables
-are not part of that count. Versions `1`, `2`, `3`, and `4`, existing nonempty
-unversioned databases, and unknown format versions are unsupported. The same
-format check applies in both current and legacy filesystem roots.
+tables. Root identity, mode state, and permanent agent lineage live in `meta.json`.
+Tool calls are stored as `tool_call` rows in `conversation_part`, alongside text
+and image parts. Context reminders use the `context_reminder` conversation kind.
+Their checkpoint data stays on the same record. SQLite's internal tables are not
+part of that count. Versions `1`, `2`, `3`, and `4`, existing nonempty unversioned
+databases, and unknown format versions are unsupported. The same format check
+applies in both current and legacy filesystem roots.
 
 By default, `parrot` and `parrot chat` load or join the workspace's latest session.
 If resume encounters an unsupported database, startup reports the incompatibility
