@@ -2,7 +2,7 @@ use super::node::{Node, Style, mapping, validate_keys};
 use super::{ConfigError, Result};
 use std::collections::BTreeMap;
 
-const BUILTIN_PROMPTS: [(&str, &str); 17] = [
+const BUILTIN_PROMPTS: [(&str, &str); 16] = [
     (
         "system-prompts/base.md",
         include_str!("../../../../assets/config/system-prompts/base.md"),
@@ -24,12 +24,8 @@ const BUILTIN_PROMPTS: [(&str, &str); 17] = [
         include_str!("../../../../assets/config/system-prompts/behavior-guidelines.md"),
     ),
     (
-        "system-prompts/markdown-reading.md",
-        include_str!("../../../../assets/config/system-prompts/markdown-reading.md"),
-    ),
-    (
-        "system-prompts/git-ethics.md",
-        include_str!("../../../../assets/config/system-prompts/git-ethics.md"),
+        "system-prompts/toolings.md",
+        include_str!("../../../../assets/config/system-prompts/toolings.md"),
     ),
     (
         "profile-prompts/general.md",

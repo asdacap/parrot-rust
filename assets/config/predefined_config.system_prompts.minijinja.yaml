@@ -15,9 +15,7 @@ system_prompts:
 
   runtime:system-context:04-behavior-guideline: '@builtin:system-prompts/behavior-guidelines.md'
 
-  runtime:system-context:04a-markdown-reading: '@builtin:system-prompts/markdown-reading.md'
-
-  runtime:system-context:05-git-ethics: '@builtin:system-prompts/git-ethics.md'
+  runtime:system-context:05-toolings: '@builtin:system-prompts/toolings.md'
 
 # Stable named prompt templates. User mappings recursively override individual
 # fields. Placeholders use {name}; double braces emit literal braces.
