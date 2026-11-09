@@ -380,7 +380,6 @@ async fn materialized_images_use_part_metadata_without_decoding_bytes_or_file_fa
     let artifact = images
         .persist(
             std::io::Cursor::new(include_bytes!("../artifacts/fixtures/rectangle.png")),
-            "materialization-upload",
             "stored name",
             "test",
             None,
@@ -441,7 +440,6 @@ async fn image_materialization_does_not_require_upload_or_artifact_metadata_rows
     let artifact = images
         .persist(
             std::io::Cursor::new(include_bytes!("../artifacts/fixtures/rectangle.png")),
-            "self-contained-image-upload",
             "rectangle.png",
             "test",
             None,
@@ -454,7 +452,9 @@ async fn image_materialization_does_not_require_upload_or_artifact_metadata_rows
     repo.events()
         .database()
         .admit("remove-image-registries", &NeverCancelled, |tx| {
-            tx.execute_batch("DELETE FROM image_upload; DROP TABLE IF EXISTS image_artifact;")?;
+            tx.execute_batch(
+                "DROP TABLE IF EXISTS image_upload; DROP TABLE IF EXISTS image_artifact;",
+            )?;
             Ok(())
         })
         .unwrap()

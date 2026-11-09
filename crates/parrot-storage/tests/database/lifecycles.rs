@@ -64,14 +64,13 @@ async fn repository_workflows_keep_current_schema_after_reopen() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!((version, tables.len()), (8, 6));
+    assert_eq!((version, tables.len()), (9, 5));
     assert_eq!(
         tables,
         [
             "conversation_item",
             "conversation_part",
             "event",
-            "image_upload",
             "input",
             "input_part",
         ]

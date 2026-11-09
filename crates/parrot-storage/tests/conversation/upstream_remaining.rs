@@ -743,7 +743,6 @@ async fn original_materialize_durable_image_at_provider_boundary() {
     let artifact = images
         .persist(
             std::io::Cursor::new(bytes),
-            "upload-1",
             "pixel.png",
             "test",
             None,
