@@ -407,7 +407,6 @@ async fn image_artifacts_are_materialized_loaded_by_summary_provider_and_retaine
     let artifact = images
         .persist(
             std::io::Cursor::new(PIXEL.to_vec()),
-            "upload",
             "pixel.png",
             "test",
             Some("image/png"),

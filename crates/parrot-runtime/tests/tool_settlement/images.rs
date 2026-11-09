@@ -10,7 +10,6 @@ pub(super) async fn image(fixture: &Fixture) -> ImageArtifactMetadata {
     .unwrap()
     .persist(
         std::io::Cursor::new(include_bytes!("fixtures/pixel.png").to_vec()),
-        "synthetic-upload",
         "pixel.png",
         "T47 synthetic fixture",
         Some("image/png"),

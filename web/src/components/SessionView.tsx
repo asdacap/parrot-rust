@@ -96,12 +96,13 @@ function SessionChat({ session, onCycleMode, onSessionChanged }: SessionChatProp
           images.map(async (image) => {
             const content = new Uint8Array(await image.arrayBuffer())
             const response = await parrotWeb.uploadAttachment({ userSessionId, displayName: image.name, mediaType: image.type, content })
-            return response.artifact?.artifactId ?? ""
+            if (!response.artifact) throw new Error("The image upload returned no artifact.")
+            return response.artifact
           }),
         )
         const parts = [
           ...(text ? [{ content: { case: "text" as const, value: text } }] : []),
-          ...uploaded.map((artifactId) => ({ content: { case: "artifactId" as const, value: artifactId } })),
+          ...uploaded.map((artifact) => ({ content: { case: "artifactId" as const, value: artifact.artifactId }, displayName: artifact.displayName })),
         ]
         await parrot.sendMessage({ userSessionId, parts, messageId: crypto.randomUUID(), delivery: timeline.busy ? Delivery.STEER : Delivery.QUEUE })
       } catch (error) {

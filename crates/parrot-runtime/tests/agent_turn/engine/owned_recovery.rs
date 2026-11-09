@@ -229,7 +229,6 @@ async fn image_execution_metadata_survives_suspend_reopen_and_recovery() {
             std::io::Cursor::new(include_bytes!(
                 "../../../../parrot-storage/tests/artifacts/fixtures/rectangle.png"
             )),
-            "recovered-image-upload",
             "rectangle.png",
             "execution recovery",
             Some("image/png"),
@@ -269,6 +268,18 @@ async fn image_execution_metadata_survives_suspend_reopen_and_recovery() {
         sent.execution.join().await.unwrap().status,
         ExecutionStatus::Canceled
     );
+    let admitted = fixture
+        .events()
+        .await
+        .into_iter()
+        .find(|event| {
+            event.has_input_admitted()
+                && event.input_admitted().message_id == "image-recovery-input"
+        })
+        .unwrap();
+    let reference = &admitted.input_admitted().parts[1];
+    assert_eq!(reference.artifact_id(), metadata.artifact_id);
+    assert_eq!(reference.display_name, "rectangle.png");
     let checkpoint = state.load().await.unwrap().unwrap().execution.unwrap();
     assert_eq!(
         checkpoint.initial_parts,

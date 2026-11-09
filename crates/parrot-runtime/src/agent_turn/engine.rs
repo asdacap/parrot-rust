@@ -968,7 +968,8 @@ where
                             match part {
                                 ConversationPart::Text(text) => output.set_text(text.clone()),
                                 ConversationPart::ImageArtifact { metadata } => {
-                                    output.set_artifact_id(metadata.artifact_id.clone())
+                                    output.set_artifact_id(metadata.artifact_id.clone());
+                                    output.display_name = metadata.display_name.clone();
                                 }
                             };
                             output
