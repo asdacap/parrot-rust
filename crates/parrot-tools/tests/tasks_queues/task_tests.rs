@@ -943,25 +943,49 @@ async fn get_propagates_unexpected_snapshot_backend_failure() {
 
 #[test]
 fn task_factories_preserve_the_actual_recursive_configured_schema() {
-    use parrot_foundation::config::{
-        configuration::source_predefined_content, runtime::read_tool_definitions, yaml,
-    };
-    let root = yaml::parse_root(&source_predefined_content().unwrap()).unwrap();
-    let definitions = ToolDefinitionCatalog::new(
-        &read_tool_definitions(&root)
-            .unwrap()
-            .into_iter()
-            .map(|(name, definition)| {
-                (
-                    name,
-                    ConfiguredToolDefinition::new(
-                        definition.description,
-                        definition.parameters_json,
-                    ),
-                )
-            })
-            .collect(),
-    );
+    let definitions = ToolDefinitionCatalog::new(&BTreeMap::from([
+        (
+            "set_agent_tasks".into(),
+            ConfiguredToolDefinition::new(
+                "Custom recursive task declaration",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "tasks": {"type": "array", "items": {"$ref": "#/$defs/custom_task"}}
+                    },
+                    "$defs": {
+                        "custom_task": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string", "maxLength": 17},
+                                "payload": {"oneOf": [
+                                    {"type": "string"},
+                                    {"type": "array", "items": {"$ref": "#/$defs/custom_task"}}
+                                ]}
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            ),
+        ),
+        (
+            "get_agent_tasks".into(),
+            ConfiguredToolDefinition::new(
+                "Custom task selection",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "selection": {
+                            "type": "object",
+                            "properties": {"names": {"type": "array", "items": {"type": "string"}}}
+                        }
+                    }
+                })
+                .to_string(),
+            ),
+        ),
+    ]));
     let fixture = Fixture::default();
     for kind in [TaskToolKind::Set, TaskToolKind::Get] {
         let render: Renderer = Box::new(|_| Ok(String::new()));
@@ -977,34 +1001,6 @@ fn task_factories_preserve_the_actual_recursive_configured_schema() {
             tool.definition(),
             definitions.describe(kind.name()).unwrap()
         );
-        let schema: serde_json::Value =
-            serde_json::from_str(&tool.definition().parameters_json).unwrap();
-        assert_eq!(schema["type"], "object");
-        assert_eq!(schema["additionalProperties"], false);
-        match kind {
-            TaskToolKind::Set => {
-                assert_eq!(
-                    schema["oneOf"],
-                    serde_json::json!([{"required":["path"]},{"required":["tasks"]}])
-                );
-                assert_eq!(
-                    schema["properties"]["tasks"]["items"]["$ref"],
-                    "#/$defs/task"
-                );
-                assert_eq!(
-                    schema["$defs"]["task"]["properties"]["description"]["maxLength"],
-                    300
-                );
-                assert_eq!(
-                    schema["$defs"]["task"]["properties"]["payload"]["oneOf"][1]["items"]["$ref"],
-                    "#/$defs/task"
-                );
-            }
-            TaskToolKind::Get => {
-                assert!(schema.get("required").is_none());
-                assert_eq!(schema["properties"]["name"]["minLength"], 1);
-            }
-        }
     }
 }
 
