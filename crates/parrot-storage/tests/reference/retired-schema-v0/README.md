@@ -25,12 +25,14 @@ Paths in this inventory refer to their former locations under `crates/parrot-sto
 | `events/projection.rs` | `existing_conversation_skips_legacy_backfill_and_future_versions_are_not_replaced` | Lazy import and independent projection versions are removed. | Bootstrap owns the single database-format marker and refusal behavior. |
 | `events/projection.rs` | `history_backfill_orders_pre_watermark_messages_compactions_then_tail` | Historical reconstruction from the old snapshot table is removed. | Normal history insertion remains active. The compaction package tests retained compaction history and ordering. |
 | `events/projection.rs` | `history_initialization_failure_is_rolled_back_without_marking_version` | Lazy history initialization and its marker are removed. | Direct projection rollback remains active. Bootstrap owns atomic fresh initialization. |
+| `events/projection.rs` | `project_writes_every_payload_component_and_source_text_only_legacy_content` | The text-copy and provider-extension layout assertions are retired. | `projection::project_writes_structured_components_without_legacy_tables` retains payload, metadata, ordered parts/calls, text rendering, and embedded provider checks. Repository reopen coverage is active in `conversation/embedded_metadata.rs`. |
+| `conversation/reads.rs` | `malformed_conversation_metadata_and_missing_item_are_observable_without_partial_projection` | Its setup requires lazy import from the retired text-only table. The unchanged case is archived in `conversation/metadata_backfill.rs`. | `reads::malformed_conversation_metadata_and_missing_item_are_observable_without_mutation` keeps current-format role errors, missing-item errors, and nonmutating reads active. |
 
 ## Retained current behavior
 
 `database/event_metadata.rs` keeps `key_presence_is_oneof_specific_including_empty_keys` and checks direct first-start persistence through reopen. Lineage now belongs to the main fresh schema. Current-format initialization and nonmutating refusal checks are active in `database/current_schema.rs`.
 
-The active `events/projection.rs` retains payload-component writes, part roundtrips and error handling, and caller-owned transaction rollback. Its old physical-layout assertions are adapted by the later metadata package, not weakened here.
+The active `events/projection.rs` checks structured payload writes, ordered part roundtrips, error handling, and caller-owned transaction rollback. It reads provider fields from conversation items and verifies that the retired tables are absent. The original physical-layout assertions remain unchanged in the archived source.
 
 The active selected-root case still checks that fresh tables borrow no facts, unrelated selected-root files stay unchanged, the counterpart root stays unchanged, and WAL/SHM are absent.
 

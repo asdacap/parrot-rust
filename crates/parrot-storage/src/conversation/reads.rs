@@ -33,6 +33,7 @@ fn read_message(
     role: &str,
     tool_call_id: String,
     final_phase: bool,
+    provider_content: ProviderContent,
 ) -> Result<ConversationItem, EventError> {
     let origin = parse_origin(origin)?;
     let role = parse_role(role)?;
@@ -47,19 +48,6 @@ fn read_message(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let provider_content = tx
-        .query_row(
-            "SELECT provider, content FROM conversation_provider_content WHERE item_sequence = ?1;",
-            [sequence],
-            |row| {
-                Ok(ProviderContent {
-                    provider_id: row.get(0)?,
-                    content: row.get(1)?,
-                })
-            },
-        )
-        .optional()?
-        .unwrap_or_default();
     Ok(ConversationItem {
         sequence,
         final_phase,
@@ -80,7 +68,7 @@ pub fn read_conversation_item(
 ) -> Result<ConversationItem, EventError> {
     let item = tx
         .query_row(
-            "SELECT origin, role, tool_call_id, final_phase FROM conversation_item WHERE sequence = ?1;",
+            "SELECT origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE sequence = ?1;",
             [sequence],
             |row| {
                 Ok((
@@ -88,14 +76,26 @@ pub fn read_conversation_item(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, bool>(3)?,
+                    ProviderContent {
+                        provider_id: row.get(4)?,
+                        content: row.get(5)?,
+                    },
                 ))
             },
         )
         .optional()?;
-    let (origin, role, call, final_phase) = item.ok_or_else(|| {
+    let (origin, role, call, final_phase, provider_content) = item.ok_or_else(|| {
         EventError::Invalid(format!("Conversation item {sequence} does not exist."))
     })?;
-    read_message(tx, sequence, &origin, &role, call, final_phase)
+    read_message(
+        tx,
+        sequence,
+        &origin,
+        &role,
+        call,
+        final_phase,
+        provider_content,
+    )
 }
 fn read_selected(
     tx: &Transaction<'_>,
@@ -104,9 +104,9 @@ fn read_selected(
     tail: bool,
 ) -> Result<Vec<ConversationItem>, EventError> {
     let sql = if tail {
-        "SELECT item.sequence, item.origin, item.role, item.tool_call_id, item.final_phase FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence;"
+        "SELECT item.sequence, item.origin, item.role, item.tool_call_id, item.final_phase, item.provider_id, item.provider_content FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) ORDER BY item.sequence;"
     } else {
-        "SELECT sequence, origin, role, tool_call_id, final_phase FROM conversation_item WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;"
+        "SELECT sequence, origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;"
     };
     let mut read = tx.prepare(sql)?;
     let mut rows = read.query(params![agent, watermark])?;
@@ -119,6 +119,10 @@ fn read_selected(
             &row.get::<_, String>(2)?,
             row.get(3)?,
             row.get(4)?,
+            ProviderContent {
+                provider_id: row.get(5)?,
+                content: row.get(6)?,
+            },
         )?);
     }
     Ok(items)
@@ -156,7 +160,7 @@ impl ConversationRepository {
                     let (owner, child) = row?;
                     owners.insert(child, owner);
                 }
-                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence), item.final_phase FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
+                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
                 let mut rows = read.query(params![agent, watermark])?;
                 let mut items = Vec::new();
                 while let Some(row) = rows.next()? {
@@ -169,6 +173,10 @@ impl ConversationRepository {
                             &row.get::<_, String>(2)?,
                             row.get(3)?,
                             row.get(5)?,
+                            ProviderContent {
+                                provider_id: row.get(6)?,
+                                content: row.get(7)?,
+                            },
                         )?,
                         tool_owner_sequence: owners.get(&sequence).copied(),
                         is_compaction_status: row.get(4)?,

@@ -19,7 +19,7 @@ fn count(connection: &Connection, table: &str) -> i64 {
 }
 
 #[test]
-fn project_writes_every_payload_component_and_source_text_only_legacy_content() {
+fn project_writes_structured_components_without_legacy_tables() {
     let mut connection = database();
     let tx = connection.transaction().unwrap();
     let message = ConversationMessage {
@@ -50,21 +50,20 @@ fn project_writes_every_payload_component_and_source_text_only_legacy_content() 
     };
     let item = project(&tx, "agent", &message, "exact-at").unwrap();
     assert_eq!(item.message, message);
-    let legacy: (String, String, String, String) = tx
+    let stored: (String, String, String) = tx
         .query_row(
-            "SELECT agent_session,role,content,created_at FROM message",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            "SELECT agent_session,role,created_at FROM conversation_item WHERE sequence=?1",
+            [item.sequence],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
     assert_eq!(
-        legacy,
-        (
-            "agent".into(),
-            "assistant".into(),
-            "first\0last".into(),
-            "exact-at".into()
-        )
+        stored,
+        ("agent".into(), "assistant".into(), "exact-at".into())
+    );
+    assert_eq!(
+        content(&read_parts(&tx, "conversation_part", "item_sequence", &item.sequence).unwrap()),
+        "first\0last"
     );
     assert_eq!(
         read_parts(&tx, "conversation_part", "item_sequence", &item.sequence).unwrap(),
@@ -88,8 +87,8 @@ fn project_writes_every_payload_component_and_source_text_only_legacy_content() 
     );
     assert_eq!(
         tx.query_row(
-            "SELECT provider||':'||content FROM conversation_provider_content",
-            [],
+            "SELECT provider_id||':'||provider_content FROM conversation_item WHERE sequence=?1",
+            [item.sequence],
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
@@ -111,7 +110,20 @@ fn project_writes_every_payload_component_and_source_text_only_legacy_content() 
         "next",
     )
     .unwrap();
-    assert_eq!(count(&tx, "conversation_provider_content"), 1);
+    let provider: (String, String) = tx
+        .query_row(
+            "SELECT provider_id,provider_content FROM conversation_item WHERE sequence=?1",
+            [empty.sequence],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(provider, (String::new(), String::new()));
+    let retired_tables: i64 = tx.query_row(
+        "SELECT count(*) FROM sqlite_schema WHERE name IN ('message','conversation_provider_content')",
+        [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retired_tables, 0);
     assert_eq!(
         read_parts(&tx, "conversation_part", "item_sequence", &empty.sequence).unwrap(),
         vec![ConversationPart::text("")]
@@ -193,14 +205,17 @@ fn projection_failure_leaves_every_write_in_callers_transaction_for_rollback() {
         );
     }
     for table in [
-        "message",
         "conversation_item",
         "conversation_part",
         "conversation_tool_call",
-        "conversation_provider_content",
         "agent_history",
-        "projection_version",
     ] {
         assert_eq!(count(&connection, table), 0, "{table}");
     }
+    let retired_tables: i64 = connection.query_row(
+        "SELECT count(*) FROM sqlite_schema WHERE name IN ('message','conversation_provider_content','projection_version')",
+        [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retired_tables, 0);
 }
