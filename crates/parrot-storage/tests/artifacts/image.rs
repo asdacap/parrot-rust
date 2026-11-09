@@ -240,6 +240,63 @@ fn setup_repository(label: &str) -> (TempDir, SessionDatabase, ImageArtifactRepo
 }
 
 #[tokio::test]
+async fn upload_free_references_preserve_distinct_labels() {
+    let (_temp, database, repository) = setup_repository("image-reference-labels");
+    let first = persist_image(&repository, PIXEL, "first-upload", "first.png", "upload")
+        .await
+        .unwrap();
+    let second = persist_image(
+        &repository,
+        PIXEL,
+        "second-upload",
+        "second.png",
+        "read_image",
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.artifact_id, second.artifact_id);
+    assert_eq!(first.display_name, "first.png");
+    assert_eq!(first.origin, "upload");
+    assert_eq!(second.display_name, "second.png");
+    assert_eq!(second.origin, "read_image");
+    assert_eq!(
+        std::fs::read_dir(repository.store().directory())
+            .unwrap()
+            .count(),
+        1
+    );
+    database.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn upload_free_reads_do_not_require_a_registry() {
+    use std::io::Read;
+
+    let (_temp, database, repository) = setup_repository("image-file-without-registry");
+    let image = persist_image(&repository, PIXEL, "original-upload", "pixel.png", "upload")
+        .await
+        .unwrap();
+    database
+        .admit("drop-upload-registry", &NeverCancelled, |tx| {
+            tx.execute_batch("DROP TABLE IF EXISTS image_upload;")?;
+            Ok(())
+        })
+        .unwrap()
+        .into_completion()
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    repository
+        .open(&image.artifact_id, &NeverCancelled)
+        .await
+        .unwrap()
+        .read_to_end(&mut bytes)
+        .unwrap();
+    assert_eq!(bytes, PIXEL);
+    database.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn image_upload_reopens_is_idempotent_preserves_first_labels_and_rejects_conflicts() {
     let temp = TempDir::new("image-repository");
     let root = temp.root();
