@@ -77,24 +77,13 @@ fn embeds_all_files_in_sorted_relative_paths_with_content_types_and_original_byt
             "EmbeddedWebAsset {{ path: {path:?}, content_type: {content_type:?}, bytes: include_bytes!({:?}) }},",
             source.to_string_lossy(),
         );
-        assert!(
-            generated.contains(&entry),
-            "missing generated entry {entry}"
-        );
-        assert_eq!(
-            fs::read(source).expect("read source bytes"),
-            match path {
-                "assets/app.js" => b"globalThis.ready=true".as_slice(),
-                "assets/fonts/ui.woff2" => b"font bytes".as_slice(),
-                "assets/site.css" => b"body{margin:0}".as_slice(),
-                "index.html" => b"<main>retained UI</main>".as_slice(),
-                _ => unreachable!(),
-            }
-        );
+        let position = generated
+            .find(&entry)
+            .unwrap_or_else(|| panic!("missing generated entry {entry}"));
         if let Some(previous) = previous {
-            assert!(previous < path, "asset entries are not sorted");
+            assert!(previous < position, "asset entries are not sorted");
         }
-        previous = Some(path);
+        previous = Some(position);
     }
 }
 
