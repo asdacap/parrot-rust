@@ -11,8 +11,14 @@ async fn unavailable_selection(mode: &str, selector: &str) {
     // Persist the selection a previous installation could have supplied. The
     // current real factory has only build mode and the local provider.
     user.lease
-        .update_selection_metadata("local", "local/model", selector, mode)
+        .metadata()
+        .update_model_selection(&parrot_storage::ownership::SessionModelSelection {
+            provider_id: "local".into(),
+            canonical_model: "local/model".into(),
+            selector: selector.into(),
+        })
         .unwrap();
+    user.lease.metadata().update_mode(mode).await.unwrap();
     f.close().await;
     let id = UserSessionId::try_parse(&session.id).unwrap();
     let constructors = f.observations.lock().unwrap().constructors;

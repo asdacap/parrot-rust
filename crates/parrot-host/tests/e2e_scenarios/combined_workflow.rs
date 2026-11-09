@@ -223,7 +223,11 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     let resumed = bounded(fixture.factory.bind_opened(opened)).await.unwrap();
     let resumed_root = fixture.root();
     let resumed_user = fixture.user();
-    let restored = ConversationRepository::new(resumed_user.lease.events.clone());
+    let restored = ConversationRepository::new(
+        resumed_user.lease.events.clone(),
+        resumed_user.lease.metadata().clone(),
+    )
+    .unwrap();
     let restored_child_history = restored.conversation(child_id.clone()).await.unwrap();
     let restored_child_compaction = restored.compaction_history(child_id).await.unwrap();
     let restored_history = resumed_root.history().conversation().await.unwrap();
