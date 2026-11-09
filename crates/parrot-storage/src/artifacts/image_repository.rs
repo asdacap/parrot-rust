@@ -9,9 +9,9 @@ use super::{Error, ErrorKind, ImageArtifactMetadata, Result};
 use crate::database::{DatabaseError, SessionDatabase, Transaction};
 use parrot_domain::contracts::storage::AdmissionError;
 
-const ARTIFACT_SELECT: &str = "SELECT artifact.artifact_id, content.sha256, content.media_type, content.byte_length, content.width, content.height, content.frame_count, content.aggregate_pixels, artifact.display_name, artifact.origin FROM image_artifact AS artifact JOIN image_content AS content ON content.sha256 = artifact.sha256";
+const ARTIFACT_SELECT: &str = "SELECT artifact.artifact_id, artifact.media_type, artifact.byte_length, artifact.width, artifact.height, artifact.frame_count, artifact.aggregate_pixels, artifact.display_name, artifact.origin FROM image_artifact AS artifact";
 
-/// Image bytes and upload/reference metadata bound to one selected session DB and resource directory.
+/// Image bytes and upload metadata bound to one selected session DB and resource directory.
 pub struct ImageArtifactRepository {
     database: SessionDatabase,
     store: ImageArtifactStore,
@@ -53,18 +53,6 @@ impl ImageArtifactRepository {
             declared_byte_length,
             cancellation,
         )?;
-        self.record(artifact, upload_id, cancellation).await
-    }
-
-    pub async fn record(
-        &self,
-        artifact: ImageArtifactMetadata,
-        upload_id: &str,
-        cancellation: &dyn Cancellation,
-    ) -> Result<ImageArtifactMetadata> {
-        if upload_id.trim().is_empty() {
-            return Err(Error::invalid_input("upload_id cannot be empty"));
-        }
         let upload_id = upload_id.to_owned();
         execute(
             &self.database,
@@ -107,59 +95,6 @@ impl ImageArtifactRepository {
         self.store.open(artifact_id)
     }
 
-    pub async fn claim(
-        &self,
-        artifact_id: &str,
-        reference_id: &str,
-        cancellation: &dyn Cancellation,
-    ) -> Result<()> {
-        if artifact_id.trim().is_empty() || reference_id.trim().is_empty() {
-            return Err(Error::invalid_input(
-                "artifact_id and reference_id cannot be empty",
-            ));
-        }
-        let artifact_id = artifact_id.to_owned();
-        let reference_id = reference_id.to_owned();
-        execute(&self.database, format!("image-claim:{artifact_id}:{reference_id}"), cancellation, move |tx| {
-            let inserted = tx.execute(
-                "INSERT INTO image_artifact_reference (artifact_id, reference_id) SELECT artifact_id, ?2 FROM image_artifact WHERE artifact_id = ?1 ON CONFLICT DO NOTHING",
-                params![artifact_id, reference_id],
-            )?;
-            if inserted == 0 && resolve_artifact(tx, &artifact_id)?.is_none() {
-                return Err(Error::new(ErrorKind::NotFound, "The image artifact does not exist."));
-            }
-            Ok(())
-        }).await
-    }
-
-    pub async fn release(
-        &self,
-        artifact_id: &str,
-        reference_id: &str,
-        cancellation: &dyn Cancellation,
-    ) -> Result<()> {
-        if artifact_id.trim().is_empty() || reference_id.trim().is_empty() {
-            return Err(Error::invalid_input(
-                "artifact_id and reference_id cannot be empty",
-            ));
-        }
-        let artifact_id = artifact_id.to_owned();
-        let reference_id = reference_id.to_owned();
-        execute(
-            &self.database,
-            format!("image-release:{artifact_id}:{reference_id}"),
-            cancellation,
-            move |tx| {
-                tx.execute(
-                "DELETE FROM image_artifact_reference WHERE artifact_id = ?1 AND reference_id = ?2",
-                params![artifact_id, reference_id],
-            )?;
-                Ok(())
-            },
-        )
-        .await
-    }
-
     /// Removes expired unreferenced metadata in one DB transaction, then its selected-root files.
     pub async fn remove_stale_unreferenced_before(
         &self,
@@ -170,7 +105,6 @@ impl ImageArtifactRepository {
         let artifacts = execute(&self.database, format!("image-cleanup:{before}"), cancellation, move |tx| {
             let mut statement = tx.prepare(&format!(
                 "{ARTIFACT_SELECT} WHERE artifact.created_at < ?1 \
-                 AND NOT EXISTS (SELECT 1 FROM image_artifact_reference AS reference WHERE reference.artifact_id = artifact.artifact_id) \
                  AND NOT EXISTS (SELECT 1 FROM input_part WHERE input_part.artifact_id = artifact.artifact_id) \
                  AND NOT EXISTS (SELECT 1 FROM conversation_part WHERE conversation_part.artifact_id = artifact.artifact_id) \
                  AND NOT EXISTS (SELECT 1 FROM tool_execution_result_part WHERE tool_execution_result_part.artifact_id = artifact.artifact_id)"
@@ -183,7 +117,6 @@ impl ImageArtifactRepository {
             for artifact in &artifacts {
                 tx.execute("DELETE FROM image_upload WHERE artifact_id = ?1", [&artifact.artifact_id])?;
                 tx.execute("DELETE FROM image_artifact WHERE artifact_id = ?1", [&artifact.artifact_id])?;
-                tx.execute("DELETE FROM image_content WHERE sha256 = ?1 AND NOT EXISTS (SELECT 1 FROM image_artifact WHERE sha256 = ?1)", [&artifact.sha256])?;
             }
             Ok(artifacts)
         }).await?;
@@ -224,13 +157,8 @@ fn record_artifact(
     }
     let at = current_timestamp();
     tx.execute(
-        "INSERT INTO image_content (sha256, media_type, byte_length, width, height, frame_count, aggregate_pixels) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
-         ON CONFLICT(sha256) DO UPDATE SET media_type = excluded.media_type, byte_length = excluded.byte_length, width = excluded.width, height = excluded.height, frame_count = excluded.frame_count, aggregate_pixels = excluded.aggregate_pixels",
-        params![artifact.sha256, artifact.media_type, artifact.byte_length, artifact.width, artifact.height, artifact.frame_count, artifact.aggregate_pixels],
-    ).map_err(Error::from_sqlite)?;
-    tx.execute(
-        "INSERT INTO image_artifact (artifact_id, sha256, display_name, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(artifact_id) DO NOTHING",
-        params![artifact.artifact_id, artifact.sha256, artifact.display_name, artifact.origin, at],
+        "INSERT INTO image_artifact (artifact_id, media_type, byte_length, width, height, frame_count, aggregate_pixels, display_name, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(artifact_id) DO NOTHING",
+        params![artifact.artifact_id, artifact.media_type, artifact.byte_length, artifact.width, artifact.height, artifact.frame_count, artifact.aggregate_pixels, artifact.display_name, artifact.origin, at],
     ).map_err(Error::from_sqlite)?;
     let recorded = resolve_artifact(tx, &artifact.artifact_id)
         .map_err(Error::from_sqlite)?
@@ -272,17 +200,18 @@ fn resolve_artifact(
 }
 
 fn read_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageArtifactMetadata> {
+    let artifact_id: String = row.get(0)?;
     Ok(ImageArtifactMetadata {
-        artifact_id: row.get(0)?,
-        sha256: row.get(1)?,
-        media_type: row.get(2)?,
-        byte_length: row.get(3)?,
-        width: row.get(4)?,
-        height: row.get(5)?,
-        frame_count: row.get(6)?,
-        aggregate_pixels: row.get(7)?,
-        display_name: row.get(8)?,
-        origin: row.get(9)?,
+        sha256: artifact_id.clone(),
+        artifact_id,
+        media_type: row.get(1)?,
+        byte_length: row.get(2)?,
+        width: row.get(3)?,
+        height: row.get(4)?,
+        frame_count: row.get(5)?,
+        aggregate_pixels: row.get(6)?,
+        display_name: row.get(7)?,
+        origin: row.get(8)?,
     })
 }
 

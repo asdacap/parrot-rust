@@ -1,13 +1,13 @@
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::protocol::messages::parrot::{Event, RequestUsageRecorded};
-use parrot_storage::artifacts::ImageArtifactStore;
+use parrot_storage::artifacts::{ImageArtifactRepository, ImageArtifactStore};
 use parrot_storage::conversation::{
     AgentHistoryEntry, CompactionSnapshot, ConversationItem, ConversationMessage,
     ConversationOrigin, ConversationPart, ConversationRepository, EventError, MessageRole,
     ModelContent, ProviderContent, ToolCall,
 };
 use parrot_storage::database::{DatabaseError, SessionDatabase};
-use parrot_storage::events::EventRepository;
+use parrot_storage::events::{EventRepository, NeverCancelled};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -319,20 +319,31 @@ async fn legacy_model_rejects_images_while_materialize_preserves_text_and_errors
 async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_file_fallback() {
     let fixture = Fixture::new();
     let store = ImageArtifactStore::for_session(&fixture.root(), "images").unwrap();
-    std::fs::create_dir_all(store.directory()).unwrap();
-    let id = "a".repeat(64);
-    let path = store.directory().join(format!("{id}.png"));
+    let repo = fixture
+        .repository()
+        .with_image_store(store.clone())
+        .unwrap();
+    let images =
+        ImageArtifactRepository::new(repo.events().database().clone(), store.clone()).unwrap();
+    let artifact = images
+        .persist(
+            std::io::Cursor::new(include_bytes!("../artifacts/fixtures/rectangle.png")),
+            "materialization-upload",
+            "stored name",
+            "test",
+            None,
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    let id = artifact.artifact_id;
+    let path = store.path_of(&id).unwrap();
     std::fs::write(
         &path,
         b"materialization resolves existing paths without decoding file bytes",
     )
     .unwrap();
-    let repo = fixture.repository().with_image_store(store).unwrap();
-    let insert = id.clone();
-    repo.events().transaction(move |tx| {
-        tx.execute("INSERT INTO image_content (sha256, media_type, byte_length, width, height, frame_count, aggregate_pixels) VALUES (?1, 'image/png', 1, 24, 12, 1, 288)", [&insert])?;
-        tx.execute("INSERT INTO image_artifact (artifact_id, sha256, display_name, origin, created_at) VALUES (?1, ?1, 'stored name', 'test', 'at')", [&insert])?; Ok(())
-    }).await.unwrap();
     let metadata_only = ConversationRepository::new(repo.events().clone());
     let resolved = metadata_only
         .resolve_image_artifact(id.clone())

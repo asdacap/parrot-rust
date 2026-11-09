@@ -736,24 +736,18 @@ async fn original_materialize_durable_image_at_provider_boundary() {
     let fixture = Fixture::new();
     let store = ImageArtifactStore::for_session(&fixture.root(), "artifacts").unwrap();
     let bytes = STANDARD.decode(PNG).unwrap();
-    let writer = store.clone();
-    let artifact = tokio::task::spawn_blocking(move || {
-        writer.persist(
-            &mut std::io::Cursor::new(bytes),
+    let repo = fixture.repo().with_image_store(store.clone()).unwrap();
+    let images = ImageArtifactRepository::new(repo.events().database().clone(), store).unwrap();
+    let artifact = images
+        .persist(
+            std::io::Cursor::new(bytes),
+            "upload-1",
             "pixel.png",
             "test",
             None,
             None,
             &NeverCancelled,
         )
-    })
-    .await
-    .unwrap()
-    .unwrap();
-    let repo = fixture.repo().with_image_store(store.clone()).unwrap();
-    let images = ImageArtifactRepository::new(repo.events().database().clone(), store).unwrap();
-    images
-        .record(artifact.clone(), "upload-1", &NeverCancelled)
         .await
         .unwrap();
     let contents = repo

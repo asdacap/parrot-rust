@@ -256,9 +256,27 @@ impl ConversationRepository {
                 "artifactId must not be empty or whitespace".into(),
             ));
         }
-        self.events.transaction(move |tx| Ok(tx.query_row("SELECT artifact.artifact_id, content.sha256, content.media_type, content.byte_length, content.width, content.height, content.frame_count, content.aggregate_pixels, artifact.display_name, artifact.origin FROM image_artifact AS artifact JOIN image_content AS content ON content.sha256 = artifact.sha256 WHERE artifact.artifact_id = ?1;", [artifact_id], |row| Ok(crate::artifacts::ImageArtifactMetadata {
-            artifact_id: row.get(0)?, sha256: row.get(1)?, media_type: row.get(2)?, byte_length: row.get(3)?, width: row.get(4)?, height: row.get(5)?, frame_count: row.get(6)?, aggregate_pixels: row.get(7)?, display_name: row.get(8)?, origin: row.get(9)?,
-        })).optional()?)).await
+        self.events.transaction(move |tx| {
+            Ok(tx.query_row(
+                "SELECT artifact_id, media_type, byte_length, width, height, frame_count, aggregate_pixels, display_name, origin FROM image_artifact WHERE artifact_id = ?1;",
+                [artifact_id],
+                |row| {
+                    let artifact_id: String = row.get(0)?;
+                    Ok(crate::artifacts::ImageArtifactMetadata {
+                        sha256: artifact_id.clone(),
+                        artifact_id,
+                        media_type: row.get(1)?,
+                        byte_length: row.get(2)?,
+                        width: row.get(3)?,
+                        height: row.get(4)?,
+                        frame_count: row.get(5)?,
+                        aggregate_pixels: row.get(6)?,
+                        display_name: row.get(7)?,
+                        origin: row.get(8)?,
+                    })
+                },
+            ).optional()?)
+        }).await
     }
     pub async fn conversation(&self, agent: String) -> Result<Vec<ConversationItem>, EventError> {
         self.conversation_after(agent, 0).await

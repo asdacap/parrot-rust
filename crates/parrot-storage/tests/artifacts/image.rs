@@ -9,6 +9,7 @@ use parrot_storage::artifacts::{
 use parrot_storage::database::SessionDatabase;
 
 const PIXEL: &[u8] = include_bytes!("fixtures/pixel.png");
+const ALTERNATE: &[u8] = include_bytes!("fixtures/pixel-labeled.png");
 const INVALID: &[u8] = include_bytes!("fixtures/invalid-image.bin");
 
 #[test]
@@ -211,20 +212,24 @@ fn missing_selected_root_artifact_never_borrows_a_counterpart() {
     assert!(other_store.path_of(&metadata.artifact_id).is_ok());
 }
 
-fn metadata(id: char, display: &str, origin: &str) -> ImageArtifactMetadata {
-    let id = id.to_string().repeat(64);
-    ImageArtifactMetadata {
-        artifact_id: id.clone(),
-        sha256: id,
-        media_type: "image/png".into(),
-        byte_length: 1,
-        width: 1,
-        height: 1,
-        frame_count: 1,
-        aggregate_pixels: 1,
-        display_name: display.into(),
-        origin: origin.into(),
-    }
+async fn persist_image(
+    repository: &ImageArtifactRepository,
+    bytes: &'static [u8],
+    upload_id: &str,
+    display_name: &str,
+    origin: &str,
+) -> parrot_storage::artifacts::Result<ImageArtifactMetadata> {
+    repository
+        .persist(
+            Cursor::new(bytes),
+            upload_id,
+            display_name,
+            origin,
+            None,
+            None,
+            &NeverCancelled,
+        )
+        .await
 }
 
 fn setup_repository(label: &str) -> (TempDir, SessionDatabase, ImageArtifactRepository) {
@@ -243,70 +248,114 @@ async fn image_upload_reopens_is_idempotent_preserves_first_labels_and_rejects_c
     let database = SessionDatabase::open(root.clone()).unwrap();
     let store = ImageArtifactStore::for_session(&root, "artifacts").unwrap();
     let repository = ImageArtifactRepository::new(database.clone(), store).unwrap();
-    let image = metadata('a', "pixel.png", "test");
+    let image = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
+        .await
+        .unwrap();
+    assert_eq!(image.sha256, image.artifact_id);
+    assert_eq!(image.byte_length, PIXEL.len() as i64);
     assert_eq!(
-        repository
-            .record(image.clone(), "upload-1", &NeverCancelled)
+        std::fs::read(repository.store().path_of(&image.artifact_id).unwrap()).unwrap(),
+        PIXEL
+    );
+    assert_eq!(
+        persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
             .await
             .unwrap(),
         image
     );
-    assert_eq!(
-        repository
-            .record(image.clone(), "upload-1", &NeverCancelled)
-            .await
-            .unwrap(),
-        image
-    );
+    database
+        .admit("first-created-at", &NeverCancelled, |tx| {
+            tx.execute(
+                "UPDATE image_artifact SET created_at='2000-01-01T00:00:00.0000000+00:00'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap()
+        .into_completion()
+        .await
+        .unwrap();
     database.close().await.unwrap();
 
     let reopened = SessionDatabase::open(root).unwrap();
-    let reopened_store = ImageArtifactStore::for_session(&temp.root(), "artifacts").unwrap();
-    let reopened_repo = ImageArtifactRepository::new(reopened.clone(), reopened_store).unwrap();
-    let first = reopened_repo
-        .resolve(&image.artifact_id, &NeverCancelled)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(first, image);
-    let renamed = metadata('a', "renamed.png", "read_image");
+    let store = ImageArtifactStore::for_session(&temp.root(), "artifacts").unwrap();
+    let repository = ImageArtifactRepository::new(reopened.clone(), store).unwrap();
     assert_eq!(
-        reopened_repo
-            .record(renamed.clone(), "upload-2", &NeverCancelled)
+        repository
+            .resolve(&image.artifact_id, &NeverCancelled)
             .await
             .unwrap(),
-        first
+        Some(image.clone())
     );
     assert_eq!(
-        reopened_repo
-            .resolve(&first.artifact_id, &NeverCancelled)
+        persist_image(&repository, PIXEL, "upload-2", "renamed.png", "read_image")
             .await
-            .unwrap()
             .unwrap(),
-        first
+        image
     );
-    let conflict = metadata('b', "renamed.png", "read_image");
     assert_eq!(
-        reopened_repo
-            .record(conflict.clone(), "upload-2", &NeverCancelled)
+        persist_image(&repository, ALTERNATE, "upload-2", "other.png", "test")
             .await
             .unwrap_err()
             .kind,
         ErrorKind::Conflict
     );
+    let counts = reopened
+        .admit("upload-counts", &NeverCancelled, |tx| {
+            Ok((
+                tx.query_row("SELECT count(*) FROM image_artifact", [], |row| {
+                    row.get::<_, i64>(0)
+                })?,
+                tx.query_row("SELECT count(*) FROM image_upload", [], |row| {
+                    row.get::<_, i64>(0)
+                })?,
+                tx.query_row("SELECT created_at FROM image_artifact", [], |row| {
+                    row.get::<_, String>(0)
+                })?,
+            ))
+        })
+        .unwrap()
+        .into_completion()
+        .await
+        .unwrap()
+        .into_value()
+        .into_output();
+    assert_eq!(counts, (1, 2, "2000-01-01T00:00:00.0000000+00:00".into()));
+    assert_eq!(
+        repository
+            .resolve(&image.artifact_id, &NeverCancelled)
+            .await
+            .unwrap(),
+        Some(image.clone())
+    );
+    assert_eq!(
+        std::fs::read(repository.store().path_of(&image.artifact_id).unwrap()).unwrap(),
+        PIXEL
+    );
+    assert_eq!(
+        repository
+            .remove_stale_unreferenced_before(
+                SystemTime::now() - Duration::from_secs(3600),
+                &NeverCancelled
+            )
+            .await
+            .unwrap(),
+        [image.clone()]
+    );
     assert!(
-        reopened_repo
-            .resolve(&conflict.artifact_id, &NeverCancelled)
+        repository
+            .resolve(&image.artifact_id, &NeverCancelled)
             .await
             .unwrap()
             .is_none()
     );
     assert_eq!(
-        reopened_repo
-            .record(first.clone(), "upload-1", &NeverCancelled)
-            .await
-            .unwrap(),
-        first
+        repository
+            .store()
+            .path_of(&image.artifact_id)
+            .unwrap_err()
+            .kind,
+        ErrorKind::NotFound
     );
     reopened.close().await.unwrap();
 }
@@ -314,15 +363,11 @@ async fn image_upload_reopens_is_idempotent_preserves_first_labels_and_rejects_c
 #[tokio::test]
 async fn upload_id_cannot_be_reused_for_a_different_artifact() {
     let (_temp, database, repository) = setup_repository("image-upload-id-conflict");
-    let original = metadata('a', "pixel.png", "test");
-    let different = metadata('b', "other.png", "test");
-    repository
-        .record(original.clone(), "upload-1", &NeverCancelled)
+    let original = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
         .await
         .unwrap();
     assert_eq!(
-        repository
-            .record(different.clone(), "upload-1", &NeverCancelled)
+        persist_image(&repository, ALTERNATE, "upload-1", "other.png", "test")
             .await
             .unwrap_err()
             .kind,
@@ -332,23 +377,25 @@ async fn upload_id_cannot_be_reused_for_a_different_artifact() {
         repository
             .resolve(&original.artifact_id, &NeverCancelled)
             .await
-            .unwrap()
+            .unwrap(),
+        Some(original.clone())
+    );
+    assert_eq!(
+        persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
+            .await
             .unwrap(),
         original
     );
-    assert!(
+    let different = persist_image(&repository, ALTERNATE, "upload-2", "other.png", "test")
+        .await
+        .unwrap();
+    assert_ne!(different.artifact_id, original.artifact_id);
+    assert_eq!(
         repository
             .resolve(&different.artifact_id, &NeverCancelled)
             .await
-            .unwrap()
-            .is_none()
-    );
-    assert_eq!(
-        repository
-            .record(original.clone(), "upload-1", &NeverCancelled)
-            .await
             .unwrap(),
-        original
+        Some(different)
     );
     database.close().await.unwrap();
 }
@@ -371,20 +418,15 @@ async fn source_parameterized_first_label_reuse_cases_preserve_all_original_labe
         let database = SessionDatabase::open(root.clone()).unwrap();
         let store = ImageArtifactStore::for_session(&root, "artifacts").unwrap();
         let repository = ImageArtifactRepository::new(database.clone(), store).unwrap();
-        let first = metadata('e', "pixel.png", "test");
-        repository
-            .record(first.clone(), "upload-1", &NeverCancelled)
+        let first = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
             .await
             .unwrap();
         database.close().await.unwrap();
-
         let reopened = SessionDatabase::open(root.clone()).unwrap();
         let store = ImageArtifactStore::for_session(&root, "artifacts").unwrap();
         let repository = ImageArtifactRepository::new(reopened.clone(), store).unwrap();
-        let repeated = metadata('e', display_name, origin);
         assert_eq!(
-            repository
-                .record(repeated, upload_id, &NeverCancelled)
+            persist_image(&repository, PIXEL, upload_id, display_name, origin)
                 .await
                 .unwrap(),
             first
@@ -393,31 +435,19 @@ async fn source_parameterized_first_label_reuse_cases_preserve_all_original_labe
             repository
                 .resolve(&first.artifact_id, &NeverCancelled)
                 .await
-                .unwrap()
                 .unwrap(),
-            first
+            Some(first.clone())
         );
-        let conflict = metadata('g', display_name, origin);
         assert_eq!(
-            repository
-                .record(conflict, upload_id, &NeverCancelled)
+            persist_image(&repository, ALTERNATE, upload_id, display_name, origin)
                 .await
                 .unwrap_err()
                 .kind,
             ErrorKind::Conflict
         );
         assert_eq!(
-            repository
-                .record(first.clone(), "upload-1", &NeverCancelled)
+            persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
                 .await
-                .unwrap(),
-            first
-        );
-        assert_eq!(
-            repository
-                .resolve(&first.artifact_id, &NeverCancelled)
-                .await
-                .unwrap()
                 .unwrap(),
             first
         );
@@ -426,127 +456,103 @@ async fn source_parameterized_first_label_reuse_cases_preserve_all_original_labe
 }
 
 #[tokio::test]
-async fn inconsistent_content_fields_conflict_without_mutation() {
-    for field in [
-        "sha256",
-        "media_type",
-        "byte_length",
-        "width",
-        "height",
-        "frame_count",
-        "aggregate_pixels",
-    ] {
-        let (_temp, database, repository) = setup_repository("image-conflict");
-        let original = metadata('a', "pixel.png", "test");
-        repository
-            .record(original.clone(), "upload-1", &NeverCancelled)
+async fn each_part_owner_retains_images_until_its_reference_is_deleted() {
+    let cases = [
+        (
+            "input",
+            "INSERT INTO input(id,agent_session,message_id,content,delivery,status,created_at) VALUES('input','agent','message','','queue','pending','at')",
+            "INSERT INTO input_part(input_id,position,kind,text,artifact_id,media_type,display_name) VALUES('input',0,'image_artifact','',?1,'image/png','pixel.png')",
+            "DELETE FROM input WHERE id='input'",
+        ),
+        (
+            "conversation",
+            "INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','user_input','user','','at')",
+            "INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(last_insert_rowid(),0,'image_artifact','',?1,'image/png','pixel.png')",
+            "DELETE FROM conversation_item WHERE agent_session='agent'",
+        ),
+        (
+            "terminal",
+            "INSERT INTO tool_execution_terminal(agent_session,tool_call_id,tool_name,status,message,created_at) VALUES('agent','call','tool','finished','','at')",
+            "INSERT INTO tool_execution_result_part(terminal_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(last_insert_rowid(),0,'image_artifact','',?1,'image/png','pixel.png')",
+            "DELETE FROM tool_execution_terminal WHERE agent_session='agent'",
+        ),
+    ];
+    for (label, insert_owner, insert_part, delete_owner) in cases {
+        let (_temp, database, repository) = setup_repository(label);
+        let image = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
             .await
             .unwrap();
-        let mut changed = original.clone();
-        match field {
-            "sha256" => changed.sha256 = "b".repeat(64),
-            "media_type" => changed.media_type = "image/jpeg".into(),
-            "byte_length" => changed.byte_length = 2,
-            "width" => changed.width = 2,
-            "height" => changed.height = 2,
-            "frame_count" => changed.frame_count = 2,
-            "aggregate_pixels" => changed.aggregate_pixels = 2,
-            _ => unreachable!(),
-        }
-        for upload_id in ["upload-1", "upload-2"] {
-            assert_eq!(
-                repository
-                    .record(changed.clone(), upload_id, &NeverCancelled)
-                    .await
-                    .unwrap_err()
-                    .kind,
-                ErrorKind::Conflict
-            );
-            assert_eq!(
-                repository
-                    .resolve(&original.artifact_id, &NeverCancelled)
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                original
-            );
-            assert_eq!(
-                repository
-                    .record(original.clone(), "upload-1", &NeverCancelled)
-                    .await
-                    .unwrap(),
-                original
-            );
-        }
-        let different = metadata('b', "pixel2.png", "test");
+        let artifact_id = image.artifact_id.clone();
+        database
+            .admit("image-reference", &NeverCancelled, move |tx| {
+                tx.execute(insert_owner, [])?;
+                tx.execute(insert_part, [&artifact_id])?;
+                Ok(())
+            })
+            .unwrap()
+            .into_completion()
+            .await
+            .unwrap();
+        let before = SystemTime::now() + Duration::from_secs(60);
+        assert!(
+            repository
+                .remove_stale_unreferenced_before(before, &NeverCancelled)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            std::fs::read(repository.store().path_of(&image.artifact_id).unwrap()).unwrap(),
+            PIXEL
+        );
+        database
+            .admit("remove-image-reference", &NeverCancelled, move |tx| {
+                tx.execute(delete_owner, [])?;
+                Ok(())
+            })
+            .unwrap()
+            .into_completion()
+            .await
+            .unwrap();
         assert_eq!(
             repository
-                .record(different.clone(), "upload-2", &NeverCancelled)
+                .remove_stale_unreferenced_before(before, &NeverCancelled)
                 .await
                 .unwrap(),
-            different
+            [image.clone()]
         );
+        assert!(
+            repository
+                .resolve(&image.artifact_id, &NeverCancelled)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            repository
+                .store()
+                .path_of(&image.artifact_id)
+                .unwrap_err()
+                .kind,
+            ErrorKind::NotFound
+        );
+        let uploads = database
+            .admit("count-cleaned-uploads", &NeverCancelled, |tx| {
+                Ok(
+                    tx.query_row("SELECT count(*) FROM image_upload", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                )
+            })
+            .unwrap()
+            .into_completion()
+            .await
+            .unwrap()
+            .into_value()
+            .into_output();
+        assert_eq!(uploads, 0);
         database.close().await.unwrap();
     }
-}
-
-#[tokio::test]
-async fn references_block_stale_cleanup_and_release_allows_it() {
-    let (_temp, database, repository) = setup_repository("image-claim");
-    let image = metadata('c', "pixel.png", "test");
-    repository
-        .record(image.clone(), "upload-1", &NeverCancelled)
-        .await
-        .unwrap();
-    repository
-        .claim(&image.artifact_id, "message-1", &NeverCancelled)
-        .await
-        .unwrap();
-    let before = SystemTime::now() + Duration::from_secs(60);
-    assert!(
-        repository
-            .remove_stale_unreferenced_before(before, &NeverCancelled)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    repository
-        .release(&image.artifact_id, "message-1", &NeverCancelled)
-        .await
-        .unwrap();
-    let removed = repository
-        .remove_stale_unreferenced_before(before, &NeverCancelled)
-        .await
-        .unwrap();
-    assert_eq!(removed, vec![image]);
-    database.close().await.unwrap();
-}
-
-#[tokio::test]
-async fn existing_conversation_image_reference_prevents_cleanup() {
-    let (_temp, database, repository) = setup_repository("image-conversation-reference");
-    let image = metadata('d', "pixel.png", "test");
-    repository
-        .record(image.clone(), "upload-1", &NeverCancelled)
-        .await
-        .unwrap();
-    let artifact_id = image.artifact_id.clone();
-    database.admit("image-conversation-fixture", &NeverCancelled, move |tx| {
-        tx.execute("INSERT INTO conversation_item (agent_session, origin, role, tool_call_id, created_at) VALUES ('agent', 'input', 'user', '', '2025-01-01T00:00:00.0000000+00:00')", [])?;
-        tx.execute("INSERT INTO conversation_part (item_sequence, position, kind, text, artifact_id, media_type, display_name) VALUES (last_insert_rowid(), 0, 'image_artifact', '', ?1, 'image/png', 'pixel.png')", [&artifact_id])?;
-        Ok(())
-    }).unwrap().into_completion().await.unwrap();
-    assert!(
-        repository
-            .remove_stale_unreferenced_before(
-                SystemTime::now() + Duration::from_secs(60),
-                &NeverCancelled
-            )
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    database.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -556,28 +562,18 @@ async fn missing_artifact_insert_rolls_back_content_and_reports_original_validat
         tx.execute_batch("CREATE TRIGGER ignore_image_artifact BEFORE INSERT ON image_artifact BEGIN SELECT RAISE(IGNORE); END;")?;
         Ok(())
     }).unwrap().into_completion().await.unwrap();
-
-    let error = repository
-        .record(
-            metadata('f', "pixel.png", "test"),
-            "upload-1",
-            &NeverCancelled,
-        )
+    let error = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
         .await
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidData);
     assert_eq!(error.message, "The image artifact was not recorded.");
-
     let counts = database
         .admit("count-artifact-rollback", &NeverCancelled, |tx| {
             Ok((
-                tx.query_row("SELECT COUNT(*) FROM image_content", [], |row| {
+                tx.query_row("SELECT count(*) FROM image_artifact", [], |row| {
                     row.get::<_, i64>(0)
                 })?,
-                tx.query_row("SELECT COUNT(*) FROM image_artifact", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
-                tx.query_row("SELECT COUNT(*) FROM image_upload", [], |row| {
+                tx.query_row("SELECT count(*) FROM image_upload", [], |row| {
                     row.get::<_, i64>(0)
                 })?,
             ))
@@ -588,7 +584,7 @@ async fn missing_artifact_insert_rolls_back_content_and_reports_original_validat
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(counts, (0, 0, 0));
+    assert_eq!(counts, (0, 0));
     database.close().await.unwrap();
 }
 
@@ -599,29 +595,23 @@ async fn upload_insert_abort_rolls_back_rows_preserves_sqlite_cause_and_worker_s
         tx.execute_batch("CREATE TRIGGER abort_image_upload BEFORE INSERT ON image_upload BEGIN SELECT RAISE(ABORT, 'controlled upload failure'); END;")?;
         Ok(())
     }).unwrap().into_completion().await.unwrap();
-
-    let error = repository
-        .record(
-            metadata('f', "pixel.png", "test"),
-            "upload-1",
-            &NeverCancelled,
-        )
+    let error = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
         .await
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Database);
-    let cause = std::error::Error::source(&error).unwrap();
-    assert!(cause.downcast_ref::<rusqlite::Error>().is_some());
-
+    assert!(
+        std::error::Error::source(&error)
+            .unwrap()
+            .downcast_ref::<rusqlite::Error>()
+            .is_some()
+    );
     let counts = database
         .admit("count-upload-rollback", &NeverCancelled, |tx| {
             Ok((
-                tx.query_row("SELECT COUNT(*) FROM image_content", [], |row| {
+                tx.query_row("SELECT count(*) FROM image_artifact", [], |row| {
                     row.get::<_, i64>(0)
                 })?,
-                tx.query_row("SELECT COUNT(*) FROM image_artifact", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
-                tx.query_row("SELECT COUNT(*) FROM image_upload", [], |row| {
+                tx.query_row("SELECT count(*) FROM image_upload", [], |row| {
                     row.get::<_, i64>(0)
                 })?,
             ))
@@ -632,10 +622,9 @@ async fn upload_insert_abort_rolls_back_rows_preserves_sqlite_cause_and_worker_s
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(counts, (0, 0, 0));
-
+    assert_eq!(counts, (0, 0));
     database
-        .admit("drop-abort-trigger", &NeverCancelled, |tx| {
+        .admit("drop-upload-trigger", &NeverCancelled, |tx| {
             tx.execute_batch("DROP TRIGGER abort_image_upload;")?;
             Ok(())
         })
@@ -643,13 +632,15 @@ async fn upload_insert_abort_rolls_back_rows_preserves_sqlite_cause_and_worker_s
         .into_completion()
         .await
         .unwrap();
-    let image = metadata('f', "pixel.png", "test");
+    let image = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
+        .await
+        .unwrap();
     assert_eq!(
         repository
-            .record(image.clone(), "upload-1", &NeverCancelled)
+            .resolve(&image.artifact_id, &NeverCancelled)
             .await
             .unwrap(),
-        image
+        Some(image)
     );
     database.close().await.unwrap();
 }
