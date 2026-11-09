@@ -3,8 +3,8 @@ use super::execution::{
     CompactionEffectsAdapter, CompactionEstimates, CoreCancellation, SummaryProviderAdapter,
 };
 use super::{
-    CompactionError, CompactionGroup, CompactionObserver, CompactionResult, Compactor,
-    ContextCadence, ContextSize, ContextSnapshot, PlanningError, ProviderTokenBudget,
+    CompactionError, CompactionObserver, CompactionResult, Compactor, ContextCadence, ContextSize,
+    ContextSnapshot, PlanningError, ProviderTokenBudget,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_core::{
@@ -169,15 +169,6 @@ pub enum StatusInjection {
     Complete,
     /// The caller must refresh its full profile/model/security selection and try again.
     RefreshSelection,
-}
-
-pub(crate) struct CompactionCheckpoint {
-    instructions: String,
-}
-
-pub(crate) struct CompactionEpochInput {
-    pub checkpoint: CompactionCheckpoint,
-    pub input: parrot_core::compaction::CompactionInput,
 }
 
 pub struct ContextController {
@@ -570,7 +561,6 @@ impl ContextController {
         target: Option<&ContextSize>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
-        let prepared = self.read_epoch_compaction(&mut input, cancellation).await?;
         let configuration = self
             .compactor
             .planner()
@@ -578,6 +568,30 @@ impl ContextController {
         let definitions: Vec<parrot_core::ToolDefinition> =
             input.tools.iter().cloned().map(Into::into).collect();
         let estimates = CompactionEstimates::new(&self.compactor, input.selection);
+        let status = CompactionStatusRenderer(input.status);
+        let is_cancelled = || cancellation.is_cancelled();
+        let cancelled = || cancellation.cancelled();
+        let token = parrot_core::CancellationToken::new(&is_cancelled, &cancelled);
+        let preparation = CompactionPreparationAdapter {
+            controller: self,
+            prompt: input.prompt,
+            selection: input.selection,
+            events: input.events,
+        };
+        let prepared = parrot_core::compaction::prepare_compaction(
+            self.read_conversation_state(input.conversation),
+            &definitions,
+            &configuration,
+            &preparation,
+            &status,
+            |instructions, definitions, messages| {
+                estimates
+                    .estimate_context_tokens(instructions, definitions, messages)
+                    .map_err(ContextError::from)
+            },
+            token,
+        )
+        .await?;
         let mut effects = CompactionEffectsAdapter::<_, _, ContextError>::new(
             estimates,
             &mut self.blobs,
@@ -588,51 +602,39 @@ impl ContextController {
             input.sessions,
             ContextObserver(input.events),
         );
-        let status = CompactionStatusRenderer(input.status);
-        let is_cancelled = || cancellation.is_cancelled();
-        let cancelled = || cancellation.cancelled();
         let result = parrot_core::compaction::compact_conversation(
-            &prepared.input,
+            &prepared,
             &definitions,
             &configuration,
             &mut effects,
             &provider,
             &status,
-            parrot_core::CancellationToken::new(&is_cancelled, &cancelled),
+            token,
         )
         .await;
-        self.record_epoch_compaction(&mut input, prepared.checkpoint, result, cancellation)
+        self.record_epoch_compaction(&mut input, prepared.instructions, result, cancellation)
             .await
     }
 
-    pub(crate) async fn read_epoch_compaction(
-        &mut self,
-        input: &mut EpochInput<'_>,
-        cancellation: &dyn Cancellation,
-    ) -> ContextResult<CompactionEpochInput> {
+    pub(crate) async fn report_epoch_started(
+        &self,
+        events: &dyn ContextEvents,
+    ) -> ContextResult<()> {
         let mut started = self.event()?;
         started.set_compaction_started(CompactionStarted::new());
-        input.events.emit(started, &Uncancelled).await?;
-        match self.read_compaction_inner(input, cancellation).await {
-            Ok(prepared) => Ok(prepared),
-            Err(error) => {
-                self.fail_epoch_compaction(error.to_string(), input.events)
-                    .await?;
-                Err(error)
-            }
-        }
+        events.emit(started, &Uncancelled).await
     }
 
     pub(crate) async fn record_epoch_compaction(
         &mut self,
         input: &mut EpochInput<'_>,
-        checkpoint: CompactionCheckpoint,
+        instructions: String,
         result: ContextResult<Option<parrot_core::compaction::FittedCompaction>>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
         let outcome: ContextResult<EpochResult> = async {
             let result = self
-                .apply_compaction(input, checkpoint, result?, cancellation)
+                .apply_compaction(input, instructions, result?, cancellation)
                 .await?;
             let mut finished = self.event()?;
             finished.set_compaction_finished(CompactionFinished::new());
@@ -669,93 +671,43 @@ impl ContextController {
         &mut self.blobs
     }
 
-    async fn read_compaction_inner(
-        &mut self,
-        input: &mut EpochInput<'_>,
-        cancellation: &dyn Cancellation,
-    ) -> ContextResult<CompactionEpochInput> {
-        input.prompt.sample_epoch(cancellation).await?;
-        let instructions = input.prompt.build(input.selection, cancellation).await?;
-        let effective = self.history.effective_conversation_groups().await?;
-        let checkpoints = self.history.active_checkpoint_assistant_sequences().await?;
-        let base = effective
-            .snapshot
-            .as_ref()
-            .map_or(0, |snapshot| snapshot.watermark);
-        let mut materialized = Vec::new();
-        if let Some(snapshot) = &effective.snapshot {
-            materialized.push(vec![Message::system(&snapshot.summary)]);
-        }
-        for group in &effective.groups {
-            let mut messages = Vec::new();
-            for item in &group.items {
-                messages.push(provider_message(
-                    &input.conversation.materialize(item.clone()).await?,
-                ));
-            }
-            materialized.push(messages);
-        }
-        let mut groups = Vec::new();
-        let offset = usize::from(effective.snapshot.is_some());
-        if offset > 0 {
-            groups.push(CompactionGroup {
-                messages: &materialized[0],
-                end_watermark: base,
-                has_checkpoint_before: false,
-                is_complete: true,
+    pub(crate) async fn read_conversation_state(
+        &self,
+        conversation: &AgentConversation,
+    ) -> ContextResult<parrot_core::compaction::ConversationState> {
+        let state = self.history.read_conversation_state().await?;
+        let mut history = Vec::with_capacity(state.items.len());
+        for item in state.items {
+            history.push(parrot_core::compaction::ConversationHistoryItem {
+                sequence: item.item.sequence,
+                tool_owner_sequence: item.tool_owner_sequence,
+                is_compaction_status: item.is_compaction_status,
+                message: provider_message(&conversation.materialize(item.item).await?).into(),
             });
         }
-        groups.extend(
-            effective
-                .groups
-                .iter()
-                .enumerate()
-                .map(|(index, group)| CompactionGroup {
-                    messages: &materialized[index + offset],
-                    end_watermark: group.end_watermark,
-                    has_checkpoint_before: group.assistant_sequence > 0
-                        && checkpoints.contains(&group.assistant_sequence),
-                    is_complete: group.is_complete,
+        Ok(parrot_core::compaction::ConversationState {
+            summary: state
+                .snapshot
+                .map(|snapshot| parrot_core::compaction::ConversationSummary {
+                    content: snapshot.summary,
+                    watermark: snapshot.watermark,
                 }),
-        );
-        let status = input
-            .status
-            .observe(&self.estimate(input, &instructions)?, cancellation)
-            .await?;
-        let fixed = Message::system(status);
-        Ok(CompactionEpochInput {
-            checkpoint: CompactionCheckpoint {
-                instructions: instructions.clone(),
-            },
-            input: parrot_core::compaction::CompactionInput {
-                groups: groups
-                    .iter()
-                    .map(|group| parrot_core::compaction::CompactionHistoryGroup {
-                        messages: group.messages.iter().cloned().map(Into::into).collect(),
-                        end_watermark: group.end_watermark,
-                        has_checkpoint_before: group.has_checkpoint_before,
-                        is_complete: group.is_complete,
-                    })
-                    .collect(),
-                base_watermark: base,
-                instructions,
-                messages: provider_messages(input.conversation)
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                fixed_message: fixed.into(),
-            },
+            history,
+            checkpoint_sequences: state.checkpoint_sequences,
+            messages: provider_messages(conversation)
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         })
     }
 
     async fn apply_compaction(
         &mut self,
         input: &mut EpochInput<'_>,
-        checkpoint: CompactionCheckpoint,
+        instructions: String,
         compacted: Option<parrot_core::compaction::FittedCompaction>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
-        let CompactionCheckpoint { instructions } = checkpoint;
         let mut reduced = false;
         if let Some(compacted) = compacted {
             let status = compacted.status;
@@ -872,6 +824,55 @@ impl ContextController {
             ..AgentNotice::new()
         });
         Ok(event)
+    }
+}
+
+struct CompactionPreparationAdapter<'a> {
+    controller: &'a ContextController,
+    prompt: &'a SessionPrompt,
+    selection: &'a ResolvedModelSelection,
+    events: &'a dyn ContextEvents,
+}
+
+impl parrot_core::compaction::CompactionPreparationEffects for CompactionPreparationAdapter<'_> {
+    type Error = ContextError;
+
+    fn report_started(&self) -> BoxFuture<'_, ContextResult<()>> {
+        Box::pin(self.controller.report_epoch_started(self.events))
+    }
+
+    fn sample_epoch<'a, 'c>(
+        &'a self,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, ContextResult<()>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.prompt
+                .sample_epoch(&CoreCancellation(cancellation))
+                .await?;
+            Ok(())
+        })
+    }
+
+    fn render_instructions<'a, 'c>(
+        &'a self,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, ContextResult<String>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            Ok(self
+                .prompt
+                .build(self.selection, &CoreCancellation(cancellation))
+                .await?)
+        })
+    }
+
+    fn report_failed(&self, message: String) -> BoxFuture<'_, ContextResult<()>> {
+        Box::pin(self.controller.fail_epoch_compaction(message, self.events))
     }
 }
 

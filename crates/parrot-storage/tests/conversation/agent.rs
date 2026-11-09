@@ -73,6 +73,47 @@ fn model(role: MessageRole, text: &str) -> ModelMessage {
 }
 
 #[tokio::test]
+async fn bound_raw_conversation_state_reads_only_its_agent_and_does_not_refresh_projection() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let projection = Arc::new(Projection::new(
+        "agent",
+        repo.events().database().selected_root().clone(),
+    ));
+    let history = repo
+        .bind_agent_history("agent".into(), projection.clone())
+        .unwrap();
+    let empty = history.read_conversation_state().await.unwrap();
+    assert_eq!(empty.snapshot, None);
+    assert!(empty.items.is_empty());
+    assert!(empty.checkpoint_sequences.is_empty());
+    repo.events()
+        .append(
+            event("owned", "agent"),
+            Some(ConversationMessage::text(MessageRole::User, "owned")),
+        )
+        .await
+        .unwrap();
+    repo.events()
+        .append(
+            event("other", "other"),
+            Some(ConversationMessage::text(MessageRole::User, "other")),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        history.read_conversation_state().await.unwrap(),
+        repo.read_conversation_state("agent".into()).await.unwrap()
+    );
+    assert_eq!(
+        history.read_conversation_state().await.unwrap().items.len(),
+        1
+    );
+    assert!(projection.entries_seen.lock().unwrap().is_empty());
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn last_visible_turn_is_absent_for_empty_or_system_only_conversations() {
     let fixture = Fixture::new();
     let repo = fixture.repository();

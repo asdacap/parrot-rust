@@ -135,6 +135,54 @@ pub fn read_compaction_tail(
 }
 
 impl ConversationRepository {
+    /// Captures a summary and its flat durable tail with stored ownership and checkpoint facts.
+    pub async fn read_conversation_state(
+        &self,
+        agent: String,
+    ) -> Result<ConversationHistorySnapshot, EventError> {
+        self.events
+            .transaction(move |tx| {
+                ensure_conversation_projection(tx)?;
+                let snapshot = super::compaction::read_snapshot(tx, &agent)?;
+                let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
+                let mut owners = std::collections::BTreeMap::new();
+                let mut read = tx.prepare("SELECT assistant_sequence, item_sequence FROM tool_batch_result WHERE agent_session = ?1 AND item_sequence > ?2 UNION ALL SELECT assistant_sequence, item_sequence FROM tool_batch_synthetic WHERE agent_session = ?1 AND item_sequence > ?2;")?;
+                for row in read.query_map(params![agent, watermark], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                })? {
+                    let (owner, child) = row?;
+                    owners.insert(child, owner);
+                }
+                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM compaction_status AS status WHERE status.agent_session = item.agent_session AND status.status_conversation_sequence = item.sequence) FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.sequence > ?2 ORDER BY item.sequence;")?;
+                let mut rows = read.query(params![agent, watermark])?;
+                let mut items = Vec::new();
+                while let Some(row) = rows.next()? {
+                    let sequence = row.get(0)?;
+                    items.push(ConversationHistoryItem {
+                        item: read_message(
+                            tx,
+                            sequence,
+                            &row.get::<_, String>(1)?,
+                            &row.get::<_, String>(2)?,
+                            row.get(3)?,
+                        )?,
+                        tool_owner_sequence: owners.get(&sequence).copied(),
+                        is_compaction_status: row.get(4)?,
+                    });
+                }
+                let mut read = tx.prepare("SELECT DISTINCT checkpoint.assistant_sequence FROM history_checkpoint AS checkpoint JOIN (SELECT title, MAX(sequence) AS sequence FROM history_checkpoint WHERE agent_session = ?1 GROUP BY title) AS latest ON latest.sequence = checkpoint.sequence WHERE checkpoint.agent_session = ?1 AND checkpoint.assistant_sequence > ?2 ORDER BY checkpoint.assistant_sequence;")?;
+                let checkpoint_sequences = read
+                    .query_map(params![agent, watermark], |row| row.get(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(ConversationHistorySnapshot {
+                    snapshot,
+                    items,
+                    checkpoint_sequences,
+                })
+            })
+            .await
+    }
+
     /// Captures the current conversation boundary for a new public execution.
     pub async fn execution_watermark(&self, agent: String) -> Result<i64, EventError> {
         self.events.transaction(move |tx| {

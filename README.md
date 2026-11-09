@@ -38,12 +38,15 @@ Its turn contracts are:
 - `Provider`: model invocation and awaited stream cleanup.
 
 Compaction receives configuration and native effects through `CompactionDependencies`.
-Core computes target limits, selects the safe prefix, runs summaries, and fits the
-actual replacement status. `CompactionEffects` supplies model-aware estimates,
-actual blob notices, and awaited progress. `StatusRenderer` renders the context
-supplied by core without making fitting decisions. `SummaryProvider` invokes
-private summary requests and joins their streams. Its typed summary outcome
-preserves diagnostics without exposing provider stream representations.
+Core samples instructions, assembles durable conversation groups, computes target
+limits, selects the safe prefix, runs summaries, and fits the actual replacement
+status. `CompactionPreparationEffects` supplies prompt sampling, instruction
+rendering, and preparation lifecycle publication. `CompactionEffects` supplies
+model-aware estimates, actual blob notices, and awaited progress. `StatusRenderer`
+renders the context supplied by core without making fitting decisions.
+`SummaryProvider` invokes private summary requests and joins their streams. Its
+typed summary outcome preserves diagnostics without exposing provider stream
+representations.
 
 Requests, responses, tool execution results, messages, tool definitions, and errors
 are concrete core-owned types. Adapters implement the same interface; they do not
@@ -76,16 +79,24 @@ The core specifies and implements:
   closing a turn.
 
 For core-selected automatic compaction and oversized recovery,
-`States::read_compaction` returns owned conversation groups, checkpoint metadata,
-watermarks, sampled instructions, and current messages. It returns no executable
-services or borrowed runtime guards. Runtime composition supplies configuration,
-estimates, status rendering, and summary execution independently. Core's
-`compact_conversation` resolves target policy, selects the plan, runs the shared
-summary algorithm, and fits the actual replacement status. State then records the
-outcome on success or failure before execution continues. Recording returns refreshed
-instructions and whether context was reduced. Native state owns lifecycle events,
-summary and watermark persistence, and conversation reload. Inline and explicit
-native paths call that same core implementation.
+`States::read_conversation_state` returns one raw summary and its durable tail,
+stored tool ownership, active checkpoint sequences, and current in-memory messages.
+The durable facts are captured in one transaction. The tail starts after the
+summary watermark, not at the beginning of the archive. Current messages remain
+separate because they can include transient notices.
+
+Core's `prepare_compaction` samples instructions, excludes old compaction-status
+rows, assembles causal groups from stored ownership, derives completeness and
+checkpoint flags, and renders initial status from the current-message estimate.
+The state getter performs no preparation or lifecycle effects and retains no
+pending compaction. Runtime composition supplies configuration and native effects
+independently. Core's `compact_conversation` selects the plan, runs summaries, and
+fits replacement status. State records that outcome with the explicitly supplied
+instructions and tool definitions. After a successful start, preparation failures
+publish failure before returning without recording. Native state retains summary
+and watermark persistence, conversation reload, and terminal publication. Inline
+and explicit native paths
+use the same core preparation and compaction implementation.
 
 Core owns checkpoint selection, incomplete-group protection, watermark progress,
 and final context validation. Status fitting compares complete context snapshots

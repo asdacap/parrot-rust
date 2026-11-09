@@ -749,49 +749,57 @@ impl States for MemoryState {
             Ok(self.messages.clone())
         })
     }
-    fn read_compaction<'a>(
-        &'a mut self,
-        definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<parrot_core::compaction::CompactionInput, Error>> {
+    fn read_conversation_state(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, Error>> {
         Box::pin(async move {
-            self.step("read_compaction")?;
-            self.compacted_definitions.push(definitions.to_vec());
-            let groups = if let Some(plan) = &self.compaction_plan {
-                plan.groups
-                    .iter()
-                    .enumerate()
-                    .map(
-                        |(index, group)| parrot_core::compaction::CompactionHistoryGroup {
-                            messages: group.messages.clone(),
-                            end_watermark: plan.watermark + index as i64
-                                - plan.keep_group_from as i64
-                                + 1,
-                            has_checkpoint_before: false,
-                            is_complete: group.is_complete,
-                        },
-                    )
-                    .collect()
+            self.trace.step("conversation_state", self.fail_at)?;
+            let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
+                (
+                    plan.groups
+                        .iter()
+                        .flat_map(|group| group.messages.clone())
+                        .collect::<Vec<_>>(),
+                    plan.watermark - plan.keep_group_from as i64 + 1,
+                )
             } else {
-                parrot_core::compaction::group_messages(&self.messages)
+                (self.messages.clone(), 1)
             };
-            Ok(parrot_core::compaction::CompactionInput {
-                groups,
-                base_watermark: 0,
-                instructions: self.instructions.clone(),
+            let mut owners = std::collections::BTreeMap::new();
+            let history = messages
+                .into_iter()
+                .enumerate()
+                .map(|(index, message)| {
+                    let sequence = first_sequence + index as i64;
+                    let tool_owner_sequence = owners.get(&message.tool_call_id).copied();
+                    for call in &message.tool_calls {
+                        owners.insert(call.id.clone(), sequence);
+                    }
+                    parrot_core::compaction::ConversationHistoryItem {
+                        sequence,
+                        tool_owner_sequence,
+                        is_compaction_status: false,
+                        message,
+                    }
+                })
+                .collect();
+            Ok(parrot_core::compaction::ConversationState {
+                history,
                 messages: self.messages.clone(),
-                fixed_message: Message {
-                    role: Role::System,
-                    ..compaction_support::message("status")
-                },
+                ..Default::default()
             })
         })
     }
-    fn record_compaction(
-        &mut self,
+    fn record_compaction<'a>(
+        &'a mut self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
         result: Result<Option<parrot_core::compaction::FittedCompaction>, Error>,
-    ) -> BoxFuture<'_, Result<ContextCompaction, Error>> {
+    ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async move {
             self.step("compact")?;
+            self.compacted_definitions.push(definitions.to_vec());
+            self.instructions = instructions.into();
             self.recorded_compactions.push(
                 result
                     .clone()

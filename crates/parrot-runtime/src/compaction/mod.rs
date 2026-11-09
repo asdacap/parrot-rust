@@ -2,7 +2,6 @@
 mod budget;
 mod cadence;
 mod execution;
-pub(crate) use context::CompactionCheckpoint;
 pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
 pub(crate) use execution::{CompactionEstimates, SummaryProviderAdapter};
 mod context;

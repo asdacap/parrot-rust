@@ -16,7 +16,6 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     pending_prompt: Option<PendingPrompt>,
     exit_blocker_sources: Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>,
     persistence_key: Option<TurnKey>,
-    pending_compaction: Option<PendingCompaction>,
 }
 
 struct PendingPrompt {
@@ -24,11 +23,6 @@ struct PendingPrompt {
     content: String,
     observed_percentage: i32,
     published: Option<Event>,
-}
-
-struct PendingCompaction {
-    checkpoint: crate::compaction::CompactionCheckpoint,
-    definitions: Vec<sessions::Tool>,
 }
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -57,6 +51,87 @@ struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
 
 struct RuntimeStatusRenderer<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
+}
+
+struct RuntimeCompactionPreparation<'a, S: AccessSnapshot, T: TurnTools<S>> {
+    backend: &'a RuntimeBackend<S, T>,
+    binding: &'a TurnBinding<S, T>,
+}
+
+impl<S, T> parrot_core::compaction::CompactionPreparationEffects
+    for RuntimeCompactionPreparation<'_, S, T>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    type Error = CoreError;
+
+    fn report_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .report_epoch_started(&ContextEmitter {
+                    backend: self.backend,
+                })
+                .await
+                .map_err(Into::into)
+        })
+    }
+
+    fn sample_epoch<'a, 'c>(
+        &'a self,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), CoreError>>
+    where
+        'c: 'a,
+    {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .sample_epoch(&RuntimeCancellation(cancellation))
+                .await
+                .map_err(Into::into)
+        })
+    }
+
+    fn render_instructions<'a, 'c>(
+        &'a self,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, CoreError>>
+    where
+        'c: 'a,
+    {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            self.backend
+                .prompt
+                .build(&selection.model, &RuntimeCancellation(cancellation))
+                .await
+                .map_err(Into::into)
+        })
+    }
+
+    fn report_failed(&self, message: String) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .fail_epoch_compaction(
+                    message,
+                    &ContextEmitter {
+                        backend: self.backend,
+                    },
+                )
+                .await
+                .map_err(Into::into)
+        })
+    }
 }
 
 struct RuntimeCompactionEffects<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -324,7 +399,6 @@ where
             pending_prompt: None,
             exit_blocker_sources: Vec::new(),
             persistence_key: None,
-            pending_compaction: None,
         }
     }
 }
@@ -480,7 +554,12 @@ where
                         &backend.sessions,
                         ContextEmitter { backend },
                     );
+                let preparation = RuntimeCompactionPreparation {
+                    backend,
+                    binding: &binding,
+                };
                 let mut compaction = parrot_core::compaction::CompactionDependencies {
+                    preparation: &preparation,
                     configuration: &configuration,
                     effects: &mut effects,
                     provider: &summary_provider,
@@ -809,53 +888,27 @@ where
                 .collect())
         })
     }
-    fn read_compaction<'a>(
-        &'a mut self,
-        definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<parrot_core::compaction::CompactionInput, CoreError>> {
+    fn read_conversation_state(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, CoreError>> {
         adapt_operation(async move {
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let selection = self.binding.capture_selection()?;
-            let definitions: Vec<sessions::Tool> =
-                definitions.iter().cloned().map(Into::into).collect();
-            let events = ContextEmitter { backend };
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            let prepared = state
+            let state = self.backend.state.lock().await;
+            state
                 .context
-                .read_epoch_compaction(
-                    &mut EpochInput {
-                        selection: &selection.model,
-                        tools: &definitions,
-                        conversation: &mut state.conversation,
-                        prompt: &backend.prompt,
-                        sessions: &backend.sessions,
-                        status: status.as_ref(),
-                        events: &events,
-                    },
-                    self.cancellation,
-                )
-                .await?;
-            self.pending_compaction = Some(PendingCompaction {
-                checkpoint: prepared.checkpoint,
-                definitions,
-            });
-            Ok(prepared.input)
+                .read_conversation_state(&state.conversation)
+                .await
+                .map_err(Into::into)
         })
     }
-    fn record_compaction(
-        &mut self,
+    fn record_compaction<'a>(
+        &'a mut self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
         result: Result<Option<parrot_core::compaction::FittedCompaction>, CoreError>,
-    ) -> BoxFuture<'_, Result<CoreContextCompaction, CoreError>> {
+    ) -> BoxFuture<'a, Result<CoreContextCompaction, CoreError>> {
         Box::pin(async move {
-            let pending = self
-                .pending_compaction
-                .take()
-                .ok_or_else(|| CoreError::failed("compaction preparation is unavailable"))?;
+            let definitions: Vec<sessions::Tool> =
+                definitions.iter().cloned().map(Into::into).collect();
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
@@ -882,14 +935,14 @@ where
                 .record_epoch_compaction(
                     &mut EpochInput {
                         selection: &selection.model,
-                        tools: &pending.definitions,
+                        tools: &definitions,
                         conversation: &mut state.conversation,
                         prompt: &backend.prompt,
                         sessions: &backend.sessions,
                         status: status.as_ref(),
                         events: &events,
                     },
-                    pending.checkpoint,
+                    instructions.into(),
                     Ok(compacted),
                     self.cancellation,
                 )

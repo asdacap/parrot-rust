@@ -6,10 +6,12 @@ use std::fmt;
 
 mod fitting;
 mod planning;
+mod preparation;
 pub use fitting::{compact_conversation, fit_compaction, fit_status};
 pub use planning::{
     CompactionConfiguration, CompactionPolicy, PlanningError, group_messages, is_complete,
 };
+pub use preparation::prepare_compaction;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactionGroup {
@@ -32,6 +34,30 @@ pub struct CompactionHistoryGroup {
     pub end_watermark: i64,
     pub has_checkpoint_before: bool,
     pub is_complete: bool,
+}
+
+/// Captures durable history facts and the independent current provider-visible view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ConversationState {
+    pub summary: Option<ConversationSummary>,
+    /// Contains the chronological durable tail after the captured summary watermark.
+    pub history: Vec<ConversationHistoryItem>,
+    pub checkpoint_sequences: Vec<i64>,
+    pub messages: Vec<Message>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationSummary {
+    pub content: String,
+    pub watermark: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationHistoryItem {
+    pub sequence: i64,
+    pub tool_owner_sequence: Option<i64>,
+    pub is_compaction_status: bool,
+    pub message: Message,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -88,8 +114,31 @@ pub trait StatusRenderer: Send + Sync {
         'c: 'a;
 }
 
+/// Performs prompt and lifecycle effects without assembling compaction input.
+pub trait CompactionPreparationEffects: Send + Sync {
+    type Error: Send;
+
+    /// Publishes the start before preparation, independent of request cancellation.
+    fn report_started(&self) -> BoxFuture<'_, Result<(), Self::Error>>;
+    fn sample_epoch<'a, 'c>(
+        &'a self,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Self::Error>>
+    where
+        'c: 'a;
+    fn render_instructions<'a, 'c>(
+        &'a self,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, Self::Error>>
+    where
+        'c: 'a;
+    /// Publishes a preparation failure, independent of request cancellation.
+    fn report_failed(&self, message: String) -> BoxFuture<'_, Result<(), Self::Error>>;
+}
+
 pub struct CompactionDependencies<'a> {
     pub configuration: &'a CompactionConfiguration,
+    pub preparation: &'a dyn CompactionPreparationEffects<Error = Error>,
     pub effects: &'a mut dyn CompactionEffects<Error = Error>,
     pub provider: &'a dyn SummaryProvider<Error = Error>,
     pub status: &'a dyn StatusRenderer<Error = Error>,

@@ -1,6 +1,7 @@
 use super::*;
 use parrot_core::compaction::{
-    CompactionConfiguration, CompactionDependencies, CompactionPlan, StatusRenderer,
+    CompactionConfiguration, CompactionDependencies, CompactionPlan, CompactionPreparationEffects,
+    StatusRenderer,
 };
 
 #[test]
@@ -10,26 +11,56 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
     }
 
     let mut state = MemoryState::new([]);
-    state.instructions = "sampled epoch".into();
     state.messages = vec![compaction_support::message("saved conversation")];
     let provider = state.summary_provider.clone();
-    let input = retain_owned(finish(state.read_compaction(&[])).unwrap());
+    let input = retain_owned(finish(state.read_conversation_state()).unwrap());
     drop(state);
 
-    assert_eq!(input.instructions, "sampled epoch");
     assert_eq!(
         input.messages,
         [compaction_support::message("saved conversation")]
     );
-    assert_eq!(input.groups[0].messages, input.messages);
-    assert_eq!(input.groups[0].end_watermark, 1);
-    assert_eq!(input.base_watermark, 0);
+    assert_eq!(input.history[0].message, input.messages[0]);
+    assert_eq!(input.history[0].sequence, 1);
+    assert_eq!(input.history[0].tool_owner_sequence, None);
+    assert_eq!(input.summary, None);
     assert!(provider.requests.lock().unwrap().is_empty());
+}
+
+struct MemoryPreparation;
+
+impl CompactionPreparationEffects for MemoryPreparation {
+    type Error = Error;
+
+    fn report_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn sample_epoch<'a, 'c>(&'a self, _: CancellationToken<'c>) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn render_instructions<'a, 'c>(
+        &'a self,
+        _: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Ok("core request".into()) })
+    }
+
+    fn report_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 struct MemoryStatus {
     contexts: Mutex<Vec<ContextSnapshot>>,
-    failure: Option<Error>,
+    failure: Option<(usize, Error)>,
 }
 
 impl StatusRenderer for MemoryStatus {
@@ -45,8 +76,10 @@ impl StatusRenderer for MemoryStatus {
     {
         Box::pin(async move {
             self.contexts.lock().unwrap().push(context);
-            if let Some(error) = &self.failure {
-                return Err(error.clone());
+            if let Some((call, error)) = &self.failure {
+                if *call == self.contexts.lock().unwrap().len() {
+                    return Err(error.clone());
+                }
             }
             Ok("fitted status".into())
         })
@@ -117,6 +150,7 @@ impl MemoryCompaction {
     pub(super) fn dependencies(&mut self) -> CompactionDependencies<'_> {
         CompactionDependencies {
             configuration: &self.configuration,
+            preparation: &MemoryPreparation,
             effects: &mut self.effects,
             provider: &self.provider,
             status: &self.status,
@@ -183,6 +217,30 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
 }
 
 #[test]
+fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
+    for stage in ["conversation_state", "estimate", "status"] {
+        let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
+        state.compaction_plan = Some(compaction_support::plan(&["saved group", "tail"]));
+        let provider = compaction_support::Provider::default();
+        let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
+        let error = Error::failed(stage);
+        match stage {
+            "conversation_state" => state.fail_at = Some(stage),
+            "estimate" => compaction.effects.context_failure = Some((1, error.clone())),
+            "status" => compaction.status.failure = Some((1, error.clone())),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            state.run_with_compaction(&mut compaction.dependencies()),
+            Err(error)
+        );
+        assert!(state.recorded_compactions.is_empty());
+        assert!(provider.requests.lock().unwrap().is_empty());
+        assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[test]
 fn planning_and_fitting_failures_are_recorded_before_propagation() {
     for (step, message) in [("plan", "planning failed"), ("fit", "fitting failed")] {
         let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
@@ -194,9 +252,9 @@ fn planning_and_fitting_failures_are_recorded_before_propagation() {
         let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
         let error = Error::failed(message);
         if step == "plan" {
-            compaction.effects.context_failure = Some((1, error.clone()));
+            compaction.effects.context_failure = Some((2, error.clone()));
         } else {
-            compaction.status.failure = Some(error.clone());
+            compaction.status.failure = Some((2, error.clone()));
         }
         assert_eq!(
             state.run_with_compaction(&mut compaction.dependencies()),
