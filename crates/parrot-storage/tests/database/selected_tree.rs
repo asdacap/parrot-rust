@@ -74,103 +74,72 @@ pub async fn suite(workspace: &Path, fixtures: &Path) -> Result<Value> {
     let source = fixtures.join("legacy-canonical-before.sqlite");
     let source_hash = hash(&source)?;
     let mut cases = Vec::new();
-    for case in ["fresh-selected", "legacy-selected"] {
-        let case_root = workspace.join(case);
-        let selected = case_root.join("selected/same-id");
-        let unselected = case_root.join("unselected/same-id");
-        // Refuse accidental reuse of a previous runtime tree.
-        std::fs::create_dir(&case_root)?;
-        std::fs::create_dir_all(&selected)?;
-        std::fs::create_dir_all(&unselected)?;
-        std::fs::write(selected.join("keep"), b"selected marker")?;
-        std::fs::write(unselected.join("keep"), b"unselected marker")?;
-        std::os::unix::fs::symlink("keep", selected.join("keep-link"))?;
-        std::os::unix::fs::symlink("keep", unselected.join("keep-link"))?;
-        std::fs::copy(&source, unselected.join("session.db"))?;
-        assert_eq!(hash(&unselected.join("session.db"))?, source_hash);
-        let path = selected.join("session.db");
-        let before = if case == "legacy-selected" {
-            std::fs::copy(&source, &path)?;
-            assert_eq!(hash(&path)?, source_hash);
-            Some(super::observe::inspect_raw(&path)?)
-        } else {
-            assert!(!path.exists());
-            None
-        };
-        let selected_before = tree(&selected)?;
-        let unselected_before = tree(&unselected)?;
-        let database = SessionDatabase::open(SelectedSessionRoot::new(
-            selected.clone(),
-            RootOrigin::Current,
-        )?)?;
-        let observed_path = path.clone();
-        let opened = database
-            .admit("selected-tree-inspect", &Active, move |tx| {
-                super::observe::inspect(tx, &observed_path)
-            })
-            .map_err(|error| format!("inspection admission: {error:?}"))?
-            .into_completion()
-            .await?
-            .into_value()
-            .into_output();
-        database.close().await?;
-        let after = super::observe::inspect_raw(&path)?;
-        if let Some(before) = &before {
-            let before_payloads: Vec<_> = before["tables"]["event"]["rows"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|row| (&row["sequence"], &row["payload"]))
-                .collect();
-            let after_payloads: Vec<_> = after["tables"]["event"]["rows"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|row| (&row["sequence"], &row["payload"]))
-                .collect();
-            assert_eq!(before_payloads, after_payloads);
-            assert!(after["tables"]["agent_lineage"].is_object());
-            assert!(
-                after["tables"]["event"]["columns"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|column| column["name"] == "request_id")
-            );
-        } else {
-            for table in after["tables"].as_object().unwrap().values() {
-                assert!(
-                    table["rows"].as_array().unwrap().is_empty(),
-                    "fresh root borrowed facts"
-                );
-            }
-        }
-        assert_eq!(opened["journal_mode"], json!([{"journal_mode":"truncate"}]));
-        assert_eq!(
-            after["sidecars"],
-            json!({"wal_exists":false,"shm_exists":false})
-        );
-        let journal = path.with_extension("db-journal");
-        if journal.exists() {
-            assert_eq!(std::fs::metadata(&journal)?.len(), 0);
-        }
-        let selected_after = tree(&selected)?;
-        let unselected_after = tree(&unselected)?;
-        allowed_changes(&selected_before, &selected_after);
-        assert_eq!(unselected_before, unselected_after);
-        cases.push(
-            json!({"case_id":case, "fixture_sha256":source_hash, "before":before,
-            "opened":opened, "after":after, "selected-before":selected_before,
-            "selected-after":selected_after, "unselected-before":unselected_before,
-            "unselected-after":unselected_after}),
+    let case = "fresh-selected";
+    let case_root = workspace.join(case);
+    let selected = case_root.join("selected/same-id");
+    let unselected = case_root.join("unselected/same-id");
+    // Refuse accidental reuse of a previous runtime tree.
+    std::fs::create_dir(&case_root)?;
+    std::fs::create_dir_all(&selected)?;
+    std::fs::create_dir_all(&unselected)?;
+    std::fs::write(selected.join("keep"), b"selected marker")?;
+    std::fs::write(unselected.join("keep"), b"unselected marker")?;
+    std::os::unix::fs::symlink("keep", selected.join("keep-link"))?;
+    std::os::unix::fs::symlink("keep", unselected.join("keep-link"))?;
+    std::fs::copy(&source, unselected.join("session.db"))?;
+    assert_eq!(hash(&unselected.join("session.db"))?, source_hash);
+    let path = selected.join("session.db");
+    assert!(!path.exists());
+    let before: Option<Value> = None;
+    let selected_before = tree(&selected)?;
+    let unselected_before = tree(&unselected)?;
+    let database = SessionDatabase::open(SelectedSessionRoot::new(
+        selected.clone(),
+        RootOrigin::Current,
+    )?)?;
+    let observed_path = path.clone();
+    let opened = database
+        .admit("selected-tree-inspect", &Active, move |tx| {
+            super::observe::inspect(tx, &observed_path)
+        })
+        .map_err(|error| format!("inspection admission: {error:?}"))?
+        .into_completion()
+        .await?
+        .into_value()
+        .into_output();
+    database.close().await?;
+    let after = super::observe::inspect_raw(&path)?;
+    for table in after["tables"].as_object().unwrap().values() {
+        assert!(
+            table["rows"].as_array().unwrap().is_empty(),
+            "fresh root borrowed facts"
         );
     }
+    assert_eq!(opened["journal_mode"], json!([{"journal_mode":"truncate"}]));
+    assert_eq!(
+        after["sidecars"],
+        json!({"wal_exists":false,"shm_exists":false})
+    );
+    let journal = path.with_extension("db-journal");
+    if journal.exists() {
+        assert_eq!(std::fs::metadata(&journal)?.len(), 0);
+    }
+    let selected_after = tree(&selected)?;
+    let unselected_after = tree(&unselected)?;
+    allowed_changes(&selected_before, &selected_after);
+    assert_eq!(unselected_before, unselected_after);
+    cases.push(
+        json!({"case_id":case, "fixture_sha256":source_hash, "before":before,
+        "opened":opened, "after":after, "selected-before":selected_before,
+        "selected-after":selected_after, "unselected-before":unselected_before,
+        "unselected-after":unselected_after}),
+    );
     assert_eq!(hash(&source)?, source_hash);
     Ok(json!({"schema_version":1,"cases":cases}))
 }
 
 #[tokio::test]
-async fn selected_creation_and_legacy_upgrade_do_not_borrow_or_mutate_counterpart() {
+async fn selected_creation_does_not_borrow_or_mutate_counterpart() {
     let workspace = std::env::temp_dir().join(format!(
         "parrot-t16-selected-{}-{}",
         std::process::id(),

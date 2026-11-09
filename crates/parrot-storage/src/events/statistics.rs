@@ -60,7 +60,6 @@ pub fn append_usage_fact(
     }
     let revision = super::record(tx, event, None, &clock())?.sequence;
     if event.has_request_usage_recorded() {
-        super::projection::ensure_agent_history_projection(tx)?;
         tx.execute(
             "INSERT INTO request_history_anchor (event_sequence, agent_session, history_sequence) SELECT ?1, ?2, COALESCE(MAX(sequence), 0) FROM agent_history WHERE agent_session = ?2;",
             params![revision, event.agent_session_id],

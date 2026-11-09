@@ -211,7 +211,6 @@ pub fn read_effective_conversation_groups(
     tx: &Transaction<'_>,
     agent: &str,
 ) -> Result<EffectiveConversationHistory, EventError> {
-    projection::ensure_conversation_projection(tx)?;
     let snapshot = tx
         .query_row(
             "SELECT summary, watermark FROM compaction_snapshot WHERE agent_session = ?1;",
@@ -377,8 +376,6 @@ fn initialize_fork(
     } else {
         preceding
     };
-    projection::ensure_conversation_projection(tx)?;
-    projection::ensure_agent_history_projection(tx)?;
     let mut sequences = BTreeMap::new();
     if let Some(snapshot) = effective
         .snapshot

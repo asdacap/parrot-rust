@@ -49,7 +49,6 @@ impl ConversationRepository {
         let saved = self
             .events
             .transaction(move |tx| {
-                projection::ensure_agent_history_projection(tx)?;
                 if already_saved(tx, &agent, snapshot.watermark)? {
                     return Ok(false);
                 }
@@ -72,7 +71,6 @@ impl ConversationRepository {
         let agent = published.agent_session_id.clone();
         let context = self.events.context().clone();
         let appended = self.events.transaction(move |tx| {
-            projection::ensure_agent_history_projection(tx)?;
             if already_saved(tx, &published.agent_session_id, snapshot.watermark)? { return Ok(false); }
             save_snapshot(tx, &published.agent_session_id, &snapshot, &(context.timestamp)())?;
             record(tx, &published, None, &(context.timestamp)())?;
@@ -99,7 +97,6 @@ impl ConversationRepository {
         agent: String,
     ) -> Result<Option<CompactionContext>, EventError> {
         self.events.transaction(move |tx| {
-            projection::ensure_conversation_projection(tx)?;
             let Some(snapshot) = read_snapshot(tx, &agent)? else { return Ok(None); };
             let sequence: Option<i64> = tx.query_row("SELECT status_conversation_sequence FROM compaction_status WHERE agent_session = ?1 AND watermark = ?2;", params![agent, snapshot.watermark], |row| row.get(0)).optional()?;
             let status = sequence.map(|sequence| super::reads::read_conversation_item(tx, sequence)).transpose()?;

@@ -1,7 +1,6 @@
 //! Agent history is authoritative SQLite projection history plus anchored request facts.
 use super::{ConversationRepository, EventError, reads::read_conversation_item, types::*};
 use crate::database::Transaction;
-use crate::events::projection::ensure_agent_history_projection;
 use parrot_domain::protocol::messages::parrot::Event;
 use protobuf::Message;
 use rusqlite::params;
@@ -60,7 +59,6 @@ pub fn include_request_history(
 impl ConversationRepository {
     pub async fn agent_history_session_ids(&self) -> Result<Vec<String>, EventError> {
         self.events.transaction(|tx| {
-            ensure_agent_history_projection(tx)?;
             let mut read = tx.prepare("SELECT agent_session FROM agent_history UNION SELECT agent_session FROM request_history_anchor ORDER BY agent_session;")?;
             Ok(read.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?)
         }).await
@@ -75,7 +73,6 @@ impl ConversationRepository {
         request_event_sequence: i64,
     ) -> Result<Vec<AgentHistoryEntry>, EventError> {
         self.events.transaction(move |tx| {
-            ensure_agent_history_projection(tx)?;
             let mut read = tx.prepare("SELECT sequence, kind, conversation_sequence, summary, watermark FROM agent_history WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence;")?;
             let mut rows = read.query(params![agent, history_sequence])?;
             let mut entries = Vec::new();

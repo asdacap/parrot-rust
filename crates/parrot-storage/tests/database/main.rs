@@ -1,8 +1,6 @@
 mod actor;
-mod migrations;
+mod event_metadata;
 mod observe;
-mod reference_comparison;
-mod scenario;
 mod selected_tree;
 mod source_boundaries;
 

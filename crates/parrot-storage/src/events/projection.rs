@@ -2,90 +2,12 @@
 use super::{error::EventError, types::*};
 use rusqlite::{OptionalExtension, Row, ToSql, Transaction, params};
 
-fn projection_current(tx: &Transaction<'_>, name: &str) -> Result<bool, EventError> {
-    let version: Option<i64> = tx
-        .query_row(
-            "SELECT version FROM projection_version WHERE name = ?1;",
-            [name],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(version.is_some_and(|version| version >= 1))
-}
-
-fn mark_projection(tx: &Transaction<'_>, name: &str) -> Result<(), EventError> {
-    tx.execute(
-        "INSERT OR REPLACE INTO projection_version (name, version) VALUES (?1, 1);",
-        [name],
-    )?;
-    Ok(())
-}
-
-pub fn ensure_conversation_projection(tx: &Transaction<'_>) -> Result<(), EventError> {
-    if projection_current(tx, "conversation")? {
-        return Ok(());
-    }
-    let count: i64 = tx.query_row("SELECT COUNT(*) FROM conversation_item;", [], |row| {
-        row.get(0)
-    })?;
-    if count == 0 {
-        tx.execute(
-            "INSERT INTO conversation_item (sequence, agent_session, origin, role, tool_call_id, created_at) \
-             SELECT sequence, agent_session, CASE role WHEN 'system' THEN 'system' \
-             WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' ELSE 'model' END, \
-             role, '', created_at FROM message ORDER BY sequence;",
-            [],
-        )?;
-        tx.execute(
-            "INSERT INTO conversation_part \
-             (item_sequence, position, kind, text, artifact_id, media_type, display_name) \
-             SELECT sequence, 0, 'text', content, '', '', '' FROM message ORDER BY sequence;",
-            [],
-        )?;
-    }
-    mark_projection(tx, "conversation")
-}
-
-pub fn ensure_agent_history_projection(tx: &Transaction<'_>) -> Result<(), EventError> {
-    if projection_current(tx, "agent-history")? {
-        return Ok(());
-    }
-    tx.execute(
-        "INSERT OR IGNORE INTO agent_history \
-         (agent_session, kind, conversation_sequence, summary, watermark, created_at) \
-         SELECT item.agent_session, 'message', item.sequence, '', 0, item.created_at \
-         FROM conversation_item AS item \
-         LEFT JOIN compaction_snapshot AS snapshot ON snapshot.agent_session = item.agent_session \
-         WHERE snapshot.watermark IS NULL OR item.sequence <= snapshot.watermark \
-         ORDER BY item.sequence;",
-        [],
-    )?;
-    tx.execute(
-        "INSERT OR IGNORE INTO agent_history \
-         (agent_session, kind, conversation_sequence, summary, watermark, created_at) \
-         SELECT agent_session, 'compaction', NULL, summary, watermark, created_at \
-         FROM compaction_snapshot ORDER BY created_at, agent_session;",
-        [],
-    )?;
-    tx.execute(
-        "INSERT OR IGNORE INTO agent_history \
-         (agent_session, kind, conversation_sequence, summary, watermark, created_at) \
-         SELECT item.agent_session, 'message', item.sequence, '', 0, item.created_at \
-         FROM conversation_item AS item \
-         JOIN compaction_snapshot AS snapshot ON snapshot.agent_session = item.agent_session \
-         WHERE item.sequence > snapshot.watermark ORDER BY item.sequence;",
-        [],
-    )?;
-    mark_projection(tx, "agent-history")
-}
-
 pub fn insert_agent_history_message(
     tx: &Transaction<'_>,
     agent: &str,
     conversation_sequence: i64,
     at: &str,
 ) -> Result<(), EventError> {
-    ensure_agent_history_projection(tx)?;
     tx.execute(
         "INSERT OR IGNORE INTO agent_history \
          (agent_session, kind, conversation_sequence, summary, watermark, created_at) \
@@ -301,7 +223,6 @@ pub fn project(
     message: &ConversationMessage,
     at: &str,
 ) -> Result<ConversationItem, EventError> {
-    ensure_conversation_projection(tx)?;
     tx.execute(
         "INSERT INTO message (agent_session, role, content, created_at) VALUES (?1, ?2, ?3, ?4);",
         params![agent, message.role.as_str(), content(&message.parts), at],

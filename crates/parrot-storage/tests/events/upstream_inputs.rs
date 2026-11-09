@@ -107,7 +107,6 @@ fn single<T>(mut values: Vec<T>) -> T {
 // the later T18 production Conversation/ModelHistory APIs or materialization.
 async fn messages(repo: &EventRepository) -> Vec<String> {
     repo.transaction(|tx| {
-        projection::ensure_conversation_projection(tx)?;
         let mut read = tx.prepare("SELECT sequence, role FROM conversation_item WHERE agent_session = ?1 ORDER BY sequence")?;
         let rows = read.query_map([SESSION], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
         rows.into_iter().map(|(sequence, role)| {
@@ -125,7 +124,6 @@ struct ObservedConversation {
 }
 async fn conversation(repo: &EventRepository) -> Vec<ObservedConversation> {
     repo.transaction(|tx| {
-        projection::ensure_conversation_projection(tx)?;
         let mut read = tx.prepare("SELECT sequence, origin FROM conversation_item WHERE agent_session = ?1 ORDER BY sequence")?;
         let rows = read.query_map([SESSION], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
         rows.into_iter().map(|(sequence, origin)| {

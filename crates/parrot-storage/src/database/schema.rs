@@ -1,12 +1,7 @@
 use super::{Connection, DatabaseError, Transaction};
 use parrot_domain::protocol::messages::parrot::Event;
-use protobuf::Message;
 use rusqlite::params;
 use std::path::Path;
-
-#[cfg(test)]
-#[path = "../../tests/database/process_kill.rs"]
-mod g16_process_kill;
 
 pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
     if let Some(parent) = path
@@ -15,16 +10,13 @@ pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
     {
         std::fs::create_dir_all(parent)?;
     }
-    let mut connection = Connection::open(path)?;
+    let connection = Connection::open(path)?;
     // Microsoft.Data.Sqlite's unmodified connection/command timeout is 30s;
     // rusqlite otherwise uses a shorter five-second busy timeout.
     connection.busy_timeout(std::time::Duration::from_secs(30))?;
     // TRUNCATE is required on shared filesystems; WAL/SHM are never enabled.
     connection.execute_batch("PRAGMA journal_mode=TRUNCATE; PRAGMA foreign_keys=ON;")?;
     connection.execute_batch(include_str!("schema.sql"))?;
-    migrate_message_flags(&mut connection)?;
-    migrate_usage_keys(&mut connection)?;
-    migrate_lineage(&mut connection)?;
     connection.execute_batch(include_str!("event_indexes.sql"))?;
     Ok(connection)
 }
@@ -54,120 +46,5 @@ pub fn record_agent_start(
             params![event.agent_session_id, start.parent_agent_session_id, start.name, event_sequence],
         )?;
     }
-    Ok(())
-}
-
-fn migrate_message_flags(connection: &mut Connection) -> Result<(), DatabaseError> {
-    let has_flags: bool = connection.query_row(
-        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('conversation_item') WHERE name = 'final_phase');",
-        [],
-        |row| row.get(0),
-    )?;
-    let has_marker: bool = connection.query_row(
-        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'final_provider_request_prompt');",
-        [],
-        |row| row.get(0),
-    )?;
-    if has_flags && !has_marker {
-        return Ok(());
-    }
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    if !has_flags {
-        transaction.execute_batch(
-            "ALTER TABLE conversation_item ADD COLUMN final_phase INTEGER NOT NULL DEFAULT 0;",
-        )?;
-    }
-    if has_marker {
-        transaction.execute_batch(
-            "UPDATE conversation_item SET final_phase = 1 WHERE sequence IN \
-             (SELECT (SELECT sequence FROM conversation_item WHERE agent_session = marker.agent_session \
-             ORDER BY sequence DESC LIMIT 1) FROM final_provider_request_prompt AS marker); \
-             DROP TABLE final_provider_request_prompt;",
-        )?;
-    }
-    transaction.commit()?;
-    Ok(())
-}
-
-fn migrate_usage_keys(connection: &mut Connection) -> Result<(), DatabaseError> {
-    let exists: bool = connection.query_row(
-        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('event') WHERE name = 'request_id');",
-        [],
-        |row| row.get(0),
-    )?;
-    // Match the source presence sentinel, including its deliberately narrow
-    // behavior on malformed partially upgraded schemas.
-    if exists {
-        return Ok(());
-    }
-    #[cfg(test)]
-    g16_process_kill::baseline(connection, "usage-before-commit");
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    transaction.execute_batch("ALTER TABLE event ADD COLUMN request_id TEXT; ALTER TABLE event ADD COLUMN tool_call_id TEXT;")?;
-    let mut keys = Vec::new();
-    {
-        let mut statement = transaction.prepare("SELECT sequence, payload FROM event;")?;
-        let mut rows = statement.query([])?;
-        while let Some(row) = rows.next()? {
-            let sequence: i64 = row.get(0)?;
-            let payload: Vec<u8> = row.get(1)?;
-            let event = Event::parse_from_bytes(&payload)?;
-            let (request, tool) = extract_usage_keys(&event);
-            if request.is_some() || tool.is_some() {
-                keys.push((
-                    sequence,
-                    request.map(str::to_owned),
-                    tool.map(str::to_owned),
-                ));
-            }
-        }
-    }
-    for (sequence, request, tool) in keys {
-        transaction.execute(
-            "UPDATE event SET request_id = ?1, tool_call_id = ?2 WHERE sequence = ?3;",
-            params![request, tool, sequence],
-        )?;
-    }
-    #[cfg(test)]
-    g16_process_kill::pause(&transaction, "usage-before-commit");
-    transaction.commit()?;
-    Ok(())
-}
-
-fn migrate_lineage(connection: &mut Connection) -> Result<(), DatabaseError> {
-    let exists: bool = connection.query_row(
-        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_lineage');",
-        [], |row| row.get(0),
-    )?;
-    if exists {
-        return Ok(());
-    }
-    #[cfg(test)]
-    g16_process_kill::baseline(connection, "lineage-before-commit");
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    transaction.execute_batch(include_str!("lineage.sql"))?;
-    let mut starts = Vec::new();
-    {
-        let mut statement =
-            transaction.prepare("SELECT sequence, payload FROM event ORDER BY sequence;")?;
-        let mut rows = statement.query([])?;
-        while let Some(row) = rows.next()? {
-            let sequence: i64 = row.get(0)?;
-            let payload: Vec<u8> = row.get(1)?;
-            let event = Event::parse_from_bytes(&payload)?;
-            if event.has_agent_started() {
-                starts.push((sequence, event));
-            }
-        }
-    }
-    for (sequence, event) in starts {
-        record_agent_start(&transaction, sequence, &event)?;
-    }
-    #[cfg(test)]
-    g16_process_kill::pause(&transaction, "lineage-before-commit");
-    transaction.commit()?;
     Ok(())
 }

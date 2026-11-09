@@ -1,7 +1,7 @@
 //! Structured reads use the same selected-session transaction as projection writes.
 use super::{ConversationRepository, EventError, types::*};
 use crate::database::Transaction;
-use crate::events::projection::{ensure_conversation_projection, read_parts};
+use crate::events::projection::read_parts;
 use rusqlite::{OptionalExtension, params};
 
 fn parse_origin(value: &str) -> Result<ConversationOrigin, EventError> {
@@ -146,7 +146,6 @@ impl ConversationRepository {
     ) -> Result<ConversationHistorySnapshot, EventError> {
         self.events
             .transaction(move |tx| {
-                ensure_conversation_projection(tx)?;
                 let snapshot = super::compaction::read_snapshot(tx, &agent)?;
                 let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
                 let mut owners = std::collections::BTreeMap::new();
@@ -267,10 +266,7 @@ impl ConversationRepository {
             ));
         }
         self.events
-            .transaction(move |tx| {
-                ensure_conversation_projection(tx)?;
-                read_conversation(tx, &agent, watermark)
-            })
+            .transaction(move |tx| read_conversation(tx, &agent, watermark))
             .await
     }
     /// Source legacy model reads reject artifact references; only materialize resolves them.
