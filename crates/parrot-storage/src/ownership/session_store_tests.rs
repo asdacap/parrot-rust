@@ -1853,6 +1853,53 @@ async fn failed_task_limit_publication_retains_existing_metadata_and_malformed_v
 }
 
 #[tokio::test]
+async fn fast_mode_updates_preserve_other_metadata_and_survive_reopening() {
+    let fixture = Fixture::new();
+    let store = fixture.store(Arc::new(Factory::default()));
+    let mut opened = store
+        .open_admitted(
+            fixture.workspace.clone(),
+            fixture.admission(),
+            Some(model()),
+            "query",
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(opened.initialization.fast_mode, None);
+    let original = opened.resources.index.find().unwrap().unwrap();
+    for enabled in [true, false] {
+        opened.resources.update_fast_mode_metadata(enabled).unwrap();
+        let mut expected = original.clone();
+        expected.fast_mode = Some(enabled);
+        assert_eq!(opened.resources.index.find().unwrap().unwrap(), expected);
+    }
+    let path = opened.resources.index.metadata_path();
+    let bytes = fs::read(path).unwrap();
+    let staging = path.with_file_name("meta.json.staging");
+    fs::create_dir(&staging).unwrap();
+    assert!(opened.resources.update_fast_mode_metadata(true).is_err());
+    assert_eq!(fs::read(path).unwrap(), bytes);
+    fs::remove_dir(staging).unwrap();
+    opened
+        .resources
+        .update_selection_metadata("other", "other/model", "alias", "mode")
+        .unwrap();
+    opened.record_opened().unwrap();
+    let metadata = opened.resources.index.find().unwrap().unwrap();
+    assert_eq!(metadata.fast_mode, Some(false));
+    assert_eq!(metadata.provider_id.as_deref(), Some("other"));
+    opened.close().await.unwrap();
+    let mut resumed = store.resume(&fixture.id(), false, false).await.unwrap();
+    assert_eq!(resumed.initialization.fast_mode, Some(false));
+    assert_eq!(
+        resumed.resources.index.find().unwrap().unwrap().fast_mode,
+        Some(false)
+    );
+    resumed.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn metadata_updater_uses_record_opened_gate_and_preserves_failures() {
     let fixture = Fixture::new();
     let factory = Arc::new(Factory::default());

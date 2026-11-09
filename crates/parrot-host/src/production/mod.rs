@@ -230,6 +230,7 @@ impl ProductionHost {
         let factory = UserSessionFactory::new(UserSessionFactoryConfig {
             agent_limits: configuration.runtime.agent_limits,
             extra_concurrent_tasks: configuration.runtime.agent_tasks.extra_concurrent_tasks,
+            fast_mode: configuration.fast_mode,
             router: router.clone(),
             modes,
             workflows: vec![(

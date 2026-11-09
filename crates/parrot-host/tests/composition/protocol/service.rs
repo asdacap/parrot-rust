@@ -318,6 +318,53 @@ async fn task_limit_query_reads_live_snapshot_without_update_or_metadata_write()
 }
 
 #[tokio::test]
+async fn fast_mode_updates_preserve_selection_and_omitted_old_client_fields() {
+    let f = Fixture::new();
+    let session = f.create().await;
+    let other = f.create().await;
+    let original = session.snapshot();
+    for enabled in [true, false, true] {
+        let updated = f
+            .service
+            .update_session(&wire::UpdateSessionRequest {
+                user_session_id: session.id(),
+                fast_mode: Some(enabled),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(updated.fast_mode, enabled);
+        assert_eq!(updated.model, original.model);
+        assert_eq!(updated.mode, original.mode);
+        assert_eq!(
+            updated.extra_concurrent_tasks,
+            original.extra_concurrent_tasks
+        );
+        assert!(!other.snapshot().fast_mode);
+    }
+    let queried = f
+        .service
+        .update_session(&wire::UpdateSessionRequest {
+            user_session_id: session.id(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(queried.fast_mode);
+    let updated = f
+        .service
+        .update_session(&wire::UpdateSessionRequest {
+            user_session_id: session.id(),
+            model: "scripted/new".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(updated.fast_mode);
+    f.close().await;
+}
+
+#[tokio::test]
 async fn task_limit_updates_validate_and_preserve_omitted_old_client_fields() {
     let f = Fixture::new();
     let session = f.create().await;

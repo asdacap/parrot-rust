@@ -191,9 +191,9 @@ async fn actual_task_limit_live_increase_wakes_pending_and_decrease_does_not_pre
         root.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
         ExecutionStatus::Pending
     );
-    hosted.update(None, None, Some(1)).await.unwrap();
+    hosted.update(None, None, Some(1), None).await.unwrap();
     wait_task_request(&fixture, "live-b").await;
-    hosted.update(None, None, Some(0)).await.unwrap();
+    hosted.update(None, None, Some(0), None).await.unwrap();
     let tasks = root.get_service::<Scheduler>().unwrap().snapshot().await;
     assert_eq!(tasks[0].state, ExecutionStatus::Running);
     assert_eq!(tasks[1].state, ExecutionStatus::Running);

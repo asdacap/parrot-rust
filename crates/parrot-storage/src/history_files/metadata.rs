@@ -30,6 +30,8 @@ pub struct SessionMeta {
         deserialize_with = "deserialize_task_limit"
     )]
     pub extra_concurrent_tasks: Option<i32>,
+    #[serde(rename = "FastMode", default, skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<bool>,
     #[serde(rename = "LastOpenedAt", default)]
     pub last_opened_at: Option<String>,
     #[serde(rename = "CreatedAt", default)]
@@ -52,6 +54,7 @@ impl SessionMeta {
             selector: Some(String::new()),
             mode: Some(String::new()),
             extra_concurrent_tasks: None,
+            fast_mode: None,
             last_opened_at: Some(String::new()),
             created_at: Some(String::new()),
         }

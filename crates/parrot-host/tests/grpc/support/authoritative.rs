@@ -541,6 +541,7 @@ impl Fixture {
         let skill_gate = gate.clone();
         let factory = Arc::new(UserSessionFactory::new(UserSessionFactoryConfig {
             extra_concurrent_tasks: configuration.runtime.agent_tasks.extra_concurrent_tasks,
+            fast_mode: false,
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
                 ..Default::default()

@@ -892,6 +892,7 @@ impl Fixture {
         let skill_templates = templates.clone();
         let mut config = UserSessionFactoryConfig {
             extra_concurrent_tasks: configuration.runtime.agent_tasks.extra_concurrent_tasks,
+            fast_mode: false,
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
                 ..Default::default()
@@ -1535,6 +1536,7 @@ async fn actual_hosted_selection_updates_preserve_open_metadata_and_record_opene
     bounded(hosted.update(
         Some(fixture.router.resolve("local/model-next").unwrap()),
         Some("build".into()),
+        None,
         None,
     ))
     .await
@@ -2747,6 +2749,7 @@ mod ordinary_workspace_binding {
     }
 }
 
+mod fast_mode;
 mod integrated_adapters;
 mod integrated_rpc;
 mod original_adapters_v8;
