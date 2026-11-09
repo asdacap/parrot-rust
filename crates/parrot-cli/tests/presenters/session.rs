@@ -1099,6 +1099,25 @@ macro_rules! retry_cases {($($name:ident:$value:literal),*$(,)?)=>{$(#[test] fn 
 retry_cases! { retry_exhaustion_zero:0, retry_exhaustion_one:1, retry_exhaustion_five:5 }
 
 #[test]
+fn root_modeline_uses_main_after_statistics_arrive_before_the_first_turn() {
+    let mut presenter = configured(120);
+    let statistics = event(
+        "root-session-id",
+        Payload::AgentStatisticsUpdated(wire::AgentStatisticsUpdatedEvent::default()),
+    );
+    presenter.observe(&statistics).unwrap();
+    let started = presenter.observe(&start("root-session-id")).unwrap();
+    let frame = live(&started.live, 120);
+    assert!(frame.contains("agent main (running 0s)"), "{frame}");
+    assert!(!frame.contains("root-session-id"), "{frame}");
+
+    let updated = presenter.observe(&statistics).unwrap();
+    let frame = live(&updated.live, 120);
+    assert!(frame.contains("agent main (running 0s)"), "{frame}");
+    assert!(!frame.contains("root-session-id"), "{frame}");
+}
+
+#[test]
 fn root_turn_duration_advances_and_respects_lifecycle_boundaries() {
     let mut presenter = configured(120);
     let first = presenter.observe(&start("root")).unwrap();
