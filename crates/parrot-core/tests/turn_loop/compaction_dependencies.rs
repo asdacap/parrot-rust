@@ -1,7 +1,6 @@
 use super::*;
 use parrot_core::compaction::{
-    CompactionContext, CompactionDependencies, CompactionInput, CompactionPlan, CompactionResult,
-    FittedCompaction,
+    CompactionConfiguration, CompactionDependencies, CompactionPlan, StatusRenderer,
 };
 
 #[test]
@@ -28,48 +27,43 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
-#[derive(Default)]
-struct PlannedContext {
-    plan: Option<CompactionPlan>,
+struct MemoryStatus {
+    contexts: Mutex<Vec<ContextSnapshot>>,
+    failure: Option<Error>,
 }
 
-impl CompactionContext for PlannedContext {
-    fn plan(
-        &self,
-        input: &CompactionInput,
-        definitions: &[ToolDefinition],
-    ) -> Result<Option<CompactionPlan>, Error> {
-        Ok(self.plan.clone().map(|mut plan| {
-            plan.instructions = input.instructions.clone();
-            plan.tools = definitions.to_vec();
-            plan
-        }))
-    }
+impl StatusRenderer for MemoryStatus {
+    type Error = Error;
 
-    fn fit<'a, 'c>(
+    fn render<'a, 'c>(
         &'a self,
-        _: &'a CompactionInput,
-        _: &'a [ToolDefinition],
-        result: Option<CompactionResult>,
+        context: ContextSnapshot,
         _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Option<FittedCompaction>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
-            Ok(result.map(|result| FittedCompaction {
-                result,
-                status: "fitted status".into(),
-            }))
+            self.contexts.lock().unwrap().push(context);
+            if let Some(error) = &self.failure {
+                return Err(error.clone());
+            }
+            Ok("fitted status".into())
         })
     }
 }
 
-#[derive(Default)]
 pub(super) struct MemoryCompaction {
-    context: PlannedContext,
+    configuration: CompactionConfiguration,
     effects: compaction_support::Effects,
     provider: compaction_support::Provider,
+    status: MemoryStatus,
+}
+
+impl Default for MemoryCompaction {
+    fn default() -> Self {
+        Self::new(None, compaction_support::Provider::default())
+    }
 }
 
 impl MemoryCompaction {
@@ -77,107 +71,83 @@ impl MemoryCompaction {
         plan: Option<CompactionPlan>,
         provider: compaction_support::Provider,
     ) -> Self {
+        let input_limit = plan.as_ref().map_or(10000, |plan| plan.input_token_limit);
+        let configuration = CompactionConfiguration {
+            context: ContextConfiguration {
+                model: ContextModel {
+                    canonical_model: "summary-model".into(),
+                    context_window: if plan.is_some() { input_limit } else { 0 },
+                    maximum_input_tokens: input_limit,
+                    maximum_output_tokens: 1,
+                },
+                trigger_percent: 90,
+                context_limit: None,
+            },
+            target: plan
+                .is_none()
+                .then_some(parrot_core::ContextLimit::Percentage(50)),
+            target_percent: 50,
+            maximum_input_tokens: plan.as_ref().map_or(1000, |plan| plan.input_budget as i32),
+            summary_output_tokens: plan.as_ref().map_or(19, |plan| plan.summary_output_tokens),
+            profile_maximum_input_tokens: None,
+            profile_summary_output_tokens: None,
+            model: plan
+                .as_ref()
+                .map_or_else(|| "summary-model".into(), |plan| plan.model.clone()),
+            reasoning: plan.as_ref().and_then(|plan| plan.reasoning.clone()),
+            summary_instructions: plan.as_ref().map_or_else(
+                || "instructions".into(),
+                |plan| plan.summary_instructions.clone(),
+            ),
+            summary_prefix: plan
+                .as_ref()
+                .map_or_else(|| "prefix:".into(), |plan| plan.summary_prefix.clone()),
+        };
         Self {
-            context: PlannedContext { plan },
+            configuration,
+            effects: compaction_support::Effects::default(),
             provider,
-            ..Self::default()
+            status: MemoryStatus {
+                contexts: Mutex::default(),
+                failure: None,
+            },
         }
     }
 
     pub(super) fn dependencies(&mut self) -> CompactionDependencies<'_> {
         CompactionDependencies {
-            context: &self.context,
+            configuration: &self.configuration,
             effects: &mut self.effects,
             provider: &self.provider,
+            status: &self.status,
         }
-    }
-}
-
-struct RecordedContext {
-    inputs: Mutex<Vec<(CompactionInput, Vec<ToolDefinition>)>>,
-    fail_at: Option<&'static str>,
-}
-
-impl CompactionContext for RecordedContext {
-    fn plan(
-        &self,
-        input: &CompactionInput,
-        definitions: &[ToolDefinition],
-    ) -> Result<Option<CompactionPlan>, Error> {
-        self.inputs
-            .lock()
-            .unwrap()
-            .push((input.clone(), definitions.to_vec()));
-        if self.fail_at == Some("plan") {
-            return Err(Error::failed("planning failed"));
-        }
-        let mut plan = compaction_support::plan(&["saved group", "retained tail"]);
-        plan.instructions = input.instructions.clone();
-        plan.tools = definitions.to_vec();
-        Ok(Some(plan))
-    }
-
-    fn fit<'a, 'c>(
-        &'a self,
-        input: &'a CompactionInput,
-        definitions: &'a [ToolDefinition],
-        result: Option<CompactionResult>,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Option<FittedCompaction>, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            let inputs = self.inputs.lock().unwrap();
-            assert_eq!(inputs[0], (input.clone(), definitions.to_vec()));
-            if self.fail_at == Some("fit") {
-                return Err(Error::failed("fitting failed"));
-            }
-            Ok(result.map(|result| FittedCompaction {
-                result,
-                status: "fitted status".into(),
-            }))
-        })
     }
 }
 
 #[test]
-fn caller_supplied_compaction_services_plan_summarize_and_fit_before_retry() {
+fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
     let mut state = MemoryState::new([
         Reply::TooLarge("oversized"),
         Reply::final_response("answer"),
     ]);
-    let context = RecordedContext {
-        inputs: Mutex::default(),
-        fail_at: None,
-    };
+    state.compaction_plan = Some(compaction_support::plan(&["saved group", "retained tail"]));
     let provider =
         compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
             "injected summary".into(),
         )]);
-    let mut effects = compaction_support::Effects::default();
-    let mut compaction = CompactionDependencies {
-        context: &context,
-        effects: &mut effects,
-        provider: &provider,
-    };
+    let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
     assert_eq!(
-        state.run_with_compaction(&mut compaction),
+        state.run_with_compaction(&mut compaction.dependencies()),
         Ok(Outcome::Completed("answer".into()))
     );
 
-    let inputs = context.inputs.lock().unwrap();
-    assert_eq!(inputs.len(), 1);
-    assert_eq!(inputs[0].0.instructions, "core request");
+    let summaries = provider.requests.lock().unwrap();
+    assert_eq!(summaries.len(), 1);
     assert_eq!(
-        inputs[0]
-            .1
-            .iter()
-            .map(|tool| tool.name.as_str())
-            .collect::<Vec<_>>(),
-        ["read", "write"]
+        summaries[0].messages[1],
+        compaction_support::message("saved group")
     );
-    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    assert!(summaries[0].tools.is_empty());
     assert!(state.summary_provider.requests.lock().unwrap().is_empty());
     assert_eq!(state.fitted_statuses, ["fitted status"]);
     let result = state.recorded_compactions[0]
@@ -189,36 +159,47 @@ fn caller_supplied_compaction_services_plan_summarize_and_fit_before_retry() {
         result.summary.contents,
         [Content::Text("prefix:injected summary".into())]
     );
+    assert_eq!(result.watermark, 42);
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
-    let estimates = effects.contexts.lock().unwrap();
-    assert_eq!(estimates.len(), 1);
-    assert_eq!(estimates[0].instructions, "core request");
-    assert_eq!(estimates[0].tools, inputs[0].1);
-    assert_eq!(estimates[0].messages, result.history);
-    assert_eq!(effects.progress.lock().unwrap().len(), 2);
+    let estimates = compaction.effects.contexts.lock().unwrap();
+    let fitted = estimates.last().unwrap();
+    assert_eq!(fitted.instructions, "core request");
+    assert_eq!(
+        fitted
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["read", "write"]
+    );
+    assert!(
+        fitted
+            .messages
+            .iter()
+            .any(|message| message.contents == [Content::Text("fitted status".into())])
+    );
+    assert!(!compaction.status.contexts.lock().unwrap().is_empty());
+    assert_eq!(compaction.effects.progress.lock().unwrap().len(), 2);
 }
 
 #[test]
 fn planning_and_fitting_failures_are_recorded_before_propagation() {
     for (step, message) in [("plan", "planning failed"), ("fit", "fitting failed")] {
         let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
-        let context = RecordedContext {
-            inputs: Mutex::default(),
-            fail_at: Some(step),
-        };
+        state.compaction_plan = Some(compaction_support::plan(&["saved group", "tail"]));
         let provider =
             compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
                 "not committed".into(),
             )]);
-        let mut effects = compaction_support::Effects::default();
-        let mut compaction = CompactionDependencies {
-            context: &context,
-            effects: &mut effects,
-            provider: &provider,
-        };
+        let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
         let error = Error::failed(message);
+        if step == "plan" {
+            compaction.effects.context_failure = Some((1, error.clone()));
+        } else {
+            compaction.status.failure = Some(error.clone());
+        }
         assert_eq!(
-            state.run_with_compaction(&mut compaction),
+            state.run_with_compaction(&mut compaction.dependencies()),
             Err(error.clone())
         );
         assert_eq!(state.recorded_compactions, [Err(error)]);

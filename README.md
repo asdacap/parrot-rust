@@ -37,12 +37,13 @@ Its turn contracts are:
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
-Compaction receives its dependencies separately through `CompactionDependencies`.
-`CompactionContext` computes the safe-prefix plan and fits the actual replacement
-status. `CompactionEffects` supplies model-aware estimates, actual blob notices,
-and awaited progress. `SummaryProvider` invokes private summary requests and joins
-their streams. Its typed summary outcome preserves diagnostics without exposing
-provider stream representations.
+Compaction receives configuration and native effects through `CompactionDependencies`.
+Core computes target limits, selects the safe prefix, runs summaries, and fits the
+actual replacement status. `CompactionEffects` supplies model-aware estimates,
+actual blob notices, and awaited progress. `StatusRenderer` renders the context
+supplied by core without making fitting decisions. `SummaryProvider` invokes
+private summary requests and joins their streams. Its typed summary outcome
+preserves diagnostics without exposing provider stream representations.
 
 Requests, responses, tool execution results, messages, tool definitions, and errors
 are concrete core-owned types. Adapters implement the same interface; they do not
@@ -77,18 +78,21 @@ The core specifies and implements:
 For core-selected automatic compaction and oversized recovery,
 `States::read_compaction` returns owned conversation groups, checkpoint metadata,
 watermarks, sampled instructions, and current messages. It returns no executable
-services or borrowed runtime guards. Runtime composition supplies the context,
-effects, and summary dependencies independently. Core explicitly computes the
-plan, runs the shared summary algorithm, fits the actual replacement status, and
-awaits `record_compaction` on success or failure before continuing. Recording returns
-refreshed instructions and whether context was reduced. Native state owns lifecycle
-events, summary and watermark persistence, and conversation reload. Inline and
-explicit native paths reuse the same planning, fitting, and summary computations.
+services or borrowed runtime guards. Runtime composition supplies configuration,
+estimates, status rendering, and summary execution independently. Core's
+`compact_conversation` resolves target policy, selects the plan, runs the shared
+summary algorithm, and fits the actual replacement status. State then records the
+outcome on success or failure before execution continues. Recording returns refreshed
+instructions and whether context was reduced. Native state owns lifecycle events,
+summary and watermark persistence, and conversation reload. Inline and explicit
+native paths call that same core implementation.
 
-The native retention planner remains the single implementation of checkpoint and
-safe-prefix selection. Moving that policy into core is not required to separate
-service ownership from persistence. Blob publication is awaited so the runtime
-adapter can lock state for the spill without retaining that lock during summaries.
+Core owns checkpoint selection, incomplete-group protection, watermark progress,
+and final context validation. Status fitting compares complete context snapshots
+and permits at most eight rerenders after the initial rendering. Native planning
+and status conveniences delegate to these core computations. The automatic runtime
+adapter awaits blob publication and locks state only for the spill. It retains no
+state guard during summaries or status rendering.
 
 `States` exposes the latest visible conversation segment and its result, not a
 precomputed work flag. A no-tool assistant candidate can be present while durable
@@ -149,7 +153,7 @@ catalog preparation restores that context after capturing executable snapshots
 and before input promotion, without a separate core state operation.
 
 `parrot-runtime` implements the turn and compaction contracts with private adapters.
-Persistence, prompt rendering, compaction planning and token estimates, blobs,
+Persistence, prompt rendering, configuration capture, native token estimates, blobs,
 security, streaming, accounting, cancellation, events, and session lifecycle stay
 outside the core. Provider representations are translated losslessly at the
 interface, including raw provider extensions and multimodal content. Runtime

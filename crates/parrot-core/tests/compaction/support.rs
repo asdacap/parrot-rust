@@ -50,6 +50,7 @@ pub struct Effects {
     pub progress: Mutex<Vec<CompactionProgress>>,
     pub spills: Vec<Vec<Message>>,
     pub contexts: Mutex<Vec<ProviderRequest>>,
+    pub context_failure: Option<(usize, Error)>,
 }
 
 impl CompactionEffects for Effects {
@@ -91,12 +92,18 @@ impl CompactionEffects for Effects {
         definitions: &[parrot_core::ToolDefinition],
         messages: &[Message],
     ) -> Result<i64, Error> {
-        self.contexts.lock().unwrap().push(ProviderRequest {
+        let mut contexts = self.contexts.lock().unwrap();
+        contexts.push(ProviderRequest {
             instructions: instructions.into(),
             tools: definitions.to_vec(),
             messages: messages.to_vec(),
             ..ProviderRequest::default()
         });
+        if let Some((call, error)) = &self.context_failure {
+            if *call == contexts.len() {
+                return Err(error.clone());
+            }
+        }
         self.estimate_tokens(messages)
     }
 

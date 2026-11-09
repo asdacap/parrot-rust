@@ -1,8 +1,15 @@
 use crate::{
-    BoxFuture, CancellationToken, Content, Error, ErrorCode, Message, ProviderRequest, Reasoning,
-    Role, ToolDefinition,
+    BoxFuture, CancellationToken, Content, ContextSnapshot, Error, ErrorCode, Message,
+    ProviderRequest, Reasoning, Role, ToolDefinition,
 };
 use std::fmt;
+
+mod fitting;
+mod planning;
+pub use fitting::{compact_conversation, fit_compaction, fit_status};
+pub use planning::{
+    CompactionConfiguration, CompactionPolicy, PlanningError, group_messages, is_complete,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactionGroup {
@@ -11,7 +18,7 @@ pub struct CompactionGroup {
 }
 
 impl CompactionGroup {
-    fn can_spill(&self) -> bool {
+    pub fn can_spill(&self) -> bool {
         self.is_complete
             && self.messages.first().is_some_and(|message| {
                 message.role == Role::Assistant && !message.tool_calls.is_empty()
@@ -67,31 +74,25 @@ pub struct FittedCompaction {
     pub status: String,
 }
 
-/// Computes a safe-prefix plan and fits actual status without persisting the result.
-pub trait CompactionContext: Send + Sync {
-    /// Selects a plan from owned history and the core-selected tool definitions.
-    fn plan(
-        &self,
-        input: &CompactionInput,
-        definitions: &[ToolDefinition],
-    ) -> Result<Option<CompactionPlan>, Error>;
+/// Renders native status for exactly the context supplied by core.
+pub trait StatusRenderer: Send + Sync {
+    type Error: Send;
 
-    /// Fits the replacement status, or validates current context when no prefix advances.
-    fn fit<'a, 'c>(
+    /// Observes and renders status without estimating, fitting, or persisting context.
+    fn render<'a, 'c>(
         &'a self,
-        input: &'a CompactionInput,
-        definitions: &'a [ToolDefinition],
-        result: Option<CompactionResult>,
+        context: ContextSnapshot,
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Option<FittedCompaction>, Error>>
+    ) -> BoxFuture<'a, Result<String, Self::Error>>
     where
         'c: 'a;
 }
 
 pub struct CompactionDependencies<'a> {
-    pub context: &'a dyn CompactionContext,
+    pub configuration: &'a CompactionConfiguration,
     pub effects: &'a mut dyn CompactionEffects<Error = Error>,
     pub provider: &'a dyn SummaryProvider<Error = Error>,
+    pub status: &'a dyn StatusRenderer<Error = Error>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -112,6 +113,8 @@ pub enum CompactionFailure {
     GroupExceedsBudget,
     TokenOverflow,
     InputLimitExceeded,
+    FittedInputLimitExceeded,
+    NoSafeBoundary,
     NoSummary(String),
 }
 
@@ -123,8 +126,11 @@ impl fmt::Display for CompactionFailure {
                 "A complete conversation group exceeds the compaction input budget."
             }
             Self::TokenOverflow => "Token estimate overflow.",
-            Self::InputLimitExceeded => {
+            Self::InputLimitExceeded | Self::FittedInputLimitExceeded => {
                 "The compacted conversation exceeds the selected model input limit."
+            }
+            Self::NoSafeBoundary => {
+                "The conversation has no safe compaction boundary before the input limit."
             }
             Self::NoSummary(reason) => reason,
         })
@@ -203,7 +209,7 @@ pub trait SummaryProvider: Send + Sync {
 }
 
 /// Executes one safe-prefix plan, retaining atomic groups and joining every provider call.
-/// Native callers retain ownership of plan selection, lifecycle events, and persistence.
+/// Native callers retain lifecycle events and persistence. Core also exposes planning and fitting.
 pub async fn compact<E: From<CompactionFailure> + Send>(
     plan: Option<CompactionPlan>,
     effects: &mut dyn CompactionEffects<Error = E>,

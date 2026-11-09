@@ -117,8 +117,6 @@ impl Cancellation for Uncancelled {
 pub struct Compactor {
     planner: Arc<CompactionPlanner>,
     templates: Arc<PromptTemplateCatalog>,
-    summary_instructions: String,
-    summary_prefix: String,
 }
 impl Compactor {
     pub fn new(
@@ -134,8 +132,6 @@ impl Compactor {
         settings.summary_instructions = render("compaction.summary-instructions")?;
         settings.summary_prefix = render("compaction.summary-prefix")?;
         Ok(Self {
-            summary_instructions: settings.summary_instructions.clone(),
-            summary_prefix: settings.summary_prefix.clone(),
             planner: Arc::new(CompactionPlanner::new(settings, profiles)),
             templates,
         })
@@ -175,74 +171,26 @@ impl Compactor {
         .await
     }
 
-    pub(crate) fn prepare_plan(
+    fn prepare_plan(
         &self,
         selected: &ResolvedModelSelection,
         target: Option<&ContextSize>,
         input: &PlanningInput<'_>,
     ) -> Result<Option<CompactionPlan>, CompactionError> {
-        let model = &selected.canonical_model;
-        let target_budget = self.planner.resolve_policy(selected, target).target_tokens;
-        Ok(self
+        let configuration = self
             .planner
-            .plan_retention(model, target_budget, input)?
-            .map(|plan| CompactionPlan {
-                groups: input
-                    .groups
-                    .iter()
-                    .map(|group| core::CompactionGroup {
-                        messages: group.messages.iter().cloned().map(Into::into).collect(),
-                        is_complete: group.is_complete,
-                    })
-                    .collect(),
-                keep_group_from: plan.keep_group_from,
-                watermark: plan.watermark,
-                input_budget: plan.input_budget,
-                summary_output_tokens: plan.summary_output_tokens,
-                input_token_limit: model.model.input_token_limit(),
-                instructions: input.instructions.into(),
-                tools: input.tools.iter().cloned().map(Into::into).collect(),
-                fixed_message: input.fixed_message.clone().into(),
-                summary_instructions: self.summary_instructions.clone(),
-                summary_prefix: self.summary_prefix.clone(),
-                model: model.model.id.clone(),
-                reasoning: model.reasoning().map(Into::into),
-            }))
-    }
-
-    pub(crate) fn prepare_input_plan(
-        &self,
-        selected: &ResolvedModelSelection,
-        target: Option<&ContextSize>,
-        input: &core::CompactionInput,
-        tools: &[Tool],
-    ) -> Result<Option<CompactionPlan>, CompactionError> {
-        let messages: Vec<Vec<Message>> = input
-            .groups
-            .iter()
-            .map(|group| group.messages.iter().cloned().map(Into::into).collect())
-            .collect();
-        let groups: Vec<super::CompactionGroup<'_>> = input
-            .groups
-            .iter()
-            .zip(&messages)
-            .map(|(group, messages)| super::CompactionGroup {
-                messages,
-                end_watermark: group.end_watermark,
-                has_checkpoint_before: group.has_checkpoint_before,
-                is_complete: group.is_complete,
-            })
-            .collect();
-        let fixed: Message = input.fixed_message.clone().into();
-        self.prepare_plan(
-            selected,
-            target,
-            &PlanningInput {
-                instructions: &input.instructions,
-                tools,
-                groups: &groups,
-                base_watermark: input.base_watermark,
-                fixed_message: &fixed,
+            .capture_compaction_configuration(selected, target);
+        let input_data = input.capture_input();
+        let definitions: Vec<parrot_core::ToolDefinition> =
+            input.tools.iter().cloned().map(Into::into).collect();
+        let estimates = CompactionEstimates::new(self, selected);
+        CompactionPlan::select(
+            &input_data,
+            &definitions,
+            &configuration,
+            |messages| estimates.estimate_tokens(messages),
+            |instructions, definitions, messages| {
+                estimates.estimate_context_tokens(instructions, definitions, messages)
             },
         )
     }
@@ -302,7 +250,11 @@ impl From<CompactionFailure> for CompactionError {
                 Self::Planning(PlanningError::GroupExceedsBudget)
             }
             CompactionFailure::TokenOverflow => Self::Planning(PlanningError::TokenOverflow),
-            CompactionFailure::InputLimitExceeded => Self::InvalidOperation(failure.to_string()),
+            CompactionFailure::InputLimitExceeded
+            | CompactionFailure::NoSafeBoundary
+            | CompactionFailure::FittedInputLimitExceeded => {
+                Self::InvalidOperation(failure.to_string())
+            }
             CompactionFailure::NoSummary(reason) => Self::InvalidOperation(reason),
         }
     }
@@ -586,7 +538,7 @@ impl<O: CompactionObserver, E> SummaryProviderAdapter<'_, O, E> {
     }
 }
 
-struct CoreCancellation<'a>(CancellationToken<'a>);
+pub(crate) struct CoreCancellation<'a>(pub(crate) CancellationToken<'a>);
 impl Cancellation for CoreCancellation<'_> {
     fn is_cancelled(&self) -> bool {
         self.0.is_cancelled()

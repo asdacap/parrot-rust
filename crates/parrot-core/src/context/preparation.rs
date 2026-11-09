@@ -2,7 +2,7 @@ use crate::{
     CancellationToken, ContextCompaction, ContextSnapshot, Error, ProviderRequest, States,
     ToolDefinition, TurnOptions,
     budget::TurnRequestPhase,
-    compaction::{CompactionDependencies, compact},
+    compaction::{CompactionDependencies, compact_conversation},
 };
 
 pub(crate) async fn compact_context(
@@ -12,15 +12,15 @@ pub(crate) async fn compact_context(
     cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
     let input = states.read_compaction(definitions).await?;
-    let compacted = async {
-        let plan = compaction.context.plan(&input, definitions)?;
-        let result = compact(plan, compaction.effects, compaction.provider, cancellation).await?;
-        let advancing = result.filter(|result| result.watermark > input.base_watermark);
-        compaction
-            .context
-            .fit(&input, definitions, advancing, cancellation)
-            .await
-    }
+    let compacted = compact_conversation(
+        &input,
+        definitions,
+        compaction.configuration,
+        compaction.effects,
+        compaction.provider,
+        compaction.status,
+        cancellation,
+    )
     .await;
     states.record_compaction(compacted).await
 }

@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+parrot-core = { path = "../parrot-core" }
 serde = { version = "=1.0.229", features = ["derive"] }
 bytes = "=1.12.1"
 protobuf = "=3.7.2"

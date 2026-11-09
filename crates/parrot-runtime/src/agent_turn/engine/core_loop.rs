@@ -55,9 +55,8 @@ struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
     cancellation: &'a dyn Cancellation,
 }
 
-struct RuntimeCompactionContext<'a, S: AccessSnapshot, T: TurnTools<S>> {
+struct RuntimeStatusRenderer<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S, T>,
 }
 
 struct RuntimeCompactionEffects<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -65,37 +64,23 @@ struct RuntimeCompactionEffects<'a, S: AccessSnapshot, T: TurnTools<S>> {
     estimates: crate::compaction::CompactionEstimates,
 }
 
-impl<S, T> parrot_core::compaction::CompactionContext for RuntimeCompactionContext<'_, S, T>
+impl<S, T> parrot_core::compaction::StatusRenderer for RuntimeStatusRenderer<'_, S, T>
 where
     S: AccessSnapshot + 'static,
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    fn plan(
-        &self,
-        input: &parrot_core::compaction::CompactionInput,
-        definitions: &[ToolDefinition],
-    ) -> Result<Option<parrot_core::compaction::CompactionPlan>, CoreError> {
-        let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-        let tools: Vec<sessions::Tool> = definitions.iter().cloned().map(Into::into).collect();
-        self.backend
-            .compactor
-            .prepare_input_plan(&selection.model, None, input, &tools)
-            .map_err(Into::into)
-    }
+    type Error = CoreError;
 
-    fn fit<'a, 'c>(
+    fn render<'a, 'c>(
         &'a self,
-        input: &'a parrot_core::compaction::CompactionInput,
-        definitions: &'a [ToolDefinition],
-        result: Option<parrot_core::compaction::CompactionResult>,
+        context: CoreContextSnapshot,
         cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Option<parrot_core::compaction::FittedCompaction>, CoreError>>
+    ) -> BoxFuture<'a, Result<String, CoreError>>
     where
         'c: 'a,
     {
         adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
             let status = self
                 .backend
                 .state
@@ -104,15 +89,17 @@ where
                 .request_status
                 .clone()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            let tools: Vec<sessions::Tool> = definitions.iter().cloned().map(Into::into).collect();
-            self.backend
-                .compactor
-                .fit_context(
-                    &selection.model,
-                    input,
-                    &tools,
-                    status.as_ref(),
-                    result,
+            status
+                .observe(
+                    &crate::compaction::ContextSnapshot {
+                        estimated_tokens: context.estimated_tokens,
+                        context_limit: context.context_limit,
+                        usage_percent: context.usage_percent,
+                        trigger_percent: context.trigger_percent,
+                        input_limit: context.input_limit,
+                        trigger_tokens: context.trigger_tokens,
+                        has_context_limit_override: context.has_context_limit_override,
+                    },
                     &RuntimeCancellation(cancellation),
                 )
                 .await
@@ -475,10 +462,11 @@ where
                 })
                 .await?;
                 let selection = binding.capture_selection().map_err(CoreError::from)?;
-                let context = RuntimeCompactionContext {
-                    backend,
-                    binding: &binding,
-                };
+                let configuration = backend
+                    .compactor
+                    .planner()
+                    .capture_compaction_configuration(&selection.model, None);
+                let status = RuntimeStatusRenderer { backend };
                 let mut effects = RuntimeCompactionEffects {
                     backend,
                     estimates: crate::compaction::CompactionEstimates::new(
@@ -493,9 +481,10 @@ where
                         ContextEmitter { backend },
                     );
                 let mut compaction = parrot_core::compaction::CompactionDependencies {
-                    context: &context,
+                    configuration: &configuration,
                     effects: &mut effects,
                     provider: &summary_provider,
+                    status: &status,
                 };
                 parrot_core::run_turn(
                     &mut states,

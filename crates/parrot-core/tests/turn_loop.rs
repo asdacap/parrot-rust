@@ -756,24 +756,33 @@ impl States for MemoryState {
         Box::pin(async move {
             self.step("read_compaction")?;
             self.compacted_definitions.push(definitions.to_vec());
-            Ok(parrot_core::compaction::CompactionInput {
-                groups: self
-                    .messages
+            let groups = if let Some(plan) = &self.compaction_plan {
+                plan.groups
                     .iter()
                     .enumerate()
                     .map(
-                        |(index, message)| parrot_core::compaction::CompactionHistoryGroup {
-                            messages: vec![message.clone()],
-                            end_watermark: index as i64 + 1,
+                        |(index, group)| parrot_core::compaction::CompactionHistoryGroup {
+                            messages: group.messages.clone(),
+                            end_watermark: plan.watermark + index as i64
+                                - plan.keep_group_from as i64
+                                + 1,
                             has_checkpoint_before: false,
-                            is_complete: true,
+                            is_complete: group.is_complete,
                         },
                     )
-                    .collect(),
+                    .collect()
+            } else {
+                parrot_core::compaction::group_messages(&self.messages)
+            };
+            Ok(parrot_core::compaction::CompactionInput {
+                groups,
                 base_watermark: 0,
                 instructions: self.instructions.clone(),
                 messages: self.messages.clone(),
-                fixed_message: compaction_support::message("status"),
+                fixed_message: Message {
+                    role: Role::System,
+                    ..compaction_support::message("status")
+                },
             })
         })
     }
