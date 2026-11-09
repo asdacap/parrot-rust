@@ -5,18 +5,16 @@ CREATE TABLE IF NOT EXISTS event (
     payload       BLOB NOT NULL,
     created_at    TEXT NOT NULL,
     request_id    TEXT,
-    tool_call_id  TEXT
+    tool_call_id  TEXT,
+    history_anchor INTEGER CHECK (history_anchor >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS message (
-    sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_session TEXT NOT NULL,
-    role          TEXT NOT NULL,
-    content       TEXT NOT NULL,
-    created_at    TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS agent_lineage (
+    agent_session        TEXT PRIMARY KEY,
+    parent_agent_session TEXT NOT NULL,
+    name                 TEXT NOT NULL,
+    event_sequence       INTEGER NOT NULL REFERENCES event(sequence)
 );
-
-CREATE INDEX IF NOT EXISTS message_by_session ON message (agent_session, sequence);
 
 CREATE TABLE IF NOT EXISTS conversation_item (
     sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,11 +23,34 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     role          TEXT NOT NULL,
     tool_call_id  TEXT NOT NULL,
     created_at    TEXT NOT NULL,
-    final_phase   INTEGER NOT NULL DEFAULT 0
+    final_phase   INTEGER NOT NULL DEFAULT 0,
+    provider_id   TEXT NOT NULL DEFAULT '',
+    provider_content TEXT NOT NULL DEFAULT '',
+    tool_owner_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE SET NULL,
+    CHECK (
+        tool_owner_sequence IS NULL
+        OR (
+            tool_owner_sequence <> sequence
+            AND origin = 'tool'
+            AND (role = 'tool' OR (role = 'user' AND tool_call_id = ''))
+        )
+    )
 );
 
 CREATE INDEX IF NOT EXISTS conversation_by_session
     ON conversation_item (agent_session, sequence);
+
+CREATE UNIQUE INDEX IF NOT EXISTS conversation_owned_result
+    ON conversation_item (agent_session, tool_call_id)
+    WHERE tool_owner_sequence IS NOT NULL AND role = 'tool';
+
+CREATE UNIQUE INDEX IF NOT EXISTS conversation_owned_synthetic
+    ON conversation_item (agent_session, tool_owner_sequence)
+    WHERE tool_owner_sequence IS NOT NULL AND role = 'user' AND origin = 'tool';
+
+CREATE INDEX IF NOT EXISTS conversation_by_tool_owner
+    ON conversation_item (agent_session, tool_owner_sequence, sequence)
+    WHERE tool_owner_sequence IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS conversation_part (
     item_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
@@ -42,6 +63,8 @@ CREATE TABLE IF NOT EXISTS conversation_part (
     PRIMARY KEY (item_sequence, position)
 );
 
+CREATE INDEX IF NOT EXISTS conversation_part_by_artifact ON conversation_part (artifact_id);
+
 CREATE TABLE IF NOT EXISTS conversation_tool_call (
     item_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
     position      INTEGER NOT NULL CHECK (position >= 0),
@@ -49,12 +72,6 @@ CREATE TABLE IF NOT EXISTS conversation_tool_call (
     name          TEXT NOT NULL,
     arguments     TEXT NOT NULL,
     PRIMARY KEY (item_sequence, position)
-);
-
-CREATE TABLE IF NOT EXISTS conversation_provider_content (
-    item_sequence INTEGER PRIMARY KEY REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    provider      TEXT NOT NULL,
-    content       TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS input (
@@ -86,6 +103,8 @@ CREATE TABLE IF NOT EXISTS input_part (
     PRIMARY KEY (input_id, position)
 );
 
+CREATE INDEX IF NOT EXISTS input_part_by_artifact ON input_part (artifact_id);
+
 CREATE TABLE IF NOT EXISTS tool_execution_terminal (
     sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_session TEXT NOT NULL,
@@ -108,37 +127,8 @@ CREATE TABLE IF NOT EXISTS tool_execution_result_part (
     PRIMARY KEY (terminal_sequence, position)
 );
 
-CREATE TABLE IF NOT EXISTS tool_batch_result (
-    agent_session     TEXT NOT NULL,
-    assistant_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    tool_call_id      TEXT NOT NULL,
-    item_sequence     INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    PRIMARY KEY (agent_session, assistant_sequence, tool_call_id),
-    UNIQUE (agent_session, tool_call_id)
-);
-
-CREATE TABLE IF NOT EXISTS tool_batch_synthetic (
-    agent_session      TEXT NOT NULL,
-    assistant_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    item_sequence      INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    PRIMARY KEY (agent_session, assistant_sequence),
-    UNIQUE (item_sequence)
-);
-
-CREATE TABLE IF NOT EXISTS compaction_snapshot (
-    agent_session TEXT PRIMARY KEY,
-    summary       TEXT NOT NULL,
-    watermark     INTEGER NOT NULL CHECK (watermark >= 0),
-    created_at    TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS compaction_status (
-    agent_session               TEXT NOT NULL,
-    watermark                   INTEGER NOT NULL CHECK (watermark >= 0),
-    status_conversation_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    PRIMARY KEY (agent_session, watermark),
-    UNIQUE (status_conversation_sequence)
-);
+CREATE INDEX IF NOT EXISTS tool_execution_result_part_by_artifact
+    ON tool_execution_result_part (artifact_id);
 
 CREATE TABLE IF NOT EXISTS agent_history (
     sequence              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,18 +138,13 @@ CREATE TABLE IF NOT EXISTS agent_history (
     summary               TEXT NOT NULL,
     watermark             INTEGER NOT NULL CHECK (watermark >= 0),
     created_at            TEXT NOT NULL,
+    status_conversation_sequence INTEGER UNIQUE REFERENCES conversation_item(sequence) ON DELETE SET NULL,
     CHECK (
-        (kind = 'message' AND conversation_sequence IS NOT NULL AND summary = '' AND watermark = 0)
+        (kind = 'message' AND conversation_sequence IS NOT NULL AND summary = '' AND watermark = 0 AND status_conversation_sequence IS NULL)
         OR
         (kind = 'compaction' AND conversation_sequence IS NULL)
     ),
     UNIQUE (conversation_sequence)
-);
-
-CREATE TABLE IF NOT EXISTS request_history_anchor (
-    event_sequence INTEGER PRIMARY KEY REFERENCES event(sequence),
-    agent_session TEXT NOT NULL,
-    history_sequence INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS agent_history_by_session
@@ -167,6 +152,9 @@ CREATE INDEX IF NOT EXISTS agent_history_by_session
 
 CREATE UNIQUE INDEX IF NOT EXISTS agent_history_compaction
     ON agent_history (agent_session, watermark) WHERE kind = 'compaction';
+
+CREATE INDEX IF NOT EXISTS agent_history_latest_compaction
+    ON agent_history (agent_session, sequence DESC) WHERE kind = 'compaction';
 
 CREATE TABLE IF NOT EXISTS history_checkpoint (
     sequence           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,26 +169,6 @@ CREATE TABLE IF NOT EXISTS history_checkpoint (
 CREATE INDEX IF NOT EXISTS history_checkpoint_by_title
     ON history_checkpoint (agent_session, title, sequence DESC);
 
-CREATE TABLE IF NOT EXISTS mode_change (
-    sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_session TEXT NOT NULL,
-    mode          TEXT NOT NULL,
-    created_at    TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS mode_change_by_session
-    ON mode_change (agent_session, sequence);
-
-CREATE TABLE IF NOT EXISTS status_prompt (
-    sequence             INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_session        TEXT NOT NULL,
-    mode_change_sequence INTEGER NOT NULL,
-    created_at           TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS status_prompt_by_session
-    ON status_prompt (agent_session, sequence);
-
 CREATE TABLE IF NOT EXISTS context_reminder (
     sequence        INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_session   TEXT NOT NULL,
@@ -214,39 +182,25 @@ CREATE INDEX IF NOT EXISTS context_reminder_by_session
     ON context_reminder (agent_session, sequence DESC);
 
 CREATE TABLE IF NOT EXISTS session_state (
-    user_session  TEXT PRIMARY KEY,
-    agent_session TEXT NOT NULL,
-    mode          TEXT NOT NULL
+    user_session    TEXT PRIMARY KEY,
+    agent_session   TEXT NOT NULL UNIQUE,
+    mode            TEXT NOT NULL,
+    mode_revision   INTEGER NOT NULL DEFAULT 0 CHECK (mode_revision >= 0),
+    status_revision INTEGER,
+    CHECK (status_revision IS NULL OR (status_revision >= 0 AND status_revision <= mode_revision))
 );
 
-CREATE TABLE IF NOT EXISTS agent_usage (
-    agent_session      TEXT PRIMARY KEY,
-    revision           INTEGER NOT NULL CHECK (revision > 0),
-    input_tokens       INTEGER NOT NULL,
-    cached_input_tokens INTEGER NOT NULL,
-    output_tokens      INTEGER NOT NULL,
-    context_size       INTEGER NOT NULL,
-    context_limit      INTEGER NOT NULL,
-    input_cost         REAL NOT NULL,
-    output_cost        REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS image_content (
-    sha256           TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS image_artifact (
+    artifact_id      TEXT PRIMARY KEY,
     media_type       TEXT NOT NULL,
     byte_length      INTEGER NOT NULL CHECK (byte_length >= 0),
     width            INTEGER NOT NULL CHECK (width > 0),
     height           INTEGER NOT NULL CHECK (height > 0),
     frame_count      INTEGER NOT NULL CHECK (frame_count > 0),
-    aggregate_pixels INTEGER NOT NULL CHECK (aggregate_pixels > 0)
-);
-
-CREATE TABLE IF NOT EXISTS image_artifact (
-    artifact_id  TEXT PRIMARY KEY,
-    sha256       TEXT NOT NULL REFERENCES image_content (sha256),
-    display_name TEXT NOT NULL,
-    origin       TEXT NOT NULL,
-    created_at   TEXT NOT NULL
+    aggregate_pixels INTEGER NOT NULL CHECK (aggregate_pixels > 0),
+    display_name     TEXT NOT NULL,
+    origin           TEXT NOT NULL,
+    created_at       TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS image_upload (
@@ -255,16 +209,4 @@ CREATE TABLE IF NOT EXISTS image_upload (
     created_at  TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS image_artifact_reference (
-    artifact_id  TEXT NOT NULL REFERENCES image_artifact (artifact_id),
-    reference_id TEXT NOT NULL,
-    PRIMARY KEY (artifact_id, reference_id)
-);
-
-CREATE INDEX IF NOT EXISTS image_artifact_unreferenced
-    ON image_artifact (created_at);
-
-CREATE TABLE IF NOT EXISTS projection_version (
-    name    TEXT PRIMARY KEY,
-    version INTEGER NOT NULL
-);
+CREATE INDEX IF NOT EXISTS image_artifact_unreferenced ON image_artifact (created_at);

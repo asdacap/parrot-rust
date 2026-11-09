@@ -26,9 +26,6 @@ fn database() -> Connection {
         .execute_batch(include_str!("../../src/database/event_indexes.sql"))
         .unwrap();
     connection
-        .execute_batch(include_str!("../../src/database/lineage.sql"))
-        .unwrap();
-    connection
 }
 fn event(id: &str, agent: &str) -> Event {
     Event {

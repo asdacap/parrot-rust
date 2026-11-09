@@ -26,6 +26,7 @@ pub enum DatabaseError {
     Sqlite(rusqlite::Error),
     Io(std::io::Error),
     Protobuf(protobuf::Error),
+    UnsupportedSchema { version: i64 },
     Closed,
     CommandPanicked,
     WorkerStopped,
@@ -37,6 +38,10 @@ impl fmt::Display for DatabaseError {
             Self::Sqlite(error) => error.fmt(f),
             Self::Io(error) => error.fmt(f),
             Self::Protobuf(error) => error.fmt(f),
+            Self::UnsupportedSchema { version } => write!(
+                f,
+                "unsupported session database schema version {version}. Start a new session"
+            ),
             Self::Closed => f.write_str("session database is closed"),
             Self::CommandPanicked => f.write_str("database command panicked"),
             Self::WorkerStopped => f.write_str("database worker stopped before completion"),

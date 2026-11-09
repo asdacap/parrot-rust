@@ -1,4 +1,5 @@
 mod actor;
+mod current_schema;
 mod event_metadata;
 mod observe;
 mod selected_tree;
@@ -53,12 +54,12 @@ async fn schema_foreign_keys_truncate_and_no_wal() {
     let value = database.admit("schema", &active(), |tx| {
         let mode: String = tx.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
         let foreign_keys: i64 = tx.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
-        let tables: i64 = tx.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'", [], |row| row.get(0))?;
-        let versions: i64 = tx.query_row("SELECT count(*) FROM projection_version", [], |row| row.get(0))?;
+        let tables: i64 = tx.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'", [], |row| row.get(0))?;
+        let versions: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         assert!(tx.execute("INSERT INTO conversation_part VALUES(999,0,'text','','','','')", []).is_err());
         Ok((mode, foreign_keys, tables, versions))
     }).unwrap().into_completion().await.unwrap().into_value().into_output();
-    assert_eq!(value, ("truncate".into(), 1, 28, 0));
+    assert_eq!(value, ("truncate".into(), 1, 15, 1));
     database.close().await.unwrap();
     assert!(!fixture.0.join("session.db-wal").exists());
     assert!(!fixture.0.join("session.db-shm").exists());

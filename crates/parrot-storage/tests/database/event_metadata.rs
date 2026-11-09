@@ -43,9 +43,6 @@ fn first_agent_start_fixes_lineage_during_writes_and_survives_reopen() {
     connection
         .execute_batch(include_str!("../../src/database/schema.sql"))
         .unwrap();
-    connection
-        .execute_batch(include_str!("../../src/database/lineage.sql"))
-        .unwrap();
     let transaction = connection.transaction().unwrap();
     for event in [
         start("original", "child", "old-parent", "old"),

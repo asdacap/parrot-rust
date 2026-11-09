@@ -28,7 +28,7 @@ Paths in this inventory refer to their former locations under `crates/parrot-sto
 
 ## Retained current behavior
 
-`database/event_metadata.rs` keeps `key_presence_is_oneof_specific_including_empty_keys` and adds direct first-start persistence through reopen. The latter still uses `lineage.sql` as a transitional fixture until bootstrap installs lineage in the main fresh schema.
+`database/event_metadata.rs` keeps `key_presence_is_oneof_specific_including_empty_keys` and checks direct first-start persistence through reopen. Lineage now belongs to the main fresh schema. Current-format initialization and nonmutating refusal checks are active in `database/current_schema.rs`.
 
 The active `events/projection.rs` retains payload-component writes, part roundtrips and error handling, and caller-owned transaction rollback. Its old physical-layout assertions are adapted by the later metadata package, not weakened here.
 

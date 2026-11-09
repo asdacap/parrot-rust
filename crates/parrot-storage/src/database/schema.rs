@@ -1,7 +1,14 @@
 use super::{Connection, DatabaseError, Transaction};
 use parrot_domain::protocol::messages::parrot::Event;
-use rusqlite::params;
+use rusqlite::{OpenFlags, TransactionBehavior, params};
 use std::path::Path;
+use std::time::Duration;
+
+const SCHEMA_VERSION: i64 = 1;
+
+#[cfg(test)]
+#[path = "../../tests/database/current_schema_crash.rs"]
+mod current_schema_crash;
 
 pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
     if let Some(parent) = path
@@ -10,14 +17,46 @@ pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
     {
         std::fs::create_dir_all(parent)?;
     }
-    let connection = Connection::open(path)?;
-    // Microsoft.Data.Sqlite's unmodified connection/command timeout is 30s;
-    // rusqlite otherwise uses a shorter five-second busy timeout.
-    connection.busy_timeout(std::time::Duration::from_secs(30))?;
+    let existing = path.try_exists()?;
+    let mut connection = if existing {
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?
+    } else {
+        Connection::open(path)?
+    };
+    let timeout = Duration::from_secs(30);
+    connection.busy_timeout(timeout)?;
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let initialize = match version {
+        0 => {
+            let populated: bool = connection.query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*');",
+                [],
+                |row| row.get(0),
+            )?;
+            if populated {
+                return Err(DatabaseError::UnsupportedSchema { version });
+            }
+            true
+        }
+        SCHEMA_VERSION => false,
+        _ => return Err(DatabaseError::UnsupportedSchema { version }),
+    };
+    if existing {
+        drop(connection);
+        connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        connection.busy_timeout(timeout)?;
+    }
     // TRUNCATE is required on shared filesystems; WAL/SHM are never enabled.
     connection.execute_batch("PRAGMA journal_mode=TRUNCATE; PRAGMA foreign_keys=ON;")?;
-    connection.execute_batch(include_str!("schema.sql"))?;
-    connection.execute_batch(include_str!("event_indexes.sql"))?;
+    if initialize {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(include_str!("schema.sql"))?;
+        transaction.execute_batch(include_str!("event_indexes.sql"))?;
+        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        #[cfg(test)]
+        current_schema_crash::wait_before_commit(&transaction);
+        transaction.commit()?;
+    }
     Ok(connection)
 }
 
