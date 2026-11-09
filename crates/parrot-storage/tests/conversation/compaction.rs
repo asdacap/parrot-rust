@@ -319,6 +319,154 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
 }
 
 #[tokio::test]
+async fn context_reminder_checkpoint_belongs_to_its_conversation_message_after_reopen() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    assert!(
+        repo.append_context_reminder(
+            event("reminder"),
+            checkpoint("provider/model", 10_000, 50),
+            "rendered warning".into(),
+        )
+        .await
+        .unwrap()
+    );
+    let items = repo
+        .read_conversation_state("agent".into())
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].item.message.role, MessageRole::System);
+    assert_eq!(
+        items[0].item.message.parts,
+        vec![parrot_storage::events::ConversationPart::text(
+            "rendered warning"
+        )]
+    );
+    let sequence = items[0].item.sequence;
+    repo.events().database().close().await.unwrap();
+
+    let reopened = fixture.repository();
+    assert_eq!(
+        reopened
+            .latest_context_reminder("agent".into())
+            .await
+            .unwrap(),
+        Some(checkpoint("provider/model", 10_000, 50))
+    );
+    assert!(
+        !reopened
+            .append_context_reminder(
+                event("duplicate"),
+                checkpoint("provider/model", 10_000, 50),
+                "duplicate".into(),
+            )
+            .await
+            .unwrap()
+    );
+    reopened
+        .events()
+        .transaction(move |tx| {
+            tx.execute(
+                "DELETE FROM conversation_item WHERE sequence = ?1;",
+                [sequence],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        reopened
+            .latest_context_reminder("agent".into())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn compaction_resets_reminders_even_when_the_message_is_retained() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    assert!(
+        repo.append_context_reminder(
+            event("reminder"),
+            checkpoint("provider/model", 10_000, 75),
+            "retained reminder".into(),
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        repo.append_compaction_status(event("status"), snapshot("summary", 0), "compacted".into())
+            .await
+            .unwrap()
+    );
+    let status_sequence = repo
+        .compaction_history("agent".into())
+        .await
+        .unwrap()
+        .unwrap()
+        .status
+        .unwrap()
+        .sequence;
+    repo.events()
+        .transaction(move |tx| {
+            tx.execute(
+                "DELETE FROM conversation_item WHERE sequence = ?1;",
+                [status_sequence],
+            )?;
+            let kind: String = tx.query_row(
+                "SELECT kind FROM conversation_item WHERE agent_session = 'agent' ORDER BY sequence LIMIT 1;",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(kind, "context_reminder");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    repo.save_compaction("agent".into(), snapshot("statusless summary", 1))
+        .await
+        .unwrap();
+    assert!(
+        repo.latest_context_reminder("agent".into())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        repo.append_context_reminder(
+            event("next-reminder"),
+            checkpoint("provider/model", 10_000, 50),
+            "new cycle".into(),
+        )
+        .await
+        .unwrap()
+    );
+    repo.save_compaction("agent".into(), snapshot("another statusless summary", 2))
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.latest_context_reminder("agent".into()).await.unwrap(),
+        Some(checkpoint("provider/model", 10_000, 50))
+    );
+    assert!(
+        !repo
+            .append_context_reminder(
+                event("duplicate"),
+                checkpoint("provider/model", 10_000, 50),
+                "duplicate".into(),
+            )
+            .await
+            .unwrap()
+    );
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn context_reminders_are_monotone_per_model_limit_and_project_only() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
@@ -367,10 +515,27 @@ async fn context_reminders_are_monotone_per_model_limit_and_project_only() {
         .unwrap()
     );
     assert_eq!(count(&repo, "event").await, 0);
-    assert_eq!(count(&repo, "context_reminder").await, 4);
+    assert_eq!(
+        repo.read_conversation_state("agent".into())
+            .await
+            .unwrap()
+            .items
+            .len(),
+        4
+    );
     assert_eq!(
         repo.latest_context_reminder("agent".into()).await.unwrap(),
         Some(checkpoint("A", 2000, 50))
+    );
+    let before = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert!(
+        repo.append_context_reminder(event("invalid"), checkpoint("A", 0, 90), "invalid".into())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        repo.read_conversation_state("agent".into()).await.unwrap(),
+        before
     );
     fail_projection(&repo).await;
     assert!(
@@ -378,7 +543,14 @@ async fn context_reminders_are_monotone_per_model_limit_and_project_only() {
             .await
             .is_err()
     );
-    assert_eq!(count(&repo, "context_reminder").await, 4);
+    assert_eq!(
+        repo.read_conversation_state("agent".into())
+            .await
+            .unwrap()
+            .items
+            .len(),
+        4
+    );
     assert_eq!(
         repo.latest_context_reminder("agent".into()).await.unwrap(),
         Some(checkpoint("A", 2000, 50))

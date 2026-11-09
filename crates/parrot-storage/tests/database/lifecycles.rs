@@ -51,13 +51,12 @@ async fn repository_workflows_keep_current_schema_after_reopen() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!((version, tables.len()), (1, 15));
+    assert_eq!((version, tables.len()), (2, 14));
     assert_eq!(
         tables,
         [
             "agent_history",
             "agent_lineage",
-            "context_reminder",
             "conversation_item",
             "conversation_part",
             "conversation_tool_call",
