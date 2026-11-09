@@ -13,7 +13,6 @@ TABLES = {
     "conversation_item",
     "conversation_part",
     "event",
-    "image_artifact",
     "image_upload",
     "input",
     "input_part",
@@ -46,8 +45,8 @@ def main():
             )
         }
         require(
-            version == 7 and tables == TABLES,
-            f"Expected format 7 and 7 application tables. Observed format {version} "
+            version == 8 and tables == TABLES,
+            f"Expected format 8 and 6 application tables. Observed format {version} "
             f"and {len(tables)} tables {sorted(tables)}.",
         )
         require(database.execute("PRAGMA integrity_check").fetchall() == [("ok",)], "Database integrity failed.")

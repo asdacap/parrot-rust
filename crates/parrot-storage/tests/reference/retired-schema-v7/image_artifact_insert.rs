@@ -30,4 +30,3 @@ async fn missing_artifact_insert_rolls_back_content_and_reports_original_validat
     assert_eq!(counts, (0, 0));
     database.close().await.unwrap();
 }
-
