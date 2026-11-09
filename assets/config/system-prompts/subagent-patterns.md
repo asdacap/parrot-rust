@@ -3,28 +3,28 @@
 Note: These are advisory
 
 ## Spawner
-- Agent A spawn Agent B or more agent to do indepandent work.
-- Agent A continue doing separate work.
-- Agent A uses 'wait' until Agent B finish where the result will be notified by the harness or ask B directly if needed.
-- This is basic delegation, clearly specify end goal for subagent.
+- Agent A spawns Agent B or additional agents to do independent work.
+- Agent A continues doing separate work.
+- Agent A uses 'wait' until Agent B finishes and the harness reports the result, or asks B directly if needed.
+- This is basic delegation. Clearly specify the end goal for each subagent.
 
 ## Consultant
-- Agent A spawn Agent B or more agent that act as consultant to agent A.
-  - Agent B may act like adversary or focuses on certain aspec only.
-  - The subagent should have diferent role or focus than Agent A.
-- Agent A discuss with Agent B.
-- Useful for more demanding task.
+- Agent A spawns Agent B or additional agents that act as consultants to agent A.
+  - Agent B may act as an adversary or focus only on certain aspects.
+  - The subagent should have a different role or focus from Agent A.
+- Agent A discusses with Agent B.
+- Useful for more demanding tasks.
 
 ## Council
 
-- Agent A starts N subagent to think about a topic. Each subagent think from different perspective.
-- For M round:
-   - subagents think and send their report to Agent A.
-   - Agent A compile all their reports to a scratch file, word-by-word without any alteration.
+- Agent A starts N subagents to think about a topic. Each subagent thinks from a different perspective.
+- For M rounds:
+   - Subagents think and send their reports to Agent A.
+   - Agent A compiles all their reports to a scratch file, word-by-word without any alteration.
    - Agent A starts another round by sending a message to every subagent again, restarting them, but pointing at the current scratch file for more context.
-- Agent A then compile the final subagent reports and form a conclusion.
-- Use different scratch file for different round.
-- Use for very-very delicate reasoning where different perspective is useful.
+- Agent A then compiles the final subagent reports and forms a conclusion.
+- Use a different scratch file for each round.
+- Use for very, very delicate reasoning where different perspectives are useful.
 
 ## Work Queue
 - Agent A uses the `$queue` skill to create a work-item queue and spawns N equivalent agents.
@@ -47,8 +47,8 @@ Note: These are advisory
 
 ## Fork Join
 
-- Agent A have a large task or investigation, it first define the scope of the task and how it can be broken up across N parallel indepandent agent. Consider triggering compaction if remaining context is insufficient for all subagents results before spawning subagents, after defining tasks.
-- Agent A spawn N indepandent agent, each given a subtask as specified before.
-- N subagent indipendantly execute task. Each compiling a comprehensive report.
-- Agent A wait until all subagent completed. 
-- Agent A ruminate on the collective result returned by subagents. Subagent's history is available for reading in current agent's $AGENT_DIR/subagent_name.
+- Agent A has a large task or investigation. It first defines the scope of the task and how it can be broken up across N parallel independent agents. Consider triggering compaction if the remaining context is insufficient for all subagents' results before spawning subagents, after defining the tasks.
+- Agent A spawns N independent agents, each given a subtask as specified before.
+- N subagents independently execute their tasks. Each compiles a comprehensive report.
+- Agent A waits until all subagents have completed.
+- Agent A ruminates on the collective results returned by the subagents. Each subagent's history is available for reading in the current agent's $AGENT_DIR/subagent_name.
