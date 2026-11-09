@@ -511,6 +511,65 @@ async fn history_up_recalls_last_prompt_and_down_discards_recall() {
 }
 
 #[tokio::test]
+async fn fast_mode_indicator_follows_model_on_startup() {
+    for enabled in [true, false] {
+        let mut rpc = Fixture::start().await;
+        let initial = wire::UserSession {
+            id: "session-1".into(),
+            model: "provider/model".into(),
+            mode: "build".into(),
+            fast_mode: enabled,
+            working_directory: rpc.root.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        rpc.state
+            .lock()
+            .unwrap()
+            .sessions
+            .insert(initial.id.clone(), initial.clone());
+        let mut terminal = TerminalFixture::new();
+        let cli = rpc.cli(terminal.take(), "", Some(initial));
+        let result = fixture::run_flow(cli, rpc.stopping.clone(), terminal.end_input(), async {
+            terminal.output_contains("❯ ").await;
+            let output = terminal.output.text();
+            assert_eq!(
+                output.contains("provider/model ⚡"),
+                enabled,
+                "fast-mode selection must appear after the model name: {output:?}"
+            );
+            assert_eq!(output.contains('⚡'), enabled);
+            terminal.input.end();
+        })
+        .await;
+        assert_eq!(result.unwrap(), 0);
+        rpc.close().await;
+    }
+}
+
+#[tokio::test]
+async fn fast_mode_indicator_refreshes_after_slash_toggle() {
+    let mut rpc = Fixture::start().await;
+    let mut terminal = TerminalFixture::new();
+    let cli = rpc.cli(terminal.take(), "", None);
+    let result = fixture::run_flow(cli, rpc.stopping.clone(), terminal.end_input(), async {
+        terminal.output_contains("❯ ").await;
+        for (state, expected) in [("on", " provider/model ⚡ "), ("off", " provider/model ")] {
+            terminal.input.type_text(&format!("/fast {state}\r"));
+            terminal
+                .output_contains(&format!("Fast mode is {state} "))
+                .await;
+            let dismissed = terminal.output.text().len();
+            terminal.input.type_text("\r");
+            wait_until(|| terminal.output.text()[dismissed..].contains(expected)).await;
+        }
+        terminal.input.end();
+    })
+    .await;
+    assert_eq!(result.unwrap(), 0);
+    rpc.close().await;
+}
+
+#[tokio::test]
 async fn actual_slash_registry_completes_filters_and_dispatches_mode_and_exit() {
     let mut rpc = Fixture::start().await;
     let mut terminal = TerminalFixture::new();

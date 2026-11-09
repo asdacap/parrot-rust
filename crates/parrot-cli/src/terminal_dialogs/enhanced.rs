@@ -255,7 +255,7 @@ impl EnhancedCli {
             registry,
         );
         let initial_update = presenter
-            .set_session(&initial.mode, &initial.model)
+            .set_session(&initial.mode, &initial.model, initial.fast_mode)
             .map_err(presenter_error)?;
         let input = InputPump::start(
             self.terminal
@@ -601,7 +601,11 @@ impl EnhancedInput {
                                 shared.update_settings(selected.current_session().clone());
                                 shared
                                     .apply_presenter(|presenter| {
-                                        presenter.set_session(selected.mode(), selected.model())
+                                        presenter.set_session(
+                                            selected.mode(),
+                                            selected.model(),
+                                            selected.current_session().fast_mode,
+                                        )
                                     })
                                     .map_err(as_slash)?;
                                 shared.busy.store(true, Ordering::Release);
@@ -612,7 +616,11 @@ impl EnhancedInput {
                         .await?;
                         shared.update_settings(session.current_session().clone());
                         shared.apply_presenter(|presenter| {
-                            presenter.set_session(session.mode(), session.model())
+                            presenter.set_session(
+                                session.mode(),
+                                session.model(),
+                                session.current_session().fast_mode,
+                            )
                         })?;
                         controller.synchronize_current(
                             shared.snapshot().client,
@@ -688,7 +696,11 @@ impl EnhancedInput {
                         session.current_session().clone(),
                     );
                     shared.apply_presenter(|presenter| {
-                        presenter.set_session(session.mode(), session.model())
+                        presenter.set_session(
+                            session.mode(),
+                            session.model(),
+                            session.current_session().fast_mode,
+                        )
                     })?;
                 }
                 continue;
@@ -803,7 +815,11 @@ impl EnhancedInput {
                     session.current_session().clone(),
                 );
                 shared.apply_presenter(|presenter| {
-                    presenter.set_session(session.mode(), session.model())
+                    presenter.set_session(
+                        session.mode(),
+                        session.model(),
+                        session.current_session().fast_mode,
+                    )
                 })?;
                 draw_prompt(&shared, &mut slash, &mut skills, &editor, &commands)?;
             } else {
@@ -1494,7 +1510,7 @@ impl SessionReplacement for EnhancedSession {
                 registry,
             );
             let update = presenter
-                .set_session(&session.mode, &session.model)
+                .set_session(&session.mode, &session.model, session.fast_mode)
                 .map_err(|error| NavigationFailure::Other(error.to_string()))?;
             check(c)?;
             // Flush the old response/activity before publishing a new identity.

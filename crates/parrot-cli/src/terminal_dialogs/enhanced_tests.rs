@@ -178,8 +178,12 @@ fn frame_copies_owned_input_and_places_modeline_before_prompt() {
     let (view, output, reads) = frame_view(80, original.clone());
     original[0] = prompt("changed> ", "not owned", 0);
     let mut presenter = EnhancedSessionPresenter::new(80, false, false);
-    view.apply(presenter.set_session("build", "provider/model").unwrap())
-        .unwrap();
+    view.apply(
+        presenter
+            .set_session("build", "provider/model", false)
+            .unwrap(),
+    )
+    .unwrap();
 
     let frame = output.text();
     let modeline = frame.find("mode: build").expect("modeline must be drawn");
@@ -199,7 +203,9 @@ fn question_countdown_preserves_input_and_clears_without_another_key() {
     for columns in [20, 80] {
         let (view, output, reads) = frame_view(columns, vec![prompt("> ", "typed answer", 4)]);
         let mut presenter = EnhancedSessionPresenter::new(columns, false, false);
-        presenter.set_session("build", "provider/model").unwrap();
+        presenter
+            .set_session("build", "provider/model", false)
+            .unwrap();
         view.apply(presenter.set_question_countdown(Some(61)).unwrap())
             .unwrap();
         assert!(
@@ -520,8 +526,12 @@ fn replacement_cleanup_commits_unfinished_reasoning_without_leaving_it_live() {
     view.apply(old.cancel().unwrap()).unwrap();
     assert!(old.cancel().unwrap().commits.is_empty());
     let mut replacement = EnhancedSessionPresenter::new(80, false, false);
-    view.apply(replacement.set_session("build", "replacement").unwrap())
-        .unwrap();
+    view.apply(
+        replacement
+            .set_session("build", "replacement", false)
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(output.text().matches("✦ Old planning").count(), 1);
     assert!(!replacement.snapshot().unwrap().iter().any(|item| {
         item.render(LiveBufferRenderContext {
@@ -628,8 +638,12 @@ fn progress_snapshot_redraw_preserves_modeline_and_owned_input_without_a_key() {
     use parrot_domain::values::progress::{PROGRESS_INVENTORY_KIND, Progress, ProgressSnapshot};
     let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 2)]);
     let mut presenter = EnhancedSessionPresenter::new(80, false, false);
-    view.apply(presenter.set_session("build", "provider/model").unwrap())
-        .unwrap();
+    view.apply(
+        presenter
+            .set_session("build", "provider/model", false)
+            .unwrap(),
+    )
+    .unwrap();
     view.apply(
         presenter
             .observe(&wire::Event {

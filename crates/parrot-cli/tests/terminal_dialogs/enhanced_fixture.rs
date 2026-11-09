@@ -151,6 +151,9 @@ impl Endpoint {
                 if !request.mode.is_empty() {
                     current.mode.clone_from(&request.mode);
                 }
+                if let Some(enabled) = request.fast_mode {
+                    current.fast_mode = enabled;
+                }
                 bytes(current)
             }
             "send_message" => {

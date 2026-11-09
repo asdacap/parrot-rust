@@ -12,7 +12,9 @@ use super::turn::{child, commits, completed, ended, event, live, start, text};
 
 fn configured(columns: usize) -> EnhancedSessionPresenter {
     let mut presenter = EnhancedSessionPresenter::new(columns, false, false);
-    presenter.set_session("build", "provider/model").unwrap();
+    presenter
+        .set_session("build", "provider/model", false)
+        .unwrap();
     presenter
 }
 fn summary(owner: &str, fragment: &str, completed: bool) -> wire::Event {
@@ -31,7 +33,9 @@ fn summary(owner: &str, fragment: &str, completed: bool) -> wire::Event {
 fn tool_path_aliases_flow_from_events_to_live_and_replayed_labels_per_agent() {
     for replaying in [false, true] {
         let mut presenter = EnhancedSessionPresenter::new(200, false, replaying);
-        presenter.set_session("build", "provider/model").unwrap();
+        presenter
+            .set_session("build", "provider/model", false)
+            .unwrap();
         presenter.observe(&start("root")).unwrap();
         presenter.observe(&child("root")).unwrap();
         for (agent, root) in [("root", "/remote/main"), ("child", "/remote/worker")] {
@@ -473,7 +477,9 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
         Arc::new(Mutex::new(SessionReplayContext::new(false))),
         registry,
     );
-    presenter.set_session("build", "provider/model").unwrap();
+    presenter
+        .set_session("build", "provider/model", false)
+        .unwrap();
     presenter.observe(&start("root")).unwrap();
     for (id, name, arguments) in [
         (
@@ -1224,7 +1230,9 @@ fn boundary_case(kind: &str, owner: &str, replaying: bool) {
         context,
         Arc::new(ToolPresenterRegistry::standard(Vec::new())),
     );
-    presenter.set_session("build", "provider/model").unwrap();
+    presenter
+        .set_session("build", "provider/model", false)
+        .unwrap();
     let boundary = match kind {
         "queue" => queue_event(owner, Vec::new()),
         "reasoning" => event(

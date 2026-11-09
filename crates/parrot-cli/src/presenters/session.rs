@@ -463,9 +463,18 @@ impl EnhancedSessionPresenter {
         Ok(update)
     }
 
-    pub fn set_session(&mut self, mode: &str, model: &str) -> PresenterResult<PresentationUpdate> {
+    pub fn set_session(
+        &mut self,
+        mode: &str,
+        model: &str,
+        fast_mode: bool,
+    ) -> PresenterResult<PresentationUpdate> {
         self.mode = mode.into();
-        self.model = model.into();
+        self.model = if fast_mode {
+            format!("{model} ⚡")
+        } else {
+            model.into()
+        };
         self.refresh()
     }
     pub fn set_question_countdown(
