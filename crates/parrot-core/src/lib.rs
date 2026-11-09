@@ -104,9 +104,9 @@ pub async fn run_turn<'a>(
             continue;
         }
         if !response.tool_calls.is_empty() {
-            states.record_tool_calls(&response, phase).await?;
+            let receipt = states.record_tool_calls(&response).await?;
             let results = tools
-                .execute(response.tool_calls.clone(), cancellation)
+                .execute(response.tool_calls.clone(), receipt, phase, cancellation)
                 .await?;
             if results.is_empty() {
                 return Err(Error::failed("tool execution returned no results"));

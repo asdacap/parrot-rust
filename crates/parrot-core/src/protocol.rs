@@ -60,13 +60,15 @@ pub trait Tools: Send + Sync {
     /// Captures permitted definitions backed by the original executable identities
     /// for this turn. The final catalog is the subset permitted in the final phase.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
-    /// Executes the complete supplied batch using retained executable identities,
-    /// returning results in call order and joining all admitted work before returning,
-    /// including on failure. Scheduling and batch-local bookkeeping stay internal;
-    /// result recording belongs to [`States`].
+    /// Executes the recorded batch using retained executable identities for the
+    /// supplied phase and explicit durable assistant correlation. Returns results
+    /// in call order and joins all admitted work, including on failure. Native
+    /// adapters may settle chunks durably before returning the complete batch to [`States`].
     fn execute<'a>(
         &'a self,
         calls: Vec<ToolCall>,
+        receipt: ToolCallReceipt,
+        phase: budget::TurnRequestPhase,
         cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>>;
 }
@@ -137,13 +139,12 @@ pub trait States: Send {
         reason: RetryReason,
         attempt: i32,
     ) -> BoxFuture<'_, Result<(), Error>>;
-    /// Durably records the assistant's tool calls before execution begins, retaining
-    /// the actual executable bindings for the supplied core-selected phase.
+    /// Durably records the assistant's tool calls and returns their correlation
+    /// for execution without preparing executable bindings or a live batch.
     fn record_tool_calls<'a>(
         &'a mut self,
         response: &'a ProviderResponse,
-        phase: budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<(), Error>>;
+    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>>;
     /// Reads ordered exit-blocker messages after accepted mutations have settled.
     /// Any nonempty list blocks completion, even when its messages are empty strings.
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>>;
@@ -265,6 +266,12 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments_json: String,
+}
+
+/// Correlates tool execution with the durably recorded assistant message.
+#[derive(Debug, Eq, PartialEq)]
+pub struct ToolCallReceipt {
+    pub assistant_sequence: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -5,12 +5,12 @@ use parrot_core::{
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
     ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorCode, ErrorKind,
     ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, TokenCalibration,
-    ToolCall, ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S, T>,
+    binding: &'a TurnBinding<S>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
     pending_prompt: Option<PendingPrompt>,
@@ -33,8 +33,9 @@ struct PendingCompaction {
 
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S, T>,
+    binding: &'a TurnBinding<S>,
     cancellation: &'a dyn Cancellation,
+    captured: std::sync::Mutex<Option<CapturedTools<T::Snapshot>>>,
 }
 
 struct RuntimeCancellation<'a>(parrot_core::CancellationToken<'a>);
@@ -51,7 +52,7 @@ impl Cancellation for RuntimeCancellation<'_> {
 
 struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S, T>,
+    binding: &'a TurnBinding<S>,
     cancellation: &'a dyn Cancellation,
 }
 
@@ -60,66 +61,25 @@ struct CapturedTools<T> {
     final_phase: T,
 }
 
-struct BoundTurn<S: AccessSnapshot, T: TurnTools<S>> {
-    selection: TurnSelection<S>,
-    tools: Option<CapturedTools<T::Snapshot>>,
+struct TurnBinding<S: AccessSnapshot> {
+    selection: std::sync::Mutex<Option<TurnSelection<S>>>,
 }
 
-struct ExecutionBinding<S: AccessSnapshot, T: TurnTools<S>> {
-    assistant_sequence: i64,
-    selection: TurnSelection<S>,
-    tools: T::Snapshot,
-    status: Arc<dyn crate::compaction::ContextStatus>,
-}
-
-struct TurnBinding<S: AccessSnapshot, T: TurnTools<S>> {
-    turn: std::sync::Mutex<Option<BoundTurn<S, T>>>,
-    execution: std::sync::Mutex<Option<ExecutionBinding<S, T>>>,
-}
-
-impl<S: AccessSnapshot, T: TurnTools<S>> TurnBinding<S, T> {
+impl<S: AccessSnapshot> TurnBinding<S> {
     fn new() -> Self {
         Self {
-            turn: std::sync::Mutex::new(None),
-            execution: std::sync::Mutex::new(None),
+            selection: std::sync::Mutex::new(None),
         }
     }
     fn bind(&self, selection: TurnSelection<S>) {
-        *self.turn.lock().expect("turn binding poisoned") = Some(BoundTurn {
-            selection,
-            tools: None,
-        });
+        *self.selection.lock().expect("turn binding poisoned") = Some(selection);
     }
     fn capture_selection(&self) -> Result<TurnSelection<S>, TurnError> {
-        self.turn
+        self.selection
             .lock()
             .expect("turn binding poisoned")
-            .as_ref()
-            .map(|turn| turn.selection.clone())
+            .clone()
             .ok_or_else(|| TurnError::Service("turn selection is unavailable".into()))
-    }
-    fn retain_tools(&self, normal: T::Snapshot, final_phase: T::Snapshot) -> Result<(), TurnError> {
-        let mut guard = self.turn.lock().expect("turn binding poisoned");
-        let turn = guard
-            .as_mut()
-            .ok_or_else(|| TurnError::Service("turn selection is unavailable".into()))?;
-        turn.tools = Some(CapturedTools {
-            normal,
-            final_phase,
-        });
-        Ok(())
-    }
-    fn capture_tools(&self, final_phase: bool) -> Result<T::Snapshot, TurnError> {
-        let guard = self.turn.lock().expect("turn binding poisoned");
-        let tools = guard
-            .as_ref()
-            .and_then(|turn| turn.tools.as_ref())
-            .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
-        Ok(if final_phase {
-            tools.final_phase.clone()
-        } else {
-            tools.normal.clone()
-        })
     }
 }
 
@@ -181,7 +141,7 @@ where
 {
     fn new(
         backend: &'a RuntimeBackend<S, T>,
-        binding: &'a TurnBinding<S, T>,
+        binding: &'a TurnBinding<S>,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
     ) -> Self {
@@ -245,6 +205,7 @@ where
                 backend,
                 binding: &binding,
                 cancellation,
+                captured: std::sync::Mutex::new(None),
             };
             let provider = RuntimeProvider {
                 backend,
@@ -392,11 +353,6 @@ where
                 .tool_conversation
                 .complete_execution(&mut state.conversation, results)
                 .await?;
-            self.binding
-                .execution
-                .lock()
-                .expect("execution binding poisoned")
-                .take();
             Ok(())
         })
     }
@@ -771,8 +727,7 @@ where
     fn record_tool_calls<'a>(
         &'a mut self,
         completed: &'a ProviderResponse,
-        phase: parrot_core::budget::TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<(), CoreError>> {
+    ) -> BoxFuture<'a, Result<ToolCallReceipt, CoreError>> {
         adapt_operation(async move {
             let completed: sessions::Completion = completed.clone().into();
             let completed = &completed;
@@ -796,32 +751,9 @@ where
                 ..Default::default()
             });
             backend.emit(received, cancellation).await?;
-            state.tool_conversation.begin_execution(
-                assistant.sequence,
-                completed
-                    .tool_calls
-                    .iter()
-                    .cloned()
-                    .map(Into::into)
-                    .collect(),
-            )?;
-            let tools = self.binding.capture_tools(phase.final_phase)?;
-            let selection = self.binding.capture_selection()?;
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            *self
-                .binding
-                .execution
-                .lock()
-                .expect("execution binding poisoned") = Some(ExecutionBinding {
+            Ok(ToolCallReceipt {
                 assistant_sequence: assistant.sequence,
-                selection,
-                tools,
-                status,
-            });
-            Ok(())
+            })
         })
     }
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
@@ -949,7 +881,10 @@ where
                     .map(Into::into)
                     .collect(),
             };
-            self.binding.retain_tools(normal, final_phase)?;
+            *self.captured.lock().expect("captured tools poisoned") = Some(CapturedTools {
+                normal,
+                final_phase,
+            });
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
@@ -969,29 +904,35 @@ where
     fn execute<'a>(
         &'a self,
         calls: Vec<ToolCall>,
+        receipt: ToolCallReceipt,
+        phase: parrot_core::budget::TurnRequestPhase,
         cancellation: parrot_core::CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
             let cancellation = RuntimeCancellation(cancellation);
             let backend = self.backend;
-            let (assistant_sequence, selection, snapshot, status) = {
-                let guard = self
-                    .binding
-                    .execution
-                    .lock()
-                    .expect("execution binding poisoned");
-                let binding = guard
+            let assistant_sequence = receipt.assistant_sequence;
+            let selection = self.binding.capture_selection()?;
+            let snapshot = {
+                let guard = self.captured.lock().expect("captured tools poisoned");
+                let tools = guard
                     .as_ref()
-                    .ok_or_else(|| TurnError::Service("execution tools are unavailable".into()))?;
-                (
-                    binding.assistant_sequence,
-                    binding.selection.clone(),
-                    binding.tools.clone(),
-                    binding.status.clone(),
-                )
+                    .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
+                if phase.final_phase {
+                    tools.final_phase.clone()
+                } else {
+                    tools.normal.clone()
+                }
             };
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
+            let status = state
+                .request_status
+                .clone()
+                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
+            state
+                .tool_conversation
+                .begin_execution(assistant_sequence, calls.clone())?;
             let events = ContextEmitter { backend };
             let mut results = Vec::with_capacity(calls.len());
             let mut cancel_remaining = false;

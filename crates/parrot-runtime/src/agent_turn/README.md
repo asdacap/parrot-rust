@@ -175,11 +175,18 @@ default, `The process crashed before the tool completed.`), with the existing
 `tool-result.error` formatting. Persistence precedes publication, and repeating
 restoration neither replaces completed results nor republishes their terminals.
 
-Only a newly recorded model response can stage a live execution batch. Interrupted
-or failed batches lose that live execution context; any missing results are closed
-as crash errors when conversation processing resumes. External effects may already
-have happened before the missing result, so the error does not imply a rollback.
-This policy supersedes earlier tool-replay behavior described in historical reports.
+`States::record_tool_calls` returns a `ToolCallReceipt` containing the durable
+assistant sequence. Core passes the receipt and selected request phase to
+`Tools::execute`. `RuntimeTools` owns the original executable snapshots and stages
+the live batch when execution begins. Recording does not prepare the executor.
+Each execution chunk settles durably before the next chunk starts. Final result
+recording validates the complete batch and advances the conversation watermark.
+
+Interrupted or failed batches lose their live execution context. Any missing
+results are closed as crash errors when conversation processing resumes. External
+effects may already have happened before the missing result, so the error does not
+imply a rollback. This policy supersedes earlier tool-replay behavior described in
+historical reports.
 
 ### External versus inline context operations
 

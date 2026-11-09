@@ -3,8 +3,8 @@ use parrot_core::{
     ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
     ConversationTurn, Delivery, Error, ErrorCode, ErrorKind, FinishReason, InputAdmission, Message,
     Outcome, PendingMessage, Provider, ProviderRequest, ProviderResponse, Reasoning, RetryReason,
-    Role, States, TokenCalibration, ToolCall, ToolCatalog, ToolDefinition, ToolImage, ToolResult,
-    ToolStatus, Tools, TurnOptions,
+    Role, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition,
+    ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnRequestPhase},
     run, run_turn,
 };
@@ -130,6 +130,8 @@ struct MemoryTools {
     fail_at: Arc<Mutex<Option<&'static str>>>,
     requests: Arc<Mutex<Vec<Vec<ToolCall>>>>,
     replies: Arc<Mutex<VecDeque<Vec<ToolResult>>>>,
+    receipts: Arc<Mutex<Vec<ToolCallReceipt>>>,
+    phases: Arc<Mutex<Vec<TurnRequestPhase>>>,
 }
 impl Tools for MemoryTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
@@ -154,11 +156,15 @@ impl Tools for MemoryTools {
     fn execute<'a>(
         &'a self,
         calls: Vec<ToolCall>,
+        receipt: ToolCallReceipt,
+        phase: TurnRequestPhase,
         _cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             assert!(!calls.is_empty());
             self.requests.lock().unwrap().push(calls.clone());
+            self.receipts.lock().unwrap().push(receipt);
+            self.phases.lock().unwrap().push(phase);
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
                 return Ok(reply);
@@ -241,7 +247,6 @@ struct MemoryState {
     completion_feedback: Vec<CompletionFeedback>,
     rendered_instructions: Vec<String>,
     final_requests: Vec<usize>,
-    recorded_phases: Vec<TurnRequestPhase>,
     estimates: Mutex<Vec<InputEstimate>>,
     estimate_script: Mutex<VecDeque<i64>>,
     estimated_input_tokens: i64,
@@ -296,6 +301,8 @@ impl MemoryState {
                 fail_at: Arc::default(),
                 requests: Arc::default(),
                 replies: Arc::default(),
+                receipts: Arc::default(),
+                phases: Arc::default(),
             },
             provider: MemoryProvider {
                 trace,
@@ -307,7 +314,6 @@ impl MemoryState {
             completion_feedback: Vec::new(),
             rendered_instructions: Vec::new(),
             final_requests: Vec::new(),
-            recorded_phases: Vec::new(),
             estimates: Mutex::default(),
             estimate_script: Mutex::default(),
             estimated_input_tokens: 0,
@@ -776,11 +782,9 @@ impl States for MemoryState {
     fn record_tool_calls<'a>(
         &'a mut self,
         response: &'a ProviderResponse,
-        phase: TurnRequestPhase,
-    ) -> BoxFuture<'a, Result<(), Error>> {
+    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>> {
         Box::pin(async move {
             self.step("record_tools")?;
-            self.recorded_phases.push(phase);
             self.recorded_tools.push(response.clone());
             self.append_response(response);
             self.recorded_catalogs.push(
@@ -794,7 +798,9 @@ impl States for MemoryState {
                     .map(|definition| definition.name.clone())
                     .collect(),
             );
-            Ok(())
+            Ok(ToolCallReceipt {
+                assistant_sequence: i64::try_from(self.recorded_tools.len()).unwrap(),
+            })
         })
     }
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
@@ -909,7 +915,15 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.rendered_instructions.len(), 5);
-    assert!(state.recorded_phases.iter().all(|phase| phase.final_phase));
+    assert!(
+        state
+            .tools
+            .phases
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|phase| phase.final_phase)
+    );
     assert!(
         state
             .capture_catalogs()
@@ -1048,7 +1062,10 @@ fn disabled_request_limits_keep_every_request_in_normal_phase() {
     assert!(state.final_requests.is_empty());
     assert!(
         state
-            .recorded_phases
+            .tools
+            .phases
+            .lock()
+            .unwrap()
             .iter()
             .all(|phase| !phase.final_phase && !phase.enters_final_phase)
     );
@@ -1445,9 +1462,9 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     assert_eq!(catalogs[3], ["read", "write"]);
     assert_eq!(state.final_requests, [1, 4]);
     assert!(catalogs[4..].iter().all(|tools| tools == &["read"]));
-    assert!(state.recorded_phases[3].enters_final_phase);
+    assert!(state.tools.phases.lock().unwrap()[3].enters_final_phase);
     assert!(
-        state.recorded_phases[4..]
+        state.tools.phases.lock().unwrap()[4..]
             .iter()
             .all(|phase| phase.final_phase && !phase.enters_final_phase)
     );
@@ -1483,7 +1500,18 @@ fn tools_and_provider_operate_without_states() {
     let is_cancelled = || source.is_cancelled();
     let cancelled = || source.cancelled();
     let cancellation = CancellationToken::new(&is_cancelled, &cancelled);
-    let results = finish(tools.execute(calls.clone(), cancellation)).unwrap();
+    let results = finish(tools.execute(
+        calls.clone(),
+        ToolCallReceipt {
+            assistant_sequence: 41,
+        },
+        TurnRequestPhase {
+            final_phase: false,
+            enters_final_phase: false,
+        },
+        cancellation,
+    ))
+    .unwrap();
     assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(
         results,
@@ -1564,7 +1592,7 @@ fn core_selects_phase_and_estimates_the_exact_advertised_tools() {
     states.maximum = 2;
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(states.rendered_instructions.len(), 2);
-    assert!(!states.recorded_phases[0].final_phase);
+    assert!(!states.tools.phases.lock().unwrap()[0].final_phase);
     assert_eq!(states.final_requests, [1]);
     let requests = states.provider.requests.lock().unwrap();
     let estimates = states.capture_request_estimates();
