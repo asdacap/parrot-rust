@@ -1,6 +1,7 @@
 mod actor;
 mod current_schema;
 mod event_metadata;
+mod lifecycles;
 mod observe;
 mod selected_tree;
 mod source_boundaries;

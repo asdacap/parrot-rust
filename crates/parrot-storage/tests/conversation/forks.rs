@@ -710,6 +710,7 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
     let old = append(&repo, "agent", message(MessageRole::User, "old")).await;
     let status = append(&repo, "agent", message(MessageRole::System, "status")).await;
     append(&repo, "agent", message(MessageRole::User, "tail")).await;
+    let final_item = append(&repo, "agent", message(MessageRole::Assistant, "final")).await;
     repo.events()
         .transaction(move |tx| {
             tx.execute(
@@ -717,8 +718,8 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
                 rusqlite::params![old, status],
             )?;
             tx.execute(
-                "UPDATE conversation_item SET final_phase = 1 WHERE sequence = ?1;",
-                [status],
+                "UPDATE conversation_item SET final_phase = 1 WHERE sequence IN (?1, ?2);",
+                [status, final_item],
             )?;
             Ok(())
         })
@@ -748,14 +749,33 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
             copied_status.message.parts,
             vec![ConversationPart::text("status")]
         );
-        assert_eq!(effective.groups.len(), 1);
+        assert_eq!(effective.groups.len(), 2);
         assert!(!effective.groups[0].items[0].final_phase);
+        assert!(effective.groups[1].items[0].final_phase);
+        assert_eq!(single_text(&effective.groups[1].items[0]), "final");
         assert_eq!(
             effective.groups[0].items[0].message.parts,
             vec![ConversationPart::text("tail")]
         );
     }
     repo.events().database().close().await.unwrap();
+    let reopened = fixture.repository();
+    for destination in ["completed", "safe"] {
+        let effective = reopened
+            .effective_conversation_groups(destination.into())
+            .await
+            .unwrap();
+        assert!(effective.status.unwrap().final_phase);
+        assert_eq!(
+            effective
+                .groups
+                .iter()
+                .map(|group| group.items[0].final_phase)
+                .collect::<Vec<_>>(),
+            [false, true]
+        );
+    }
+    reopened.events().database().close().await.unwrap();
 }
 
 #[tokio::test]
