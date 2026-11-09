@@ -29,7 +29,7 @@ use parrot_runtime::event_broker::{BrokerError, EventBroker};
 use parrot_storage::conversation::{AgentHistoryView, ConversationRepository};
 use parrot_storage::database::SessionDatabase;
 use parrot_storage::events::{EventRepository, NeverCancelled};
-use parrot_storage::history_files::AgentHistoryFile;
+use parrot_storage::history_files::{AgentHistoryFile, SessionIndex, SessionMeta};
 use protobuf::Message;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -53,7 +53,30 @@ impl Fixture {
 
     fn open(path: &std::path::Path) -> ConversationRepository {
         let root = SelectedSessionRoot::new(path.to_owned(), RootOrigin::Current).unwrap();
-        ConversationRepository::new(EventRepository::new(SessionDatabase::open(root).unwrap()))
+        let session_id = root.path().file_name().unwrap().to_str().unwrap();
+        let launch_directory = std::env::current_dir().unwrap();
+        let metadata = SessionIndex::new(
+            root.clone(),
+            parrot_domain::values::identifiers::UserSessionId::parse(session_id).unwrap(),
+            launch_directory.clone(),
+        )
+        .unwrap();
+        if metadata.find().unwrap().is_none() {
+            let mut session = SessionMeta::new(
+                session_id,
+                launch_directory.to_str().unwrap(),
+                "provider",
+                "model",
+            );
+            session.root_agent_name = Some("main".into());
+            session.mode = Some("initial".into());
+            metadata.initialize(session, "fixture-root".into()).unwrap();
+        }
+        ConversationRepository::new(
+            EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+            metadata,
+        )
+        .unwrap()
     }
 
     fn history_for(repository: &ConversationRepository) -> AgentHistoryView {
