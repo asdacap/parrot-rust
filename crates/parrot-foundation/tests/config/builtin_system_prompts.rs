@@ -6,7 +6,7 @@ use parrot_foundation::template_catalog::PromptTemplateCatalog;
 fn defaults_resolve_to_prompt_text() {
     let (configuration, _) =
         PromptTemplateCatalog::from_content("", &fixtures::environment()).unwrap();
-    assert_eq!(configuration.system_prompts.len(), 7);
+    assert_eq!(configuration.system_prompts.len(), 6);
     for text in configuration.system_prompts.values() {
         assert!(!text.trim().is_empty());
         assert!(!text.starts_with("@builtin:"));
@@ -30,7 +30,7 @@ fn inline_overrides_replace_only_the_selected_prompt() {
         &environment,
     )
     .unwrap();
-    assert_eq!(configuration.system_prompts.len(), 8);
+    assert_eq!(configuration.system_prompts.len(), 7);
     assert_eq!(
         configuration.system_prompts["runtime:system-context:01-base"],
         "Custom base prompt."
@@ -62,11 +62,7 @@ fn builtin_references_can_be_reused_under_custom_provider_keys() {
             "runtime:system-context:04-behavior-guideline",
             "behavior-guidelines.md",
         ),
-        (
-            "runtime:system-context:04a-markdown-reading",
-            "markdown-reading.md",
-        ),
-        ("runtime:system-context:05-git-ethics", "git-ethics.md"),
+        ("runtime:system-context:05-toolings", "toolings.md"),
     ] {
         let (configuration, _) = PromptTemplateCatalog::from_content(
             &format!("system_prompts:\n  custom:guidance: '@builtin:system-prompts/{filename}'\n"),

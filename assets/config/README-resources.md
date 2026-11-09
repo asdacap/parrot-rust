@@ -19,7 +19,7 @@ resource, not the active production resource.
 
 ## Built-in system prompts
 
-The seven static `system_prompts` bodies live in `assets/config/system-prompts/`:
+The six static `system_prompts` bodies live in `assets/config/system-prompts/`:
 
 | Provider key | Markdown file |
 | --- | --- |
@@ -28,8 +28,7 @@ The seven static `system_prompts` bodies live in `assets/config/system-prompts/`
 | `runtime:system-context:02a-agent-tasks` | `agent-tasks.md` |
 | `runtime:system-context:03-subagent-pattern` | `subagent-patterns.md` |
 | `runtime:system-context:04-behavior-guideline` | `behavior-guidelines.md` |
-| `runtime:system-context:04a-markdown-reading` | `markdown-reading.md` |
-| `runtime:system-context:05-git-ethics` | `git-ethics.md` |
+| `runtime:system-context:05-toolings` | `toolings.md` |
 
 Architecture guidance is provided by the bundled
 [`architecture` skill](../skills/architecture/SKILL.md), not an always-loaded
