@@ -553,7 +553,7 @@ fn body_render_cache_survives_input_changes_and_commits_but_invalidates_on_resiz
         ..Default::default()
     })
     .unwrap();
-    view.flush_commits(&mut view.state.lock().unwrap()).unwrap();
+    view.clear().unwrap();
     assert_eq!(body.rendered.load(Ordering::SeqCst), 1);
 
     columns.store(40, Ordering::SeqCst);
