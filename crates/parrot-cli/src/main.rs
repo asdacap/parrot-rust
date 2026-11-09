@@ -582,7 +582,14 @@ impl Application {
             .with_restore_progress(restore_progress)
             .with_legacy_path_read_fallback(legacy);
             let result = async {
-                let opened = match startup.open(options.prompt.is_empty(), cancellation).await {
+                let opened = match startup
+                    .open(
+                        options.session_start,
+                        options.prompt.is_empty(),
+                        cancellation,
+                    )
+                    .await
+                {
                     Ok(opened) => opened,
                     Err(_) if invalid_variant.load(Ordering::Relaxed) => {
                         cancellation.check().map_err(|_| DispatchError::Cancelled)?;

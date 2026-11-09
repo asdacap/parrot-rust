@@ -64,8 +64,15 @@ pub enum AuthInput {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatSessionStart {
+    ResumeLatest,
+    Fresh,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChatOptions {
+    pub session_start: ChatSessionStart,
     pub model: String,
     pub model_overridden: bool,
     pub variant: Option<String>,
@@ -79,6 +86,7 @@ pub struct ChatOptions {
 impl Default for ChatOptions {
     fn default() -> Self {
         Self {
+            session_start: ChatSessionStart::ResumeLatest,
             model: DEFAULT_MODEL.into(),
             model_overridden: false,
             variant: None,
@@ -213,6 +221,7 @@ fn parse_chat(arguments: &[String]) -> Result<ChatOptions, UsageError> {
                 options.token_file = value.clone();
                 index += 1;
             }
+            ("--new-session", _) => options.session_start = ChatSessionStart::Fresh,
             ("--basic", _) => options.basic = true,
             ("--take-over", _) => options.take_over = true,
             _ => words.push(argument.clone()),

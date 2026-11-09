@@ -4,6 +4,7 @@
 //! startup;` from tests/dispatch/main.rs after shared registration.
 #![cfg(unix)]
 
+use parrot_cli::dispatch::arguments::ChatSessionStart;
 use parrot_cli::dispatch::startup::{
     ConfigureFresh, LocalChatStartup, OpenLocalClient, RestoreProgress, StartupError,
 };
@@ -91,8 +92,8 @@ struct Context {
 }
 impl Context {
     fn new() -> Self {
-        let root = PathBuf::from(format!(
-            "/tmp/t65-{}-{}",
+        let root = std::env::temp_dir().join(format!(
+            "t65-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
@@ -503,7 +504,9 @@ async fn run_case(scenario: &'static str, interactive: bool, expected_opens: usi
     assert_eq!(startup.workspace().launch_directory(), context.root);
     assert_eq!(startup.workspace().physical_identity(), context.root);
     let stop = Stop::new();
-    let opened = bounded(startup.open(interactive, &stop)).await.unwrap();
+    let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, interactive, &stop))
+        .await
+        .unwrap();
     assert_eq!(context.opens.load(Ordering::SeqCst), expected_opens);
     assert_eq!(context.configurations.load(Ordering::SeqCst), fresh);
     let resumes = usize::from(!matches!(
@@ -643,7 +646,9 @@ async fn empty_restore_reports_zero_events() {
     let mut server = context.server(endpoint, false).await;
     let mut local = context.client(&server);
     let startup = context.startup(local.client().unwrap().clone(), false);
-    let opened = bounded(startup.open(false, &Stop::new())).await.unwrap();
+    let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
+        .await
+        .unwrap();
     assert!(
         context
             .text()
@@ -654,7 +659,7 @@ async fn empty_restore_reports_zero_events() {
     bounded(server.close()).await.unwrap();
 }
 
-async fn cancellation_case(during_attach: bool) {
+async fn cancellation_case(session_start: ChatSessionStart, during_attach: bool) {
     let context = Context::new();
     let _activation = context.admit(false);
     let endpoint = Endpoint::new(&context, "cancel");
@@ -665,7 +670,7 @@ async fn cancellation_case(during_attach: bool) {
     if !during_attach {
         stop.cancel();
     }
-    let (result, ()) = tokio::join!(bounded(startup.open(true, &stop)), async {
+    let (result, ()) = tokio::join!(bounded(startup.open(session_start, true, &stop)), async {
         if during_attach {
             bounded(endpoint.attach_started.notified()).await;
             assert!(
@@ -689,11 +694,15 @@ async fn cancellation_case(during_attach: bool) {
 }
 #[tokio::test]
 async fn cancellation_before_start_keeps_local_providers_lazy() {
-    cancellation_case(false).await;
+    cancellation_case(ChatSessionStart::ResumeLatest, false).await;
+}
+#[tokio::test]
+async fn cancellation_before_explicit_fresh_keeps_local_providers_lazy() {
+    cancellation_case(ChatSessionStart::Fresh, false).await;
 }
 #[tokio::test]
 async fn cancellation_during_native_attach_has_no_fallback() {
-    cancellation_case(true).await;
+    cancellation_case(ChatSessionStart::ResumeLatest, true).await;
 }
 
 async fn recovery_failure_case(scenario: &'static str, expected: Code) {
@@ -705,17 +714,20 @@ async fn recovery_failure_case(scenario: &'static str, expected: Code) {
     let mut local_owner = context.client(&local_server);
     let startup = context.startup(local_owner.client().unwrap().clone(), false);
     let stop = Stop::new();
-    let (result, ()) = tokio::join!(bounded(startup.open(true, &stop)), async {
-        bounded(endpoint.resume_started.notified()).await;
-        assert!(context.text().contains("existing... 1 events loaded"));
-        assert!(!context.text().contains("loaded existing user session"));
-        if scenario == "cancel-retry" {
-            bounded(endpoint.retry_started.notified()).await;
+    let (result, ()) = tokio::join!(
+        bounded(startup.open(ChatSessionStart::ResumeLatest, true, &stop)),
+        async {
+            bounded(endpoint.resume_started.notified()).await;
+            assert!(context.text().contains("existing... 1 events loaded"));
+            assert!(!context.text().contains("loaded existing user session"));
+            if scenario == "cancel-retry" {
+                bounded(endpoint.retry_started.notified()).await;
+            }
+            if matches!(scenario, "cancel-recovery" | "cancel-retry") {
+                stop.cancel();
+            }
         }
-        if matches!(scenario, "cancel-recovery" | "cancel-retry") {
-            stop.cancel();
-        }
-    });
+    );
     assert!(matches!(result, Err(StartupError::Rpc(status)) if status.code() == expected));
     let before = context.text();
     (endpoint.progress)("existing", 100);
@@ -784,7 +796,9 @@ async fn explicit_rpc_cancelled_attach_with_live_caller_retries_then_creates_fre
     let mut local = context.client(&local_server);
     let startup = context.startup(local.client().unwrap().clone(), false);
     let caller = Stop::new();
-    let opened = bounded(startup.open(true, &caller)).await.unwrap();
+    let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, true, &caller))
+        .await
+        .unwrap();
     assert!(!caller.is_cancelled());
     assert_eq!(opened.session.id, "new-session");
     assert!(opened.remote.is_none());
@@ -822,6 +836,58 @@ async fn explicit_rpc_cancelled_attach_with_live_caller_retries_then_creates_fre
 }
 
 #[tokio::test]
+async fn explicit_fresh_skips_discovery_and_preserves_live_owner_data() {
+    let context = Context::new();
+    let _activation = context.admit(false);
+    let id = UserSessionId::parse("existing").unwrap();
+    let old = context.roots.current().state().join("sessions/existing");
+    std::fs::write(old.join("session.db"), b"retained database").unwrap();
+    std::fs::create_dir(old.join("artifacts")).unwrap();
+    std::fs::write(old.join("artifacts/image"), b"retained image").unwrap();
+    let canonical = WorkingDirectoryClaim::canonicalize(&context.root).unwrap();
+    let association = context
+        .roots
+        .current()
+        .state()
+        .join("owners/workspaces")
+        .join(WorkingDirectoryClaim::fingerprint(&canonical))
+        .join("existing.json");
+    std::fs::write(&association, "{").unwrap();
+    let endpoint = Endpoint::new(&context, "connect");
+    let mut owner_server = context.server(endpoint.clone(), true).await;
+    let mut local_server = context.server(endpoint.clone(), false).await;
+    let mut local = context.client(&local_server);
+    let startup = context.startup(local.client().unwrap().clone(), true);
+    let opened = bounded(startup.open(ChatSessionStart::Fresh, true, &Stop::new()))
+        .await
+        .unwrap();
+    assert_eq!(opened.session.id, "new-session");
+    assert!(opened.remote.is_none());
+    {
+        let calls = endpoint.calls.lock().unwrap();
+        assert_eq!(calls.created.len(), 1);
+        assert!(calls.created[0].interactive_permissions);
+        assert!(calls.attached.is_empty());
+        assert!(calls.resumed.is_empty());
+    }
+    assert_eq!(
+        std::fs::read(old.join("session.db")).unwrap(),
+        b"retained database"
+    );
+    assert_eq!(
+        std::fs::read(old.join("artifacts/image")).unwrap(),
+        b"retained image"
+    );
+    assert_eq!(std::fs::read_to_string(&association).unwrap(), "{");
+    assert!(context.claim().is_active(&id, &context.root).unwrap());
+    context.assert_diagnostics("success");
+    drop(opened);
+    local.close();
+    bounded(owner_server.close()).await.unwrap();
+    bounded(local_server.close()).await.unwrap();
+}
+
+#[tokio::test]
 async fn corrupt_claim_hard_fails_before_lazy_local_open() {
     let context = Context::new();
     let _activation = context.admit(false);
@@ -839,7 +905,9 @@ async fn corrupt_claim_hard_fails_before_lazy_local_open() {
     let mut owner = context.client(&server);
     let startup = context.startup(owner.client().unwrap().clone(), false);
     assert!(matches!(
-        startup.open(true, &Stop::new()).await,
+        startup
+            .open(ChatSessionStart::ResumeLatest, true, &Stop::new())
+            .await,
         Err(StartupError::CorruptState)
     ));
     assert_eq!(context.opens.load(Ordering::SeqCst), 0);
@@ -859,7 +927,9 @@ async fn native_identity_mismatch_is_not_accepted_as_attached() {
     let mut server = context.server(endpoint.clone(), true).await;
     let mut local = context.client(&server);
     let startup = context.startup(local.client().unwrap().clone(), false);
-    let opened = bounded(startup.open(false, &Stop::new())).await.unwrap();
+    let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
+        .await
+        .unwrap();
     assert_eq!(opened.session.id, "existing");
     assert!(opened.remote.is_none());
     assert_eq!(endpoint.calls.lock().unwrap().attached.len(), 1);
@@ -916,7 +986,9 @@ async fn legacy_only_candidate_attaches_to_legacy_socket_in_place() {
     .unwrap();
     let mut local = context.client(&server);
     let startup = context.startup(local.client().unwrap().clone(), false);
-    let opened = bounded(startup.open(false, &Stop::new())).await.unwrap();
+    let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
+        .await
+        .unwrap();
     assert_eq!(opened.session.id, "existing");
     assert!(opened.remote.is_some());
     assert_eq!(endpoint.calls.lock().unwrap().attached.len(), 1);
@@ -959,7 +1031,9 @@ async fn disabled_fallback_does_not_discover_or_attach_legacy_candidate() {
     let startup = context
         .startup(local.client().unwrap().clone(), false)
         .with_legacy_path_read_fallback(false);
-    let opened = bounded(startup.open(false, &Stop::new())).await.unwrap();
+    let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
+        .await
+        .unwrap();
     assert_eq!(opened.session.id, "new-session");
     assert!(opened.remote.is_none());
     assert!(legacy.calls.lock().unwrap().attached.is_empty());
@@ -994,7 +1068,9 @@ async fn duplicate_session_candidate_prefers_current_root_and_socket() {
     let mut current_server = context.server(current.clone(), true).await;
     let mut local = context.client(&current_server);
     let startup = context.startup(local.client().unwrap().clone(), false);
-    let opened = bounded(startup.open(true, &Stop::new())).await.unwrap();
+    let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, true, &Stop::new()))
+        .await
+        .unwrap();
     assert_eq!(opened.session.id, "existing");
     assert!(opened.remote.is_some());
     assert_eq!(current.calls.lock().unwrap().attached.len(), 1);
@@ -1036,7 +1112,7 @@ async fn corrupt_current_duplicate_does_not_fall_back_to_valid_legacy() {
     let mut local = context.client(&legacy_server);
     let startup = context.startup(local.client().unwrap().clone(), false);
     assert!(matches!(
-        bounded(startup.open(true, &Stop::new())).await,
+        bounded(startup.open(ChatSessionStart::ResumeLatest, true, &Stop::new())).await,
         Err(StartupError::CorruptState)
     ));
     assert!(legacy.calls.lock().unwrap().attached.is_empty());

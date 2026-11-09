@@ -75,6 +75,18 @@ fn only_variant_rejects_a_missing_value_or_following_double_dash_flag() {
 }
 
 #[test]
+fn new_session_is_a_startup_option_not_prompt_text() {
+    let actual = chat(&["chat", "first", "--new-session", "second"]);
+    assert_eq!(actual.prompt, "first second");
+    assert_eq!(actual.session_start, ChatSessionStart::Fresh);
+    assert_eq!(
+        chat(&["chat"]).session_start,
+        ChatSessionStart::ResumeLatest
+    );
+    assert_eq!(chat(&["chat", "--new-session"]).prompt, "");
+}
+
+#[test]
 fn stored_model_and_mode_only_fill_fresh_defaults() {
     let mut default = chat(&["chat"]);
     default.apply_configuration("saved-model", "saved-mode");

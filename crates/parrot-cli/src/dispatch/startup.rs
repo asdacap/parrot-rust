@@ -3,6 +3,7 @@
 //! The caller supplies already selected roots/workspace and lazy local service
 //! configuration. Workspace candidate roots are data, not filesystem grants.
 
+use super::arguments::ChatSessionStart;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -271,6 +272,7 @@ impl LocalChatStartup {
 
     pub async fn open(
         &self,
+        session_start: ChatSessionStart,
         interactive_permissions: bool,
         cancellation: &dyn Cancellation,
     ) -> Result<OpenedLocalSession, StartupError> {
@@ -284,7 +286,7 @@ impl LocalChatStartup {
         start.correlation_id = Some(startup_id.clone());
         self.diagnostics.write(&start);
         let result = self
-            .open_session(interactive_permissions, cancellation)
+            .open_session(session_start, interactive_permissions, cancellation)
             .await;
         let cancelled =
             matches!(&result, Err(StartupError::Rpc(status)) if status.code() == Code::Cancelled);
@@ -317,115 +319,121 @@ impl LocalChatStartup {
 
     async fn open_session(
         &self,
+        session_start: ChatSessionStart,
         interactive_permissions: bool,
         cancellation: &dyn Cancellation,
     ) -> Result<OpenedLocalSession, StartupError> {
         check(cancellation)?;
-        self.progress(
-            "looking for the workspace's latest user session...",
-            cancellation,
-        )?;
-        let directory = self.workspace.launch_directory();
-        let admissions = SessionAdmissions::new(
-            OwnershipRoots::new(
-                self.roots.current().state().to_owned(),
-                self.roots.legacy().state().to_owned(),
-            )?,
-            self.runtime.clone(),
-            self.legacy_path_read_fallback,
-        );
-        let candidate = admissions.discover_latest(directory)?;
-        if candidate.admission.disposition == ClaimDisposition::Corrupt {
-            return Err(StartupError::CorruptState);
-        }
         let mut local = None;
-        if let Some(id) = candidate.admission.session_id {
-            let selected = candidate
-                .selected_root
-                .expect("discovered session has a selected root");
-            let paths = match selected.origin() {
-                RootOrigin::Current => self.roots.current(),
-                RootOrigin::Legacy => self.roots.legacy(),
-            };
-            let claim = WorkingDirectoryClaim::new(paths.state(), self.runtime.clone());
-            let unverified_owner = candidate.admission.disposition == ClaimDisposition::Live
-                && !claim.is_active(&id, directory)?;
-            let mut attached = if unverified_owner {
-                None
-            } else {
-                self.try_attach(&id, &selected, false, cancellation).await?
-            };
-            if attached.is_none() {
-                check(cancellation)?;
-                let mut client = (self.open_local_client)(cancellation).await?;
-                let count_suffix = if self.restore_progress.is_some() {
-                    " 0 events loaded"
+        if session_start == ChatSessionStart::ResumeLatest {
+            self.progress(
+                "looking for the workspace's latest user session...",
+                cancellation,
+            )?;
+            let directory = self.workspace.launch_directory();
+            let admissions = SessionAdmissions::new(
+                OwnershipRoots::new(
+                    self.roots.current().state().to_owned(),
+                    self.roots.legacy().state().to_owned(),
+                )?,
+                self.runtime.clone(),
+                self.legacy_path_read_fallback,
+            );
+            let candidate = admissions.discover_latest(directory)?;
+            if candidate.admission.disposition == ClaimDisposition::Corrupt {
+                return Err(StartupError::CorruptState);
+            }
+            if let Some(id) = candidate.admission.session_id {
+                let selected = candidate
+                    .selected_root
+                    .expect("discovered session has a selected root");
+                let paths = match selected.origin() {
+                    RootOrigin::Current => self.roots.current(),
+                    RootOrigin::Legacy => self.roots.legacy(),
+                };
+                let claim = WorkingDirectoryClaim::new(paths.state(), self.runtime.clone());
+                let unverified_owner = candidate.admission.disposition == ClaimDisposition::Live
+                    && !claim.is_active(&id, directory)?;
+                let mut attached = if unverified_owner {
+                    None
                 } else {
-                    ""
+                    self.try_attach(&id, &selected, false, cancellation).await?
                 };
-                self.progress(
-                    &format!("restoring existing user session {id}...{count_suffix}"),
-                    cancellation,
-                )?;
-                let attempt = self
-                    .restore_progress
-                    .as_ref()
-                    .map(|progress| progress.begin(id.value()));
-                let request = wire::ResumeSessionRequest {
-                    user_session_id: id.value().into(),
-                    working_directory: directory.to_string_lossy().into_owned(),
-                    interactive_permissions,
-                    take_over: self.take_over,
-                    ..Default::default()
-                };
-                let resumed = tokio::select! {
-                    biased;
-                    _ = cancellation.cancelled() => return Err(cancelled().into()),
-                    result = client.resume_session(request) => result,
-                };
-                let count = match (resumed.is_ok(), attempt) {
-                    (true, Some(attempt)) => Some(attempt.finish()?),
-                    (_, attempt) => {
-                        drop(attempt);
-                        None
-                    }
-                };
-                match resumed {
-                    Ok(response) => {
-                        let session = response.into_inner();
-                        let count_suffix = count
-                            .map(|count| format!(" ({count} events loaded)"))
-                            .unwrap_or_default();
-                        self.progress(
-                            &format!("loaded existing user session {}{count_suffix}", session.id),
-                            cancellation,
-                        )?;
-                        return Ok(OpenedLocalSession {
-                            client,
-                            session,
-                            remote: None,
-                        });
-                    }
-                    Err(status) if status.code() == Code::AlreadyExists => check(cancellation)?,
-                    Err(status) => return Err(status.into()),
-                }
-                local = Some(client);
-                if unverified_owner && !self.take_over {
-                    self.line(
-                        &format!("user session {id} is held by a process parrot cannot verify (another host, or one it cannot inspect); run `parrot chat --take-over` to reclaim it; creating a new user session"),
-                        false,
+                if attached.is_none() {
+                    check(cancellation)?;
+                    let mut client = (self.open_local_client)(cancellation).await?;
+                    let count_suffix = if self.restore_progress.is_some() {
+                        " 0 events loaded"
+                    } else {
+                        ""
+                    };
+                    self.progress(
+                        &format!("restoring existing user session {id}...{count_suffix}"),
                         cancellation,
                     )?;
-                } else {
-                    attached = self.try_attach(&id, &selected, true, cancellation).await?;
+                    let attempt = self
+                        .restore_progress
+                        .as_ref()
+                        .map(|progress| progress.begin(id.value()));
+                    let request = wire::ResumeSessionRequest {
+                        user_session_id: id.value().into(),
+                        working_directory: directory.to_string_lossy().into_owned(),
+                        interactive_permissions,
+                        take_over: self.take_over,
+                        ..Default::default()
+                    };
+                    let resumed = tokio::select! {
+                        biased;
+                        _ = cancellation.cancelled() => return Err(cancelled().into()),
+                        result = client.resume_session(request) => result,
+                    };
+                    let count = match (resumed.is_ok(), attempt) {
+                        (true, Some(attempt)) => Some(attempt.finish()?),
+                        (_, attempt) => {
+                            drop(attempt);
+                            None
+                        }
+                    };
+                    match resumed {
+                        Ok(response) => {
+                            let session = response.into_inner();
+                            let count_suffix = count
+                                .map(|count| format!(" ({count} events loaded)"))
+                                .unwrap_or_default();
+                            self.progress(
+                                &format!(
+                                    "loaded existing user session {}{count_suffix}",
+                                    session.id
+                                ),
+                                cancellation,
+                            )?;
+                            return Ok(OpenedLocalSession {
+                                client,
+                                session,
+                                remote: None,
+                            });
+                        }
+                        Err(status) if status.code() == Code::AlreadyExists => check(cancellation)?,
+                        Err(status) => return Err(status.into()),
+                    }
+                    local = Some(client);
+                    if unverified_owner && !self.take_over {
+                        self.line(
+                            &format!("user session {id} is held by a process parrot cannot verify (another host, or one it cannot inspect); run `parrot chat --take-over` to reclaim it; creating a new user session"),
+                            false,
+                            cancellation,
+                        )?;
+                    } else {
+                        attached = self.try_attach(&id, &selected, true, cancellation).await?;
+                    }
                 }
-            }
-            if let Some(opened) = attached {
-                self.progress(
-                    &format!("connected to existing user session {}", opened.session.id),
-                    cancellation,
-                )?;
-                return Ok(opened);
+                if let Some(opened) = attached {
+                    self.progress(
+                        &format!("connected to existing user session {}", opened.session.id),
+                        cancellation,
+                    )?;
+                    return Ok(opened);
+                }
             }
         }
         check(cancellation)?;
@@ -544,9 +552,10 @@ impl WebStartup for LocalChatStartup {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<WebOpenedSession, Status>> {
         Box::pin(async move {
-            let opened = LocalChatStartup::open(self, true, cancellation)
-                .await
-                .map_err(StartupError::into_status)?;
+            let opened =
+                LocalChatStartup::open(self, ChatSessionStart::ResumeLatest, true, cancellation)
+                    .await
+                    .map_err(StartupError::into_status)?;
             Ok(WebOpenedSession {
                 session: opened.session,
                 remote: opened.remote,

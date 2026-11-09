@@ -2,6 +2,7 @@
 
 use super::*;
 use futures_util::Stream;
+use parrot_cli::dispatch::arguments::ChatSessionStart;
 use parrot_domain::protocol::bindings::parrot::parrot_server::Parrot;
 use parrot_host::grpc::transport::GrpcServer;
 use std::{
@@ -17,13 +18,11 @@ use tonic::{Request, Response, Status};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 fn application() -> (Application, PathBuf) {
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".tmp/t65-process")
-        .join(format!(
-            "{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+    let base = std::env::temp_dir().join(format!(
+        "t65-application-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&base).unwrap();
     let paths = StatePaths::new(base.join("state"), base.join("config"), base.join("data"));
     let diagnostics = Arc::new(
@@ -314,7 +313,7 @@ endpoint! {
 async fn actual_remote_invalid_variant_remains_usage_before_session_creation() {
     let (app, base) = application();
     let calls = Arc::new(Mutex::new(Calls::default()));
-    let socket_root = PathBuf::from("/tmp").join(format!(
+    let socket_root = std::env::temp_dir().join(format!(
         "t17-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
@@ -350,10 +349,13 @@ async fn actual_remote_invalid_variant_remains_usage_before_session_creation() {
     std::fs::remove_dir_all(base).unwrap();
 }
 
-async fn native_once(prompt: &str) -> (Result<i32, DispatchError>, Arc<Mutex<Calls>>) {
-    let (app, _) = application();
+async fn native_once(
+    session_start: ChatSessionStart,
+    prompt: &str,
+) -> (Result<i32, DispatchError>, Arc<Mutex<Calls>>) {
+    let (app, base) = application();
     let calls = Arc::new(Mutex::new(Calls::default()));
-    let socket_root = PathBuf::from("/tmp").join(format!(
+    let socket_root = std::env::temp_dir().join(format!(
         "t65-process-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
@@ -369,6 +371,7 @@ async fn native_once(prompt: &str) -> (Result<i32, DispatchError>, Arc<Mutex<Cal
     .await
     .unwrap();
     let options = ChatOptions {
+        session_start,
         model: "provider/model".into(),
         model_overridden: true,
         mode: "build".into(),
@@ -392,12 +395,14 @@ async fn native_once(prompt: &str) -> (Result<i32, DispatchError>, Arc<Mutex<Cal
     // Join the actual native listener and connections while this SAME Runtime lives.
     server.close().await.unwrap();
     std::fs::remove_dir(socket_root).unwrap();
+    drop(app);
+    std::fs::remove_dir_all(base).unwrap();
     (result, calls)
 }
 
 #[tokio::test]
 async fn actual_remote_basic_once_listens_then_sends_structured_text_and_finishes() {
-    let (result, calls) = native_once("hello native").await;
+    let (result, calls) = native_once(ChatSessionStart::ResumeLatest, "hello native").await;
     assert_eq!(result.unwrap(), dispatch::EXIT_SUCCESS);
     let calls = calls.lock().unwrap();
     assert_eq!(calls.created.len(), 1);
@@ -417,10 +422,22 @@ async fn actual_remote_basic_once_listens_then_sends_structured_text_and_finishe
 
 #[tokio::test]
 async fn actual_remote_attachment_boundary_never_admits_a_partial_prompt() {
-    let (result, calls) = native_once("before @missing.png after").await;
+    let (result, calls) =
+        native_once(ChatSessionStart::ResumeLatest, "before @missing.png after").await;
     assert_eq!(result.unwrap(), dispatch::EXIT_FAILURE);
     let calls = calls.lock().unwrap();
     assert_eq!(calls.created.len(), 1);
     assert_eq!(calls.listened.len(), 1);
     assert!(calls.messages.is_empty());
+}
+
+#[tokio::test]
+async fn explicit_new_session_remote_chat_creates_exactly_one_session() {
+    let (result, calls) = native_once(ChatSessionStart::Fresh, "hello native").await;
+    assert_eq!(result.unwrap(), dispatch::EXIT_SUCCESS);
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.created.len(), 1);
+    assert_eq!(calls.listened.len(), 1);
+    assert_eq!(calls.messages.len(), 1);
+    assert_eq!(calls.messages[0].user_session_id, "native-session");
 }
