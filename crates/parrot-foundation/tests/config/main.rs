@@ -3,6 +3,7 @@ mod a008_templates;
 mod agent_task_configuration_parses_extra_concurrent_tasks;
 mod builtin_profile_prompts;
 mod builtin_system_prompts;
+mod fast_mode;
 mod fixtures;
 mod integration;
 mod model_transaction;
