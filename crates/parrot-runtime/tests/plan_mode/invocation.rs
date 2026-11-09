@@ -154,6 +154,7 @@ impl DrainBackend for Consumer {
     fn execution_finished_correlated<'a>(
         &'a self,
         _: &'a Execution,
+        _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
         _: &'a str,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         panic!("fixture does not use durable owned execution")

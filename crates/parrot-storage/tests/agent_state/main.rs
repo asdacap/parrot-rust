@@ -152,6 +152,7 @@ fn snapshot() -> AgentStateSnapshot {
         phase: ExecutionPhase::Completed,
         terminal: Some(ExecutionTerminal {
             event_id: "execution-1.finished".into(),
+            elapsed_ms: Some(1234),
             history_sequence: 93,
             recovery_watermark: 95,
             outcome: ExecutionOutcome::Failed("failure".into()),
@@ -184,6 +185,16 @@ async fn round_trip_preserves_complete_snapshot_and_reopen() {
             0o600
         );
     }
+}
+
+#[test]
+fn legacy_execution_terminal_without_timing_remains_readable() {
+    let terminal: ExecutionTerminal = serde_json::from_str(
+        r#"{"event_id":"execution-1.finished","history_sequence":93,"recovery_watermark":95,"outcome":{"kind":"succeeded"}}"#,
+    )
+    .unwrap();
+    assert_eq!(terminal.elapsed_ms, None);
+    assert_eq!(terminal.outcome, ExecutionOutcome::Succeeded);
 }
 
 #[tokio::test]

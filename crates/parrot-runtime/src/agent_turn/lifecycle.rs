@@ -148,6 +148,7 @@ pub trait DrainBackend: Send + Sync + 'static {
     fn execution_finished_correlated<'a>(
         &'a self,
         execution: &'a Execution,
+        terminal: &'a ExecutionTerminal,
         correlation: &'a str,
     ) -> BoxFuture<'a, Result<(), LifecycleError>>;
     /// Cancels the exact initial input and captures its conversation boundary under backend ownership.
@@ -2096,6 +2097,7 @@ mod task_reaper_tests {
         fn execution_finished_correlated<'a>(
             &'a self,
             _: &'a Execution,
+            _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
             _: &'a str,
         ) -> BoxFuture<'a, Result<(), LifecycleError>> {
             Box::pin(async { panic!("not a persistent backend") })

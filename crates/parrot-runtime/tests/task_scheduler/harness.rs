@@ -14,15 +14,20 @@ impl ParentCompletion for NoParent {
     fn deliver_correlated<'a>(
         &'a self,
         execution: &'a parrot_runtime::agent_turn::lifecycle::Execution,
+        elapsed_ms: Option<i64>,
         _: &'a str,
     ) -> parrot_domain::contracts::async_ops::BoxFuture<
         'a,
         Result<(), parrot_runtime::agent_turn::services::TurnError>,
     > {
-        self.deliver(execution)
+        self.deliver(execution, elapsed_ms)
     }
 
-    fn deliver<'a>(&'a self, _: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
+    fn deliver<'a>(
+        &'a self,
+        _: &'a Execution,
+        _: Option<i64>,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async { Ok(()) })
     }
 }

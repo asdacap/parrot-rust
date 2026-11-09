@@ -440,7 +440,7 @@ impl SessionActivity for Activity {
         1
     }
     fn execution_duration(&self) -> Duration {
-        Duration::ZERO
+        Duration::from_millis(1234)
     }
     fn finish_execution(&self, _: i64, _: &Execution) {}
     fn turn_started(&self, _: &str) {}

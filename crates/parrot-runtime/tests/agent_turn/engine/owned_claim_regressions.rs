@@ -214,19 +214,26 @@ struct PausedParentDelivery {
     first: AtomicBool,
 }
 impl ParentCompletion for PausedParentDelivery {
-    fn deliver<'a>(&'a self, execution: &'a Execution) -> BoxFuture<'a, Result<(), TurnError>> {
-        self.inner.deliver(execution)
+    fn deliver<'a>(
+        &'a self,
+        execution: &'a Execution,
+        elapsed_ms: Option<i64>,
+    ) -> BoxFuture<'a, Result<(), TurnError>> {
+        self.inner.deliver(execution, elapsed_ms)
     }
     fn deliver_correlated<'a>(
         &'a self,
         execution: &'a Execution,
+        elapsed_ms: Option<i64>,
         id: &'a str,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
             if self.first.swap(false, Ordering::SeqCst) {
                 self.gate.wait(&NeverCancelled).await.unwrap();
             }
-            self.inner.deliver_correlated(execution, id).await
+            self.inner
+                .deliver_correlated(execution, elapsed_ms, id)
+                .await
         })
     }
 }

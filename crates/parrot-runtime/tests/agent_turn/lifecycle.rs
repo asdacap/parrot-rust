@@ -337,6 +337,7 @@ impl DrainBackend for FakeBackend {
     fn execution_finished_correlated<'a>(
         &'a self,
         _: &'a Execution,
+        _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
         _: &'a str,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async { panic!("not a persistent backend") })
