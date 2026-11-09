@@ -8,7 +8,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
+use tokio::sync::Mutex as AsyncMutex;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionIdentityState {
@@ -217,11 +217,12 @@ impl SessionIndex {
         })
     }
 
+    #[cfg(test)]
     pub(crate) async fn guard_status(
         &self,
         agent: &str,
         expected: &PendingStatus,
-    ) -> Result<Option<OwnedMutexGuard<()>>> {
+    ) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>> {
         let guard = self.shared.mode_gate.clone().lock_owned().await;
         let state = self.read_session_state()?;
         Ok((state.root_agent_session_id == agent && state.mode == *expected).then_some(guard))
