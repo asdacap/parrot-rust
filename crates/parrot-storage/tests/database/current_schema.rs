@@ -58,7 +58,7 @@ fn unversioned_tables_and_views_are_rejected_without_writes() {
 
 #[test]
 fn unknown_versions_are_rejected_without_writes() {
-    for version in [2, 7] {
+    for version in [1, 3, 7] {
         let fixture = Fixture::new();
         let path = fixture.0.join("session.db");
         let connection = Connection::open(&path).unwrap();
@@ -99,7 +99,7 @@ async fn empty_unversioned_file_initializes_the_current_format() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (1, 15));
+    assert_eq!(state, (2, 14));
     database.close().await.unwrap();
 }
 
@@ -128,7 +128,7 @@ async fn current_format_reopens_without_schema_repair() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (1, 15, false));
+    assert_eq!(state, (2, 14, false));
     reopened.close().await.unwrap();
 }
 
@@ -143,7 +143,7 @@ async fn owned_messages_enforce_uniqueness_and_survive_owner_deletion() {
              (2,'agent','model','assistant','','at',NULL),
              (3,'agent','tool','tool','call','at',1),
              (4,'agent','tool','user','','at',1);
-             INSERT INTO conversation_part VALUES(3,0,'text','kept','','','');"
+             INSERT INTO conversation_part (item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(3,0,'text','kept','','','');"
         )?;
         assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,tool_owner_sequence) VALUES('agent','tool','tool','call','at',2)", []).is_err());
         assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,tool_owner_sequence) VALUES('agent','tool','user','','at',1)", []).is_err());

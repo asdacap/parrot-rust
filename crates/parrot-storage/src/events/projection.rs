@@ -125,7 +125,7 @@ pub fn read_parts(
             "SELECT kind, text, artifact_id, media_type, display_name FROM input_part WHERE input_id = ?1 ORDER BY position;"
         }
         ("conversation_part", "item_sequence") => {
-            "SELECT kind, text, artifact_id, media_type, display_name FROM conversation_part WHERE item_sequence = ?1 ORDER BY position;"
+            "SELECT kind, text, artifact_id, media_type, display_name FROM conversation_part WHERE item_sequence = ?1 AND kind <> 'tool_call' ORDER BY position;"
         }
         ("tool_execution_result_part", "terminal_sequence") => {
             "SELECT kind, text, artifact_id, media_type, display_name FROM tool_execution_result_part WHERE terminal_sequence = ?1 ORDER BY position;"
@@ -188,27 +188,6 @@ pub fn read_input_parts(
     })
 }
 
-pub fn insert_tool_calls(
-    tx: &Transaction<'_>,
-    sequence: i64,
-    calls: &[ToolCall],
-) -> Result<(), EventError> {
-    for (position, call) in calls.iter().enumerate() {
-        tx.execute(
-            "INSERT INTO conversation_tool_call (item_sequence, position, id, name, arguments) \
-             VALUES (?1, ?2, ?3, ?4, ?5);",
-            params![
-                sequence,
-                position as i64,
-                call.id,
-                call.name,
-                call.arguments_json
-            ],
-        )?;
-    }
-    Ok(())
-}
-
 pub fn project(
     tx: &Transaction<'_>,
     agent: &str,
@@ -223,7 +202,19 @@ pub fn project(
         sequence,
         &message.parts,
     )?;
-    insert_tool_calls(tx, sequence, &message.tool_calls)?;
+    for (position, call) in message.tool_calls.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO conversation_part (item_sequence, position, kind, text, artifact_id, media_type, display_name, tool_call_id, tool_name, arguments) \
+             VALUES (?1, ?2, 'tool_call', '', '', '', '', ?3, ?4, ?5);",
+            params![
+                sequence,
+                (message.parts.len() + position) as i64,
+                call.id,
+                call.name,
+                call.arguments_json
+            ],
+        )?;
+    }
     insert_agent_history_message(tx, agent, sequence, at)?;
     Ok(ConversationItem {
         sequence,

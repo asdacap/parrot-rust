@@ -60,19 +60,13 @@ CREATE TABLE IF NOT EXISTS conversation_part (
     artifact_id   TEXT NOT NULL,
     media_type    TEXT NOT NULL,
     display_name  TEXT NOT NULL,
+    tool_call_id  TEXT NOT NULL DEFAULT '',
+    tool_name     TEXT NOT NULL DEFAULT '',
+    arguments     TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (item_sequence, position)
 );
 
 CREATE INDEX IF NOT EXISTS conversation_part_by_artifact ON conversation_part (artifact_id);
-
-CREATE TABLE IF NOT EXISTS conversation_tool_call (
-    item_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    position      INTEGER NOT NULL CHECK (position >= 0),
-    id            TEXT NOT NULL,
-    name          TEXT NOT NULL,
-    arguments     TEXT NOT NULL,
-    PRIMARY KEY (item_sequence, position)
-);
 
 CREATE TABLE IF NOT EXISTS input (
     sequence      INTEGER PRIMARY KEY AUTOINCREMENT,

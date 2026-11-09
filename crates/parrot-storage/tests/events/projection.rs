@@ -70,7 +70,7 @@ fn project_writes_structured_components_without_legacy_tables() {
         message.parts
     );
     let calls: Vec<(i64, String, String, String)> = tx
-        .prepare("SELECT position,id,name,arguments FROM conversation_tool_call ORDER BY position")
+        .prepare("SELECT position,tool_call_id,tool_name,arguments FROM conversation_part WHERE kind='tool_call' ORDER BY position")
         .unwrap()
         .query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
@@ -81,8 +81,8 @@ fn project_writes_structured_components_without_legacy_tables() {
     assert_eq!(
         calls,
         vec![
-            (0, "call1".into(), "one".into(), "{\"n\":1}".into()),
-            (1, "call2".into(), "two".into(), "{}".into())
+            (3, "call1".into(), "one".into(), "{\"n\":1}".into()),
+            (4, "call2".into(), "two".into(), "{}".into())
         ]
     );
     assert_eq!(
@@ -119,7 +119,7 @@ fn project_writes_structured_components_without_legacy_tables() {
         .unwrap();
     assert_eq!(provider, (String::new(), String::new()));
     let retired_tables: i64 = tx.query_row(
-        "SELECT count(*) FROM sqlite_schema WHERE name IN ('message','conversation_provider_content')",
+        "SELECT count(*) FROM sqlite_schema WHERE name IN ('message','conversation_provider_content','conversation_tool_call')",
         [],
         |row| row.get(0),
     ).unwrap();
@@ -128,7 +128,26 @@ fn project_writes_structured_components_without_legacy_tables() {
         read_parts(&tx, "conversation_part", "item_sequence", &empty.sequence).unwrap(),
         vec![ConversationPart::text("")]
     );
-    assert_eq!(count(&tx, "agent_history"), 2);
+    let mut calls_only = message.clone();
+    calls_only.parts.clear();
+    let calls_only = project(&tx, "agent", &calls_only, "calls-only").unwrap();
+    assert!(
+        read_parts(
+            &tx,
+            "conversation_part",
+            "item_sequence",
+            &calls_only.sequence
+        )
+        .unwrap()
+        .is_empty()
+    );
+    assert_eq!(
+        parrot_storage::conversation::reads::read_conversation_item(&tx, calls_only.sequence)
+            .unwrap()
+            .message,
+        calls_only.message
+    );
+    assert_eq!(count(&tx, "agent_history"), 3);
 }
 
 #[test]
@@ -204,12 +223,7 @@ fn projection_failure_leaves_every_write_in_callers_transaction_for_rollback() {
             .is_err()
         );
     }
-    for table in [
-        "conversation_item",
-        "conversation_part",
-        "conversation_tool_call",
-        "agent_history",
-    ] {
+    for table in ["conversation_item", "conversation_part", "agent_history"] {
         assert_eq!(count(&connection, table), 0, "{table}");
     }
     let retired_tables: i64 = connection.query_row(

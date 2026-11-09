@@ -179,10 +179,12 @@ the unresolved production filesystem/security capability.
 
 ## Database formats and fresh startup
 
-New sessions use Parrot database format version `1` in SQLite, with 15 application
-tables. SQLite's internal tables are not part of that count. Existing nonempty
-unversioned databases and unknown format versions are unsupported. The same
-format check applies in both current and legacy filesystem roots.
+New sessions use Parrot database format version `2` in SQLite, with 14 application
+tables. Tool calls are stored as `tool_call` rows in `conversation_part`, alongside
+text and image parts. SQLite's internal tables are not part of that count.
+Version `1`, existing nonempty unversioned databases, and unknown format versions
+are unsupported. The same format check applies in both current and legacy
+filesystem roots.
 
 By default, `parrot` and `parrot chat` load or join the workspace's latest session.
 If resume encounters an unsupported database, startup reports the incompatibility
