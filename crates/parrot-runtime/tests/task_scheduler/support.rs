@@ -30,7 +30,7 @@ use parrot_runtime::{
     children::*,
     compaction::*,
     event_broker::EventBroker,
-    prompt_context::{PromptResult, SkillRendering, SystemPrompt},
+    prompt_context::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     artifacts::compaction::CompactionGroupBlobStore,
@@ -353,23 +353,19 @@ impl TurnSkills for Skills {
     fn begin_turn<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, PromptResult<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn select<'a>(
+    fn get_skills<'a>(
         &'a self,
-        _: &'a [ConversationPart],
+        references: &'a [parrot_core::SkillReference],
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<()>> {
-        Box::pin(async { Ok(()) })
+    ) -> BoxFuture<'a, PromptResult<Vec<Option<parrot_core::Skill>>>> {
+        Box::pin(async move { Ok(references.iter().map(|_| None).collect()) })
     }
-    fn render<'a>(
+    fn read_skill_content<'a>(
         &'a self,
+        _: &'a parrot_core::Skill,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<SkillRendering>> {
-        Box::pin(async {
-            Ok(SkillRendering {
-                content: String::new(),
-                loaded_paths: vec![],
-            })
-        })
+    ) -> BoxFuture<'a, PromptResult<parrot_core::SkillContent>> {
+        Box::pin(async { panic!("empty skill store has no content") })
     }
     fn end_turn(&self) -> BoxFuture<'_, ()> {
         Box::pin(async {})
