@@ -200,12 +200,8 @@ pub struct TaskResponseReference {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExecutionInputPart {
-    Text {
-        text: String,
-    },
-    ImageArtifact {
-        metadata: ImageArtifactMetadata,
-    },
+    Text { text: String },
+    ImageArtifact { metadata: ImageArtifactMetadata },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

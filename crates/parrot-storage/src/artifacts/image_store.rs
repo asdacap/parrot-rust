@@ -103,45 +103,7 @@ impl ImageArtifactStore {
             cancellation.check().map_err(|_| Error::task_cancelled())?;
             let bytes = fs::read(&staging)
                 .map_err(|e| Error::io("could not read image staging file", e))?;
-            let inspection = ImageInspection::inspect(&bytes)?;
-            let frame_pixels = (inspection.width as u64)
-                .checked_mul(inspection.height as u64)
-                .ok_or_else(|| {
-                    Error::invalid_data(
-                        "The image dimensions or frame count exceed the supported limits.",
-                    )
-                })?;
-            let aggregate_pixels = frame_pixels
-                .checked_mul(inspection.frame_count as u64)
-                .ok_or_else(|| {
-                    Error::invalid_data(
-                        "The image dimensions or frame count exceed the supported limits.",
-                    )
-                })?;
-            if inspection.width > self.limits.maximum_dimension
-                || inspection.height > self.limits.maximum_dimension
-                || frame_pixels > self.limits.maximum_frame_pixels
-                || inspection.frame_count > self.limits.maximum_frames
-                || aggregate_pixels > self.limits.maximum_aggregate_pixels
-            {
-                return Err(Error::invalid_data(
-                    "The image dimensions or frame count exceed the supported limits.",
-                ));
-            }
-            let digest = Sha256::digest(&bytes);
-            let hash = lower_hex(&digest);
-            let metadata = ImageArtifactMetadata {
-                artifact_id: hash.clone(),
-                sha256: hash,
-                media_type: inspection.media_type.to_owned(),
-                byte_length: length as i64,
-                width: inspection.width,
-                height: inspection.height,
-                frame_count: inspection.frame_count,
-                aggregate_pixels: aggregate_pixels as i64,
-                display_name: display_name.to_owned(),
-                origin: origin.to_owned(),
-            };
+            let metadata = self.inspect_bytes(&bytes, display_name, origin)?;
             if declared_byte_length
                 .is_some_and(|declared| declared >= 0 && declared != metadata.byte_length)
             {
@@ -157,11 +119,7 @@ impl ImageArtifactStore {
                 ));
             }
             cancellation.check().map_err(|_| Error::task_cancelled())?;
-            let destination = self.directory.join(format!(
-                "{}.{}",
-                metadata.artifact_id,
-                extension(&metadata.media_type)?
-            ));
+            let destination = self.directory.join(&metadata.artifact_id);
             match fs::hard_link(&staging, &destination) {
                 Ok(()) => {
                     fs::remove_file(&staging)
@@ -184,12 +142,8 @@ impl ImageArtifactStore {
         outcome
     }
 
-    pub fn delete(&self, artifact: &ImageArtifactMetadata) -> Result<()> {
-        let path = self.directory.join(format!(
-            "{}.{}",
-            artifact.artifact_id,
-            extension(&artifact.media_type)?
-        ));
+    pub fn delete(&self, artifact_id: &str) -> Result<()> {
+        let path = self.hash_path(artifact_id)?;
         match fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -203,40 +157,111 @@ impl ImageArtifactStore {
     }
 
     pub fn path_of(&self, artifact_id: &str) -> Result<PathBuf> {
-        if artifact_id.trim().is_empty() {
-            return Err(Error::invalid_input("artifact id cannot be empty"));
+        let path = self.hash_path(artifact_id)?;
+        match fs::metadata(&path) {
+            Ok(metadata) if metadata.is_file() => Ok(path),
+            Ok(_) => Err(Error::new(
+                ErrorKind::NotFound,
+                "The image artifact does not exist.",
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(Error::new(
+                ErrorKind::NotFound,
+                "The image artifact does not exist.",
+            )
+            .with_source(error)),
+            Err(error) => Err(Error::io("could not inspect image artifact path", error)),
         }
-        if artifact_id.len() != 64 || !artifact_id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(Error::invalid_input(
-                "An artifact id must be a SHA-256 hexadecimal value.",
+    }
+
+    pub(super) fn inspect(
+        &self,
+        artifact_id: &str,
+        display_name: &str,
+        origin: &str,
+        cancellation: &dyn Cancellation,
+    ) -> Result<Option<ImageArtifactMetadata>> {
+        cancellation.check().map_err(|_| Error::task_cancelled())?;
+        let file = match self.open(artifact_id) {
+            Ok(file) => file,
+            Err(error) if error.kind == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut bytes = Vec::new();
+        file.take(self.limits.maximum_image_bytes as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| Error::io("could not read image artifact", error))?;
+        cancellation.check().map_err(|_| Error::task_cancelled())?;
+        let metadata = self.inspect_bytes(&bytes, display_name, origin)?;
+        if metadata.artifact_id != artifact_id {
+            return Err(Error::invalid_data(
+                "The image bytes do not match their artifact id.",
             ));
         }
-        let mut found = None;
-        let entries = fs::read_dir(&self.directory).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Error::new(ErrorKind::NotFound, "The image artifact does not exist.").with_source(e)
-            } else {
-                Error::io("could not read image artifact directory", e)
-            }
-        })?;
-        for entry in entries {
-            let entry =
-                entry.map_err(|e| Error::io("could not read image artifact directory", e))?;
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if entry.path().is_file()
-                && name.starts_with(artifact_id)
-                && name.as_bytes().get(artifact_id.len()) == Some(&b'.')
-            {
-                if found.is_some() {
-                    return Err(Error::invalid_data(
-                        "The image artifact id matched multiple files.",
-                    ));
-                }
-                found = Some(entry.path());
-            }
+        Ok(Some(metadata))
+    }
+
+    fn hash_path(&self, artifact_id: &str) -> Result<PathBuf> {
+        if artifact_id.len() != 64
+            || !artifact_id
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(Error::invalid_input(
+                "An artifact id must be a lowercase SHA-256 hexadecimal value.",
+            ));
         }
-        found.ok_or_else(|| Error::new(ErrorKind::NotFound, "The image artifact does not exist."))
+        Ok(self.directory.join(artifact_id))
+    }
+
+    fn inspect_bytes(
+        &self,
+        bytes: &[u8],
+        display_name: &str,
+        origin: &str,
+    ) -> Result<ImageArtifactMetadata> {
+        if bytes.len() > self.limits.maximum_image_bytes {
+            return Err(Error::invalid_data("An image cannot exceed 5 MiB."));
+        }
+        let inspection = ImageInspection::inspect(bytes)?;
+        let frame_pixels = (inspection.width as u64)
+            .checked_mul(inspection.height as u64)
+            .ok_or_else(|| {
+                Error::invalid_data(
+                    "The image dimensions or frame count exceed the supported limits.",
+                )
+            })?;
+        let aggregate_pixels = frame_pixels
+            .checked_mul(inspection.frame_count as u64)
+            .ok_or_else(|| {
+                Error::invalid_data(
+                    "The image dimensions or frame count exceed the supported limits.",
+                )
+            })?;
+        if inspection.width > self.limits.maximum_dimension
+            || inspection.height > self.limits.maximum_dimension
+            || frame_pixels > self.limits.maximum_frame_pixels
+            || inspection.frame_count > self.limits.maximum_frames
+            || aggregate_pixels > self.limits.maximum_aggregate_pixels
+        {
+            return Err(Error::invalid_data(
+                "The image dimensions or frame count exceed the supported limits.",
+            ));
+        }
+        let digest = Sha256::digest(bytes);
+        let hash = lower_hex(&digest);
+        let metadata = ImageArtifactMetadata {
+            artifact_id: hash.clone(),
+            sha256: hash,
+            media_type: inspection.media_type.to_owned(),
+            byte_length: bytes.len() as i64,
+            width: inspection.width,
+            height: inspection.height,
+            frame_count: inspection.frame_count,
+            aggregate_pixels: aggregate_pixels as i64,
+            display_name: display_name.to_owned(),
+            origin: origin.to_owned(),
+        };
+        Ok(metadata)
     }
 
     fn ensure_directory(&self) -> Result<()> {
@@ -296,18 +321,6 @@ fn validate_label(label: &str, parameter_name: &str) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-fn extension(media_type: &str) -> Result<&'static str> {
-    match media_type {
-        "image/png" => Ok("png"),
-        "image/jpeg" => Ok("jpg"),
-        "image/gif" => Ok("gif"),
-        "image/webp" => Ok("webp"),
-        _ => Err(Error::invalid_data(
-            "The image media type is not supported.",
-        )),
-    }
 }
 
 fn lower_hex(bytes: &[u8]) -> String {

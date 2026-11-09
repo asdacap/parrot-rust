@@ -87,7 +87,7 @@ async fn live_and_restored_tool_messages_exclude_images_but_preserve_raw_results
         .unwrap();
     let mut tool = ConversationMessage::text(MessageRole::Tool, "answer");
     tool.tool_call_id = "call".into();
-    tool.parts.push(ConversationPart::image(
+    tool.parts.push(super::Fixture::image(
         "unresolved-tool-image",
         "image/png",
         "image",
@@ -311,7 +311,7 @@ async fn bound_pending_peek_preserves_raw_image_parts_without_materializing_or_p
         .unwrap();
     let parts = vec![
         ConversationPart::text("prefix"),
-        ConversationPart::image("absent-image-artifact", "image/png", "not materialized"),
+        super::Fixture::image("absent-image-artifact", "image/png", "not materialized"),
         ConversationPart::text("suffix"),
     ];
     let admitted = history

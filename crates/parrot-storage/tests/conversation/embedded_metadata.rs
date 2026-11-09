@@ -13,7 +13,7 @@ async fn embedded_provider_parts_calls_and_final_phase_survive_reopen() {
     message.origin = ConversationOrigin::Model;
     message.parts = vec![
         ConversationPart::text("first\0"),
-        ConversationPart::image("artifact", "image/webp", "image.webp"),
+        super::Fixture::image("artifact", "image/webp", "image.webp"),
         ConversationPart::text("last"),
     ];
     message.tool_calls = vec![
@@ -97,6 +97,86 @@ async fn embedded_provider_parts_calls_and_final_phase_survive_reopen() {
         .unwrap();
     assert_eq!(retired_tables, 0);
     reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn complete_image_metadata_survives_queued_input_reopen_promotion_and_fork() {
+    use parrot_domain::protocol::messages::parrot::Delivery;
+    use parrot_storage::conversation::{HistoryForkBoundary, HistoryForkSelection};
+    use parrot_storage::events::NeverCancelled;
+
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    let parts = vec![Fixture::image("a".repeat(64), "image/webp", "diagram.webp")];
+    repository
+        .events()
+        .admit_input(
+            "agent".into(),
+            "image-message".into(),
+            parts.clone(),
+            Delivery::DELIVERY_QUEUE,
+            |_| {
+                Ok(Event {
+                    id: "image-admitted".into(),
+                    agent_session_id: "agent".into(),
+                    ..Default::default()
+                })
+            },
+            &NeverCancelled,
+        )
+        .unwrap()
+        .into_completion()
+        .await
+        .unwrap();
+    repository.events().database().close().await.unwrap();
+
+    let reopened = fixture.repository();
+    let pending = reopened
+        .events()
+        .find_input("agent".into(), "image-message".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pending.parts, parts);
+    let promoted = reopened
+        .events()
+        .promote_next_queue("agent".into(), |_| {
+            Ok(Event {
+                id: "image-promoted".into(),
+                agent_session_id: "agent".into(),
+                ..Default::default()
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(promoted.len(), 1);
+    assert_eq!(promoted[0].input.parts, parts);
+    assert_eq!(
+        reopened.conversation("agent".into()).await.unwrap()[0]
+            .message
+            .parts,
+        parts
+    );
+    reopened
+        .initialize_forked_agent_history(
+            "agent".into(),
+            "child".into(),
+            HistoryForkBoundary::AfterCompletedHistory,
+            HistoryForkSelection::parse("full"),
+            None,
+        )
+        .await
+        .unwrap();
+    reopened.events().database().close().await.unwrap();
+
+    let forked = fixture.repository();
+    assert_eq!(
+        forked.conversation("child".into()).await.unwrap()[0]
+            .message
+            .parts,
+        parts
+    );
+    forked.events().database().close().await.unwrap();
 }
 
 #[tokio::test]

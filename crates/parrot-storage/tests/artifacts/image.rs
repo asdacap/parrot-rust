@@ -41,9 +41,7 @@ fn image_format_metadata_hash_and_selected_root_relative_path_match_source_fixtu
     let path = store.path_of(&metadata.artifact_id).unwrap();
     assert_eq!(
         path,
-        root.path()
-            .join("artifacts")
-            .join(format!("{}.png", metadata.artifact_id))
+        root.path().join("artifacts").join(&metadata.artifact_id)
     );
     assert_eq!(std::fs::read(path).unwrap(), PIXEL);
     assert!(std::fs::read_dir(store.directory()).unwrap().all(|entry| {
@@ -62,7 +60,7 @@ fn existing_directory_is_not_deduplicated_or_returned_as_an_artifact() {
     std::fs::create_dir_all(store.directory()).unwrap();
     let destination = store
         .directory()
-        .join("4ff6ab670a58c14270e034e2090d9a432caa263a14e0a25785386b0c12f880b5.png");
+        .join("4ff6ab670a58c14270e034e2090d9a432caa263a14e0a25785386b0c12f880b5");
     std::fs::create_dir(&destination).unwrap();
 
     assert_eq!(
@@ -266,7 +264,7 @@ async fn image_upload_reopens_is_idempotent_preserves_first_labels_and_rejects_c
     database
         .admit("first-created-at", &NeverCancelled, |tx| {
             tx.execute(
-                "UPDATE image_artifact SET created_at='2000-01-01T00:00:00.0000000+00:00'",
+                "UPDATE image_upload SET created_at='2000-01-01T00:00:00.0000000+00:00'",
                 [],
             )?;
             Ok(())
@@ -274,6 +272,10 @@ async fn image_upload_reopens_is_idempotent_preserves_first_labels_and_rejects_c
         .unwrap()
         .into_completion()
         .await
+        .unwrap();
+    std::fs::File::open(repository.store().path_of(&image.artifact_id).unwrap())
+        .unwrap()
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(946684800))
         .unwrap();
     database.close().await.unwrap();
 
@@ -303,15 +305,19 @@ async fn image_upload_reopens_is_idempotent_preserves_first_labels_and_rejects_c
     let counts = reopened
         .admit("upload-counts", &NeverCancelled, |tx| {
             Ok((
-                tx.query_row("SELECT count(*) FROM image_artifact", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
+                tx.query_row(
+                    "SELECT count(DISTINCT artifact_id) FROM image_upload",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?,
                 tx.query_row("SELECT count(*) FROM image_upload", [], |row| {
                     row.get::<_, i64>(0)
                 })?,
-                tx.query_row("SELECT created_at FROM image_artifact", [], |row| {
-                    row.get::<_, String>(0)
-                })?,
+                tx.query_row(
+                    "SELECT created_at FROM image_upload WHERE upload_id = 'upload-1'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )?,
             ))
         })
         .unwrap()
@@ -340,7 +346,7 @@ async fn image_upload_reopens_is_idempotent_preserves_first_labels_and_rejects_c
             )
             .await
             .unwrap(),
-        [image.clone()]
+        [image.artifact_id.clone()]
     );
     assert!(
         repository
@@ -456,6 +462,62 @@ async fn source_parameterized_first_label_reuse_cases_preserve_all_original_labe
 }
 
 #[tokio::test]
+async fn resolving_uploaded_images_reinspects_bytes_and_rejects_a_changed_content_hash() {
+    let (_temp, database, repository) = setup_repository("image-reinspection");
+    let image = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
+        .await
+        .unwrap();
+    let path = repository.store().path_of(&image.artifact_id).unwrap();
+    std::fs::write(&path, ALTERNATE).unwrap();
+    assert_eq!(
+        repository
+            .resolve(&image.artifact_id, &NeverCancelled)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidData,
+    );
+    std::fs::write(path, PIXEL).unwrap();
+    assert_eq!(
+        repository
+            .resolve(&image.artifact_id, &NeverCancelled)
+            .await
+            .unwrap(),
+        Some(image),
+    );
+    database.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn cleanup_collects_unbound_corrupt_hash_files_but_preserves_unrelated_entries() {
+    let (_temp, database, repository) = setup_repository("image-orphan-cleanup");
+    let directory = repository.store().directory();
+    std::fs::create_dir_all(directory).unwrap();
+    let orphan = "a".repeat(64);
+    let unrelated_directory = directory.join("b".repeat(64));
+    std::fs::write(directory.join(&orphan), INVALID).unwrap();
+    std::fs::write(directory.join("unrelated.bin"), b"kept").unwrap();
+    std::fs::create_dir(&unrelated_directory).unwrap();
+    assert_eq!(
+        repository
+            .remove_stale_unreferenced_before(
+                SystemTime::now() + Duration::from_secs(60),
+                &NeverCancelled,
+            )
+            .await
+            .unwrap(),
+        [orphan.clone()],
+    );
+    assert!(!directory.join(orphan).exists());
+    assert_eq!(
+        std::fs::read(directory.join("unrelated.bin")).unwrap(),
+        b"kept"
+    );
+    assert!(unrelated_directory.is_dir());
+    database.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn each_part_owner_retains_images_until_its_reference_is_deleted() {
     let cases = [
         (
@@ -519,7 +581,7 @@ async fn each_part_owner_retains_images_until_its_reference_is_deleted() {
                 .remove_stale_unreferenced_before(before, &NeverCancelled)
                 .await
                 .unwrap(),
-            [image.clone()]
+            [image.artifact_id.clone()]
         );
         assert!(
             repository
@@ -556,39 +618,6 @@ async fn each_part_owner_retains_images_until_its_reference_is_deleted() {
 }
 
 #[tokio::test]
-async fn missing_artifact_insert_rolls_back_content_and_reports_original_validation_error() {
-    let (_temp, database, repository) = setup_repository("image-artifact-rollback");
-    database.admit("ignore-artifact-insert", &NeverCancelled, |tx| {
-        tx.execute_batch("CREATE TRIGGER ignore_image_artifact BEFORE INSERT ON image_artifact BEGIN SELECT RAISE(IGNORE); END;")?;
-        Ok(())
-    }).unwrap().into_completion().await.unwrap();
-    let error = persist_image(&repository, PIXEL, "upload-1", "pixel.png", "test")
-        .await
-        .unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidData);
-    assert_eq!(error.message, "The image artifact was not recorded.");
-    let counts = database
-        .admit("count-artifact-rollback", &NeverCancelled, |tx| {
-            Ok((
-                tx.query_row("SELECT count(*) FROM image_artifact", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
-                tx.query_row("SELECT count(*) FROM image_upload", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
-            ))
-        })
-        .unwrap()
-        .into_completion()
-        .await
-        .unwrap()
-        .into_value()
-        .into_output();
-    assert_eq!(counts, (0, 0));
-    database.close().await.unwrap();
-}
-
-#[tokio::test]
 async fn upload_insert_abort_rolls_back_rows_preserves_sqlite_cause_and_worker_survives() {
     let (_temp, database, repository) = setup_repository("image-upload-rollback");
     database.admit("abort-upload-insert", &NeverCancelled, |tx| {
@@ -608,9 +637,11 @@ async fn upload_insert_abort_rolls_back_rows_preserves_sqlite_cause_and_worker_s
     let counts = database
         .admit("count-upload-rollback", &NeverCancelled, |tx| {
             Ok((
-                tx.query_row("SELECT count(*) FROM image_artifact", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
+                tx.query_row(
+                    "SELECT count(DISTINCT artifact_id) FROM image_upload",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?,
                 tx.query_row("SELECT count(*) FROM image_upload", [], |row| {
                     row.get::<_, i64>(0)
                 })?,
@@ -623,6 +654,22 @@ async fn upload_insert_abort_rolls_back_rows_preserves_sqlite_cause_and_worker_s
         .into_value()
         .into_output();
     assert_eq!(counts, (0, 0));
+    let orphan_id = "4ff6ab670a58c14270e034e2090d9a432caa263a14e0a25785386b0c12f880b5";
+    assert!(repository.store().path_of(orphan_id).unwrap().is_file());
+    assert_eq!(
+        repository
+            .remove_stale_unreferenced_before(
+                SystemTime::now() + Duration::from_secs(60),
+                &NeverCancelled,
+            )
+            .await
+            .unwrap(),
+        [orphan_id],
+    );
+    assert_eq!(
+        repository.store().path_of(orphan_id).unwrap_err().kind,
+        ErrorKind::NotFound
+    );
     database
         .admit("drop-upload-trigger", &NeverCancelled, |tx| {
             tx.execute_batch("DROP TRIGGER abort_image_upload;")?;

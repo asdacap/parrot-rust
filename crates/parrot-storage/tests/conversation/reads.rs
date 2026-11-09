@@ -103,7 +103,7 @@ async fn structured_conversation_reopens_in_order_and_respects_watermark() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let mut assistant = message(MessageRole::Assistant, "before");
-    assistant.parts.push(ConversationPart::image(
+    assistant.parts.push(super::Fixture::image(
         "a".repeat(64),
         "image/png",
         "pixel.png",
@@ -127,7 +127,7 @@ async fn structured_conversation_reopens_in_order_and_respects_watermark() {
     append(&repo, "tool", "agent", tool).await;
     let mut images = message(MessageRole::User, "");
     images.origin = ConversationOrigin::Tool;
-    images.parts = vec![ConversationPart::image(
+    images.parts = vec![super::Fixture::image(
         "a".repeat(64),
         "image/png",
         "pixel.png",
@@ -141,7 +141,7 @@ async fn structured_conversation_reopens_in_order_and_respects_watermark() {
     assert_eq!(items[1].message.tool_call_id, "call-1");
     assert_eq!(
         items[2].message.parts,
-        vec![ConversationPart::image(
+        vec![super::Fixture::image(
             "a".repeat(64),
             "image/png",
             "pixel.png"
@@ -308,7 +308,7 @@ async fn structured_parts_calls_provider_and_legacy_model_rendering_are_exact() 
 async fn legacy_model_rejects_images_while_materialize_preserves_text_and_errors() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    let image = ConversationPart::image("a".repeat(64), "image/png", "display");
+    let image = super::Fixture::image("a".repeat(64), "image/png", "display");
     let mut projected = message(MessageRole::User, "");
     projected.parts = vec![ConversationPart::text("before"), image.clone()];
     append(&repo, "image", "agent", projected).await;
@@ -344,7 +344,7 @@ async fn legacy_model_history_excludes_tool_images_without_removing_raw_result_p
     let repo = fixture.repository();
     let mut tool = message(MessageRole::Tool, "before");
     tool.tool_call_id = "call".into();
-    tool.parts.push(ConversationPart::image(
+    tool.parts.push(super::Fixture::image(
         "unresolved-tool-image",
         "image/png",
         "image",
@@ -368,7 +368,7 @@ async fn legacy_model_history_excludes_tool_images_without_removing_raw_result_p
 }
 
 #[tokio::test]
-async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_file_fallback() {
+async fn materialized_images_use_part_metadata_without_decoding_bytes_or_file_fallback() {
     let fixture = Fixture::new();
     let store = ImageArtifactStore::for_session(&fixture.root(), "images").unwrap();
     let repo = fixture
@@ -396,50 +396,9 @@ async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_fi
         b"materialization resolves existing paths without decoding file bytes",
     )
     .unwrap();
-    let metadata_only = {
-        let events = repo.events().clone();
-        let root = events.database().selected_root().clone();
-        let id = parrot_domain::values::identifiers::UserSessionId::parse(
-            root.path()
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned(),
-        )
-        .unwrap();
-        let metadata =
-            parrot_storage::history_files::SessionIndex::new(root.clone(), id, root.path())
-                .unwrap();
-        ConversationRepository::new(events, metadata).unwrap()
-    };
-    let resolved = metadata_only
-        .resolve_image_artifact(id.clone())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        (
-            resolved.width,
-            resolved.height,
-            resolved.media_type.as_str(),
-            resolved.display_name.as_str()
-        ),
-        (24, 12, "image/png", "stored name")
-    );
-    assert!(
-        metadata_only
-            .resolve_image_artifact("b".repeat(64))
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(matches!(
-        metadata_only.resolve_image_artifact(" ".into()).await,
-        Err(EventError::Argument(_))
-    ));
     let parts = vec![
         ConversationPart::text("start"),
-        ConversationPart::image(id.clone(), "part/media-type", "ignored name"),
+        super::Fixture::image(id.clone(), "part/media-type", "ignored name"),
         ConversationPart::text("end"),
     ];
     assert_eq!(
@@ -456,11 +415,7 @@ async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_fi
         ]
     );
     let missing = repo
-        .materialize(vec![ConversationPart::image(
-            "b".repeat(64),
-            "image/png",
-            "",
-        )])
+        .materialize(vec![super::Fixture::image("b".repeat(64), "image/png", "")])
         .await
         .unwrap_err();
     assert!(
@@ -468,7 +423,7 @@ async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_fi
     );
     std::fs::remove_file(path).unwrap();
     assert!(
-        matches!(repo.materialize(vec![ConversationPart::image(id, "image/png", "")]).await, Err(EventError::Database(DatabaseError::Io(error))) if error.kind() == std::io::ErrorKind::NotFound)
+        matches!(repo.materialize(vec![super::Fixture::image(id, "image/png", "")]).await, Err(EventError::Database(DatabaseError::Io(error))) if error.kind() == std::io::ErrorKind::NotFound)
     );
     repo.events().database().close().await.unwrap();
 }
@@ -477,7 +432,10 @@ async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_fi
 async fn image_materialization_does_not_require_upload_or_artifact_metadata_rows() {
     let fixture = Fixture::new();
     let store = ImageArtifactStore::for_session(&fixture.root(), "artifacts").unwrap();
-    let repo = fixture.repository().with_image_store(store.clone()).unwrap();
+    let repo = fixture
+        .repository()
+        .with_image_store(store.clone())
+        .unwrap();
     let images =
         ImageArtifactRepository::new(repo.events().database().clone(), store.clone()).unwrap();
     let artifact = images
@@ -492,11 +450,7 @@ async fn image_materialization_does_not_require_upload_or_artifact_metadata_rows
         )
         .await
         .unwrap();
-    let part = ConversationPart::image(
-        &artifact.artifact_id,
-        &artifact.media_type,
-        &artifact.display_name,
-    );
+    let part = ConversationPart::image(artifact.clone());
     repo.events()
         .database()
         .admit("remove-image-registries", &NeverCancelled, |tx| {

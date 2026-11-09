@@ -75,7 +75,7 @@ async fn schema_foreign_keys_truncate_and_no_wal() {
         assert!(tx.execute("INSERT INTO conversation_part (item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(999,0,'text','','','','')", []).is_err());
         Ok((mode, foreign_keys, tables, versions))
     }).unwrap().into_completion().await.unwrap().into_value().into_output();
-    assert_eq!(value, ("truncate".into(), 1, 7, 7));
+    assert_eq!(value, ("truncate".into(), 1, 6, 8));
     database.close().await.unwrap();
     assert!(!fixture.0.join("session.db-wal").exists());
     assert!(!fixture.0.join("session.db-shm").exists());

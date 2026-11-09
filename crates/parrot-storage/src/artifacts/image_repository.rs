@@ -9,9 +9,7 @@ use super::{Error, ErrorKind, ImageArtifactMetadata, Result};
 use crate::database::{DatabaseError, SessionDatabase, Transaction};
 use parrot_domain::contracts::storage::AdmissionError;
 
-const ARTIFACT_SELECT: &str = "SELECT artifact.artifact_id, artifact.media_type, artifact.byte_length, artifact.width, artifact.height, artifact.frame_count, artifact.aggregate_pixels, artifact.display_name, artifact.origin FROM image_artifact AS artifact";
-
-/// Image bytes and upload metadata bound to one selected session DB and resource directory.
+/// Image bytes and upload identities bound to one selected session resource.
 pub struct ImageArtifactRepository {
     database: SessionDatabase,
     store: ImageArtifactStore,
@@ -58,7 +56,7 @@ impl ImageArtifactRepository {
             &self.database,
             format!("image-upload:{upload_id}"),
             cancellation,
-            move |transaction| record_artifact(transaction, &artifact, &upload_id),
+            move |transaction| record_artifact(transaction, artifact, &upload_id),
         )
         .await
     }
@@ -72,13 +70,19 @@ impl ImageArtifactRepository {
             return Err(Error::invalid_input("artifact_id cannot be empty"));
         }
         let artifact_id = artifact_id.to_owned();
-        execute(
+        let selected_id = artifact_id.clone();
+        let labels = execute(
             &self.database,
             format!("image-resolve:{artifact_id}"),
             cancellation,
-            move |tx| resolve_artifact(tx, &artifact_id).map_err(Error::from_sqlite),
+            move |tx| read_labels(tx, &selected_id).map_err(Error::from_sqlite),
         )
-        .await
+        .await?;
+        let Some((display_name, origin)) = labels else {
+            return Ok(None);
+        };
+        self.store
+            .inspect(&artifact_id, &display_name, &origin, cancellation)
     }
 
     pub async fn open(
@@ -86,41 +90,67 @@ impl ImageArtifactRepository {
         artifact_id: &str,
         cancellation: &dyn Cancellation,
     ) -> Result<std::fs::File> {
-        if self.resolve(artifact_id, cancellation).await?.is_none() {
-            return Err(Error::new(
-                ErrorKind::NotFound,
-                "The image artifact does not exist.",
-            ));
-        }
+        cancellation.check().map_err(|_| Error::task_cancelled())?;
         self.store.open(artifact_id)
     }
 
-    /// Removes expired unreferenced metadata in one DB transaction, then its selected-root files.
+    /// Removes expired unreferenced hash files and their upload bindings.
     pub async fn remove_stale_unreferenced_before(
         &self,
         before: SystemTime,
         cancellation: &dyn Cancellation,
-    ) -> Result<Vec<ImageArtifactMetadata>> {
-        let before = roundtrip_timestamp(before);
-        let artifacts = execute(&self.database, format!("image-cleanup:{before}"), cancellation, move |tx| {
-            let mut statement = tx.prepare(&format!(
-                "{ARTIFACT_SELECT} WHERE artifact.created_at < ?1 \
-                 AND NOT EXISTS (SELECT 1 FROM input_part WHERE input_part.artifact_id = artifact.artifact_id) \
-                 AND NOT EXISTS (SELECT 1 FROM conversation_part WHERE conversation_part.artifact_id = artifact.artifact_id)"
-            ))?;
-            let mut rows = statement.query([&before])?;
+    ) -> Result<Vec<String>> {
+        cancellation.check().map_err(|_| Error::task_cancelled())?;
+        let entries = match std::fs::read_dir(self.store.directory()) {
+            Ok(entries) => Some(entries),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(Error::io("could not read image artifact directory", error)),
+        };
+        let mut candidates = Vec::new();
+        for entry in entries.into_iter().flatten() {
+            cancellation.check().map_err(|_| Error::task_cancelled())?;
+            let entry =
+                entry.map_err(|error| Error::io("could not read image artifact entry", error))?;
+            if !entry
+                .file_type()
+                .map_err(|error| Error::io("could not inspect image artifact entry", error))?
+                .is_file()
+            {
+                continue;
+            }
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if name.len() != 64
+                || !name
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .map_err(|error| Error::io("could not read image artifact age", error))?;
+            if modified < before {
+                candidates.push(name.to_owned());
+            }
+        }
+        let artifacts = execute(&self.database, format!("image-cleanup:{}", roundtrip_timestamp(before)), cancellation, move |tx| {
             let mut artifacts = Vec::new();
-            while let Some(row) = rows.next()? { artifacts.push(read_metadata(row)?); }
-            drop(rows);
-            drop(statement);
-            for artifact in &artifacts {
-                tx.execute("DELETE FROM image_upload WHERE artifact_id = ?1", [&artifact.artifact_id])?;
-                tx.execute("DELETE FROM image_artifact WHERE artifact_id = ?1", [&artifact.artifact_id])?;
+            for artifact_id in candidates {
+                let retained: bool = tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM input_part WHERE artifact_id = ?1) OR EXISTS (SELECT 1 FROM conversation_part WHERE artifact_id = ?1)",
+                    [&artifact_id], |row| row.get(0),
+                )?;
+                if !retained {
+                    tx.execute("DELETE FROM image_upload WHERE artifact_id = ?1", [&artifact_id])?;
+                    artifacts.push(artifact_id);
+                }
             }
             Ok(artifacts)
         }).await?;
-        for artifact in &artifacts {
-            self.store.delete(artifact)?;
+        for artifact_id in &artifacts {
+            self.store.delete(artifact_id)?;
         }
         Ok(artifacts)
     }
@@ -128,90 +158,44 @@ impl ImageArtifactRepository {
 
 fn record_artifact(
     tx: &Transaction<'_>,
-    artifact: &ImageArtifactMetadata,
+    mut artifact: ImageArtifactMetadata,
     upload_id: &str,
 ) -> Result<ImageArtifactMetadata> {
-    if let Some(existing) = image_upload(tx, upload_id)? {
-        return if existing.matches_content(artifact) {
-            Ok(existing)
-        } else {
-            Err(Error::new(
-                ErrorKind::Conflict,
-                format!("image upload {upload_id} was already recorded with different content"),
-            ))
-        };
-    }
-    if let Some(existing) =
-        resolve_artifact(tx, &artifact.artifact_id).map_err(Error::from_sqlite)?
-    {
-        if !existing.matches_content(artifact) {
+    let existing: Option<String> = tx
+        .query_row(
+            "SELECT artifact_id FROM image_upload WHERE upload_id = ?1",
+            [upload_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(existing) = existing {
+        if existing != artifact.artifact_id {
             return Err(Error::new(
                 ErrorKind::Conflict,
-                format!(
-                    "image artifact {} was already recorded with different metadata",
-                    artifact.artifact_id
-                ),
+                format!("image upload {upload_id} was already recorded with different content"),
             ));
         }
+    } else {
+        tx.execute(
+            "INSERT INTO image_upload (upload_id, artifact_id, display_name, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![upload_id, artifact.artifact_id, artifact.display_name, artifact.origin, current_timestamp()],
+        )?;
     }
-    let at = current_timestamp();
-    tx.execute(
-        "INSERT INTO image_artifact (artifact_id, media_type, byte_length, width, height, frame_count, aggregate_pixels, display_name, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(artifact_id) DO NOTHING",
-        params![artifact.artifact_id, artifact.media_type, artifact.byte_length, artifact.width, artifact.height, artifact.frame_count, artifact.aggregate_pixels, artifact.display_name, artifact.origin, at],
-    ).map_err(Error::from_sqlite)?;
-    let recorded = resolve_artifact(tx, &artifact.artifact_id)
-        .map_err(Error::from_sqlite)?
-        .ok_or_else(|| Error::invalid_data("The image artifact was not recorded."))?;
-    if !recorded.matches_content(artifact) {
-        return Err(Error::new(
-            ErrorKind::Conflict,
-            format!(
-                "image artifact {} was already recorded with different metadata",
-                artifact.artifact_id
-            ),
-        ));
-    }
-    tx.execute(
-        "INSERT INTO image_upload (upload_id, artifact_id, created_at) VALUES (?1, ?2, ?3)",
-        params![upload_id, artifact.artifact_id, current_timestamp()],
-    )
-    .map_err(Error::from_sqlite)?;
-    Ok(recorded)
+    let (display_name, origin) = read_labels(tx, &artifact.artifact_id)?
+        .ok_or_else(|| Error::invalid_data("The image upload was not recorded."))?;
+    artifact.display_name = display_name;
+    artifact.origin = origin;
+    Ok(artifact)
 }
 
-fn image_upload(tx: &Transaction<'_>, upload_id: &str) -> Result<Option<ImageArtifactMetadata>> {
-    tx.query_row(
-        &format!("{ARTIFACT_SELECT} JOIN image_upload AS upload ON upload.artifact_id = artifact.artifact_id WHERE upload.upload_id = ?1"),
-        [upload_id], read_metadata,
-    ).optional().map_err(Error::from_sqlite)
-}
-
-fn resolve_artifact(
+fn read_labels(
     tx: &Transaction<'_>,
     artifact_id: &str,
-) -> rusqlite::Result<Option<ImageArtifactMetadata>> {
+) -> rusqlite::Result<Option<(String, String)>> {
     tx.query_row(
-        &format!("{ARTIFACT_SELECT} WHERE artifact.artifact_id = ?1"),
-        [artifact_id],
-        read_metadata,
-    )
-    .optional()
-}
-
-fn read_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageArtifactMetadata> {
-    let artifact_id: String = row.get(0)?;
-    Ok(ImageArtifactMetadata {
-        sha256: artifact_id.clone(),
-        artifact_id,
-        media_type: row.get(1)?,
-        byte_length: row.get(2)?,
-        width: row.get(3)?,
-        height: row.get(4)?,
-        frame_count: row.get(5)?,
-        aggregate_pixels: row.get(6)?,
-        display_name: row.get(7)?,
-        origin: row.get(8)?,
-    })
+        "SELECT display_name, origin FROM image_upload WHERE artifact_id = ?1 ORDER BY rowid LIMIT 1",
+        [artifact_id], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional()
 }
 
 async fn execute<T, F>(

@@ -5,9 +5,7 @@ use parrot_domain::values::image_artifact::ImageArtifactMetadata;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConversationPart {
     Text(String),
-    ImageArtifact {
-        metadata: ImageArtifactMetadata,
-    },
+    ImageArtifact { metadata: ImageArtifactMetadata },
 }
 impl ConversationPart {
     pub fn text(value: impl Into<String>) -> Self {

@@ -103,7 +103,7 @@ async fn completed_restore_failure_preserves_source_empty_after_clear_behavior()
     let live = conversation.read_view();
     assert_eq!(conversation.len(), 1);
     let mut image = ConversationMessage::text(MessageRole::User, "");
-    image.parts = vec![ConversationPart::image("missing", "image/png", "image")];
+    image.parts = vec![super::Fixture::image("missing", "image/png", "image")];
     repo.append_conversation(event("image"), image)
         .await
         .unwrap();

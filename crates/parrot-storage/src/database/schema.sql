@@ -107,6 +107,12 @@ CREATE TABLE IF NOT EXISTS conversation_part (
     artifact_id   TEXT NOT NULL,
     media_type    TEXT NOT NULL,
     display_name  TEXT NOT NULL,
+    byte_length   INTEGER NOT NULL DEFAULT 0,
+    width         INTEGER NOT NULL DEFAULT 0,
+    height        INTEGER NOT NULL DEFAULT 0,
+    frame_count   INTEGER NOT NULL DEFAULT 0,
+    aggregate_pixels INTEGER NOT NULL DEFAULT 0,
+    origin        TEXT NOT NULL DEFAULT '',
     tool_call_id  TEXT NOT NULL DEFAULT '',
     tool_name     TEXT NOT NULL DEFAULT '',
     arguments     TEXT NOT NULL DEFAULT '',
@@ -141,28 +147,23 @@ CREATE TABLE IF NOT EXISTS input_part (
     artifact_id   TEXT NOT NULL,
     media_type    TEXT NOT NULL,
     display_name  TEXT NOT NULL,
+    byte_length   INTEGER NOT NULL DEFAULT 0,
+    width         INTEGER NOT NULL DEFAULT 0,
+    height        INTEGER NOT NULL DEFAULT 0,
+    frame_count   INTEGER NOT NULL DEFAULT 0,
+    aggregate_pixels INTEGER NOT NULL DEFAULT 0,
+    origin        TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (input_id, position)
 );
 
 CREATE INDEX IF NOT EXISTS input_part_by_artifact ON input_part (artifact_id);
 
-CREATE TABLE IF NOT EXISTS image_artifact (
-    artifact_id      TEXT PRIMARY KEY,
-    media_type       TEXT NOT NULL,
-    byte_length      INTEGER NOT NULL CHECK (byte_length >= 0),
-    width            INTEGER NOT NULL CHECK (width > 0),
-    height           INTEGER NOT NULL CHECK (height > 0),
-    frame_count      INTEGER NOT NULL CHECK (frame_count > 0),
-    aggregate_pixels INTEGER NOT NULL CHECK (aggregate_pixels > 0),
-    display_name     TEXT NOT NULL,
-    origin           TEXT NOT NULL,
-    created_at       TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS image_upload (
     upload_id   TEXT PRIMARY KEY,
-    artifact_id TEXT NOT NULL REFERENCES image_artifact (artifact_id),
+    artifact_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    origin      TEXT NOT NULL,
     created_at  TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS image_artifact_unreferenced ON image_artifact (created_at);
+CREATE INDEX IF NOT EXISTS image_upload_by_artifact ON image_upload (artifact_id);

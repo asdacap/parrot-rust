@@ -172,7 +172,7 @@ fn interrupted_initialization_rolls_back_schema_and_version_then_reopens() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, tables), (7, 7));
+        assert_eq!((version, tables), (8, 6));
         drop(reopened);
     }
     std::fs::remove_dir_all(workspace).unwrap();
@@ -209,7 +209,7 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
     std::fs::create_dir(&workspace).unwrap();
     let payload = vec![b'c'; 32768];
     let cases = vec![
-        (7_i64, std::ffi::OsString::from("session-7.db")),
+        (8_i64, std::ffi::OsString::from("session-8.db")),
         (5, std::ffi::OsString::from("session-5.db")),
         (4, std::ffi::OsString::from("session-4.db")),
         (3, std::ffi::OsString::from("session-3.db")),
@@ -217,16 +217,17 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         (1, std::ffi::OsString::from("session-1.db")),
         (0, std::ffi::OsString::from("session-0.db")),
         (6, std::ffi::OsString::from("session-6.db")),
-        (8, std::ffi::OsString::from("session-8.db")),
+        (7, std::ffi::OsString::from("session-7.db")),
+        (9, std::ffi::OsString::from("session-9.db")),
     ];
     #[cfg(unix)]
     let cases = {
         use std::os::unix::ffi::OsStringExt;
 
         let mut cases = cases;
-        cases.push((7, std::ffi::OsString::from("native ?#%2F-é.db")));
+        cases.push((8, std::ffi::OsString::from("native ?#%2F-é.db")));
         cases.push((
-            7,
+            8,
             std::ffi::OsString::from_vec(b"native-\xff?#%.db".to_vec()),
         ));
         cases
@@ -280,7 +281,7 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         let journal_before = std::fs::read(&journal_path).unwrap();
         assert!(journal_before.len() > 100_000);
 
-        if version == 7 {
+        if version == 8 {
             let recovered = super::open(&path).unwrap();
             let retained: i64 = recovered
                 .query_row(
@@ -312,7 +313,7 @@ fn wal_child() {
             "PRAGMA journal_mode=WAL; \
              CREATE TABLE foreign_state(value TEXT); \
              INSERT INTO foreign_state VALUES ('kept'); \
-             PRAGMA user_version=8;",
+             PRAGMA user_version=9;",
         )
         .unwrap();
     let ready = std::env::var_os("PARROT_SCHEMA_WAL_READY").unwrap();
@@ -367,7 +368,7 @@ fn wal_only_unknown_format_is_rejected_without_changing_committed_state() {
 
     assert!(matches!(
         super::open(&path),
-        Err(super::DatabaseError::UnsupportedSchema { version: 8 })
+        Err(super::DatabaseError::UnsupportedSchema { version: 9 })
     ));
     assert_eq!(std::fs::read(&path).unwrap(), database_before);
     assert_eq!(std::fs::read(&wal_path).unwrap(), wal_before);
@@ -379,7 +380,7 @@ fn wal_only_unknown_format_is_rejected_without_changing_committed_state() {
     let value: String = readonly
         .query_row("SELECT value FROM foreign_state", [], |row| row.get(0))
         .unwrap();
-    assert_eq!((version, value), (8, "kept".into()));
+    assert_eq!((version, value), (9, "kept".into()));
     drop(readonly);
     std::fs::remove_dir_all(workspace).unwrap();
 }
@@ -416,12 +417,12 @@ fn schema_preflight_preserves_literal_uri_filename_bytes() {
             .query_row("SELECT value FROM path_probe", [], |row| row.get(0))
             .unwrap();
         assert_eq!(value, "kept");
-        reopened.pragma_update(None, "user_version", 8).unwrap();
+        reopened.pragma_update(None, "user_version", 9).unwrap();
         drop(reopened);
         let before = std::fs::read(&path).unwrap();
         assert!(matches!(
             super::open(&path),
-            Err(super::DatabaseError::UnsupportedSchema { version: 8 })
+            Err(super::DatabaseError::UnsupportedSchema { version: 9 })
         ));
         assert_eq!(std::fs::read(&path).unwrap(), before);
     }

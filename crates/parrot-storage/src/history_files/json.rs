@@ -41,15 +41,27 @@ pub fn serialize_entry(entry: &AgentHistoryEntry) -> Result<Vec<u8>> {
                                     string(&mut value, "display_name", "");
                                 }
                                 crate::conversation::ConversationPart::ImageArtifact {
-                                    artifact_id,
-                                    media_type,
-                                    display_name,
+                                    metadata,
                                 } => {
                                     string(&mut value, "kind", "image_artifact");
                                     string(&mut value, "text", "");
-                                    string(&mut value, "artifact_id", artifact_id);
-                                    string(&mut value, "media_type", media_type);
-                                    string(&mut value, "display_name", display_name);
+                                    string(&mut value, "artifact_id", &metadata.artifact_id);
+                                    string(&mut value, "media_type", &metadata.media_type);
+                                    string(&mut value, "display_name", &metadata.display_name);
+                                    integer(&mut value, "byte_length", metadata.byte_length);
+                                    integer(&mut value, "width", i64::from(metadata.width));
+                                    integer(&mut value, "height", i64::from(metadata.height));
+                                    integer(
+                                        &mut value,
+                                        "frame_count",
+                                        i64::from(metadata.frame_count),
+                                    );
+                                    integer(
+                                        &mut value,
+                                        "aggregate_pixels",
+                                        metadata.aggregate_pixels,
+                                    );
+                                    string(&mut value, "origin", &metadata.origin);
                                 }
                             }
                             Value::Object(value)

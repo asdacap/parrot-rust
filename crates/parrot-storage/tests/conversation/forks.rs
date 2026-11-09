@@ -103,7 +103,7 @@ async fn settle(repo: &ConversationRepository, agent: &str, assistant: i64, call
         status: ToolExecutionStatus::Finished,
         result_parts: vec![
             ConversationPart::text("done"),
-            ConversationPart::image("artifact", "image/png", "img"),
+            super::Fixture::image("artifact", "image/png", "img"),
         ],
     };
     repo.events()
@@ -328,7 +328,7 @@ async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_arti
                 tx,
                 &published,
                 owner,
-                &[ConversationPart::image("artifact", "image/png", "img")],
+                &[super::Fixture::image("artifact", "image/png", "img")],
                 &|| "at".into(),
             )
         })
@@ -355,7 +355,7 @@ async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_arti
     assert_eq!(state.items[3].tool_owner_sequence, Some(owner));
     assert!(matches!(
         &state.items[3].item.message.parts[0],
-        ConversationPart::ImageArtifact { artifact_id, .. } if artifact_id == "artifact"
+        ConversationPart::ImageArtifact { metadata } if metadata.artifact_id == "artifact"
     ));
     assert!(state.items.iter().all(|item| !item.is_compaction_status));
     repo.events().database().close().await.unwrap();
@@ -383,7 +383,7 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
         .append_tool_synthetic(
             event("synthetic", "agent"),
             owner,
-            vec![ConversationPart::image("artifact", "image/png", "img")],
+            vec![super::Fixture::image("artifact", "image/png", "img")],
         )
         .await
         .unwrap();
@@ -631,7 +631,7 @@ async fn named_fork_clones_complete_group_parts_provider_terminals_synthetic_and
                 tx,
                 &published,
                 checkpoint,
-                &[ConversationPart::image("artifact", "image/png", "img")],
+                &[super::Fixture::image("artifact", "image/png", "img")],
                 &|| "at".into(),
             )
         })
@@ -684,7 +684,7 @@ async fn named_fork_clones_complete_group_parts_provider_terminals_synthetic_and
         terminals[0].result_parts,
         vec![
             ConversationPart::text("done"),
-            ConversationPart::image("artifact", "image/png", "img")
+            super::Fixture::image("artifact", "image/png", "img")
         ]
     );
     assert!(
