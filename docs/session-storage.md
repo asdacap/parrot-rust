@@ -91,10 +91,10 @@ measured performance improvement.
 
 ## Format boundary and inspection
 
-Formats 1, 2, and 3, populated unversioned databases, and unknown formats use the existing
-typed refusal path. Opening does not convert, reset, or delete them. Current and
-legacy filesystem roots use the same check. `parrot chat --new-session` selects a
-separate fresh session.
+Formats 1, 2, and 3, populated unversioned databases, and unknown formats use the
+existing typed refusal path. Opening does not convert, reset, or delete them.
+Current and legacy filesystem roots use the same check. `parrot chat --new-session`
+selects a separate fresh session.
 
 The [state and rollback guide](operator/state-and-rollback.md) explains operator
 handling and the read-only `scripts/verify-session-storage` artifact check. Keep
