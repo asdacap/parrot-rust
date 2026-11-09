@@ -172,7 +172,6 @@ async fn settle(
                 tool_name: name.into(),
                 status: ToolExecutionStatus::Finished,
                 result_parts: vec![ConversationPart::text(value)],
-                message: value.into(),
             },
         )
         .await
@@ -434,7 +433,6 @@ async fn original_named_checkpoint_fork_remaps_settlement() {
                 tool_name: "set_checkpoint".into(),
                 status: ToolExecutionStatus::Finished,
                 result_parts: vec![ConversationPart::text("handoff")],
-                message: "handoff".into(),
             },
         )
         .await

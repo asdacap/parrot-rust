@@ -1,6 +1,6 @@
 //! Checkpoints and fork copies execute inside one selected-session transaction.
 use super::{ConversationRepository, EventError, compaction, reads, types::*};
-use crate::events::{projection, tools};
+use crate::events::projection;
 use rusqlite::{OptionalExtension, Transaction, params};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -176,12 +176,7 @@ impl ConversationRepository {
         let target = agent.clone();
         self.events
             .transaction(move |tx| {
-                for table in [
-                    "history_checkpoint",
-                    "tool_execution_terminal",
-                    "conversation_item",
-                    "agent_history",
-                ] {
+                for table in ["history_checkpoint", "conversation_item", "agent_history"] {
                     tx.execute(
                         &format!("DELETE FROM {table} WHERE agent_session = ?1;"),
                         [&target],
@@ -388,8 +383,8 @@ fn initialize_fork(
         for item in &group.items {
             let sequence = projection::project(tx, destination, &item.message, &clock())?.sequence;
             tx.execute(
-                "UPDATE conversation_item SET final_phase = ?1 WHERE sequence = ?2;",
-                params![item.final_phase, sequence],
+                "UPDATE conversation_item SET final_phase = ?1, tool_result_name = (SELECT tool_result_name FROM conversation_item WHERE sequence = ?2), tool_result_status = (SELECT tool_result_status FROM conversation_item WHERE sequence = ?2) WHERE sequence = ?3;",
+                params![item.final_phase, item.sequence, sequence],
             )?;
             sequences.insert(item.sequence, sequence);
         }
@@ -398,13 +393,6 @@ fn initialize_fork(
         }
         let assistant = &group.items[0];
         for call in &assistant.message.tool_calls {
-            let terminal =
-                tools::tool_terminals_of_calls(tx, &source, std::slice::from_ref(&call.id))?
-                    .pop()
-                    .ok_or_else(|| {
-                        EventError::Invalid("a complete tool group has no terminal".into())
-                    })?;
-            clone_terminal(tx, destination, &terminal, &clock())?;
             let mut results = group.items.iter().filter(|item| {
                 item.message.role == MessageRole::Tool && item.message.tool_call_id == call.id
             });
@@ -414,6 +402,17 @@ fn initialize_fork(
             if results.next().is_some() {
                 return Err(EventError::Invalid(
                     "Sequence contains more than one matching element".into(),
+                )
+                .into());
+            }
+            let has_result: bool = tx.query_row(
+                "SELECT tool_result_status IS NOT NULL FROM conversation_item WHERE sequence = ?1;",
+                [result.sequence],
+                |row| row.get(0),
+            )?;
+            if !has_result {
+                return Err(EventError::Invalid(
+                    "a complete tool group has no result metadata".into(),
                 )
                 .into());
             }
@@ -457,16 +456,4 @@ fn initialize_fork(
         }
     }
     Ok(())
-}
-
-// P03 approved this fork-local row clone while accepted T17 remains frozen.
-// Part encoding remains the shared T17 transaction helper; no event is appended.
-fn clone_terminal(
-    tx: &Transaction<'_>,
-    agent: &str,
-    terminal: &crate::events::ToolExecutionTerminal,
-    at: &str,
-) -> Result<(), EventError> {
-    tx.execute("INSERT INTO tool_execution_terminal (agent_session, tool_call_id, tool_name, status, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6);", params![agent,terminal.tool_call_id,terminal.tool_name,terminal.status.as_str(),terminal.message,at])?;
-    projection::insert_terminal_parts(tx, tx.last_insert_rowid(), &terminal.result_parts)
 }

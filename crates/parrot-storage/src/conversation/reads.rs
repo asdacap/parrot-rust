@@ -293,7 +293,8 @@ impl ConversationRepository {
             .await?
             .into_iter()
             .map(|item| {
-                let message = item.message;
+                let mut message = item.message;
+                message.retain_model_parts();
                 if message
                     .parts
                     .iter()

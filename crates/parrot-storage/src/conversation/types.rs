@@ -5,6 +5,15 @@ pub use crate::events::{
 };
 use std::path::PathBuf;
 
+impl ConversationMessage {
+    pub(super) fn retain_model_parts(&mut self) {
+        if self.role == MessageRole::Tool {
+            self.parts
+                .retain(|part| matches!(part, ConversationPart::Text(_)));
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HistoryCheckpoint {
     pub title: String,

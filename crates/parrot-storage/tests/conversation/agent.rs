@@ -73,6 +73,53 @@ fn model(role: MessageRole, text: &str) -> ModelMessage {
 }
 
 #[tokio::test]
+async fn live_and_restored_tool_messages_exclude_images_but_preserve_raw_results() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let history = repo
+        .bind_agent_history(
+            "agent".into(),
+            Arc::new(Projection::new(
+                "agent",
+                repo.events().database().selected_root().clone(),
+            )),
+        )
+        .unwrap();
+    let mut tool = ConversationMessage::text(MessageRole::Tool, "answer");
+    tool.tool_call_id = "call".into();
+    tool.parts.push(ConversationPart::image(
+        "unresolved-tool-image",
+        "image/png",
+        "image",
+    ));
+    let item = history
+        .append_conversation(event("tool-image", "agent"), tool.clone())
+        .await
+        .unwrap();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let expected = ModelMessage {
+        role: MessageRole::Tool,
+        contents: vec![ModelContent::Text("answer".into())],
+        tool_calls: vec![],
+        tool_call_id: "call".into(),
+        provider_content: ProviderContent::default(),
+    };
+    assert_eq!(conversation.messages(), [expected.clone()]);
+    assert_eq!(
+        conversation.materialize(item.clone()).await.unwrap(),
+        expected
+    );
+    conversation.reload().await.unwrap();
+    assert_eq!(conversation.messages(), [expected]);
+    assert_eq!(history.conversation().await.unwrap(), [item]);
+    assert_eq!(
+        repo.conversation("agent".into()).await.unwrap()[0].message,
+        tool
+    );
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn bound_raw_conversation_state_reads_only_its_agent_and_does_not_refresh_projection() {
     let fixture = Fixture::new();
     let repo = fixture.repository();

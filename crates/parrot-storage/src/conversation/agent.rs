@@ -528,8 +528,9 @@ impl AgentConversation {
 }
 async fn materialize(
     history: &AgentHistoryView,
-    item: ConversationItem,
+    mut item: ConversationItem,
 ) -> Result<ModelMessage, EventError> {
+    item.message.retain_model_parts();
     Ok(ModelMessage {
         role: item.message.role,
         contents: history.materialize(item.message.parts).await?,

@@ -328,6 +328,35 @@ async fn legacy_model_rejects_images_while_materialize_preserves_text_and_errors
 }
 
 #[tokio::test]
+async fn legacy_model_history_excludes_tool_images_without_removing_raw_result_parts() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let mut tool = message(MessageRole::Tool, "before");
+    tool.tool_call_id = "call".into();
+    tool.parts.push(ConversationPart::image(
+        "unresolved-tool-image",
+        "image/png",
+        "image",
+    ));
+    tool.parts.push(ConversationPart::text("after"));
+    let item = append(&repo, "tool-image", "agent", tool.clone()).await;
+    assert_eq!(item.message, tool);
+    let model = repo.model_history("agent".into()).await.unwrap();
+    assert_eq!(model.len(), 1);
+    assert_eq!(model[0].role, MessageRole::Tool);
+    assert_eq!(model[0].tool_call_id, "call");
+    assert_eq!(
+        model[0].contents,
+        [
+            ModelContent::Text("before".into()),
+            ModelContent::Text("after".into())
+        ]
+    );
+    assert_eq!(repo.conversation("agent".into()).await.unwrap(), [item]);
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_file_fallback() {
     let fixture = Fixture::new();
     let store = ImageArtifactStore::for_session(&fixture.root(), "images").unwrap();
