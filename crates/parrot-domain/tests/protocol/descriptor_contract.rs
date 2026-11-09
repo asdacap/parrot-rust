@@ -280,6 +280,7 @@ fn additive_optional_fields_preserve_existing_oneofs_and_field_contracts() {
 }
 
 #[test]
+#[ignore = "The approved upload-identity removal retires AttachmentUploadHeader.upload_id; the upload-free contract checks every other retained field and method"]
 fn skill_root_extension_preserves_existing_wire_fields_and_rpc_methods() {
     let legacy = descriptor_contract(include_bytes!("fixtures/source-descriptors.pb"));
     let current = descriptor_contract(include_bytes!(concat!(
@@ -299,6 +300,72 @@ fn skill_root_extension_preserves_existing_wire_fields_and_rpc_methods() {
         assert_eq!(actual.services, expected.services);
         assert_additive_messages(&expected.messages, &actual.messages, &expected.name);
     }
+}
+
+#[test]
+fn upload_free_protocol_preserves_other_fields_and_reserves_retired_identity() {
+    let mut legacy = descriptor_contract(include_bytes!("fixtures/source-descriptors.pb"));
+    let header = legacy
+        .iter_mut()
+        .find(|file| file.name == "parrot.proto")
+        .unwrap()
+        .messages
+        .iter_mut()
+        .find(|message| message.name == "AttachmentUploadHeader")
+        .unwrap();
+    let retired = header
+        .fields
+        .iter()
+        .position(|field| field.name == "upload_id")
+        .unwrap();
+    assert_eq!(header.fields.remove(retired).number, 2);
+
+    let current = descriptor_contract(include_bytes!(concat!(
+        env!("OUT_DIR"),
+        "/protocol-descriptors.pb"
+    )));
+    assert_eq!(current.len(), legacy.len());
+    for expected in legacy {
+        let actual = current
+            .iter()
+            .find(|file| file.name == expected.name)
+            .unwrap();
+        assert_eq!(actual.package, expected.package);
+        assert_eq!(actual.syntax, expected.syntax);
+        assert_eq!(actual.dependencies, expected.dependencies);
+        assert_additive_enums(&expected.enums, &actual.enums, &expected.name);
+        assert_eq!(actual.services, expected.services);
+        assert_additive_messages(&expected.messages, &actual.messages, &expected.name);
+    }
+
+    let descriptor = protocol::messages::parrot::file_descriptor().proto();
+    let header = descriptor
+        .message_type
+        .iter()
+        .find(|message| message.name() == "AttachmentUploadHeader")
+        .unwrap();
+    assert_eq!(header.field.len(), 1);
+    assert_eq!(header.field[0].name(), "user_session_id");
+    assert_eq!(header.field[0].number(), 1);
+    assert!(
+        header
+            .reserved_range
+            .iter()
+            .any(|range| range.start() <= 2 && range.end() > 2)
+    );
+    assert!(header.reserved_name.iter().any(|name| name == "upload_id"));
+    let part = descriptor
+        .message_type
+        .iter()
+        .find(|message| message.name() == "MessageContentPart")
+        .unwrap();
+    let label = part
+        .field
+        .iter()
+        .find(|field| field.name() == "display_name")
+        .unwrap();
+    assert_eq!(label.number(), 3);
+    assert!(label.oneof_index.is_none());
 }
 
 #[test]
