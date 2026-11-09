@@ -2104,6 +2104,70 @@ async fn closed_storage_session_resumes_exact_identity_and_new_create_is_always_
 }
 
 #[tokio::test]
+async fn unsupported_schema_resume_is_failed_precondition_without_replacing_or_mutating_session() {
+    for version in [0_i64, 7] {
+        let f = Fixture::new();
+        let original = f.create().await;
+        let id = original.id();
+        f.close().await;
+        let root = f.state.join("sessions").join(&id);
+        let database_path = root.join("session.db");
+        if version == 0 {
+            std::fs::write(
+                &database_path,
+                include_bytes!(
+                    "../../../../parrot-storage/tests/database/fixtures/legacy-canonical-before.sqlite"
+                ),
+            )
+            .unwrap();
+        } else {
+            let connection = parrot_storage::database::Connection::open(&database_path).unwrap();
+            connection
+                .pragma_update(None, "user_version", version)
+                .unwrap();
+        }
+        std::fs::create_dir_all(root.join("artifacts")).unwrap();
+        std::fs::write(root.join("artifacts/retained.bin"), b"retained artifact").unwrap();
+        let database_before = std::fs::read(&database_path).unwrap();
+        let metadata_before = std::fs::read(root.join("meta.json")).unwrap();
+        let service = f.new_service();
+        let error = bounded(service.resume_session(
+            &wire::ResumeSessionRequest {
+                user_session_id: id.clone(),
+                working_directory: f.workspace.to_string_lossy().into_owned(),
+                ..Default::default()
+            },
+            active(),
+        ))
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, RpcCode::FailedPrecondition);
+        assert!(error.message.contains("parrot chat --new-session"));
+        assert_eq!(std::fs::read(&database_path).unwrap(), database_before);
+        assert_eq!(
+            std::fs::read(root.join("meta.json")).unwrap(),
+            metadata_before
+        );
+        assert_eq!(
+            std::fs::read(root.join("artifacts/retained.bin")).unwrap(),
+            b"retained artifact"
+        );
+        assert_eq!(f.factory.created.lock().unwrap().len(), 1);
+        let sessions = SessionCatalog::new(&f.state).list();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id.value(), id);
+        code(service.sessions().find(&id), RpcCode::NotFound);
+        let admission = f
+            .admissions
+            .resume(&f.workspace, &UserSessionId::parse(&id).unwrap(), false)
+            .unwrap();
+        assert!(admission.admission.activation_lease.is_some());
+        drop(admission);
+        bounded(service.close()).await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn legacy_only_resume_uses_eligible_metadata_and_preserves_validation_and_history() {
     let f = Fixture::new();
     f.admissions.set_legacy_path_read_fallback(true);

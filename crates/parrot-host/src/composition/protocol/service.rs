@@ -926,9 +926,9 @@ fn store_error(error: SessionStoreError, resumed: bool) -> RpcError {
         {
             RpcCode::AlreadyExists
         }
-        SessionStoreError::Admission(_) | SessionStoreError::InvalidMetadata => {
-            RpcCode::FailedPrecondition
-        }
+        SessionStoreError::Admission(_)
+        | SessionStoreError::InvalidMetadata
+        | SessionStoreError::UnsupportedSchema { .. } => RpcCode::FailedPrecondition,
         SessionStoreError::Failure(failure)
             if failure
                 .downcast_ref::<parrot_provider::sessions::Error>()

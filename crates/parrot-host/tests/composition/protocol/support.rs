@@ -808,7 +808,7 @@ impl Fixture {
     }
     fn with_provider(provider: Arc<dyn Provider>) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let root = std::env::current_dir().unwrap().join(".tmp").join(format!(
+        let root = std::env::temp_dir().join(format!(
             "t62-service-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)

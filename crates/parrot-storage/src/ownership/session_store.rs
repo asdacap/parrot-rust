@@ -19,6 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 pub enum SessionStoreError {
     Admission(ClaimDisposition),
     InvalidMetadata,
+    UnsupportedSchema { version: i64 },
     Cancelled,
     Failure(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -27,6 +28,10 @@ impl std::fmt::Display for SessionStoreError {
         match self {
             Self::Admission(disposition) => write!(f, "session admission: {disposition:?}"),
             Self::InvalidMetadata => f.write_str("session metadata is unavailable or invalid"),
+            Self::UnsupportedSchema { version } => write!(
+                f,
+                "session database schema version {version} is unsupported. Start a new session with `parrot chat --new-session`."
+            ),
             Self::Cancelled => f.write_str("session opening cancelled"),
             Self::Failure(error) => error.fmt(f),
         }
@@ -48,6 +53,7 @@ impl SessionStoreError {
         match self {
             Self::Cancelled => "cancelled",
             Self::Admission(_) | Self::InvalidMetadata => "invalid_operation",
+            Self::UnsupportedSchema { .. } => "unsupported_schema",
             Self::Failure(error) => classify_failure(error.as_ref()),
         }
     }
@@ -485,8 +491,12 @@ impl SessionResourceLease {
         let root = index.selected_root().clone();
         let cleanup = ResourceCleanup::new(activation, diagnostics)?;
         let opened = (|| {
-            let database =
-                SessionDatabase::open(root.clone()).map_err(SessionStoreError::failure)?;
+            let database = SessionDatabase::open(root.clone()).map_err(|error| match error {
+                DatabaseError::UnsupportedSchema { version } => {
+                    SessionStoreError::UnsupportedSchema { version }
+                }
+                error => SessionStoreError::failure(error),
+            })?;
             cleanup.attach_database(database.clone())?;
             let store = ImageArtifactStore::for_session(&root, "artifacts")
                 .map_err(SessionStoreError::failure)?;

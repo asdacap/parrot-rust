@@ -318,6 +318,81 @@ async fn database_open_failure_closes_diagnostics_and_releases_activation() {
 }
 
 #[tokio::test]
+async fn unsupported_schema_refusal_preserves_data_and_releases_activation() {
+    for version in [0_i64, 7] {
+        let fixture = Fixture::new();
+        let factory = Arc::new(Factory::default());
+        let store = fixture.store(factory.clone());
+        let admission = fixture.admission();
+        let root = admission.selected_root.as_ref().unwrap().path().to_owned();
+        fs::create_dir_all(root.join("artifacts")).unwrap();
+        let database_path = root.join("session.db");
+        if version == 0 {
+            fs::write(
+                &database_path,
+                include_bytes!("../../tests/database/fixtures/legacy-canonical-before.sqlite"),
+            )
+            .unwrap();
+        } else {
+            let connection = crate::database::Connection::open(&database_path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE retained(value TEXT); \
+                     INSERT INTO retained VALUES ('kept'); PRAGMA user_version=7;",
+                )
+                .unwrap();
+        }
+        fs::write(root.join("artifacts/retained.bin"), b"retained artifact").unwrap();
+        let database_before = fs::read(&database_path).unwrap();
+        let error = store
+            .open_admitted(
+                fixture.workspace.clone(),
+                admission,
+                Some(model()),
+                "default",
+                false,
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(
+            &error,
+            SessionStoreError::UnsupportedSchema { version: found } if *found == version
+        ));
+        assert_eq!(error.code(), "unsupported_schema");
+        assert!(error.to_string().contains("parrot chat --new-session"));
+        assert_eq!(fs::read(&database_path).unwrap(), database_before);
+        assert_eq!(
+            fs::read(root.join("artifacts/retained.bin")).unwrap(),
+            b"retained artifact"
+        );
+        assert!(factory.lease.lock().unwrap().is_none());
+        assert!(factory.session_id.lock().unwrap().is_none());
+        let log = fs::read_to_string(root.join("session.log")).unwrap();
+        assert!(
+            log.lines().any(|line| line.contains("event=\"open\"")
+                && line.contains("error=\"unsupported_schema\""))
+        );
+        assert!(
+            fixture
+                .global()
+                .lines()
+                .any(|line| line.contains("database_failure")
+                    && line.contains("error=\"unsupported_schema\""))
+        );
+        assert!(
+            fixture
+                .admissions
+                .resume(&fixture.workspace, &fixture.id(), false)
+                .unwrap()
+                .admission
+                .activation_lease
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
 async fn construction_failure_releases_admission_for_retry_and_reports_stage_without_private_text()
 {
     let fixture = Fixture::new();
