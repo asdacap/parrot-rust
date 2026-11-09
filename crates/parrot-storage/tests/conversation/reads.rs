@@ -474,6 +474,52 @@ async fn materialized_images_use_selected_metadata_but_part_media_type_and_no_fi
 }
 
 #[tokio::test]
+async fn image_materialization_does_not_require_upload_or_artifact_metadata_rows() {
+    let fixture = Fixture::new();
+    let store = ImageArtifactStore::for_session(&fixture.root(), "artifacts").unwrap();
+    let repo = fixture.repository().with_image_store(store.clone()).unwrap();
+    let images =
+        ImageArtifactRepository::new(repo.events().database().clone(), store.clone()).unwrap();
+    let artifact = images
+        .persist(
+            std::io::Cursor::new(include_bytes!("../artifacts/fixtures/rectangle.png")),
+            "self-contained-image-upload",
+            "rectangle.png",
+            "test",
+            None,
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    let part = ConversationPart::image(
+        &artifact.artifact_id,
+        &artifact.media_type,
+        &artifact.display_name,
+    );
+    repo.events()
+        .database()
+        .admit("remove-image-registries", &NeverCancelled, |tx| {
+            tx.execute_batch("DELETE FROM image_upload; DROP TABLE IF EXISTS image_artifact;")?;
+            Ok(())
+        })
+        .unwrap()
+        .into_completion()
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.materialize(vec![part]).await.unwrap(),
+        [ModelContent::ImageFile {
+            path: store.path_of(&artifact.artifact_id).unwrap(),
+            media_type: "image/png".into(),
+            width: 24,
+            height: 12,
+        }]
+    );
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn merged_request_history_stably_interleaves_independent_cursors_and_optional_effort() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
