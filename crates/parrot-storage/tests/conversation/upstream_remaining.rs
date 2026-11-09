@@ -286,27 +286,28 @@ async fn original_latest_duplicate_checkpoint_no_fallback() {
             vec![call(id, "set_checkpoint", "{\"title\":\"same\"}")],
         )
         .await;
-        repo.record_checkpoint("agent".into(), "same".into(), assistant, id.into())
-            .await
-            .unwrap();
-        if id == "first" {
-            settle(
-                &repo,
-                "first-result",
-                "agent",
-                assistant,
-                id,
-                "set_checkpoint",
-                "same",
-            )
-            .await;
-        }
+        settle(
+            &repo,
+            &format!("{id}-result"),
+            "agent",
+            assistant,
+            id,
+            "set_checkpoint",
+            "same",
+        )
+        .await;
     }
     let current = repo
         .conversation("agent".into())
         .await
         .unwrap()
-        .last()
+        .into_iter()
+        .find(|item| {
+            item.message
+                .tool_calls
+                .iter()
+                .any(|call| call.id == "latest")
+        })
         .unwrap()
         .sequence;
     // source-line:866
@@ -431,10 +432,6 @@ async fn original_named_checkpoint_fork_remaps_settlement() {
         )],
     )
     .await;
-    parent
-        .record_checkpoint("handoff".into(), checkpoint, "checkpoint".into())
-        .await
-        .unwrap();
     parent
         .append_tool_settlement(
             event("checkpoint-result", "agent"),
@@ -636,17 +633,13 @@ async fn original_safe_prefix_excludes_crossing_complete_batches() {
         "agent",
         MessageRole::Assistant,
         vec![],
-        vec![call("checkpoint", "set_checkpoint", "{}")],
+        vec![call(
+            "checkpoint",
+            "set_checkpoint",
+            r#"{"title":"handoff"}"#,
+        )],
     )
     .await;
-    repo.record_checkpoint(
-        "agent".into(),
-        "handoff".into(),
-        checkpoint,
-        "checkpoint".into(),
-    )
-    .await
-    .unwrap();
     settle(
         &repo,
         "checkpoint-result",

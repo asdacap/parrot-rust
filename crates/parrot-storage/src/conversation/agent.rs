@@ -293,16 +293,6 @@ impl AgentHistoryView {
             .conversation_after(self.agent.clone(), watermark)
             .await
     }
-    pub async fn record_checkpoint(
-        &self,
-        title: String,
-        assistant: i64,
-        call: String,
-    ) -> Result<bool, EventError> {
-        self.repository
-            .record_checkpoint(self.agent.clone(), title, assistant, call)
-            .await
-    }
     pub async fn active_checkpoint_assistant_sequences(
         &self,
     ) -> Result<std::collections::BTreeSet<i64>, EventError> {

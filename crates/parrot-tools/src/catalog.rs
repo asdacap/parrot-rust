@@ -261,7 +261,6 @@ impl From<Invocation> for session::Invocation {
     fn from(i: Invocation) -> Self {
         Self {
             call_id: i.call_id,
-            assistant_sequence: i.assistant_sequence,
             arguments_json: i.arguments_json,
             prompt_templates: i.prompt_templates,
         }

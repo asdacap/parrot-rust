@@ -172,7 +172,7 @@ fn interrupted_initialization_rolls_back_schema_and_version_then_reopens() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, tables), (5, 9));
+        assert_eq!((version, tables), (6, 8));
         drop(reopened);
     }
     std::fs::remove_dir_all(workspace).unwrap();
@@ -209,7 +209,8 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
     std::fs::create_dir(&workspace).unwrap();
     let payload = vec![b'c'; 32768];
     let cases = vec![
-        (5_i64, std::ffi::OsString::from("session-5.db")),
+        (6_i64, std::ffi::OsString::from("session-6.db")),
+        (5, std::ffi::OsString::from("session-5.db")),
         (4, std::ffi::OsString::from("session-4.db")),
         (3, std::ffi::OsString::from("session-3.db")),
         (2, std::ffi::OsString::from("session-2.db")),
@@ -222,9 +223,9 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         use std::os::unix::ffi::OsStringExt;
 
         let mut cases = cases;
-        cases.push((5, std::ffi::OsString::from("native ?#%2F-é.db")));
+        cases.push((6, std::ffi::OsString::from("native ?#%2F-é.db")));
         cases.push((
-            5,
+            6,
             std::ffi::OsString::from_vec(b"native-\xff?#%.db".to_vec()),
         ));
         cases
@@ -278,7 +279,7 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         let journal_before = std::fs::read(&journal_path).unwrap();
         assert!(journal_before.len() > 100_000);
 
-        if version == 5 {
+        if version == 6 {
             let recovered = super::open(&path).unwrap();
             let retained: i64 = recovered
                 .query_row(

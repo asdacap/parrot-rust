@@ -74,8 +74,6 @@ pub trait TaskController: Send + Sync {
 }
 
 pub trait SessionControl: Send + Sync {
-    type CheckpointRequest: Send + 'static;
-    type CheckpointResult: Send + 'static;
     type ReminderRequest: Send + 'static;
     type ReminderResult: Send + 'static;
     type ClearReminderRequest: Send + 'static;
@@ -84,12 +82,6 @@ pub trait SessionControl: Send + Sync {
     type CompactResult: Send + 'static;
     type Status: Send + 'static;
     type Error: Send + Sync + 'static;
-
-    fn checkpoint<'a>(
-        &'a self,
-        request: Self::CheckpointRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::CheckpointResult, OperationError<Self::Error>>>;
 
     fn compact<'a>(
         &'a self,

@@ -128,7 +128,6 @@ mod fixture_support {
         pub files: BTreeMap<PathBuf, Vec<u8>>,
         pub tasks: Vec<Task>,
         pub task_boundary: Option<(i64, String)>,
-        pub checkpoints: Vec<(String, i64, String)>,
         pub reminders: BTreeMap<String, String>,
         pub progress: parrot_domain::values::progress::ProgressSnapshot,
         pub launches: Vec<(CommandRequest, i32)>,
@@ -147,7 +146,6 @@ mod fixture_support {
                 .into(),
                 tasks: Vec::new(),
                 task_boundary: None,
-                checkpoints: Vec::new(),
                 reminders: BTreeMap::new(),
                 progress: parrot_domain::values::progress::ProgressSnapshot::new("catalog".into()),
                 launches: Vec::new(),
@@ -491,27 +489,6 @@ mod fixture_support {
     impl SessionServices for Services {
         type Security = Snapshot;
         type Selection = Selection;
-        fn checkpoint<'a>(
-            &'a self,
-            title: &'a str,
-            assistant_sequence: i64,
-            call_id: &'a str,
-        ) -> BoxFuture<'a, Result<(), Failure>> {
-            Box::pin(async move {
-                self.record(
-                    "checkpoint",
-                    format!("{title} {assistant_sequence} {call_id}"),
-                    None,
-                    None,
-                );
-                self.state.lock().unwrap().checkpoints.push((
-                    title.into(),
-                    assistant_sequence,
-                    call_id.into(),
-                ));
-                Ok(())
-            })
-        }
         fn set_reminder<'a>(
             &'a self,
             title: &'a str,
@@ -1452,12 +1429,12 @@ async fn retained_session_uses_immutable_turn_selection_and_boundary_sequence() 
             .selection_id,
         Some(89)
     );
-    invoke("set_checkpoint", r#"{"title":"boundary"}"#)
-        .await
-        .unwrap();
     assert_eq!(
-        services.state.lock().unwrap().checkpoints,
-        vec![("boundary".into(), 9_007_199_254_740_993, "captured".into())]
+        invoke("set_checkpoint", r#"{"title":"boundary"}"#)
+            .await
+            .unwrap()
+            .text,
+        "boundary"
     );
     owner.dispose().await.unwrap();
     artifacts.close().await;

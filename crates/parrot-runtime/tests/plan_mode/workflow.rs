@@ -214,7 +214,7 @@ fn blank_missing_unreadable_and_invalid_inputs_require_repair_without_partial_co
 async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner_pair() {
     use parrot_storage::{
         conversation::{ConversationMessage, MessageRole, ToolCall},
-        events::projection,
+        events::{ConversationPart, ToolExecutionStatus, ToolExecutionTerminal, projection},
         history_files::AgentHistoryFile,
     };
     use std::sync::Arc;
@@ -248,18 +248,23 @@ async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner
         })
         .await
         .unwrap();
-    assert!(
-        history
-            .record_checkpoint("plan checkpoint".into(), sequence, "checkpoint-call".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        history
-            .record_checkpoint("plan checkpoint".into(), sequence, "checkpoint-call".into())
-            .await
-            .unwrap()
-    );
+    history
+        .append_tool_settlement(
+            parrot_domain::protocol::messages::parrot::Event {
+                id: "checkpoint-result".into(),
+                agent_session_id: "main".into(),
+                ..Default::default()
+            },
+            sequence,
+            ToolExecutionTerminal {
+                tool_call_id: "checkpoint-call".into(),
+                tool_name: "set_checkpoint".into(),
+                status: ToolExecutionStatus::Finished,
+                result_parts: vec![ConversationPart::text("plan checkpoint")],
+            },
+        )
+        .await
+        .unwrap();
     assert!(
         history
             .active_checkpoint_assistant_sequences()

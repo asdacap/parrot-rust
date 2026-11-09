@@ -207,7 +207,12 @@ fn call(id: &str) -> ToolCall {
             "read"
         }
         .into(),
-        arguments_json: "{}".into(),
+        arguments_json: if id == "checkpoint" {
+            "{\"title\":\"cut\"}"
+        } else {
+            "{}"
+        }
+        .into(),
     }
 }
 async fn tool_group(history: &AgentHistoryView, ids: &[&str]) -> i64 {
@@ -599,11 +604,7 @@ async fn actual_checkpoint_compaction_reopen_and_full_fork_preserve_tool_causali
     user(&history, "first").await;
     tool_group(&history, &["old"]).await;
     user(&history, "second").await;
-    let assistant = tool_group(&history, &["checkpoint", "b"]).await;
-    history
-        .record_checkpoint("cut".into(), assistant, "checkpoint".into())
-        .await
-        .unwrap();
+    tool_group(&history, &["checkpoint", "b"]).await;
     let before = history.conversation().await.unwrap();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let provider = Scripted::default();

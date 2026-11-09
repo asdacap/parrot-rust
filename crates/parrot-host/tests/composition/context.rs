@@ -21,14 +21,6 @@ struct Ancillary;
 impl SessionServices for Ancillary {
     type Security = SharedSecurity<Security>;
     type Selection = ContextSelection<Security>;
-    fn checkpoint<'a>(
-        &'a self,
-        _: &'a str,
-        _: i64,
-        _: &'a str,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
-        panic!("not exercised by compact")
-    }
     fn set_reminder<'a>(
         &'a self,
         _: &'a str,
@@ -86,8 +78,6 @@ impl SessionServices for Ancillary {
     }
 }
 impl SessionControl for Ancillary {
-    type CheckpointRequest = String;
-    type CheckpointResult = String;
     type ReminderRequest = String;
     type ReminderResult = String;
     type ClearReminderRequest = String;
@@ -96,13 +86,6 @@ impl SessionControl for Ancillary {
     type CompactResult = ();
     type Status = &'static str;
     type Error = Failure;
-    fn checkpoint<'a>(
-        &'a self,
-        value: String,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, OperationError<Failure>>> {
-        Box::pin(async move { Ok(value) })
-    }
     fn compact<'a>(
         &'a self,
         _: (),
@@ -366,12 +349,6 @@ async fn frozen_control_precancel_is_nonmutating_and_ancillary_methods_delegate(
     ));
     assert!(provider.requests.lock().unwrap().is_empty());
     assert_eq!(
-        SessionControl::checkpoint(control.as_ref(), "checkpoint".into(), &NeverCancelled)
-            .await
-            .unwrap(),
-        "checkpoint"
-    );
-    assert_eq!(
         SessionControl::set_reminder(control.as_ref(), "set".into()).unwrap(),
         "set"
     );
@@ -511,14 +488,6 @@ fn status_error(error: OperationError<StatusError>) -> OperationError<Failure> {
 impl SessionServices for StatusAncillary {
     type Security = SharedSecurity<Security>;
     type Selection = ContextSelection<Security>;
-    fn checkpoint<'a>(
-        &'a self,
-        title: &'a str,
-        sequence: i64,
-        call: &'a str,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
-        SessionServices::checkpoint(&self.other, title, sequence, call)
-    }
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,

@@ -1,7 +1,7 @@
 //! Checkpoints and fork copies execute inside one selected-session transaction.
 use super::{ConversationRepository, EventError, compaction, reads, types::*};
 use crate::events::projection;
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{Transaction, params};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Source fork argument attribution without changing the accepted T17 error API.
@@ -83,26 +83,6 @@ fn rollback_fork(error: ForkError) -> EventError {
 }
 
 impl ConversationRepository {
-    pub async fn record_checkpoint(
-        &self,
-        agent: String,
-        title: String,
-        assistant_sequence: i64,
-        tool_call_id: String,
-    ) -> Result<bool, EventError> {
-        let clock = self.events.context().timestamp.clone();
-        self.events.transaction(move |tx| {
-            let changed = tx.execute("INSERT OR IGNORE INTO history_checkpoint (agent_session, title, assistant_sequence, tool_call_id, created_at) SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM conversation_part AS call JOIN conversation_item AS item ON item.sequence = call.item_sequence WHERE item.agent_session = ?1 AND item.sequence = ?3 AND call.kind = 'tool_call' AND call.tool_call_id = ?4 AND call.tool_name = 'set_checkpoint');", params![agent,title,assistant_sequence,tool_call_id,clock()])? != 0;
-            if !changed {
-                let existing: Option<(String,i64)> = tx.query_row("SELECT title, assistant_sequence FROM history_checkpoint WHERE agent_session = ?1 AND tool_call_id = ?2;", params![agent,tool_call_id], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
-                if existing.as_ref() != Some(&(title, assistant_sequence)) {
-                    return Err(EventError::Conflict(format!("checkpoint tool call {tool_call_id} was already recorded differently")));
-                }
-            }
-            Ok(true)
-        }).await
-    }
-
     pub async fn latest_usable_checkpoint(
         &self,
         agent: String,
@@ -118,10 +98,17 @@ impl ConversationRepository {
         &self,
         agent: String,
     ) -> Result<BTreeSet<i64>, EventError> {
-        self.events.transaction(move |tx| {
-            let mut read = tx.prepare("SELECT checkpoint.assistant_sequence FROM history_checkpoint AS checkpoint JOIN (SELECT title, MAX(sequence) AS sequence FROM history_checkpoint WHERE agent_session = ?1 GROUP BY title) AS latest ON latest.sequence = checkpoint.sequence LEFT JOIN agent_history AS snapshot ON snapshot.sequence = (SELECT sequence FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' ORDER BY sequence DESC LIMIT 1) WHERE checkpoint.agent_session = ?1 AND (snapshot.watermark IS NULL OR checkpoint.assistant_sequence > snapshot.watermark);")?;
-            Ok(read.query_map([agent], |row| row.get(0))?.collect::<Result<BTreeSet<_>,_>>()?)
-        }).await
+        self.events
+            .transaction(move |tx| {
+                let watermark =
+                    compaction::read_snapshot(tx, &agent)?.map_or(0, |snapshot| snapshot.watermark);
+                Ok(read_checkpoints(tx, &agent)?
+                    .into_iter()
+                    .filter(|checkpoint| checkpoint.assistant_sequence > watermark)
+                    .map(|checkpoint| checkpoint.assistant_sequence)
+                    .collect())
+            })
+            .await
     }
 
     pub async fn effective_conversation_groups(
@@ -176,7 +163,7 @@ impl ConversationRepository {
         let target = agent.clone();
         self.events
             .transaction(move |tx| {
-                for table in ["history_checkpoint", "conversation_item", "agent_history"] {
+                for table in ["conversation_item", "agent_history"] {
                     tx.execute(
                         &format!("DELETE FROM {table} WHERE agent_session = ?1;"),
                         [&target],
@@ -189,14 +176,47 @@ impl ConversationRepository {
     }
 }
 
+pub(super) fn read_checkpoints(
+    tx: &Transaction<'_>,
+    agent: &str,
+) -> Result<Vec<HistoryCheckpoint>, EventError> {
+    let mut read = tx.prepare("SELECT call.arguments, item.sequence, call.tool_call_id FROM conversation_part AS call JOIN conversation_item AS item ON item.sequence = call.item_sequence JOIN conversation_item AS result ON result.agent_session = item.agent_session AND result.tool_owner_sequence = item.sequence AND result.tool_call_id = call.tool_call_id AND result.role = 'tool' AND result.tool_result_name = 'set_checkpoint' AND result.tool_result_status = 'finished' WHERE item.agent_session = ?1 AND call.kind = 'tool_call' AND call.tool_name = 'set_checkpoint' ORDER BY item.sequence, call.position;")?;
+    let mut rows = read.query([agent])?;
+    let mut checkpoints = BTreeMap::new();
+    while let Some(row) = rows.next()? {
+        let arguments: String = row.get(0)?;
+        let Ok(mut fields) = serde_json::from_str::<BTreeMap<String, Option<String>>>(&arguments)
+        else {
+            continue;
+        };
+        if fields.len() != 1 {
+            continue;
+        }
+        let Some(Some(title)) = fields.remove("title") else {
+            continue;
+        };
+        checkpoints.insert(
+            title.clone(),
+            HistoryCheckpoint {
+                title,
+                assistant_sequence: row.get(1)?,
+                tool_call_id: row.get(2)?,
+            },
+        );
+    }
+    Ok(checkpoints.into_values().collect())
+}
+
 pub fn read_latest_usable_checkpoint(
     tx: &Transaction<'_>,
     agent: &str,
     title: &str,
     before: i64,
 ) -> Result<Option<HistoryCheckpoint>, EventError> {
-    let checkpoint = tx.query_row("SELECT title, assistant_sequence, tool_call_id FROM history_checkpoint WHERE agent_session = ?1 AND title = ?2 ORDER BY sequence DESC LIMIT 1;", params![agent,title], |row| Ok(HistoryCheckpoint { title: row.get(0)?, assistant_sequence: row.get(1)?, tool_call_id: row.get(2)? })).optional()?;
-    Ok(checkpoint.filter(|checkpoint| checkpoint.assistant_sequence < before))
+    Ok(read_checkpoints(tx, agent)?
+        .into_iter()
+        .find(|checkpoint| checkpoint.title == title)
+        .filter(|checkpoint| checkpoint.assistant_sequence < before))
 }
 
 pub fn read_effective_conversation_groups(
@@ -442,17 +462,6 @@ fn initialize_fork(
                     sequences[&synthetic.sequence]
                 ],
             )?;
-        }
-    }
-    for group in selected.iter().filter(|group| group.assistant_sequence > 0) {
-        let mut read = tx.prepare("SELECT title, tool_call_id FROM history_checkpoint WHERE agent_session = ?1 AND assistant_sequence = ?2 ORDER BY sequence;")?;
-        let checkpoints = read
-            .query_map(params![source, group.assistant_sequence], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        for (title, call) in checkpoints {
-            tx.execute("INSERT INTO history_checkpoint (agent_session, title, assistant_sequence, tool_call_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5);", params![destination,title,sequences[&group.assistant_sequence],call,clock()])?;
         }
     }
     Ok(())

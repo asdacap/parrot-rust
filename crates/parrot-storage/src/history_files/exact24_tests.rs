@@ -198,12 +198,6 @@ async fn delegated24_named_checkpoint_fork_jsonl_literals() {
         .await
         .unwrap();
     let checkpoint_assistant = parent.conversation().await.unwrap()[1].sequence;
-    assert!(
-        parent
-            .record_checkpoint("handoff".into(), checkpoint_assistant, "checkpoint".into())
-            .await
-            .unwrap()
-    );
     parent
         .append_tool_settlement(
             event("checkpoint-result", "agent"),

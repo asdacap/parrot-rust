@@ -33,7 +33,7 @@ async fn tool(history: &AgentHistoryView, text: &str, call: &str) -> i64 {
     message.tool_calls.push(ToolCall {
         id: call.into(),
         name: "set_checkpoint".into(),
-        arguments_json: "{}".into(),
+        arguments_json: "{\"title\":\"handoff\"}".into(),
     });
     append(history, message).await
 }
@@ -62,10 +62,6 @@ async fn child_launch_uses_actual_empty_full_and_named_checkpoint_sqlite_forks()
             .append(root.history(), "before checkpoint")
             .await;
         let checkpoint = tool(root.history(), "checkpoint assistant", "checkpoint-call").await;
-        root.history()
-            .record_checkpoint("handoff".into(), checkpoint, "checkpoint-call".into())
-            .await
-            .unwrap();
         root.history()
             .append_tool_settlement(
                 Event {

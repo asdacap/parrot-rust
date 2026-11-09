@@ -507,7 +507,6 @@ impl Fixture {
 fn invocation(arguments: &str) -> Invocation {
     Invocation {
         call_id: "generate".into(),
-        assistant_sequence: 7,
         arguments_json: arguments.into(),
         prompt_templates: None,
     }

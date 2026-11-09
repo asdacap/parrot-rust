@@ -506,11 +506,7 @@ async fn long_committed_history_keeps_the_checkpoint_suffix_and_exact_reopened_t
     let history = fixture.history();
     for index in 0..200 {
         if index == 150 {
-            let assistant = tool_group(&history, &["checkpoint", "parallel"]).await;
-            history
-                .record_checkpoint("long".into(), assistant, "checkpoint".into())
-                .await
-                .unwrap();
+            tool_group(&history, &["checkpoint", "parallel"]).await;
         }
         user(&history, format!("message {index}: {}", "x".repeat(500))).await;
     }

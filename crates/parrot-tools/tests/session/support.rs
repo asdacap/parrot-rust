@@ -22,7 +22,6 @@ use std::{
 };
 
 pub const CALL_ID: &str = "session-call/{verbatim}";
-pub const ASSISTANT_SEQUENCE: i64 = 9_007_199_254_740_993;
 pub const SELECTION: &str = "captured-model-selection";
 
 pub struct Cancel(pub bool);
@@ -52,7 +51,6 @@ impl AccessSnapshot for Security {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Stage {
-    Checkpoint,
     Set,
     Clear,
     Runtime,
@@ -63,7 +61,6 @@ pub enum Stage {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Call {
-    Checkpoint(String, i64, String),
     Set(String, String),
     Clear(String),
     Titles,
@@ -76,11 +73,9 @@ pub enum Call {
 
 pub struct State {
     pub calls: Vec<Call>,
-    pub checkpoints: Vec<(String, i64, String)>,
     pub reminders: Vec<(String, String)>,
     pub progress: ProgressSnapshot,
     pub failure: Option<(Stage, Failure)>,
-    pub checkpoint_gate: Option<Arc<tokio::sync::Notify>>,
     pub reminder_titles_gate: Option<Arc<tokio::sync::Notify>>,
     pub runtime: String,
     pub statistics: String,
@@ -91,11 +86,9 @@ impl Default for State {
     fn default() -> Self {
         Self {
             calls: Vec::new(),
-            checkpoints: Vec::new(),
             reminders: Vec::new(),
             progress: ProgressSnapshot::new("session-test".into()),
             failure: None,
-            checkpoint_gate: None,
             reminder_titles_gate: None,
             runtime: String::new(),
             statistics: String::new(),
@@ -128,37 +121,6 @@ pub struct Services(pub Mutex<State>);
 impl SessionServices for Services {
     type Security = Security;
     type Selection = String;
-
-    fn checkpoint<'a>(
-        &'a self,
-        title: &'a str,
-        assistant_sequence: i64,
-        call_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
-        Box::pin(async move {
-            let gate = {
-                let mut state = self.0.lock().unwrap();
-                state.calls.push(Call::Checkpoint(
-                    title.into(),
-                    assistant_sequence,
-                    call_id.into(),
-                ));
-                if let Some((Stage::Checkpoint, failure)) = &state.failure {
-                    return Err(failure.clone());
-                }
-                state.checkpoint_gate.clone()
-            };
-            if let Some(gate) = gate {
-                gate.notified().await;
-            }
-            self.0.lock().unwrap().checkpoints.push((
-                title.into(),
-                assistant_sequence,
-                call_id.into(),
-            ));
-            Ok(())
-        })
-    }
 
     fn set_reminder<'a>(
         &'a self,
@@ -357,7 +319,6 @@ impl Fixture {
     ) -> OperationResult<Output, Failure> {
         let invocation = Invocation {
             call_id: CALL_ID.into(),
-            assistant_sequence: ASSISTANT_SEQUENCE,
             arguments_json: json.into(),
             prompt_templates: formatter,
         };

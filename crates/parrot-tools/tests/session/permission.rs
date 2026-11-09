@@ -111,7 +111,6 @@ async fn run(
     );
     let invocation = Invocation {
         call_id: "permission".into(),
-        assistant_sequence: 4,
         arguments_json: arguments.into(),
         prompt_templates: None,
     };

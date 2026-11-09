@@ -62,13 +62,6 @@ pub trait SessionServices: Send + Sync {
     type Security: AccessSnapshot + 'static;
     type Selection: Send + Sync + 'static;
 
-    fn checkpoint<'a>(
-        &'a self,
-        title: &'a str,
-        assistant_sequence: i64,
-        call_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), Failure>>;
-
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,

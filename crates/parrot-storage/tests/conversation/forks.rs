@@ -82,7 +82,12 @@ async fn assistant(repo: &ConversationRepository, agent: &str, call: &str, name:
     value.tool_calls.push(ToolCall {
         id: call.into(),
         name: name.into(),
-        arguments_json: "{}".into(),
+        arguments_json: if name == "set_checkpoint" {
+            r#"{"title":"handoff"}"#
+        } else {
+            "{}"
+        }
+        .into(),
     });
     value.provider_content = ProviderContent {
         provider_id: "provider".into(),
@@ -139,25 +144,173 @@ async fn row_counts(repo: &ConversationRepository, agent: &str) -> Vec<i64> {
     let agent = agent.to_owned();
     repo.events()
         .transaction(move |tx| {
-            [
-                "event",
-                "conversation_item",
-                "agent_history",
-                "history_checkpoint",
-            ]
-            .iter()
-            .map(|table| {
-                tx.query_row(
-                    &format!("SELECT COUNT(*) FROM {table} WHERE agent_session=?1"),
-                    [&agent],
-                    |row| row.get(0),
-                )
-                .map_err(EventError::from)
-            })
-            .collect()
+            ["event", "conversation_item", "agent_history"]
+                .iter()
+                .map(|table| {
+                    tx.query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE agent_session=?1"),
+                        [&agent],
+                        |row| row.get(0),
+                    )
+                    .map_err(EventError::from)
+                })
+                .collect()
         })
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn completed_checkpoint_call_is_available_without_separate_registration() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let mut value = message(MessageRole::Assistant, "checkpoint");
+    value.tool_calls.push(ToolCall {
+        id: "checkpoint".into(),
+        name: "set_checkpoint".into(),
+        arguments_json: r#"{"title":"handoff"}"#.into(),
+    });
+    let owner = append(&repo, "agent", value).await;
+    assert!(
+        repo.latest_usable_checkpoint("agent".into(), "handoff".into(), i64::MAX)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    settle(&repo, "agent", owner, "checkpoint").await;
+    assert_eq!(
+        repo.latest_usable_checkpoint("agent".into(), "handoff".into(), i64::MAX)
+            .await
+            .unwrap()
+            .unwrap()
+            .assistant_sequence,
+        owner
+    );
+    assert_eq!(
+        repo.read_conversation_state("agent".into())
+            .await
+            .unwrap()
+            .checkpoint_sequences,
+        vec![owner]
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_reads_validate_arguments_and_require_successful_owned_results() {
+    for (arguments, status, expected) in [
+        (
+            r#"{"title":"handoff"}"#,
+            Some(ToolExecutionStatus::Finished),
+            Some("handoff"),
+        ),
+        (
+            r#"{"title":"first","title":"last"}"#,
+            Some(ToolExecutionStatus::Finished),
+            Some("last"),
+        ),
+        (
+            r#"{"title":null,"title":"last"}"#,
+            Some(ToolExecutionStatus::Finished),
+            Some("last"),
+        ),
+        (
+            r#"{"title":""}"#,
+            Some(ToolExecutionStatus::Finished),
+            Some(""),
+        ),
+        (r#"{"title":"handoff"}"#, None, None),
+        (
+            r#"{"title":"handoff"}"#,
+            Some(ToolExecutionStatus::Error),
+            None,
+        ),
+        (
+            r#"{"title":"handoff"}"#,
+            Some(ToolExecutionStatus::Cancelled),
+            None,
+        ),
+        (
+            r#"{"title":7,"title":"last"}"#,
+            Some(ToolExecutionStatus::Finished),
+            None,
+        ),
+        (
+            r#"{"title":"first","title":null}"#,
+            Some(ToolExecutionStatus::Finished),
+            None,
+        ),
+        (
+            r#"{"title":"handoff","unknown":null}"#,
+            Some(ToolExecutionStatus::Finished),
+            None,
+        ),
+        (
+            r#"{"title":"handoff"} trailing"#,
+            Some(ToolExecutionStatus::Finished),
+            None,
+        ),
+        ("null", Some(ToolExecutionStatus::Finished), None),
+        ("[]", Some(ToolExecutionStatus::Finished), None),
+        ("{}", Some(ToolExecutionStatus::Finished), None),
+    ] {
+        let fixture = Fixture::new();
+        let repo = fixture.repository();
+        let mut value = message(MessageRole::Assistant, "checkpoint");
+        value.tool_calls.push(ToolCall {
+            id: "checkpoint".into(),
+            name: "set_checkpoint".into(),
+            arguments_json: arguments.into(),
+        });
+        let owner = append(&repo, "agent", value).await;
+        if let Some(status) = status {
+            repo.events()
+                .append_tool_settlement(
+                    event("result", "agent"),
+                    owner,
+                    ToolExecutionTerminal {
+                        tool_call_id: "checkpoint".into(),
+                        tool_name: "set_checkpoint".into(),
+                        status,
+                        result_parts: vec![ConversationPart::text(
+                            "not used to identify checkpoints",
+                        )],
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let state = repo.read_conversation_state("agent".into()).await.unwrap();
+        assert_eq!(
+            state.checkpoint_sequences,
+            expected.map(|_| owner).into_iter().collect::<Vec<_>>(),
+            "{arguments}"
+        );
+        let checkpoint = repo
+            .latest_usable_checkpoint(
+                "agent".into(),
+                expected.unwrap_or("handoff").into(),
+                i64::MAX,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.title.as_str()),
+            expected,
+            "{arguments}"
+        );
+        repo.events().database().close().await.unwrap();
+        let reopened = fixture.repository();
+        assert_eq!(
+            reopened
+                .read_conversation_state("agent".into())
+                .await
+                .unwrap(),
+            state
+        );
+        reopened.events().database().close().await.unwrap();
+    }
 }
 
 #[tokio::test]
@@ -165,9 +318,6 @@ async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_arti
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let owner = assistant(&repo, "agent", "call", "set_checkpoint").await;
-    repo.record_checkpoint("agent".into(), "handoff".into(), owner, "call".into())
-        .await
-        .unwrap();
     let between = append(&repo, "agent", message(MessageRole::User, "interleaved")).await;
     settle(&repo, "agent", owner, "call").await;
     let published = event("synthetic", "agent");
@@ -216,9 +366,6 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let owner = assistant(&repo, "agent", "call", "set_checkpoint").await;
-    repo.record_checkpoint("agent".into(), "handoff".into(), owner, "call".into())
-        .await
-        .unwrap();
     append(
         &repo,
         "agent",
@@ -348,22 +495,8 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let archived = assistant(&repo, "agent", "archived", "set_checkpoint").await;
-    repo.record_checkpoint(
-        "agent".into(),
-        "archived".into(),
-        archived,
-        "archived".into(),
-    )
-    .await
-    .unwrap();
     let first = assistant(&repo, "agent", "first", "set_checkpoint").await;
-    repo.record_checkpoint("agent".into(), "handoff".into(), first, "first".into())
-        .await
-        .unwrap();
     let latest = assistant(&repo, "agent", "latest", "set_checkpoint").await;
-    repo.record_checkpoint("agent".into(), "handoff".into(), latest, "latest".into())
-        .await
-        .unwrap();
     let snapshot = CompactionSnapshot {
         summary: "archived summary".into(),
         watermark: archived,
@@ -376,12 +509,14 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
     .await
     .unwrap();
     settle(&repo, "agent", archived, "archived").await;
+    settle(&repo, "agent", first, "first").await;
+    settle(&repo, "agent", latest, "latest").await;
     append(&repo, "agent", message(MessageRole::User, "tail")).await;
 
     let state = repo.read_conversation_state("agent".into()).await.unwrap();
     assert_eq!(state.snapshot, Some(snapshot));
     assert_eq!(state.checkpoint_sequences, vec![latest]);
-    assert_eq!(state.items.len(), 5);
+    assert_eq!(state.items.len(), 7);
     assert!(state.items.iter().all(|item| item.item.sequence > archived));
     assert_eq!(state.items[0].item.sequence, first);
     assert_eq!(state.items[1].item.sequence, latest);
@@ -389,7 +524,7 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
     assert_eq!(single_text(&state.items[2].item), "context status");
     assert_eq!(state.items[3].tool_owner_sequence, Some(archived));
     assert_eq!(state.items[3].item.message.tool_call_id, "archived");
-    assert_eq!(single_text(&state.items[4].item), "tail");
+    assert_eq!(single_text(&state.items[6].item), "tail");
     assert_eq!(
         state
             .items
@@ -411,37 +546,19 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
 }
 
 #[tokio::test]
-async fn checkpoint_retries_conflicts_latest_before_and_active_compaction_boundary() {
+async fn completed_checkpoints_keep_latest_before_and_active_compaction_boundary() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let first = assistant(&repo, "agent", "first", "set_checkpoint").await;
-    assert!(
-        repo.record_checkpoint("agent".into(), "handoff".into(), first, "first".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        repo.record_checkpoint("agent".into(), "handoff".into(), first, "first".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        matches!(repo.record_checkpoint("agent".into(),"other".into(),first,"first".into()).await,Err(EventError::Conflict(message)) if message=="checkpoint tool call first was already recorded differently")
-    );
-    assert!(matches!(
-        repo.record_checkpoint(
-            "other-agent".into(),
-            "handoff".into(),
-            first,
-            "first".into()
-        )
-        .await,
-        Err(EventError::Conflict(_))
-    ));
+    settle(&repo, "agent", first, "first").await;
     let second = assistant(&repo, "agent", "second", "set_checkpoint").await;
-    repo.record_checkpoint("agent".into(), "handoff".into(), second, "second".into())
-        .await
-        .unwrap();
+    settle(&repo, "agent", second, "second").await;
+    assert!(
+        repo.latest_usable_checkpoint("other-agent".into(), "handoff".into(), i64::MAX)
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(
         repo.latest_usable_checkpoint("agent".into(), "handoff".into(), second)
             .await
@@ -506,14 +623,6 @@ async fn named_fork_clones_complete_group_parts_provider_terminals_synthetic_and
     )
     .await;
     let checkpoint = assistant(&repo, "agent", "checkpoint", "set_checkpoint").await;
-    repo.record_checkpoint(
-        "agent".into(),
-        "handoff".into(),
-        checkpoint,
-        "checkpoint".into(),
-    )
-    .await
-    .unwrap();
     settle(&repo, "agent", checkpoint, "checkpoint").await;
     let published = event("synthetic", "agent");
     repo.events()
@@ -726,7 +835,7 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     )
     .await
     .unwrap();
-    assert_eq!(row_counts(&repo, "empty").await, vec![0; 4]);
+    assert_eq!(row_counts(&repo, "empty").await, vec![0; 3]);
     repo.events().database().close().await.unwrap();
 }
 
@@ -825,7 +934,7 @@ async fn fork_failure_after_partial_clone_rolls_back_every_destination_row() {
         .await,
         Err(ForkError::Repository(EventError::Database(_)))
     ));
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 4]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 3]);
     assert_eq!(repo.events().replay_raw().await.unwrap(), before);
     repo.events()
         .transaction(|tx| {
@@ -867,7 +976,7 @@ async fn complete_message_group_without_result_metadata_rolls_back() {
     assert!(
         matches!(fork(&repo,"agent","child",HistoryForkBoundary::AfterCompletedHistory,"full").await,Err(ForkError::Repository(EventError::Invalid(message))) if message=="a complete tool group has no result metadata")
     );
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 4]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 3]);
     repo.events()
         .transaction(|tx| {
             tx.execute(
@@ -920,9 +1029,6 @@ async fn original_full_fork_copies_settled_batches_and_checkpoints_both_paramete
                 .unwrap();
         }
         let owner = items(&repo, "agent").await.last().unwrap().sequence;
-        repo.record_checkpoint("agent".into(), "handoff".into(), owner, "checkpoint".into())
-            .await
-            .unwrap();
         repo.events()
             .append_tool_settlement(
                 event("checkpoint-result", "agent"),
@@ -1203,9 +1309,6 @@ async fn cleanup_keeps_events_usage_and_other_agents_while_removing_only_fork_st
     let repo = fixture.repository();
     let owner = assistant(&repo, "agent", "call", "set_checkpoint").await;
     settle(&repo, "agent", owner, "call").await;
-    repo.record_checkpoint("agent".into(), "checkpoint".into(), owner, "call".into())
-        .await
-        .unwrap();
     append(&repo, "other", message(MessageRole::User, "untouched")).await;
     let mut usage = event("usage-fact", "agent");
     usage.set_request_usage_recorded(

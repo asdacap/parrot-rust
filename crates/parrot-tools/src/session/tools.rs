@@ -18,7 +18,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct Invocation {
     pub call_id: String,
-    pub assistant_sequence: i64,
     pub arguments_json: String,
     pub prompt_templates: Option<Arc<PromptTemplateCatalog>>,
 }
@@ -95,9 +94,6 @@ impl<S: SessionServices> SessionTool<S> {
                 let result = async {
                     let object = input::object(&invocation.arguments_json, &["title"])?;
                     let title = input::required_string(&object, "title")?;
-                    self.services
-                        .checkpoint(title, invocation.assistant_sequence, &invocation.call_id)
-                        .await?;
                     Ok(title.to_owned().into())
                 }
                 .await;

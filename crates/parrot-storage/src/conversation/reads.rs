@@ -174,10 +174,7 @@ impl ConversationRepository {
                         is_compaction_status: row.get(4)?,
                     });
                 }
-                let mut read = tx.prepare("SELECT DISTINCT checkpoint.assistant_sequence FROM history_checkpoint AS checkpoint JOIN (SELECT title, MAX(sequence) AS sequence FROM history_checkpoint WHERE agent_session = ?1 GROUP BY title) AS latest ON latest.sequence = checkpoint.sequence WHERE checkpoint.agent_session = ?1 AND checkpoint.assistant_sequence > ?2 ORDER BY checkpoint.assistant_sequence;")?;
-                let checkpoint_sequences = read
-                    .query_map(params![agent, watermark], |row| row.get(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
+                let checkpoint_sequences = super::forks::read_checkpoints(tx, &agent)?.into_iter().filter(|checkpoint| checkpoint.assistant_sequence > watermark).map(|checkpoint| checkpoint.assistant_sequence).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
                 Ok(ConversationHistorySnapshot {
                     snapshot,
                     items,

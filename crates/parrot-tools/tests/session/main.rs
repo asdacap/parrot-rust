@@ -17,7 +17,6 @@ fn injected_definitions_are_unchanged_and_all_session_tools_default_to_sequentia
     let fixture = Fixture::new();
     let invocation = Invocation {
         call_id: "definition-probe".into(),
-        assistant_sequence: 1,
         arguments_json: "{}".into(),
         prompt_templates: None,
     };
@@ -67,7 +66,6 @@ async fn duplicate_fields_validate_every_occurrence_before_service_side_effects(
     }
     assert!(fixture.calls().is_empty());
     let state = fixture.services.0.lock().unwrap();
-    assert!(state.checkpoints.is_empty());
     assert!(state.reminders.is_empty());
 }
 
@@ -82,14 +80,7 @@ async fn valid_duplicate_strings_keep_the_last_value_like_source_deserialization
         ),
         "last"
     );
-    assert_eq!(
-        fixture.calls(),
-        [support::Call::Checkpoint(
-            "last".into(),
-            support::ASSISTANT_SEQUENCE,
-            support::CALL_ID.into()
-        )]
-    );
+    assert!(fixture.calls().is_empty());
 }
 
 #[test]

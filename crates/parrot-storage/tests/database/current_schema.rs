@@ -58,7 +58,7 @@ fn unversioned_tables_and_views_are_rejected_without_writes() {
 
 #[test]
 fn unknown_versions_are_rejected_without_writes() {
-    for version in [1, 2, 3, 4, 6, 7] {
+    for version in [1, 2, 3, 4, 5, 7] {
         let fixture = Fixture::new();
         let path = fixture.0.join("session.db");
         let connection = Connection::open(&path).unwrap();
@@ -99,7 +99,7 @@ async fn empty_unversioned_file_initializes_the_current_format() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (5, 9));
+    assert_eq!(state, (6, 8));
     database.close().await.unwrap();
 }
 
@@ -128,7 +128,7 @@ async fn current_format_reopens_without_schema_repair() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (5, 9, false));
+    assert_eq!(state, (6, 8, false));
     reopened.close().await.unwrap();
 }
 

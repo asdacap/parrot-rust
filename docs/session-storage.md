@@ -1,12 +1,18 @@
 # Session storage ownership
 
 The user-facing change moves root identity, mode state, and permanent agent
-lineage from SQLite into JSON. Database format 5 combines that change with
-conversation-owned context reminders, tool calls, and tool results. It has 9
-application tables instead of format 1's 15. The removed tables are `session_state`,
-`agent_lineage`, `context_reminder`, `conversation_tool_call`,
-`tool_execution_terminal`, and `tool_execution_result_part`. There are no
-replacement tables or automatic conversions.
+lineage from SQLite into JSON. Database format 6 combines that change with
+conversation-owned context reminders, tool calls, tool results, and named history
+checkpoints. It has 8 application tables instead of format 1's 15. The removed
+tables are `session_state`, `agent_lineage`, `context_reminder`,
+`conversation_tool_call`, `tool_execution_terminal`, `tool_execution_result_part`,
+and `history_checkpoint`. There are no replacement tables or automatic conversions.
+
+Named checkpoints come from `set_checkpoint` tool-call parts with valid title
+arguments and a completed successful result. Forking and compaction derive the
+latest completed checkpoint for each title from these conversation records.
+Unexecuted, failed, cancelled, and malformed calls do not create checkpoints.
+Fork copies carry checkpoints through their existing tool-call and result records.
 
 ## One metadata owner
 

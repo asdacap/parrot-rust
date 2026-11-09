@@ -411,7 +411,6 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         "ask",
         "reply",
         "wait",
-        "checkpoint",
         "runtime_status",
         "statistics_status",
         "compact",
@@ -429,14 +428,6 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
     assert_eq!(
         fixture.services.state.lock().unwrap().task_boundary,
         Some((9_007_199_254_740_993, "catalog-call".into()))
-    );
-    assert_eq!(
-        fixture.services.state.lock().unwrap().checkpoints,
-        vec![(
-            "before".into(),
-            9_007_199_254_740_993,
-            "catalog-call".into()
-        )]
     );
     assert_eq!(fixture.web.sessions.load(Ordering::SeqCst), 1);
     assert_eq!(*fixture.web.requests.lock().unwrap(), vec!["GET"]);

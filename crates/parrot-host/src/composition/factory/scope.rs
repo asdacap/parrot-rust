@@ -94,7 +94,6 @@ use parrot_runtime::{
 };
 use parrot_storage::{
     artifacts::{compaction::CompactionGroupBlobStore, output_blobs::ToolOutputBlobStore},
-    conversation::AgentHistoryView,
     diagnostics::{DiagnosticEvent, DiagnosticSeverity},
     events::NeverCancelled,
     progress::FileProgressStore,
@@ -879,11 +878,6 @@ impl<S: RestrictableAccessSnapshot + 'static> ImageProvider for ScopedImages<S> 
     }
 }
 
-pub struct CheckpointRequest {
-    pub title: String,
-    pub assistant_sequence: i64,
-    pub call_id: String,
-}
 pub struct ReminderRequest {
     pub title: String,
     pub description: String,
@@ -895,7 +889,6 @@ pub struct ClearReminderRequest {
 }
 struct ScopedSessionServices<S: RestrictableAccessSnapshot + 'static> {
     link: Arc<ScopeLink<S>>,
-    history: AgentHistoryView,
     reminders: Arc<ExitReminders<Publisher>>,
     progress: Arc<AgentProgress>,
     status: Arc<ScopedTurnStatus<S>>,
@@ -903,20 +896,6 @@ struct ScopedSessionServices<S: RestrictableAccessSnapshot + 'static> {
 impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionServices<S> {
     type Security = SharedSecurity<S>;
     type Selection = ContextSelection<S>;
-    fn checkpoint<'a>(
-        &'a self,
-        title: &'a str,
-        assistant_sequence: i64,
-        call_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
-        Box::pin(async move {
-            self.history
-                .record_checkpoint(title.to_owned(), assistant_sequence, call_id.to_owned())
-                .await
-                .map(|_| ())
-                .map_err(failure)
-        })
-    }
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,
@@ -1026,8 +1005,6 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
     }
 }
 impl<S: RestrictableAccessSnapshot + 'static> SessionControl for ScopedSessionServices<S> {
-    type CheckpointRequest = CheckpointRequest;
-    type CheckpointResult = ();
     type ReminderRequest = ReminderRequest;
     type ReminderResult = OperationHandle<()>;
     type ClearReminderRequest = ClearReminderRequest;
@@ -1036,44 +1013,6 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionControl for ScopedSessionSe
     type CompactResult = Compaction;
     type Status = parrot_domain::values::activity::AgentSessionActivitySnapshot;
     type Error = Failure;
-    fn checkpoint<'a>(
-        &'a self,
-        request: CheckpointRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<(), Failure>> {
-        Box::pin(async move {
-            cancellation
-                .check()
-                .map_err(|_| OperationError::Cancelled)?;
-            let operation = self
-                .link
-                .session()
-                .map_err(operation_failure)?
-                .owned_mutation(
-                    move |backend, _| {
-                        Box::pin(async move {
-                            backend
-                                .history()
-                                .record_checkpoint(
-                                    request.title,
-                                    request.assistant_sequence,
-                                    request.call_id,
-                                )
-                                .await
-                                .map(|_| ())
-                                .map_err(|error| {
-                                    parrot_runtime::agent_turn::lifecycle::LifecycleError::Failed(
-                                        error.to_string(),
-                                    )
-                                })
-                        })
-                    },
-                    Arc::new(NeverCancelled),
-                )
-                .map_err(operation_failure)?;
-            operation.join().await.map_err(operation_failure)
-        })
-    }
     fn compact<'a>(
         &'a self,
         request: Self::CompactRequest,
@@ -1548,7 +1487,6 @@ where
                 );
                 let ancillary = Arc::new(ScopedSessionServices {
                     link: link.clone(),
-                    history: prepared.history.clone(),
                     reminders: reminders.clone(),
                     progress: progress.clone(),
                     status: status.clone(),

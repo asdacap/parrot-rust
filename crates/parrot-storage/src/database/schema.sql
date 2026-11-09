@@ -81,6 +81,11 @@ CREATE INDEX IF NOT EXISTS conversation_by_tool_owner
     ON conversation_item (agent_session, tool_owner_sequence, sequence)
     WHERE tool_owner_sequence IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS conversation_checkpoint_results
+    ON conversation_item (agent_session, tool_owner_sequence, tool_call_id)
+    WHERE role = 'tool' AND tool_result_name = 'set_checkpoint'
+        AND tool_result_status = 'finished';
+
 CREATE TABLE IF NOT EXISTS conversation_part (
     item_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
     position      INTEGER NOT NULL CHECK (position >= 0),
@@ -153,19 +158,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_history_compaction
 
 CREATE INDEX IF NOT EXISTS agent_history_latest_compaction
     ON agent_history (agent_session, sequence DESC) WHERE kind = 'compaction';
-
-CREATE TABLE IF NOT EXISTS history_checkpoint (
-    sequence           INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_session      TEXT NOT NULL,
-    title              TEXT NOT NULL,
-    assistant_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,
-    tool_call_id        TEXT NOT NULL,
-    created_at          TEXT NOT NULL,
-    UNIQUE (agent_session, tool_call_id)
-);
-
-CREATE INDEX IF NOT EXISTS history_checkpoint_by_title
-    ON history_checkpoint (agent_session, title, sequence DESC);
 
 CREATE TABLE IF NOT EXISTS image_artifact (
     artifact_id      TEXT PRIMARY KEY,

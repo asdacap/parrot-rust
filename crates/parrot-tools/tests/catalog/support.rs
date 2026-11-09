@@ -118,7 +118,6 @@ pub struct State {
     pub files: BTreeMap<PathBuf, Vec<u8>>,
     pub tasks: Vec<Task>,
     pub task_boundary: Option<(i64, String)>,
-    pub checkpoints: Vec<(String, i64, String)>,
     pub reminders: BTreeMap<String, String>,
     pub progress: ProgressSnapshot,
     pub launches: Vec<(CommandRequest, i32)>,
@@ -136,7 +135,6 @@ impl Default for State {
             .into(),
             tasks: Vec::new(),
             task_boundary: None,
-            checkpoints: Vec::new(),
             reminders: BTreeMap::new(),
             progress: ProgressSnapshot::new("catalog-agent".into()),
             launches: Vec::new(),
@@ -479,27 +477,6 @@ pub fn context_snapshot() -> ContextSnapshot {
 impl SessionServices for Services {
     type Security = Snapshot;
     type Selection = Selection;
-    fn checkpoint<'a>(
-        &'a self,
-        title: &'a str,
-        assistant_sequence: i64,
-        call_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
-        Box::pin(async move {
-            self.record(
-                "checkpoint",
-                format!("{title} {assistant_sequence} {call_id}"),
-                None,
-                None,
-            );
-            self.state.lock().unwrap().checkpoints.push((
-                title.into(),
-                assistant_sequence,
-                call_id.into(),
-            ));
-            Ok(())
-        })
-    }
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,

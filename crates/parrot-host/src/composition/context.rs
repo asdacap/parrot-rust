@@ -221,8 +221,6 @@ impl<C> SessionControl for ContextControl<C>
 where
     C: SessionControl<Error = Failure>,
 {
-    type CheckpointRequest = C::CheckpointRequest;
-    type CheckpointResult = C::CheckpointResult;
     type ReminderRequest = C::ReminderRequest;
     type ReminderResult = C::ReminderResult;
     type ClearReminderRequest = C::ClearReminderRequest;
@@ -232,13 +230,6 @@ where
     type Status = C::Status;
     type Error = Failure;
 
-    fn checkpoint<'a>(
-        &'a self,
-        request: Self::CheckpointRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Self::CheckpointResult, Failure>> {
-        self.ancillary.checkpoint(request, cancellation)
-    }
     fn compact<'a>(
         &'a self,
         request: CompactRequest,
@@ -322,15 +313,6 @@ where
 {
     type Security = SharedSecurity<S>;
     type Selection = ContextSelection<S>;
-    fn checkpoint<'a>(
-        &'a self,
-        title: &'a str,
-        assistant_sequence: i64,
-        call_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
-        self.ancillary
-            .checkpoint(title, assistant_sequence, call_id)
-    }
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,
