@@ -19,7 +19,7 @@ use std::{
 
 use parrot_domain::protocol::messages::{parrot as wire, web};
 use parrot_host::grpc::{address::TransportAddress, transport::GrpcTransportClient};
-use parrot_storage::diagnostics::FileDiagnosticLog;
+use parrot_storage::{database::Connection, diagnostics::FileDiagnosticLog};
 use protobuf::Message;
 
 #[path = "local_production/https.rs"]
@@ -229,6 +229,7 @@ fn describe(output: &Output) -> String {
 
 struct Fixture {
     root: PathBuf,
+    state: PathBuf,
     address: String,
     requests: Arc<Mutex<Vec<String>>>,
     stopped: Arc<AtomicBool>,
@@ -238,11 +239,12 @@ struct Fixture {
 impl Fixture {
     fn new(fail: bool) -> Self {
         // Short roots keep the real per-session Unix socket below sockaddr_un's limit.
-        let root = PathBuf::from("/tmp").join(format!(
-            "pl-{}-{}",
+        let root = std::env::temp_dir().join(format!(
+            "e{:x}-{:x}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
+        let state = root.join("s");
         std::fs::create_dir_all(root.join("workspace")).unwrap();
         std::fs::create_dir_all(root.join("config/parrotrust")).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -284,6 +286,7 @@ impl Fixture {
         });
         Self {
             root,
+            state,
             address,
             requests,
             stopped,
@@ -313,9 +316,10 @@ impl Fixture {
             .current_dir(self.root.join("workspace"))
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("TMPDIR", std::env::temp_dir())
             .env("HOME", self.root.join("home"))
             .env("XDG_CONFIG_HOME", self.root.join("config"))
-            .env("XDG_STATE_HOME", self.root.join("state"))
+            .env("XDG_STATE_HOME", &self.state)
             .env("XDG_DATA_HOME", self.root.join("data"))
             .env("PARROT_FIXTURE_KEY", "synthetic-key")
             // Optional models.dev metadata must not contact a real remote host.
@@ -411,7 +415,7 @@ fn runtime() -> tokio::runtime::Runtime {
 fn executable_serve_binds_default_uds_serves_real_catalog_and_joins_on_shutdown() {
     let fixture = Fixture::new(false);
     let mut child = fixture.spawn(&["serve"]);
-    let socket = fixture.root.join("state/parrotrust/control/parrot.sock");
+    let socket = fixture.state.join("parrotrust/control/parrot.sock");
     let address = child.line("parrot: listening on ");
     assert_eq!(address, format!("unix:{}", socket.display()));
     assert!(socket.exists());
@@ -526,7 +530,7 @@ fn executable_web_binds_ephemeral_loopback_serves_assets_and_real_slash_then_joi
         .await
         .expect("web assets/service endpoints timed out");
     });
-    let sockets = socket_paths(&fixture.root.join("state"));
+    let sockets = socket_paths(&fixture.state);
     assert!(
         !sockets.is_empty(),
         "web did not create its actual local/session transports"
@@ -601,7 +605,7 @@ fn executable_creates_then_resumes_real_local_session_and_joins_owners() {
     let first = fixture.chat("first synthetic prompt");
     assert_success(&first);
     assert!(String::from_utf8_lossy(&first.stderr).contains("created user session"));
-    let session = std::fs::read_dir(fixture.root.join("state/parrotrust/sessions"))
+    let session = std::fs::read_dir(fixture.state.join("parrotrust/sessions"))
         .unwrap()
         .next()
         .unwrap()
@@ -661,6 +665,112 @@ fn executable_creates_then_resumes_real_local_session_and_joins_owners() {
     assert_eq!(resumed.outcome, "completed");
 }
 
+#[test]
+fn executable_refuses_incompatible_session_then_starts_fresh_without_changing_old_data() {
+    for incompatible_version in [0_i64, 7] {
+        let fixture = Fixture::new(false);
+        std::fs::write(
+            fixture.root.join("workspace/retained.png"),
+            include_bytes!("../../parrot-storage/tests/artifacts/fixtures/pixel.png"),
+        )
+        .unwrap();
+        assert_success(&fixture.chat("retained old-session message @retained.png"));
+        let sessions_directory = fixture.state.join("parrotrust/sessions");
+        let read_sessions = || {
+            std::fs::read_dir(&sessions_directory)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.is_dir())
+                .collect::<Vec<_>>()
+        };
+        let sessions = read_sessions();
+        assert_eq!(sessions.len(), 1);
+        let old_session = sessions[0].clone();
+        let database_path = old_session.join("session.db");
+        let database = Connection::open(&database_path).unwrap();
+        database
+            .pragma_update(None, "user_version", incompatible_version)
+            .unwrap();
+        drop(database);
+        let database_before = std::fs::read(&database_path).unwrap();
+        let artifacts_directory = old_session.join("artifacts");
+        let artifacts = std::fs::read_dir(&artifacts_directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_file())
+            .map(|path| {
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !artifacts.is_empty(),
+            "the real image upload was not retained"
+        );
+        let assert_old_data = || {
+            assert_eq!(std::fs::read(&database_path).unwrap(), database_before);
+            assert_eq!(
+                std::fs::read_dir(&artifacts_directory).unwrap().count(),
+                artifacts.len()
+            );
+            for (path, bytes) in &artifacts {
+                assert_eq!(&std::fs::read(path).unwrap(), bytes);
+            }
+        };
+
+        let refused = fixture.chat("blocked incompatible-session message");
+        assert!(!refused.status.success(), "{}", describe(&refused));
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains("--new-session"), "{stderr}");
+        assert_eq!(read_sessions(), [old_session.clone()]);
+        assert_eq!(fixture.chat_requests().len(), 1);
+        assert_old_data();
+        assert!(socket_paths(&fixture.state).is_empty());
+
+        let fresh = fixture
+            .spawn(&["chat", "--new-session", "--basic", "fresh-session message"])
+            .finish();
+        assert_success(&fresh);
+        let sessions = read_sessions();
+        assert_eq!(sessions.len(), 2);
+        let new_session = sessions
+            .into_iter()
+            .find(|path| path != &old_session)
+            .unwrap();
+        let database = Connection::open(new_session.join("session.db")).unwrap();
+        let version: i64 = database
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let tables: i64 = database
+            .query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((version, tables), (1, 15));
+        drop(database);
+        let requests = fixture.chat_requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].contains("fresh-session message"));
+        assert!(!requests[1].contains("retained old-session message"));
+        assert!(!requests[1].contains("blocked incompatible-session message"));
+        assert_old_data();
+
+        let resumed = fixture.chat("continued-current-session message");
+        assert_success(&resumed);
+        assert!(String::from_utf8_lossy(&resumed.stderr).contains("loaded existing user session"));
+        assert_eq!(read_sessions().len(), 2);
+        let requests = fixture.chat_requests();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[2].contains("fresh-session message"));
+        assert!(requests[2].contains("continued-current-session message"));
+        assert!(!requests[2].contains("retained old-session message"));
+        assert_old_data();
+        assert!(socket_paths(&fixture.state).is_empty());
+    }
+}
+
 fn diagnostic_field<'a>(line: &'a str, name: &str) -> &'a str {
     line.split_once(&format!(" {name}=\""))
         .unwrap_or_else(|| panic!("missing {name} in {line}"))
@@ -696,7 +806,7 @@ fn executable_provider_diagnostics_capture_actual_requests_without_logging_paylo
         let requests = fixture.chat_requests();
         assert_eq!(requests.len(), 1);
         let body = requests[0].split_once("\r\n\r\n").unwrap().1;
-        let sessions = std::fs::read_dir(fixture.root.join("state/parrotrust/sessions"))
+        let sessions = std::fs::read_dir(fixture.state.join("parrotrust/sessions"))
             .unwrap()
             .map(|entry| entry.unwrap().path())
             .filter(|path| path.is_dir())
@@ -811,7 +921,7 @@ fn executable_provider_diagnostics_capture_actual_requests_without_logging_paylo
         assert!(!log.contains(prompt));
         assert!(!log.contains("synthetic-key"));
         assert!(!log.contains("synthetic provider failure"));
-        for entry in std::fs::read_dir(fixture.root.join("state/parrotrust/logs")).unwrap() {
+        for entry in std::fs::read_dir(fixture.state.join("parrotrust/logs")).unwrap() {
             let global = std::fs::read_to_string(entry.unwrap().path()).unwrap();
             assert!(!global.contains(prompt));
             assert!(!global.contains("synthetic-key"));
