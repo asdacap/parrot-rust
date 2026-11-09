@@ -75,7 +75,7 @@ impl ConversationRepository {
             record(tx, &published, None, &(context.timestamp)())?;
             let status = projection::project(tx, &published.agent_session_id, &ConversationMessage::text(MessageRole::System, content), &(context.timestamp)())?;
             tx.execute("UPDATE agent_history SET status_conversation_sequence = ?1 WHERE sequence = ?2;", params![status.sequence, history_sequence])?;
-            tx.execute("DELETE FROM context_reminder WHERE agent_session = ?1;", [&published.agent_session_id])?;
+            tx.execute("UPDATE conversation_item SET context_reminder = NULL WHERE agent_session = ?1 AND context_reminder IS NOT NULL;", [&published.agent_session_id])?;
             Ok(true)
         }).await?;
         if appended {

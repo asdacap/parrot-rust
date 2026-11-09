@@ -11,10 +11,8 @@ from urllib.parse import quote_from_bytes
 
 TABLES = {
     "agent_history",
-    "context_reminder",
     "conversation_item",
     "conversation_part",
-    "conversation_tool_call",
     "event",
     "history_checkpoint",
     "image_artifact",
@@ -52,8 +50,8 @@ def main():
             )
         }
         require(
-            version == 2 and tables == TABLES,
-            f"Expected format 2 and 13 application tables. Observed format {version} "
+            version == 4 and tables == TABLES,
+            f"Expected format 4 and 11 application tables. Observed format {version} "
             f"and {len(tables)} tables {sorted(tables)}.",
         )
         require(database.execute("PRAGMA integrity_check").fetchall() == [("ok",)], "Database integrity failed.")

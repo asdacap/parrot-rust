@@ -92,7 +92,7 @@ impl ConversationRepository {
     ) -> Result<bool, EventError> {
         let clock = self.events.context().timestamp.clone();
         self.events.transaction(move |tx| {
-            let changed = tx.execute("INSERT OR IGNORE INTO history_checkpoint (agent_session, title, assistant_sequence, tool_call_id, created_at) SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM conversation_tool_call AS call JOIN conversation_item AS item ON item.sequence = call.item_sequence WHERE item.agent_session = ?1 AND item.sequence = ?3 AND call.id = ?4 AND call.name = 'set_checkpoint');", params![agent,title,assistant_sequence,tool_call_id,clock()])? != 0;
+            let changed = tx.execute("INSERT OR IGNORE INTO history_checkpoint (agent_session, title, assistant_sequence, tool_call_id, created_at) SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM conversation_part AS call JOIN conversation_item AS item ON item.sequence = call.item_sequence WHERE item.agent_session = ?1 AND item.sequence = ?3 AND call.kind = 'tool_call' AND call.tool_call_id = ?4 AND call.tool_name = 'set_checkpoint');", params![agent,title,assistant_sequence,tool_call_id,clock()])? != 0;
             if !changed {
                 let existing: Option<(String,i64)> = tx.query_row("SELECT title, assistant_sequence FROM history_checkpoint WHERE agent_session = ?1 AND tool_call_id = ?2;", params![agent,tool_call_id], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
                 if existing.as_ref() != Some(&(title, assistant_sequence)) {

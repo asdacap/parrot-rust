@@ -38,7 +38,7 @@ fn read_message(
     let origin = parse_origin(origin)?;
     let role = parse_role(role)?;
     let parts = read_parts(tx, "conversation_part", "item_sequence", &sequence)?;
-    let mut calls = tx.prepare("SELECT id, name, arguments FROM conversation_tool_call WHERE item_sequence = ?1 ORDER BY position;")?;
+    let mut calls = tx.prepare("SELECT tool_call_id, tool_name, arguments FROM conversation_part WHERE item_sequence = ?1 AND kind = 'tool_call' ORDER BY position;")?;
     let tool_calls = calls
         .query_map([sequence], |row| {
             Ok(ToolCall {
@@ -233,7 +233,7 @@ impl ConversationRepository {
     ) -> Result<Option<i64>, EventError> {
         self.events.transaction(move |tx| {
             Ok(tx.query_row(
-                "SELECT item.sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.role = 'assistant' AND NOT EXISTS (SELECT 1 FROM conversation_tool_call AS call WHERE call.item_sequence = item.sequence) ORDER BY item.sequence DESC LIMIT 1;",
+                "SELECT item.sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.role = 'assistant' AND NOT EXISTS (SELECT 1 FROM conversation_part AS call WHERE call.item_sequence = item.sequence AND call.kind = 'tool_call') ORDER BY item.sequence DESC LIMIT 1;",
                 [agent], |row| row.get(0),
             ).optional()?)
         }).await

@@ -151,7 +151,7 @@ impl ConversationRepository {
             ));
         }
         self.events.transaction(move |tx| {
-            Ok(tx.query_row("SELECT canonical_model, context_limit, percentage FROM context_reminder WHERE agent_session = ?1 ORDER BY sequence DESC LIMIT 1;", [agent], |row| Ok(ContextReminderCheckpoint { canonical_model: row.get(0)?, context_limit: row.get(1)?, percentage: row.get(2)? })).optional()?)
+            Ok(tx.query_row("SELECT json_extract(context_reminder, '$.canonical_model'), json_extract(context_reminder, '$.context_limit'), json_extract(context_reminder, '$.percentage') FROM conversation_item WHERE agent_session = ?1 AND context_reminder IS NOT NULL ORDER BY sequence DESC LIMIT 1;", [agent], |row| Ok(ContextReminderCheckpoint { canonical_model: row.get(0)?, context_limit: row.get(1)?, percentage: row.get(2)? })).optional()?)
         }).await
     }
     pub async fn append_context_reminder(
@@ -165,10 +165,11 @@ impl ConversationRepository {
         let refresh_agent = agent.clone();
         let context = self.events.context().clone();
         let appended = self.events.transaction(move |tx| {
-            let previous: Option<i32> = tx.query_row("SELECT percentage FROM context_reminder WHERE agent_session = ?1 AND canonical_model = ?2 AND context_limit = ?3 ORDER BY sequence DESC LIMIT 1;", params![agent, checkpoint.canonical_model, checkpoint.context_limit], |row| row.get(0)).optional()?;
+            let previous: Option<i32> = tx.query_row("SELECT json_extract(context_reminder, '$.percentage') FROM conversation_item WHERE agent_session = ?1 AND context_reminder IS NOT NULL AND json_extract(context_reminder, '$.canonical_model') = ?2 AND json_extract(context_reminder, '$.context_limit') = ?3 ORDER BY sequence DESC LIMIT 1;", params![agent, checkpoint.canonical_model, checkpoint.context_limit], |row| row.get(0)).optional()?;
             if previous.is_some_and(|previous| previous >= checkpoint.percentage) { return Ok(false); }
-            tx.execute("INSERT INTO context_reminder (agent_session, canonical_model, context_limit, percentage, created_at) VALUES (?1, ?2, ?3, ?4, ?5);", params![agent, checkpoint.canonical_model, checkpoint.context_limit, checkpoint.percentage, (context.timestamp)()])?;
-            project_system(tx, &context, &agent, content)?;
+            let tag = serde_json::to_string(&checkpoint).map_err(|error| EventError::Invalid(error.to_string()))?;
+            let item = project_system(tx, &context, &agent, content)?;
+            tx.execute("UPDATE conversation_item SET kind = 'context_reminder', context_reminder = ?1 WHERE sequence = ?2;", params![tag, item.sequence])?;
             Ok(true)
         }).await?;
         if appended {

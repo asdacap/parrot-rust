@@ -102,13 +102,26 @@ fn entry_label(entry: &AgentHistoryEntry) -> String {
 async fn structured_conversation_reopens_in_order_and_respects_watermark() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    let mut assistant = message(MessageRole::Assistant, "");
-    assistant.tool_calls = vec![ToolCall {
-        id: "call-1".into(),
-        name: "read_image".into(),
-        arguments_json: "{}".into(),
-    }];
-    append(&repo, "assistant", "agent", assistant).await;
+    let mut assistant = message(MessageRole::Assistant, "before");
+    assistant.parts.push(ConversationPart::image(
+        "a".repeat(64),
+        "image/png",
+        "pixel.png",
+    ));
+    assistant.parts.push(ConversationPart::text("after"));
+    assistant.tool_calls = vec![
+        ToolCall {
+            id: "call-1".into(),
+            name: "read_image".into(),
+            arguments_json: "{}".into(),
+        },
+        ToolCall {
+            id: "call-2".into(),
+            name: "read".into(),
+            arguments_json: " { \"path\": \"file\" } ".into(),
+        },
+    ];
+    append(&repo, "assistant", "agent", assistant.clone()).await;
     let mut tool = message(MessageRole::Tool, "read image");
     tool.tool_call_id = "call-1".into();
     append(&repo, "tool", "agent", tool).await;
@@ -124,8 +137,7 @@ async fn structured_conversation_reopens_in_order_and_respects_watermark() {
     let restored = fixture.repository();
     let items = restored.conversation("agent".into()).await.unwrap();
     assert_eq!(items.len(), 3);
-    assert_eq!(items[0].message.tool_calls.len(), 1);
-    assert_eq!(items[0].message.tool_calls[0].id, "call-1");
+    assert_eq!(items[0].message, assistant);
     assert_eq!(items[1].message.tool_call_id, "call-1");
     assert_eq!(
         items[2].message.parts,

@@ -1,9 +1,11 @@
 # Session storage ownership
 
 The user-facing change moves root identity, mode state, and permanent agent
-lineage from SQLite into JSON. Database format 2 has 13 application tables instead
-of format 1's 15. The removed tables are `session_state` and `agent_lineage`.
-There are no replacement tables or automatic conversions.
+lineage from SQLite into JSON. Database format 4 combines that change with
+conversation-owned context reminders and tool calls. It has 11 application tables
+instead of format 1's 15. The removed tables are `session_state`, `agent_lineage`,
+`context_reminder`, and `conversation_tool_call`. There are no replacement tables
+or automatic conversions.
 
 ## One metadata owner
 
@@ -89,7 +91,7 @@ measured performance improvement.
 
 ## Format boundary and inspection
 
-Format 1, populated unversioned databases, and unknown formats use the existing
+Formats 1, 2, and 3, populated unversioned databases, and unknown formats use the existing
 typed refusal path. Opening does not convert, reset, or delete them. Current and
 legacy filesystem roots use the same check. `parrot chat --new-session` selects a
 separate fresh session.

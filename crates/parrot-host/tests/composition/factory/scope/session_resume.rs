@@ -1717,7 +1717,7 @@ async fn json_identity_lineage_and_status_survive_retirement_name_reuse_and_root
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!((version, tables), (2, 13));
+    assert_eq!((version, tables), (4, 11));
     let revisions = database.prepare(
         "SELECT mode_status_revision FROM conversation_item WHERE agent_session=?1 AND mode_status_revision IS NOT NULL ORDER BY mode_status_revision",
     ).unwrap().query_map([&root_id], |row| row.get::<_, i64>(0)).unwrap()
