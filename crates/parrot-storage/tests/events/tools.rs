@@ -2,8 +2,8 @@ use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::events::error::EventError;
 use parrot_storage::events::projection::project;
 use parrot_storage::events::tools::{
-    append_tool_settlement, append_tool_synthetic, append_tool_terminal, has_tool_synthetic,
-    tool_terminals, tool_terminals_of_calls,
+    append_tool_settlement, append_tool_synthetic, has_tool_synthetic, tool_terminals,
+    tool_terminals_of_calls,
 };
 use parrot_storage::events::types::{
     ConversationMessage, ConversationOrigin, ConversationPart, MessageRole, ToolExecutionStatus,
@@ -43,7 +43,6 @@ fn terminal(call: &str) -> ToolExecutionTerminal {
             ConversationPart::text("answer"),
             ConversationPart::image("image-1", "image/png", "diagram"),
         ],
-        message: "fallback".into(),
     }
 }
 fn assistant(tx: &Transaction<'_>, agent: &str) -> i64 {
@@ -64,21 +63,30 @@ fn count(connection: &Connection, table: &str) -> i64 {
         .unwrap()
 }
 #[test]
-fn terminal_identity_is_agent_scoped_and_compares_every_field_without_duplicate_event() {
+fn result_identity_is_agent_scoped_and_compares_metadata_and_ordered_content() {
     let mut connection = database();
     let tx = connection.transaction().unwrap();
+    let owner = assistant(&tx, "agent");
     let first = terminal("call");
-    assert!(append_tool_terminal(&tx, &event("e1", "agent"), &first, &clock).unwrap());
-    assert!(!append_tool_terminal(&tx, &event("ignored-id", "agent"), &first, &clock).unwrap());
+    assert!(
+        append_tool_settlement(&tx, &event("e1", "agent"), owner, &first, &clock)
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        append_tool_settlement(&tx, &event("ignored-id", "agent"), owner, &first, &clock)
+            .unwrap()
+            .is_none()
+    );
     let mut conflicts = Vec::new();
     let mut changed = first.clone();
     changed.tool_name.push('x');
     conflicts.push(changed);
     let mut changed = first.clone();
-    changed.message.push('x');
+    changed.status = ToolExecutionStatus::Cancelled;
     conflicts.push(changed);
     let mut changed = first.clone();
-    changed.status = ToolExecutionStatus::Cancelled;
+    changed.result_parts[0] = ConversationPart::text("changed answer");
     conflicts.push(changed);
     let mut changed = first.clone();
     changed.result_parts.reverse();
@@ -88,99 +96,109 @@ fn terminal_identity_is_agent_scoped_and_compares_every_field_without_duplicate_
     conflicts.push(changed);
     for changed in conflicts {
         let error =
-            append_tool_terminal(&tx, &event("conflict", "agent"), &changed, &clock).unwrap_err();
+            append_tool_settlement(&tx, &event("conflict", "agent"), owner, &changed, &clock)
+                .unwrap_err();
         assert!(matches!(error, EventError::Conflict(_)));
         assert_eq!(
             error.to_string(),
             "tool call call was already settled differently"
         );
     }
-    assert!(append_tool_terminal(&tx, &event("e2", "other"), &first, &clock).unwrap());
+    let other = assistant(&tx, "other");
+    assert!(
+        append_tool_settlement(&tx, &event("e2", "other"), other, &first, &clock)
+            .unwrap()
+            .is_some()
+    );
     assert_eq!(tool_terminals(&tx, "agent").unwrap(), vec![first.clone()]);
     assert_eq!(tool_terminals(&tx, "other").unwrap(), vec![first]);
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 2);
-    assert_eq!(count(&connection, "tool_execution_terminal"), 2);
-    assert_eq!(count(&connection, "conversation_item"), 0);
+    assert_eq!(count(&connection, "conversation_item"), 4);
 }
 #[test]
-fn settlement_repairs_existing_terminal_and_projects_only_text_once() {
+fn settlement_stores_complete_content_once_and_retry_preserves_the_original_event() {
     let mut connection = database();
     let terminal = terminal("call");
     let tx = connection.transaction().unwrap();
-    let assistant = assistant(&tx, "agent");
-    assert!(append_tool_terminal(&tx, &event("original", "agent"), &terminal, &clock).unwrap());
+    let owner = assistant(&tx, "agent");
+    let item = append_tool_settlement(&tx, &event("original", "agent"), owner, &terminal, &clock)
+        .unwrap()
+        .unwrap();
+    assert_eq!(item.message.origin, ConversationOrigin::Tool);
+    assert_eq!(item.message.role, MessageRole::Tool);
+    assert_eq!(item.message.parts, terminal.result_parts);
+    assert_eq!(item.message.tool_call_id, "call");
     tx.commit().unwrap();
     let raw: Vec<u8> = connection
         .query_row("SELECT payload FROM event", [], |row| row.get(0))
         .unwrap();
     let tx = connection.transaction().unwrap();
-    let item = append_tool_settlement(
-        &tx,
-        &event("must-not-record", "agent"),
-        assistant,
-        &terminal,
-        &clock,
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(item.message.origin, ConversationOrigin::Tool);
-    assert_eq!(item.message.role, MessageRole::Tool);
-    assert_eq!(item.message.parts, vec![ConversationPart::text("answer")]);
-    assert_eq!(item.message.tool_call_id, "call");
     assert!(
         append_tool_settlement(
             &tx,
-            &event("also-ignored", "agent"),
-            assistant,
+            &event("must-not-record", "agent"),
+            owner,
             &terminal,
             &clock
         )
         .unwrap()
         .is_none()
     );
+    assert_eq!(tool_terminals(&tx, "agent").unwrap(), vec![terminal]);
     assert_eq!(
-        tool_terminals(&tx, "agent").unwrap()[0].result_parts,
-        terminal.result_parts
+        parrot_storage::conversation::reads::read_conversation_item(&tx, item.sequence).unwrap(),
+        item
     );
+    let copies: i64 = tx
+        .query_row(
+            "SELECT count(*) FROM conversation_part WHERE text = 'answer'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(copies, 1);
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 1);
     assert_eq!(count(&connection, "conversation_item"), 2);
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM conversation_item WHERE tool_owner_sequence IS NOT NULL AND role = 'tool'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
     let after: Vec<u8> = connection
         .query_row("SELECT payload FROM event", [], |row| row.get(0))
         .unwrap();
     assert_eq!(raw, after);
 }
 #[test]
-fn settlement_without_text_uses_message_but_empty_text_is_not_replaced() {
+fn settlement_preserves_image_only_empty_text_and_empty_content() {
     let mut connection = database();
     let tx = connection.transaction().unwrap();
-    let assistant = assistant(&tx, "agent");
-    let mut only_image = terminal("image");
-    only_image.result_parts = vec![ConversationPart::image("id", "image/webp", "image")];
-    let item = append_tool_settlement(&tx, &event("e1", "agent"), assistant, &only_image, &clock)
+    let owner = assistant(&tx, "agent");
+    for (index, parts) in [
+        vec![ConversationPart::image("id", "image/webp", "image")],
+        vec![ConversationPart::text("")],
+        vec![],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut result = terminal(&format!("call-{index}"));
+        result.result_parts = parts;
+        let item = append_tool_settlement(
+            &tx,
+            &event(&format!("e{index}"), "agent"),
+            owner,
+            &result,
+            &clock,
+        )
         .unwrap()
         .unwrap();
-    assert_eq!(item.message.parts, vec![ConversationPart::text("fallback")]);
-    let mut empty = terminal("empty");
-    empty.result_parts = vec![ConversationPart::text("")];
-    let item = append_tool_settlement(&tx, &event("e2", "agent"), assistant, &empty, &clock)
-        .unwrap()
-        .unwrap();
-    assert_eq!(item.message.parts, vec![ConversationPart::text("")]);
-    let mut no_parts = terminal("none");
-    no_parts.result_parts.clear();
-    let item = append_tool_settlement(&tx, &event("e3", "agent"), assistant, &no_parts, &clock)
-        .unwrap()
-        .unwrap();
-    assert_eq!(item.message.parts, vec![ConversationPart::text("fallback")]);
+        assert_eq!(item.message.parts, result.result_parts);
+        assert_eq!(result.content(), "");
+    }
+    assert_eq!(tool_terminals(&tx, "agent").unwrap().len(), 3);
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 3);
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM conversation_item WHERE tool_owner_sequence IS NOT NULL AND role = 'tool'", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
 }
 #[test]
-fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwriting() {
+fn cross_assistant_conflict_preserves_the_original_result_and_owner() {
     let mut connection = database();
     let terminal = terminal("call");
     let tx = connection.transaction().unwrap();
@@ -190,8 +208,6 @@ fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwrit
     tx.commit().unwrap();
     let tables = [
         "event",
-        "tool_execution_terminal",
-        "tool_execution_result_part",
         "conversation_item",
         "conversation_part",
         "agent_history",
@@ -201,9 +217,10 @@ fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwrit
         .map(|table| count(&connection, table))
         .collect();
     let tx = connection.transaction().unwrap();
-    assert!(
-        append_tool_settlement(&tx, &event("ignored", "agent"), second, &terminal, &clock).is_err()
-    );
+    assert!(matches!(
+        append_tool_settlement(&tx, &event("ignored", "agent"), second, &terminal, &clock),
+        Err(EventError::Conflict(_))
+    ));
     tx.rollback().unwrap();
     let after: Vec<_> = tables
         .iter()
@@ -212,7 +229,7 @@ fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwrit
     assert_eq!(before, after);
     let stored: i64 = connection
         .query_row(
-            "SELECT tool_owner_sequence FROM conversation_item WHERE tool_owner_sequence IS NOT NULL",
+            "SELECT tool_owner_sequence FROM conversation_item WHERE tool_result_status IS NOT NULL",
             [],
             |row| row.get(0),
         )
@@ -220,7 +237,7 @@ fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwrit
     assert_eq!(stored, first);
 }
 #[test]
-fn missing_assistant_foreign_key_rolls_back_new_terminal_event_and_projection() {
+fn missing_assistant_foreign_key_rolls_back_the_event_result_and_history() {
     let mut connection = database();
     let tx = connection.transaction().unwrap();
     assert!(
@@ -229,14 +246,37 @@ fn missing_assistant_foreign_key_rolls_back_new_terminal_event_and_projection() 
     tx.rollback().unwrap();
     for table in [
         "event",
-        "tool_execution_terminal",
-        "tool_execution_result_part",
         "conversation_item",
         "conversation_part",
         "agent_history",
     ] {
         assert_eq!(count(&connection, table), 0, "{table}");
     }
+}
+#[test]
+fn results_survive_owner_deletion_without_losing_identity() {
+    let mut connection = database();
+    let tx = connection.transaction().unwrap();
+    let owner = assistant(&tx, "agent");
+    let result = terminal("call");
+    let item = append_tool_settlement(&tx, &event("e1", "agent"), owner, &result, &clock)
+        .unwrap()
+        .unwrap();
+    tx.execute("DELETE FROM conversation_item WHERE sequence = ?1", [owner])
+        .unwrap();
+    assert_eq!(
+        tool_terminals_of_calls(&tx, "agent", &["call".into()]).unwrap(),
+        vec![result.clone()]
+    );
+    assert_eq!(
+        parrot_storage::conversation::reads::read_conversation_item(&tx, item.sequence).unwrap(),
+        item
+    );
+    let another = assistant(&tx, "agent");
+    assert!(matches!(
+        append_tool_settlement(&tx, &event("e2", "agent"), another, &result, &clock),
+        Err(EventError::Conflict(_))
+    ));
 }
 #[test]
 fn synthetic_requires_images_is_idempotent_and_validates_before_duplicate_lookup() {
@@ -291,9 +331,10 @@ fn synthetic_requires_images_is_idempotent_and_validates_before_duplicate_lookup
     assert_eq!(count(&connection, "conversation_item"), 2);
 }
 #[test]
-fn terminal_reads_keep_sequence_call_input_order_duplicates_and_all_statuses() {
+fn result_reads_preserve_call_input_order_duplicates_and_all_statuses() {
     let mut connection = database();
     let tx = connection.transaction().unwrap();
+    let owner = assistant(&tx, "agent");
     let statuses = [
         ToolExecutionStatus::Finished,
         ToolExecutionStatus::Cancelled,
@@ -304,7 +345,14 @@ fn terminal_reads_keep_sequence_call_input_order_duplicates_and_all_statuses() {
     for (index, status) in statuses.into_iter().enumerate() {
         let mut value = terminal(&format!("call-{index}"));
         value.status = status;
-        append_tool_terminal(&tx, &event(&format!("e{index}"), "agent"), &value, &clock).unwrap();
+        append_tool_settlement(
+            &tx,
+            &event(&format!("e{index}"), "agent"),
+            owner,
+            &value,
+            &clock,
+        )
+        .unwrap();
         expected.push(value);
     }
     assert_eq!(tool_terminals(&tx, "agent").unwrap(), expected);
@@ -328,7 +376,7 @@ fn terminal_reads_keep_sequence_call_input_order_duplicates_and_all_statuses() {
         ]
     );
     tx.execute(
-        "UPDATE tool_execution_terminal SET status = 'unknown' WHERE tool_call_id = 'call-0'",
+        "UPDATE conversation_item SET tool_result_status = 'unknown' WHERE tool_call_id = 'call-0'",
         [],
     )
     .unwrap();
@@ -344,72 +392,16 @@ fn terminal_reads_keep_sequence_call_input_order_duplicates_and_all_statuses() {
     );
 }
 #[test]
-fn clock_reads_follow_each_source_callsite_and_duplicates_do_not_read_clock() {
-    use std::cell::Cell;
+fn ordinary_tool_messages_are_not_completed_execution_results() {
     let mut connection = database();
     let tx = connection.transaction().unwrap();
-    let assistant = assistant(&tx, "agent");
-    let reads = Cell::new(0);
-    let clock = || {
-        let next = reads.get() + 1;
-        reads.set(next);
-        format!("2026-01-02T03:04:05.{next:07}+00:00")
-    };
-    let terminal = terminal("call");
-    let item = append_tool_settlement(&tx, &event("e1", "agent"), assistant, &terminal, &clock)
-        .unwrap()
-        .unwrap();
-    assert_eq!(reads.get(), 3);
-    let event_at: String = tx
-        .query_row("SELECT created_at FROM event WHERE id = 'e1'", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    let terminal_at: String = tx
-        .query_row(
-            "SELECT created_at FROM tool_execution_terminal",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let item_at: String = tx
-        .query_row(
-            "SELECT created_at FROM conversation_item WHERE sequence = ?1",
-            [item.sequence],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(event_at, "2026-01-02T03:04:05.0000001+00:00");
-    assert_eq!(terminal_at, "2026-01-02T03:04:05.0000002+00:00");
-    assert_eq!(item_at, "2026-01-02T03:04:05.0000003+00:00");
+    let mut message = ConversationMessage::text(MessageRole::Tool, "ordinary message");
+    message.tool_call_id = "ordinary".into();
+    project(&tx, "agent", &message, AT).unwrap();
+    assert!(tool_terminals(&tx, "agent").unwrap().is_empty());
     assert!(
-        append_tool_settlement(
-            &tx,
-            &event("ignored", "agent"),
-            assistant,
-            &terminal,
-            &clock
-        )
-        .unwrap()
-        .is_none()
+        tool_terminals_of_calls(&tx, "agent", &["ordinary".into()])
+            .unwrap()
+            .is_empty()
     );
-    assert_eq!(reads.get(), 3);
-    assert!(!append_tool_terminal(&tx, &event("ignored2", "agent"), &terminal, &clock).unwrap());
-    assert_eq!(reads.get(), 3);
-    append_tool_synthetic(
-        &tx,
-        &event("e2", "agent"),
-        assistant,
-        &[ConversationPart::image("image", "image/png", "name")],
-        &clock,
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(reads.get(), 5);
-    let event_at: String = tx
-        .query_row("SELECT created_at FROM event WHERE id = 'e2'", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(event_at, "2026-01-02T03:04:05.0000004+00:00");
 }

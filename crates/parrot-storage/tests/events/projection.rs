@@ -165,24 +165,11 @@ fn part_roundtrip_legacy_fallback_and_unknown_kind_match_source_behavior() {
     ];
     insert_parts(&tx, "input_part", "input_id", "input", &parts).unwrap();
     assert_eq!(read_input_parts(&tx, "input", "ignored").unwrap(), parts);
-    tx.execute("INSERT INTO tool_execution_terminal (agent_session,tool_call_id,tool_name,status,message,created_at) VALUES ('agent','call','tool','finished','result','at')",[]).unwrap();
-    let terminal = tx.last_insert_rowid();
-    insert_parts(
-        &tx,
-        "tool_execution_result_part",
-        "terminal_sequence",
-        terminal,
-        &parts,
-    )
-    .unwrap();
+    tx.execute("INSERT INTO conversation_item (agent_session,origin,role,tool_call_id,created_at) VALUES ('agent','tool','tool','call','at')",[]).unwrap();
+    let result = tx.last_insert_rowid();
+    insert_parts(&tx, "conversation_part", "item_sequence", result, &parts).unwrap();
     assert_eq!(
-        read_parts(
-            &tx,
-            "tool_execution_result_part",
-            "terminal_sequence",
-            &terminal
-        )
-        .unwrap(),
+        read_parts(&tx, "conversation_part", "item_sequence", &result).unwrap(),
         parts
     );
     tx.execute("UPDATE input_part SET kind='unknown' WHERE position=0", [])

@@ -219,17 +219,6 @@ impl EventRepository {
         self.transaction(move |tx| statistics::replay_statistics_with_progress(tx, progress))
             .await
     }
-    pub async fn append_tool_terminal(
-        &self,
-        event: Event,
-        terminal: ToolExecutionTerminal,
-    ) -> Result<bool, EventError> {
-        let context = self.context().clone();
-        self.transaction(move |tx| {
-            tools::append_tool_terminal(tx, &event, &terminal, context.timestamp.as_ref())
-        })
-        .await
-    }
     pub async fn append_tool_settlement(
         &self,
         event: Event,

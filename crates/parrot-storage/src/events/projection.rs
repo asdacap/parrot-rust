@@ -71,9 +71,6 @@ pub fn insert_parts(
         ("conversation_part", "item_sequence") => {
             "INSERT INTO conversation_part (item_sequence, position, kind, text, artifact_id, media_type, display_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);"
         }
-        ("tool_execution_result_part", "terminal_sequence") => {
-            "INSERT INTO tool_execution_result_part (terminal_sequence, position, kind, text, artifact_id, media_type, display_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);"
-        }
         _ => return Err(EventError::Invalid("unknown repository part table".into())),
     };
     for (position, part) in parts.iter().enumerate() {
@@ -127,9 +124,6 @@ pub fn read_parts(
         ("conversation_part", "item_sequence") => {
             "SELECT kind, text, artifact_id, media_type, display_name FROM conversation_part WHERE item_sequence = ?1 AND kind <> 'tool_call' ORDER BY position;"
         }
-        ("tool_execution_result_part", "terminal_sequence") => {
-            "SELECT kind, text, artifact_id, media_type, display_name FROM tool_execution_result_part WHERE terminal_sequence = ?1 ORDER BY position;"
-        }
         _ => return Err(EventError::Invalid("unknown repository part table".into())),
     };
     let mut statement = tx.prepare(sql)?;
@@ -147,32 +141,6 @@ pub fn insert_input_parts(
     parts: &[ConversationPart],
 ) -> Result<(), EventError> {
     insert_parts(tx, "input_part", "input_id", input_id, parts)
-}
-
-pub fn insert_terminal_parts(
-    tx: &Transaction<'_>,
-    sequence: i64,
-    parts: &[ConversationPart],
-) -> Result<(), EventError> {
-    insert_parts(
-        tx,
-        "tool_execution_result_part",
-        "terminal_sequence",
-        sequence,
-        parts,
-    )
-}
-
-pub fn read_terminal_parts(
-    tx: &Transaction<'_>,
-    sequence: i64,
-) -> Result<Vec<ConversationPart>, EventError> {
-    read_parts(
-        tx,
-        "tool_execution_result_part",
-        "terminal_sequence",
-        &sequence,
-    )
 }
 
 pub fn read_input_parts(

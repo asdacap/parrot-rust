@@ -211,7 +211,6 @@ async fn delegated24_named_checkpoint_fork_jsonl_literals() {
                 tool_name: "set_checkpoint".into(),
                 status: ToolExecutionStatus::Finished,
                 result_parts: vec![ConversationPart::Text("handoff".into())],
-                message: "handoff".into(),
             },
         )
         .await

@@ -165,7 +165,11 @@ pub struct ToolExecutionTerminal {
     pub tool_name: String,
     pub status: ToolExecutionStatus,
     pub result_parts: Vec<ConversationPart>,
-    pub message: String,
+}
+impl ToolExecutionTerminal {
+    pub fn content(&self) -> String {
+        content(&self.result_parts)
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentLineageRecord {
