@@ -117,7 +117,6 @@ impl<S: AuthorizedReadService> ReadImageTool<S> {
             .artifacts
             .persist(
                 Cursor::new(read.bytes),
-                &invocation.call_id,
                 &display_name,
                 "read_image",
                 None,

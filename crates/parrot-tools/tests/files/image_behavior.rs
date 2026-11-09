@@ -110,8 +110,7 @@ fn budget_invocation(
 }
 
 #[tokio::test]
-async fn image_result_uses_bound_actual_filename_and_real_repository_preserves_original_bytes_and_first_labels()
- {
+async fn image_references_preserve_each_bound_actual_filename_and_share_original_bytes() {
     let fixture = ImageFixture::new();
     let service = RecordingService::default();
     service.file("alias.dat", "/actual/pixel.png", PNG.to_vec());
@@ -148,11 +147,20 @@ async fn image_result_uses_bound_actual_filename_and_real_repository_preserves_o
         )
         .await
         .unwrap();
-    assert_eq!(renamed.image_artifacts, original.image_artifacts);
+    assert_eq!(renamed.image_artifacts.len(), 1);
+    let renamed_artifact = &renamed.image_artifacts[0];
+    assert!(renamed_artifact.matches_content(artifact));
+    assert_eq!(renamed_artifact.display_name, "renamed.png");
+    assert_eq!(renamed_artifact.origin, "read_image");
     assert_eq!(
         fixture
             .repository
-            .resolve(&artifact.artifact_id, &NoCancel)
+            .resolve(
+                &artifact.artifact_id,
+                &artifact.display_name,
+                "read_image",
+                &NoCancel
+            )
             .await
             .unwrap()
             .as_ref(),
