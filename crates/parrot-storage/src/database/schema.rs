@@ -19,7 +19,19 @@ pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
     }
     let existing = path.try_exists()?;
     let mut connection = if existing {
-        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?
+        let mut uri = String::from("file:");
+        let hex = b"0123456789ABCDEF";
+        for &byte in path.as_os_str().as_encoded_bytes() {
+            uri.push('%');
+            uri.push(char::from(hex[usize::from(byte >> 4)]));
+            uri.push(char::from(hex[usize::from(byte & 15)]));
+        }
+        uri.push_str("?immutable=1");
+        // Probe without journal recovery before the format is accepted.
+        Connection::open_with_flags(
+            uri,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )?
     } else {
         Connection::open(path)?
     };
