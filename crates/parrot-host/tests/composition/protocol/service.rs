@@ -916,6 +916,18 @@ async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserv
         ],
         ..Default::default()
     };
+    let expected_image = parrot_storage::artifacts::ImageArtifactMetadata {
+        artifact_id: artifact.artifact_id.clone(),
+        sha256: artifact.sha256.clone(),
+        media_type: "image/png".into(),
+        byte_length: PIXEL.len() as i64,
+        width: 1,
+        height: 1,
+        frame_count: 1,
+        aggregate_pixels: 1,
+        display_name: "pixel.png".into(),
+        origin: "upload".into(),
+    };
     let admission = f.service.send_message(&request, active()).await.unwrap();
     assert!(admission.created);
     assert_eq!(
@@ -923,7 +935,7 @@ async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserv
         vec![Call::Send(
             vec![
                 ConversationPart::text("before"),
-                ConversationPart::image(&artifact.artifact_id, "image/png", "pixel.png"),
+                ConversationPart::image(expected_image.clone()),
                 ConversationPart::text("after")
             ],
             "structured".into(),
@@ -943,7 +955,7 @@ async fn real_image_upload_persists_canonical_metadata_is_idempotent_and_preserv
         persisted.parts,
         vec![
             ConversationPart::text("before"),
-            ConversationPart::image(&artifact.artifact_id, "image/png", "pixel.png"),
+            ConversationPart::image(expected_image.clone()),
             ConversationPart::text("after")
         ]
     );
@@ -2105,7 +2117,7 @@ async fn closed_storage_session_resumes_exact_identity_and_new_create_is_always_
 
 #[tokio::test]
 async fn unsupported_schema_resume_is_failed_precondition_without_replacing_or_mutating_session() {
-    for version in [0_i64, 6, 8] {
+    for version in [0_i64, 6, 7, 9] {
         let f = Fixture::new();
         let original = f.create().await;
         let id = original.id();

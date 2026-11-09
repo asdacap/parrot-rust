@@ -880,11 +880,7 @@ pub async fn resolve_parts(
                         "the prompt image batch exceeds the supported limits",
                     ));
                 }
-                resolved.push(ConversationPart::image(
-                    artifact.artifact_id,
-                    artifact.media_type,
-                    artifact.display_name,
-                ));
+                resolved.push(ConversationPart::image(artifact));
             }
             _ => return Err(invalid("every prompt part needs text or an artifact id")),
         }

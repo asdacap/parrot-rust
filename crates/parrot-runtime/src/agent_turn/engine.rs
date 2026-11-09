@@ -967,8 +967,8 @@ where
                             let mut output = protocol::MessageContentPart::new();
                             match part {
                                 ConversationPart::Text(text) => output.set_text(text.clone()),
-                                ConversationPart::ImageArtifact { artifact_id, .. } => {
-                                    output.set_artifact_id(artifact_id.clone())
+                                ConversationPart::ImageArtifact { metadata } => {
+                                    output.set_artifact_id(metadata.artifact_id.clone())
                                 }
                             };
                             output

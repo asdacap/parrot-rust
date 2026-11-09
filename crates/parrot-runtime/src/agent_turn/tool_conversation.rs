@@ -254,13 +254,12 @@ impl ToolConversation {
                 ToolStatus::ImageBudgetExceeded => ToolExecutionStatus::ImageBudgetExceeded,
             },
             result_parts: std::iter::once(ConversationPart::text(&result.text))
-                .chain(result.images.iter().map(|image| {
-                    ConversationPart::image(
-                        &image.artifact_id,
-                        &image.media_type,
-                        &image.display_name,
-                    )
-                }))
+                .chain(
+                    result
+                        .images
+                        .iter()
+                        .map(|image| ConversationPart::image(image.clone())),
+                )
                 .collect(),
         };
         let mut event = self.event();

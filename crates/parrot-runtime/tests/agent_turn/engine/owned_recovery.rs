@@ -204,6 +204,129 @@ async fn suspension_reopens_original_admitted_prompt_and_restores_wait_and_paren
 }
 
 #[tokio::test]
+async fn image_execution_metadata_survives_suspend_reopen_and_recovery() {
+    use parrot_storage::artifacts::{ImageArtifactRepository, ImageArtifactStore};
+
+    let mut fixture = Fixture::new();
+    let store = ImageArtifactStore::for_session(
+        fixture.repository.events().database().selected_root(),
+        "images",
+    )
+    .unwrap();
+    fixture.repository = fixture
+        .repository
+        .clone()
+        .with_image_store(store.clone())
+        .unwrap();
+    fixture.history = Fixture::history_for(&fixture.path, &fixture.repository);
+    let images = ImageArtifactRepository::new(
+        fixture.repository.events().database().clone(),
+        store.clone(),
+    )
+    .unwrap();
+    let metadata = images
+        .persist(
+            std::io::Cursor::new(include_bytes!(
+                "../../../../parrot-storage/tests/artifacts/fixtures/rectangle.png"
+            )),
+            "recovered-image-upload",
+            "rectangle.png",
+            "execution recovery",
+            Some("image/png"),
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    assert_eq!((metadata.width, metadata.height), (24, 12));
+    let parts = vec![
+        ConversationPart::text("question with image"),
+        ConversationPart::image(metadata.clone()),
+    ];
+    let state = fixture.recovery_store().await;
+    let gate = Gate::new();
+    let mut step = Step::complete("discarded attempt");
+    step.gate = Some(gate.clone());
+    let parent = Arc::new(RecoveryParent::default());
+    let runtime = fixture
+        .recovered_runtime(Scripted::new(vec![step]), state.clone(), parent.clone())
+        .await;
+    let sent = runtime
+        .session
+        .send_and_select_execution(
+            parts.clone(),
+            "image-recovery-input".into(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
+            Arc::new(NeverCancelled),
+        )
+        .unwrap()
+        .join()
+        .await
+        .unwrap();
+    gate.entered().await;
+    bounded(runtime.session.suspend()).await.unwrap();
+    assert_eq!(
+        sent.execution.join().await.unwrap().status,
+        ExecutionStatus::Canceled
+    );
+    let checkpoint = state.load().await.unwrap().unwrap().execution.unwrap();
+    assert_eq!(
+        checkpoint.initial_parts,
+        [
+            ExecutionInputPart::Text {
+                text: "question with image".into(),
+            },
+            ExecutionInputPart::ImageArtifact {
+                metadata: metadata.clone(),
+            },
+        ]
+    );
+    let mut restarted = fixture.reopen().await;
+    restarted.repository = restarted
+        .repository
+        .clone()
+        .with_image_store(store)
+        .unwrap();
+    restarted.history = Fixture::history_for(&restarted.path, &restarted.repository);
+    let resumed = restarted
+        .recovered_runtime(
+            Scripted::new(vec![Step::complete("image recovered")]),
+            restarted.recovery_store().await,
+            parent,
+        )
+        .await;
+    assert_eq!(
+        bounded(resumed.session.recover_owned().unwrap().join())
+            .await
+            .unwrap(),
+        Execution::succeeded("image recovered")
+    );
+    let checkpoint = restarted
+        .recovery_store()
+        .await
+        .load()
+        .await
+        .unwrap()
+        .unwrap()
+        .execution
+        .unwrap();
+    assert_eq!(
+        checkpoint.initial_parts[1],
+        ExecutionInputPart::ImageArtifact { metadata }
+    );
+    let admitted = restarted
+        .history
+        .conversation()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.message.origin == parrot_storage::events::ConversationOrigin::UserInput)
+        .unwrap();
+    assert_eq!(admitted.message.parts, parts);
+    resumed.close().await;
+}
+
+#[tokio::test]
 async fn completed_and_never_started_recovery_stays_idle_and_retains_results() {
     let fixture = Fixture::new();
     let store = fixture.recovery_store().await;

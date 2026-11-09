@@ -428,11 +428,9 @@ async fn image_artifacts_are_materialized_loaded_by_summary_provider_and_retaine
     let history = Fixture::history_for(&repository, "agent");
     for text in ["earlier image", "retained image"] {
         let mut message = ConversationMessage::text(MessageRole::User, text);
-        message.parts.push(ConversationPart::image(
-            &artifact.artifact_id,
-            "image/png",
-            "pixel.png",
-        ));
+        message
+            .parts
+            .push(ConversationPart::image(artifact.clone()));
         append(&history, message).await;
     }
     let provider = Scripted::default();
