@@ -101,6 +101,9 @@ pub fn prepare<R: ResponsesRequestView>(
     };
 
     let mut body = vec![("model", quote(request.model()))];
+    if !request.service_tier().is_empty() {
+        body.push(("service_tier", quote(request.service_tier())));
+    }
     if !request.instructions().is_empty() {
         body.push(("instructions", quote(request.instructions())));
     }

@@ -56,6 +56,8 @@ pub trait ResponsesRequestView {
     type Message: ResponsesMessageView;
     type Tool: ResponsesToolDefinitionView;
 
+    /// Empty means standard routing; otherwise request this inference tier.
+    fn service_tier(&self) -> &str;
     fn model(&self) -> &str;
     fn messages(&self) -> &[Self::Message];
     fn tools(&self) -> &[Self::Tool];

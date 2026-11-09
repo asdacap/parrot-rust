@@ -253,6 +253,9 @@ struct Request {
     instructions: String,
 }
 impl ResponsesRequestView for Request {
+    fn service_tier(&self) -> &str {
+        ""
+    }
     type Message = Message;
     type Tool = Empty;
     fn model(&self) -> &str {

@@ -4,6 +4,7 @@ use std::{io, path::Path, time::Duration};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Request {
+    pub fast_mode: bool,
     pub model: String,
     pub instructions: String,
     pub messages: Vec<Message>,
@@ -224,6 +225,9 @@ impl chat_completions::RequestView for Request {
     }
 }
 impl responses::ResponsesRequestView for Request {
+    fn service_tier(&self) -> &str {
+        if self.fast_mode { "priority" } else { "" }
+    }
     type Message = Message;
     type Tool = Tool;
     fn model(&self) -> &str {

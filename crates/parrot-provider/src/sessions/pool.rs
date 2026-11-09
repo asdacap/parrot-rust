@@ -1,7 +1,8 @@
 use super::{
-    Error, Provider, Session,
+    Error, FastMode, Provider, Session,
     diagnostic_session::DiagnosticSession,
     diagnostics::{DiagnosticClock, DiagnosticSink, LastRequestDumper},
+    fast_mode::FastModeSession,
 };
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
@@ -27,6 +28,7 @@ pub struct ProviderSessions {
     state: Arc<Mutex<State>>,
     closed: Arc<Notify>,
     diagnostics: Option<SessionDiagnostics>,
+    fast_mode: Option<Arc<FastMode>>,
 }
 
 impl ProviderSessions {
@@ -51,6 +53,11 @@ impl ProviderSessions {
         }
     }
 
+    pub fn with_fast_mode(mut self, mode: Arc<FastMode>) -> Self {
+        self.fast_mode = Some(mode);
+        self
+    }
+
     pub async fn get(&self, provider: Arc<dyn Provider>) -> Result<Arc<dyn Session>, Error> {
         let mut state = self.state.lock().await;
         if state.disposing {
@@ -73,6 +80,10 @@ impl ProviderSessions {
                 provider.id().to_owned(),
                 diagnostics.dumper.clone(),
             )),
+            None => session,
+        };
+        let session: Arc<dyn Session> = match &self.fast_mode {
+            Some(mode) => Arc::new(FastModeSession::new(session, mode.clone())),
             None => session,
         };
         if state.turn_open {

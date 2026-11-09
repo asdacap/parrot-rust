@@ -101,6 +101,9 @@ pub struct ToolDefinition {
 }
 
 impl ResponsesRequestView for Request {
+    fn service_tier(&self) -> &str {
+        ""
+    }
     type Message = Message;
     type Tool = ToolDefinition;
     fn model(&self) -> &str {
