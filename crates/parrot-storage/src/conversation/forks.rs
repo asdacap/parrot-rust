@@ -1,5 +1,5 @@
 //! Checkpoints and fork copies execute inside one selected-session transaction.
-use super::{ConversationRepository, EventError, reads, types::*};
+use super::{ConversationRepository, EventError, compaction, reads, types::*};
 use crate::events::{projection, tools};
 use rusqlite::{OptionalExtension, Transaction, params};
 use std::collections::{BTreeMap, BTreeSet};
@@ -119,7 +119,7 @@ impl ConversationRepository {
         agent: String,
     ) -> Result<BTreeSet<i64>, EventError> {
         self.events.transaction(move |tx| {
-            let mut read = tx.prepare("SELECT checkpoint.assistant_sequence FROM history_checkpoint AS checkpoint JOIN (SELECT title, MAX(sequence) AS sequence FROM history_checkpoint WHERE agent_session = ?1 GROUP BY title) AS latest ON latest.sequence = checkpoint.sequence LEFT JOIN compaction_snapshot AS snapshot ON snapshot.agent_session = checkpoint.agent_session WHERE checkpoint.agent_session = ?1 AND (snapshot.watermark IS NULL OR checkpoint.assistant_sequence > snapshot.watermark);")?;
+            let mut read = tx.prepare("SELECT checkpoint.assistant_sequence FROM history_checkpoint AS checkpoint JOIN (SELECT title, MAX(sequence) AS sequence FROM history_checkpoint WHERE agent_session = ?1 GROUP BY title) AS latest ON latest.sequence = checkpoint.sequence LEFT JOIN agent_history AS snapshot ON snapshot.sequence = (SELECT sequence FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' ORDER BY sequence DESC LIMIT 1) WHERE checkpoint.agent_session = ?1 AND (snapshot.watermark IS NULL OR checkpoint.assistant_sequence > snapshot.watermark);")?;
             Ok(read.query_map([agent], |row| row.get(0))?.collect::<Result<BTreeSet<_>,_>>()?)
         }).await
     }
@@ -178,8 +178,6 @@ impl ConversationRepository {
             .transaction(move |tx| {
                 for table in [
                     "history_checkpoint",
-                    "compaction_status",
-                    "compaction_snapshot",
                     "tool_execution_terminal",
                     "conversation_item",
                     "agent_history",
@@ -210,20 +208,9 @@ pub fn read_effective_conversation_groups(
     tx: &Transaction<'_>,
     agent: &str,
 ) -> Result<EffectiveConversationHistory, EventError> {
-    let snapshot = tx
-        .query_row(
-            "SELECT summary, watermark FROM compaction_snapshot WHERE agent_session = ?1;",
-            [agent],
-            |row| {
-                Ok(CompactionSnapshot {
-                    summary: row.get(0)?,
-                    watermark: row.get(1)?,
-                })
-            },
-        )
-        .optional()?;
+    let snapshot = compaction::read_snapshot(tx, agent)?;
     let status = if let Some(snapshot) = &snapshot {
-        let sequence: Option<i64> = tx.query_row("SELECT status_conversation_sequence FROM compaction_status WHERE agent_session = ?1 AND watermark = ?2;", params![agent,snapshot.watermark], |row| row.get(0)).optional()?;
+        let sequence: Option<i64> = tx.query_row("SELECT status_conversation_sequence FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' AND watermark = ?2;", params![agent,snapshot.watermark], |row| row.get(0))?;
         sequence
             .map(|sequence| reads::read_conversation_item(tx, sequence))
             .transpose()?
@@ -233,7 +220,7 @@ pub fn read_effective_conversation_groups(
     let items =
         reads::read_compaction_tail(tx, agent, snapshot.as_ref().map_or(0, |s| s.watermark))?;
     let mut owners = BTreeMap::new();
-    let mut read = tx.prepare("SELECT assistant_sequence, item_sequence FROM tool_batch_result WHERE agent_session = ?1 UNION ALL SELECT assistant_sequence, item_sequence FROM tool_batch_synthetic WHERE agent_session = ?1;")?;
+    let mut read = tx.prepare("SELECT tool_owner_sequence, sequence FROM conversation_item WHERE agent_session = ?1 AND tool_owner_sequence IS NOT NULL;")?;
     for row in read.query_map([agent], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
     })? {
@@ -382,8 +369,8 @@ fn initialize_fork(
         .filter(|_| selection.kind == HistoryForkKind::Full)
     {
         let at = clock();
-        tx.execute("INSERT INTO compaction_snapshot (agent_session, summary, watermark, created_at) VALUES (?1, ?2, 0, ?3);", params![destination,snapshot.summary,at])?;
         tx.execute("INSERT INTO agent_history (agent_session, kind, conversation_sequence, summary, watermark, created_at) VALUES (?1, 'compaction', NULL, ?2, 0, ?3);", params![destination,snapshot.summary,at])?;
+        let history_sequence = tx.last_insert_rowid();
         if let Some(status) = &effective.status {
             let sequence =
                 projection::project(tx, destination, &status.message, &clock())?.sequence;
@@ -391,7 +378,10 @@ fn initialize_fork(
                 "UPDATE conversation_item SET final_phase = ?1 WHERE sequence = ?2;",
                 params![status.final_phase, sequence],
             )?;
-            tx.execute("INSERT INTO compaction_status (agent_session, watermark, status_conversation_sequence) VALUES (?1, 0, ?2);", params![destination,sequence])?;
+            tx.execute(
+                "UPDATE agent_history SET status_conversation_sequence = ?1 WHERE sequence = ?2;",
+                params![sequence, history_sequence],
+            )?;
         }
     }
     for group in selected {
@@ -427,7 +417,13 @@ fn initialize_fork(
                 )
                 .into());
             }
-            tx.execute("INSERT INTO tool_batch_result (agent_session, assistant_sequence, tool_call_id, item_sequence) VALUES (?1, ?2, ?3, ?4);", params![destination,sequences[&group.assistant_sequence],call.id,sequences[&result.sequence]])?;
+            tx.execute(
+                "UPDATE conversation_item SET tool_owner_sequence = ?1 WHERE sequence = ?2;",
+                params![
+                    sequences[&group.assistant_sequence],
+                    sequences[&result.sequence]
+                ],
+            )?;
         }
         let mut synthetics = group.items.iter().filter(|item| {
             item.message.role == MessageRole::User
@@ -440,7 +436,13 @@ fn initialize_fork(
                 )
                 .into());
             }
-            tx.execute("INSERT INTO tool_batch_synthetic (agent_session, assistant_sequence, item_sequence) VALUES (?1, ?2, ?3);", params![destination,sequences[&group.assistant_sequence],sequences[&synthetic.sequence]])?;
+            tx.execute(
+                "UPDATE conversation_item SET tool_owner_sequence = ?1 WHERE sequence = ?2;",
+                params![
+                    sequences[&group.assistant_sequence],
+                    sequences[&synthetic.sequence]
+                ],
+            )?;
         }
     }
     for group in selected.iter().filter(|group| group.assistant_sequence > 0) {

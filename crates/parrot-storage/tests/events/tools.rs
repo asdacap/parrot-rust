@@ -145,8 +145,8 @@ fn settlement_repairs_existing_terminal_and_projects_only_text_once() {
     );
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 1);
-    assert_eq!(count(&connection, "message"), 2);
-    assert_eq!(count(&connection, "tool_batch_result"), 1);
+    assert_eq!(count(&connection, "conversation_item"), 2);
+    assert_eq!(connection.query_row("SELECT COUNT(*) FROM conversation_item WHERE tool_owner_sequence IS NOT NULL AND role = 'tool'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
     let after: Vec<u8> = connection
         .query_row("SELECT payload FROM event", [], |row| row.get(0))
         .unwrap();
@@ -177,7 +177,7 @@ fn settlement_without_text_uses_message_but_empty_text_is_not_replaced() {
     assert_eq!(item.message.parts, vec![ConversationPart::text("fallback")]);
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 3);
-    assert_eq!(count(&connection, "tool_batch_result"), 3);
+    assert_eq!(connection.query_row("SELECT COUNT(*) FROM conversation_item WHERE tool_owner_sequence IS NOT NULL AND role = 'tool'", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
 }
 #[test]
 fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwriting() {
@@ -192,11 +192,9 @@ fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwrit
         "event",
         "tool_execution_terminal",
         "tool_execution_result_part",
-        "message",
         "conversation_item",
         "conversation_part",
         "agent_history",
-        "tool_batch_result",
     ];
     let before: Vec<_> = tables
         .iter()
@@ -214,7 +212,7 @@ fn cross_assistant_unique_conflict_rolls_back_projected_rows_instead_of_overwrit
     assert_eq!(before, after);
     let stored: i64 = connection
         .query_row(
-            "SELECT assistant_sequence FROM tool_batch_result",
+            "SELECT tool_owner_sequence FROM conversation_item WHERE tool_owner_sequence IS NOT NULL",
             [],
             |row| row.get(0),
         )
@@ -233,12 +231,9 @@ fn missing_assistant_foreign_key_rolls_back_new_terminal_event_and_projection() 
         "event",
         "tool_execution_terminal",
         "tool_execution_result_part",
-        "message",
         "conversation_item",
         "conversation_part",
         "agent_history",
-        "tool_batch_result",
-        "projection_version",
     ] {
         assert_eq!(count(&connection, table), 0, "{table}");
     }
@@ -292,7 +287,7 @@ fn synthetic_requires_images_is_idempotent_and_validates_before_duplicate_lookup
     }
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 1);
-    assert_eq!(count(&connection, "tool_batch_synthetic"), 1);
+    assert_eq!(connection.query_row("SELECT COUNT(*) FROM conversation_item WHERE tool_owner_sequence IS NOT NULL AND role = 'user' AND origin = 'tool'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
     assert_eq!(count(&connection, "conversation_item"), 2);
 }
 #[test]

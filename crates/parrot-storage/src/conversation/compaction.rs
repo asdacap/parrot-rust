@@ -15,10 +15,9 @@ fn save_snapshot(
     agent: &str,
     snapshot: &CompactionSnapshot,
     at: &str,
-) -> Result<(), EventError> {
-    tx.execute("INSERT INTO compaction_snapshot (agent_session, summary, watermark, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (agent_session) DO UPDATE SET summary = excluded.summary, watermark = excluded.watermark, created_at = excluded.created_at;", params![agent, snapshot.summary, snapshot.watermark, at])?;
+) -> Result<i64, EventError> {
     tx.execute("INSERT INTO agent_history (agent_session, kind, conversation_sequence, summary, watermark, created_at) VALUES (?1, 'compaction', NULL, ?2, ?3, ?4);", params![agent, snapshot.summary, snapshot.watermark, at])?;
-    Ok(())
+    Ok(tx.last_insert_rowid())
 }
 pub fn read_snapshot(
     tx: &Transaction<'_>,
@@ -26,7 +25,7 @@ pub fn read_snapshot(
 ) -> Result<Option<CompactionSnapshot>, EventError> {
     Ok(tx
         .query_row(
-            "SELECT summary, watermark FROM compaction_snapshot WHERE agent_session = ?1;",
+            "SELECT summary, watermark FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' ORDER BY sequence DESC LIMIT 1;",
             [agent],
             |row| {
                 Ok(CompactionSnapshot {
@@ -72,10 +71,10 @@ impl ConversationRepository {
         let context = self.events.context().clone();
         let appended = self.events.transaction(move |tx| {
             if already_saved(tx, &published.agent_session_id, snapshot.watermark)? { return Ok(false); }
-            save_snapshot(tx, &published.agent_session_id, &snapshot, &(context.timestamp)())?;
+            let history_sequence = save_snapshot(tx, &published.agent_session_id, &snapshot, &(context.timestamp)())?;
             record(tx, &published, None, &(context.timestamp)())?;
             let status = projection::project(tx, &published.agent_session_id, &ConversationMessage::text(MessageRole::System, content), &(context.timestamp)())?;
-            tx.execute("INSERT INTO compaction_status (agent_session, watermark, status_conversation_sequence) VALUES (?1, ?2, ?3);", params![published.agent_session_id, snapshot.watermark, status.sequence])?;
+            tx.execute("UPDATE agent_history SET status_conversation_sequence = ?1 WHERE sequence = ?2;", params![status.sequence, history_sequence])?;
             tx.execute("DELETE FROM context_reminder WHERE agent_session = ?1;", [&published.agent_session_id])?;
             Ok(true)
         }).await?;
@@ -98,7 +97,7 @@ impl ConversationRepository {
     ) -> Result<Option<CompactionContext>, EventError> {
         self.events.transaction(move |tx| {
             let Some(snapshot) = read_snapshot(tx, &agent)? else { return Ok(None); };
-            let sequence: Option<i64> = tx.query_row("SELECT status_conversation_sequence FROM compaction_status WHERE agent_session = ?1 AND watermark = ?2;", params![agent, snapshot.watermark], |row| row.get(0)).optional()?;
+            let sequence: Option<i64> = tx.query_row("SELECT status_conversation_sequence FROM agent_history WHERE agent_session = ?1 AND kind = 'compaction' AND watermark = ?2;", params![agent, snapshot.watermark], |row| row.get(0))?;
             let status = sequence.map(|sequence| super::reads::read_conversation_item(tx, sequence)).transpose()?;
             let tail = super::reads::read_compaction_tail(tx, &agent, snapshot.watermark)?;
             Ok(Some(CompactionContext { snapshot, status, tail }))

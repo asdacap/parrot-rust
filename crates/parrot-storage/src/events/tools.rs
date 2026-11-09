@@ -107,8 +107,8 @@ pub fn has_tool_synthetic(
     assistant_sequence: i64,
 ) -> Result<bool, EventError> {
     Ok(tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM tool_batch_synthetic \
-         WHERE agent_session = ?1 AND assistant_sequence = ?2);",
+        "SELECT EXISTS (SELECT 1 FROM conversation_item \
+         WHERE agent_session = ?1 AND tool_owner_sequence = ?2 AND origin = 'tool' AND role = 'user');",
         params![agent, assistant_sequence],
         |row| row.get(0),
     )?)
@@ -148,8 +148,8 @@ pub fn append_tool_synthetic(
         &clock(),
     )?;
     tx.execute(
-        "INSERT INTO tool_batch_synthetic (agent_session, assistant_sequence, item_sequence) \
-         VALUES (?1, ?2, ?3);",
+        "UPDATE conversation_item SET tool_owner_sequence = ?2 \
+         WHERE agent_session = ?1 AND sequence = ?3;",
         params![event.agent_session_id, assistant_sequence, item.sequence],
     )?;
     Ok(Some(item))
@@ -162,8 +162,8 @@ fn has_tool_result(
     call: &str,
 ) -> Result<bool, EventError> {
     Ok(tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM tool_batch_result \
-         WHERE agent_session = ?1 AND assistant_sequence = ?2 AND tool_call_id = ?3);",
+        "SELECT EXISTS (SELECT 1 FROM conversation_item \
+         WHERE agent_session = ?1 AND tool_owner_sequence = ?2 AND role = 'tool' AND tool_call_id = ?3);",
         params![agent, assistant_sequence, call],
         |row| row.get(0),
     )?)
@@ -270,9 +270,9 @@ fn insert_tool_result(
         at,
     )?;
     tx.execute(
-        "INSERT INTO tool_batch_result (agent_session, assistant_sequence, tool_call_id, item_sequence) \
-         VALUES (?1, ?2, ?3, ?4);",
-        params![agent, assistant_sequence, terminal.tool_call_id, item.sequence],
+        "UPDATE conversation_item SET tool_owner_sequence = ?2 \
+         WHERE agent_session = ?1 AND sequence = ?3;",
+        params![agent, assistant_sequence, item.sequence],
     )?;
     Ok(item)
 }

@@ -597,7 +597,7 @@ async fn compaction_tail_excludes_all_associated_status_items_not_just_current_s
         message(MessageRole::System, "current"),
     )
     .await;
-    repo.events().transaction(move |tx| { tx.execute("INSERT INTO compaction_status (agent_session, watermark, status_conversation_sequence) VALUES ('agent', 0, ?1), ('agent', 1, ?2)", rusqlite::params![old.sequence, current.sequence])?; Ok(()) }).await.unwrap();
+    repo.events().transaction(move |tx| { tx.execute("INSERT INTO agent_history (agent_session, kind, summary, watermark, created_at, status_conversation_sequence) VALUES ('agent', 'compaction', 'old', 0, 'at', ?1), ('agent', 'compaction', 'current', 1, 'at', ?2)", rusqlite::params![old.sequence, current.sequence])?; Ok(()) }).await.unwrap();
     let tail = repo
         .events()
         .transaction(|tx| parrot_storage::conversation::reads::read_compaction_tail(tx, "agent", 0))
