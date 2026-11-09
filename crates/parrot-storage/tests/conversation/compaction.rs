@@ -282,7 +282,18 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
     assert_eq!(repo.compaction("agent".into()).await.unwrap(), None);
     assert_eq!(repo.agent_history("agent".into()).await.unwrap(), before);
     assert_eq!(count(&repo, "event").await, 0);
-    assert_eq!(count(&repo, "compaction_status").await, 0);
+    let associations = repo
+        .events()
+        .transaction(|tx| {
+            Ok(tx.query_row(
+                "SELECT count(*) FROM agent_history WHERE status_conversation_sequence IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(associations, 0);
     assert_eq!(
         repo.latest_context_reminder("agent".into()).await.unwrap(),
         Some(checkpoint("provider/model", 10_000, 75))
@@ -713,12 +724,174 @@ async fn projection_failure_is_postcommit_and_duplicate_compaction_does_not_refr
             .await,
         Err(EventError::Argument(_))
     ));
-    assert_eq!(count(&repo, "compaction_snapshot").await, 1);
+    let compactions = repo
+        .events()
+        .transaction(|tx| {
+            Ok(tx.query_row(
+                "SELECT count(*) FROM agent_history WHERE kind = 'compaction'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(compactions, 1);
     repo.events().database().close().await.unwrap();
     let reopened = fixture.repository();
     assert_eq!(
         reopened.compaction("agent".into()).await.unwrap(),
         Some(snapshot("durable", 99))
+    );
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn latest_compaction_uses_history_order_and_retries_preserve_current_after_reopen() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    assert!(
+        repo.save_compaction("agent".into(), snapshot("earlier", 20))
+            .await
+            .unwrap()
+    );
+    assert!(
+        repo.save_compaction("agent".into(), snapshot("latest", 3))
+            .await
+            .unwrap()
+    );
+    assert!(
+        repo.save_compaction("other".into(), snapshot("other agent", 99))
+            .await
+            .unwrap()
+    );
+    assert!(
+        !repo
+            .save_compaction("agent".into(), snapshot("ignored retry", 20))
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        repo.compaction("agent".into()).await.unwrap(),
+        Some(snapshot("latest", 3))
+    );
+    let history = repo.agent_history("agent".into()).await.unwrap();
+    let compactions = history
+        .iter()
+        .filter_map(|entry| match entry {
+            AgentHistoryEntry::Compaction {
+                summary, watermark, ..
+            } => Some((summary.as_str(), *watermark)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(compactions, [("earlier", 20), ("latest", 3)]);
+    repo.events().database().close().await.unwrap();
+    let reopened = fixture.repository();
+    assert_eq!(
+        reopened.compaction("agent".into()).await.unwrap(),
+        Some(snapshot("latest", 3))
+    );
+    assert_eq!(
+        reopened.agent_history("agent".into()).await.unwrap(),
+        history
+    );
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
+async fn deleting_status_preserves_historical_compactions_and_tail_after_reopen() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    append(&repo, "before", MessageRole::User, "before").await;
+    assert!(
+        repo.append_compaction_status(
+            event("first-status"),
+            snapshot("first", 0),
+            "old status".into()
+        )
+        .await
+        .unwrap()
+    );
+    append(&repo, "ordinary", MessageRole::System, "ordinary").await;
+    assert!(
+        repo.append_compaction_status(
+            event("second-status"),
+            snapshot("second", 1),
+            "current status".into()
+        )
+        .await
+        .unwrap()
+    );
+    append(&repo, "after", MessageRole::Assistant, "after").await;
+    let current = repo
+        .compaction_history("agent".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        current
+            .tail
+            .iter()
+            .map(|item| parrot_storage::events::types::content(&item.message.parts))
+            .collect::<Vec<_>>(),
+        ["ordinary", "after"]
+    );
+    let status_sequence = current.status.unwrap().sequence;
+    repo.events()
+        .transaction(move |tx| {
+            tx.execute(
+                "DELETE FROM conversation_item WHERE sequence = ?1",
+                [status_sequence],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let retained = repo
+        .compaction_history("agent".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.snapshot, snapshot("second", 1));
+    assert!(retained.status.is_none());
+    assert_eq!(
+        retained
+            .tail
+            .iter()
+            .map(|item| parrot_storage::events::types::content(&item.message.parts))
+            .collect::<Vec<_>>(),
+        ["ordinary", "after"]
+    );
+    assert!(
+        !repo
+            .append_compaction_status(
+                event("retry-status"),
+                snapshot("ignored retry", 1),
+                "ignored status".into()
+            )
+            .await
+            .unwrap()
+    );
+    let history = repo.agent_history("agent".into()).await.unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .filter_map(|entry| match entry {
+                AgentHistoryEntry::Compaction { summary, .. } => Some(summary.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    repo.events().database().close().await.unwrap();
+    let reopened = fixture.repository();
+    assert_eq!(
+        reopened.compaction_history("agent".into()).await.unwrap(),
+        Some(retained)
+    );
+    assert_eq!(
+        reopened.agent_history("agent".into()).await.unwrap(),
+        history
     );
     reopened.events().database().close().await.unwrap();
 }

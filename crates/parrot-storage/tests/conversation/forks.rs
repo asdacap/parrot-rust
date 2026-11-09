@@ -133,8 +133,6 @@ async fn row_counts(repo: &ConversationRepository, agent: &str) -> Vec<i64> {
                 "message",
                 "agent_history",
                 "history_checkpoint",
-                "compaction_snapshot",
-                "compaction_status",
                 "tool_execution_terminal",
                 "tool_batch_result",
                 "tool_batch_synthetic",
@@ -324,21 +322,35 @@ async fn checkpoint_retries_conflicts_latest_before_and_active_compaction_bounda
             .unwrap(),
         [second].into_iter().collect()
     );
-    repo.events()
-        .transaction(move |tx| {
-            tx.execute(
-                "INSERT INTO compaction_snapshot VALUES ('agent','summary',?1,'at')",
-                [second],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
+    repo.save_compaction(
+        "agent".into(),
+        CompactionSnapshot {
+            summary: "summary".into(),
+            watermark: second,
+        },
+    )
+    .await
+    .unwrap();
     assert!(
         repo.active_checkpoint_assistant_sequences("agent".into())
             .await
             .unwrap()
             .is_empty()
+    );
+    repo.save_compaction(
+        "agent".into(),
+        CompactionSnapshot {
+            summary: "newer lower watermark".into(),
+            watermark: 0,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.active_checkpoint_assistant_sequences("agent".into())
+            .await
+            .unwrap(),
+        [second].into_iter().collect()
     );
     repo.events().database().close().await.unwrap();
 }
@@ -526,16 +538,15 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     .await
     .unwrap();
     assert!(items(&repo, "empty-child").await.is_empty());
-    repo.events()
-        .transaction(|tx| {
-            tx.execute(
-                "INSERT INTO compaction_snapshot VALUES ('compact-only','summary',7,'at')",
-                [],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
+    repo.save_compaction(
+        "compact-only".into(),
+        CompactionSnapshot {
+            summary: "summary".into(),
+            watermark: 7,
+        },
+    )
+    .await
+    .unwrap();
     repo.initialize_forked_agent_history(
         "compact-only".into(),
         "compact-child".into(),
@@ -575,7 +586,7 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     )
     .await
     .unwrap();
-    assert_eq!(row_counts(&repo, "empty").await, vec![0; 10]);
+    assert_eq!(row_counts(&repo, "empty").await, vec![0; 8]);
     repo.events().database().close().await.unwrap();
 }
 
@@ -589,11 +600,7 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
     repo.events()
         .transaction(move |tx| {
             tx.execute(
-                "INSERT INTO compaction_snapshot VALUES ('agent','summary',?1,'at')",
-                [old],
-            )?;
-            tx.execute(
-                "INSERT INTO compaction_status VALUES ('agent',?1,?2)",
+                "INSERT INTO agent_history (agent_session, kind, summary, watermark, created_at, status_conversation_sequence) VALUES ('agent','compaction','summary',?1,'at',?2)",
                 rusqlite::params![old, status],
             )?;
             tx.execute(
@@ -658,7 +665,7 @@ async fn fork_failure_after_partial_clone_rolls_back_every_destination_row() {
         .await,
         Err(ForkError::Repository(EventError::Database(_)))
     ));
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 10]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 8]);
     assert_eq!(repo.events().replay_raw().await.unwrap(), before);
     repo.events()
         .transaction(|tx| {
@@ -701,7 +708,7 @@ async fn complete_message_group_without_terminal_and_duplicate_results_roll_back
     assert!(
         matches!(fork(&repo,"agent","child",HistoryForkBoundary::AfterCompletedHistory,"full").await,Err(ForkError::Repository(EventError::Invalid(message))) if message=="a complete tool group has no terminal")
     );
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 10]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 8]);
     settle(&repo, "agent", owner, "call").await;
     let mut duplicate = message(MessageRole::Tool, "duplicate");
     duplicate.tool_call_id = "call".into();
@@ -719,7 +726,7 @@ async fn complete_message_group_without_terminal_and_duplicate_results_roll_back
     assert!(
         matches!(fork(&repo,"agent","child",HistoryForkBoundary::AfterCompletedHistory,"full").await,Err(ForkError::Repository(EventError::Invalid(message))) if message=="Sequence contains more than one matching element")
     );
-    assert_eq!(row_counts(&repo, "child").await, vec![0; 10]);
+    assert_eq!(row_counts(&repo, "child").await, vec![0; 8]);
     repo.events().database().close().await.unwrap();
 }
 
