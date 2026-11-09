@@ -809,7 +809,7 @@ impl RawActivityView {
             .agents
             .entry(owner.to_owned())
             .or_insert_with(|| AgentSessionState::new(owner));
-        if state.name.is_none() {
+        if state.name.is_none() || state.name.as_deref() == Some(owner) {
             state.name = Some(name);
         }
         state
