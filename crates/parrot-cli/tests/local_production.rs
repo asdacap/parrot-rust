@@ -748,7 +748,7 @@ fn executable_refuses_incompatible_session_then_starts_fresh_without_changing_ol
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, tables), (3, 13));
+        assert_eq!((version, tables), (4, 11));
         drop(database);
         let requests = fixture.chat_requests();
         assert_eq!(requests.len(), 2);

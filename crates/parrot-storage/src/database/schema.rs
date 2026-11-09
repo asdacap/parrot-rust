@@ -4,7 +4,7 @@ use rusqlite::{OpenFlags, TransactionBehavior, params};
 use std::path::Path;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 #[cfg(test)]
 #[path = "../../tests/database/current_schema_crash.rs"]

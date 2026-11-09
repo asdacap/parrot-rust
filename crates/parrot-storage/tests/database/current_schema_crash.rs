@@ -28,6 +28,82 @@ impl Drop for Reap {
 }
 
 #[test]
+fn initialized_schema_has_no_separate_tool_result_tables() {
+    let workspace = std::env::temp_dir().join(format!(
+        "parrot-schema-results-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let connection = super::open(&workspace.join("session.db")).unwrap();
+    let retained: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name IN ('tool_execution_terminal', 'tool_execution_result_part');",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, 0);
+    drop(connection);
+    std::fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
+fn tool_result_metadata_and_content_survive_owner_deletion_without_duplicate_identity() {
+    let connection = Connection::open_in_memory().unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    connection
+        .execute_batch(include_str!("../../src/database/schema.sql"))
+        .unwrap();
+    connection.execute_batch(
+        "INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at) VALUES(1,'agent','model','assistant','','at');
+         INSERT INTO conversation_item(sequence,agent_session,origin,role,tool_call_id,created_at,tool_owner_sequence,tool_result_name,tool_result_status) VALUES(2,'agent','tool','tool','call','at',1,'shell','finished');
+         INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(2,0,'text','saved result','','','');",
+    ).unwrap();
+    for (name, status, origin, role) in [
+        (None, Some("finished"), "tool", "tool"),
+        (Some("shell"), None, "tool", "tool"),
+        (Some("shell"), Some("finished"), "model", "tool"),
+        (Some("shell"), Some("finished"), "tool", "assistant"),
+    ] {
+        assert!(connection.execute(
+            "INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,tool_result_name,tool_result_status) VALUES('agent',?1,?2,'invalid','at',?3,?4)",
+            rusqlite::params![origin, role, name, status],
+        ).is_err());
+    }
+    connection
+        .execute_batch(
+            "UPDATE conversation_item SET tool_result_status='unknown' WHERE sequence=2;
+         DELETE FROM conversation_item WHERE sequence=1;",
+        )
+        .unwrap();
+    let result = connection.query_row(
+        "SELECT item.tool_owner_sequence,item.tool_result_name,item.tool_result_status,part.text FROM conversation_item AS item JOIN conversation_part AS part ON part.item_sequence=item.sequence WHERE item.sequence=2",
+        [],
+        |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)),
+    ).unwrap();
+    assert_eq!(
+        result,
+        (
+            None,
+            "shell".into(),
+            "unknown".into(),
+            "saved result".into()
+        )
+    );
+    assert!(connection.execute(
+        "INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,tool_result_name,tool_result_status) VALUES('agent','tool','tool','call','at','shell','finished')",
+        [],
+    ).is_err());
+    connection.execute(
+        "INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,tool_result_name,tool_result_status) VALUES('other','tool','tool','call','at','shell','finished')",
+        [],
+    ).unwrap();
+}
+
+#[test]
 #[ignore = "child runner for the initialization process-kill check"]
 fn child() {
     let path = std::env::var_os("PARROT_SCHEMA_INIT_KILL_DB").unwrap();
@@ -96,7 +172,7 @@ fn interrupted_initialization_rolls_back_schema_and_version_then_reopens() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, tables), (3, 13));
+        assert_eq!((version, tables), (4, 11));
         drop(reopened);
     }
     std::fs::remove_dir_all(workspace).unwrap();
@@ -133,7 +209,8 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
     std::fs::create_dir(&workspace).unwrap();
     let payload = vec![b'c'; 32768];
     let cases = vec![
-        (3_i64, std::ffi::OsString::from("session-3.db")),
+        (4_i64, std::ffi::OsString::from("session-4.db")),
+        (3, std::ffi::OsString::from("session-3.db")),
         (2, std::ffi::OsString::from("session-2.db")),
         (1, std::ffi::OsString::from("session-1.db")),
         (0, std::ffi::OsString::from("session-0.db")),
@@ -144,9 +221,9 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         use std::os::unix::ffi::OsStringExt;
 
         let mut cases = cases;
-        cases.push((3, std::ffi::OsString::from("native ?#%2F-é.db")));
+        cases.push((4, std::ffi::OsString::from("native ?#%2F-é.db")));
         cases.push((
-            3,
+            4,
             std::ffi::OsString::from_vec(b"native-\xff?#%.db".to_vec()),
         ));
         cases
@@ -200,7 +277,7 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         let journal_before = std::fs::read(&journal_path).unwrap();
         assert!(journal_before.len() > 100_000);
 
-        if version == 3 {
+        if version == 4 {
             let recovered = super::open(&path).unwrap();
             let retained: i64 = recovered
                 .query_row(

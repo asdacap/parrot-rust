@@ -106,8 +106,7 @@ impl ImageArtifactRepository {
             let mut statement = tx.prepare(&format!(
                 "{ARTIFACT_SELECT} WHERE artifact.created_at < ?1 \
                  AND NOT EXISTS (SELECT 1 FROM input_part WHERE input_part.artifact_id = artifact.artifact_id) \
-                 AND NOT EXISTS (SELECT 1 FROM conversation_part WHERE conversation_part.artifact_id = artifact.artifact_id) \
-                 AND NOT EXISTS (SELECT 1 FROM tool_execution_result_part WHERE tool_execution_result_part.artifact_id = artifact.artifact_id)"
+                 AND NOT EXISTS (SELECT 1 FROM conversation_part WHERE conversation_part.artifact_id = artifact.artifact_id)"
             ))?;
             let mut rows = statement.query([&before])?;
             let mut artifacts = Vec::new();

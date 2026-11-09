@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     role          TEXT NOT NULL,
     kind          TEXT NOT NULL DEFAULT 'message',
     tool_call_id  TEXT NOT NULL,
+    tool_result_name TEXT,
+    tool_result_status TEXT,
     created_at    TEXT NOT NULL,
     final_phase   INTEGER NOT NULL DEFAULT 0,
     context_reminder TEXT CHECK (
@@ -32,6 +34,13 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     provider_id   TEXT NOT NULL DEFAULT '',
     provider_content TEXT NOT NULL DEFAULT '',
     tool_owner_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE SET NULL,
+    CHECK (
+        (tool_result_name IS NULL AND tool_result_status IS NULL)
+        OR (
+            tool_result_name IS NOT NULL AND tool_result_status IS NOT NULL
+            AND origin = 'tool' AND role = 'tool'
+        )
+    ),
     CHECK (
         tool_owner_sequence IS NULL
         OR (
@@ -57,6 +66,10 @@ CREATE INDEX IF NOT EXISTS conversation_context_reminder_by_model
         sequence DESC
     )
     WHERE context_reminder IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS conversation_tool_result
+    ON conversation_item (agent_session, tool_call_id)
+    WHERE tool_result_status IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS conversation_owned_result
     ON conversation_item (agent_session, tool_call_id)
@@ -116,31 +129,6 @@ CREATE TABLE IF NOT EXISTS input_part (
 );
 
 CREATE INDEX IF NOT EXISTS input_part_by_artifact ON input_part (artifact_id);
-
-CREATE TABLE IF NOT EXISTS tool_execution_terminal (
-    sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_session TEXT NOT NULL,
-    tool_call_id  TEXT NOT NULL,
-    tool_name     TEXT NOT NULL,
-    status        TEXT NOT NULL,
-    message       TEXT NOT NULL,
-    created_at    TEXT NOT NULL,
-    UNIQUE (agent_session, tool_call_id)
-);
-
-CREATE TABLE IF NOT EXISTS tool_execution_result_part (
-    terminal_sequence INTEGER NOT NULL REFERENCES tool_execution_terminal(sequence) ON DELETE CASCADE,
-    position          INTEGER NOT NULL CHECK (position >= 0),
-    kind              TEXT NOT NULL,
-    text              TEXT NOT NULL,
-    artifact_id       TEXT NOT NULL,
-    media_type        TEXT NOT NULL,
-    display_name      TEXT NOT NULL,
-    PRIMARY KEY (terminal_sequence, position)
-);
-
-CREATE INDEX IF NOT EXISTS tool_execution_result_part_by_artifact
-    ON tool_execution_result_part (artifact_id);
 
 CREATE TABLE IF NOT EXISTS agent_history (
     sequence              INTEGER PRIMARY KEY AUTOINCREMENT,

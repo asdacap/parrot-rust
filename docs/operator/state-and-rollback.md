@@ -179,11 +179,11 @@ the unresolved production filesystem/security capability.
 
 ## Database formats and fresh startup
 
-New sessions use Parrot database format version `3` in SQLite, with 13 application
+New sessions use Parrot database format version `4` in SQLite, with 11 application
 tables. Tool calls are stored as `tool_call` rows in `conversation_part`, alongside
 text and image parts. Context reminders use the `context_reminder` conversation
 kind. Their checkpoint data stays on the same record. SQLite's internal tables
-are not part of that count. Versions `1` and `2`, existing nonempty unversioned
+are not part of that count. Versions `1`, `2`, and `3`, existing nonempty unversioned
 databases, and unknown format versions are unsupported. The same format check
 applies in both current and legacy filesystem roots.
 
@@ -210,8 +210,10 @@ unsupported. Keep complete session backups and follow the
 
 Durable accounting uses individual recorded facts. Live aggregate usage
 publications remain available, but aggregate SQL usage APIs are retired.
-Explicit image claim and release APIs are also retired. Input, conversation, and
-tool-terminal part references retain their images.
+Explicit image claim and release APIs are also retired. Input and conversation
+part references retain their images. Tool results and their execution status belong
+to conversation records. Their text and image references are stored in conversation
+parts, not separate execution-result tables.
 
 ## Managed task concurrency
 

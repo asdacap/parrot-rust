@@ -471,10 +471,10 @@ async fn each_part_owner_retains_images_until_its_reference_is_deleted() {
             "DELETE FROM conversation_item WHERE agent_session='agent'",
         ),
         (
-            "terminal",
-            "INSERT INTO tool_execution_terminal(agent_session,tool_call_id,tool_name,status,message,created_at) VALUES('agent','call','tool','finished','','at')",
-            "INSERT INTO tool_execution_result_part(terminal_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(last_insert_rowid(),0,'image_artifact','',?1,'image/png','pixel.png')",
-            "DELETE FROM tool_execution_terminal WHERE agent_session='agent'",
+            "tool-result",
+            "INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,tool_result_name,tool_result_status,created_at) VALUES('agent','tool','tool','call','tool','finished','at')",
+            "INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(last_insert_rowid(),0,'image_artifact','',?1,'image/png','pixel.png')",
+            "DELETE FROM conversation_item WHERE agent_session='agent' AND role='tool'",
         ),
     ];
     for (label, insert_owner, insert_part, delete_owner) in cases {
