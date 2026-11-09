@@ -57,9 +57,25 @@ pub fn align_product_text(id: &str, text: &str) -> String {
                 "satisfy the task’s scope and acceptance criteria."
             ),
         ),
-        "context.agent-path-environment" | "context.agent-history" => {
-            ("AGENT_HISTORY_DIR", "AGENT_DIR")
+        "context.agent-path-environment" => {
+            let original = "AGENT_HISTORY_DIR contains this agent's history.jsonl.";
+            assert_eq!(
+                text.matches(original).count(),
+                1,
+                "source text changed: {id}"
+            );
+            return text.replace(
+                original,
+                concat!(
+                    "AGENT_DIR contains this agent's history.jsonl.\n",
+                    "Every agent's output is always available at \"$AGENT_DIR/output.txt\", ",
+                    "including while it runs. A direct subagent's output is at ",
+                    "\"$AGENT_DIR/<subagent-name>/output.txt\"; agent_spawn and agent_status ",
+                    "report its exact path."
+                ),
+            );
         }
+        "context.agent-history" => ("AGENT_HISTORY_DIR", "AGENT_DIR"),
         _ => return text.to_owned(),
     };
     assert_eq!(

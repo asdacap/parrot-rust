@@ -46,7 +46,7 @@ fn actual_selected_resources_render_compressed_environment_and_literal_overrides
             .build(&selection)
             .unwrap();
         let lines: Vec<_> = rendered.lines().collect();
-        assert_eq!(lines.len(), 7);
+        assert_eq!(lines.len(), 8);
         assert_eq!(lines[1], format!("WORKDIR = {}", work.display()));
         assert_eq!(
             lines[2],

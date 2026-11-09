@@ -122,6 +122,7 @@ impl AgentScratchDirectory {
         "scratch",
         "queues",
         "history.jsonl",
+        "output.txt",
         "blobs",
         "plan",
         "last_request.json",

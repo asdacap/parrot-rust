@@ -364,6 +364,23 @@ async fn retained_wait_wakes_from_real_child_completion_and_cleans_child_registr
     let spawned = agent_invoke(&spawn, json!({"name":"adapter-child","agent":"adapter","prompt":"child-wake-marker","fork":"empty"}), &NeverCancelled).await.unwrap();
     assert!(spawned.contains("adapter-child"), "{spawned}");
     let child = root.children().find("adapter-child").unwrap();
+    let output_path = fixture
+        .user()
+        .resources
+        .agents_directory()
+        .join(child.identity().name_path.join("/"))
+        .join("output.txt");
+    let spawned: Value = serde_json::from_str(&spawned).unwrap();
+    assert_eq!(spawned["output"], output_path.to_str().unwrap());
+    assert_eq!(std::fs::read_to_string(&output_path).unwrap(), "");
+    let status = agent_invoke(
+        &agent_tool(&fixture, &root, AgentToolKind::Status),
+        json!({"name":"adapter-child"}),
+        &NeverCancelled,
+    )
+    .await
+    .unwrap();
+    assert!(status.contains(&format!("Live output file: {}", output_path.display())));
     assert!(fixture.user().registry().unwrap().contains(&child));
     assert!(Arc::ptr_eq(&root, &fixture.root()));
     assert!(Arc::ptr_eq(&root, &child.parent_scope().parent().unwrap()));

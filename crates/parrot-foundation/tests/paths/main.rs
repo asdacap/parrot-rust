@@ -503,6 +503,10 @@ fn resource_names_are_contained_and_reserved_names_are_only_for_children() {
     fs::write(&record, "existing request").unwrap();
     assert!(resources.agent_scratch(&["main", "requests"]).is_err());
     assert_eq!(fs::read(&record).unwrap(), b"existing request");
+    let output = agent.root().join("output.txt");
+    fs::write(&output, "live agent output").unwrap();
+    assert!(resources.agent_scratch(&["main", "output.txt"]).is_err());
+    assert_eq!(fs::read(&output).unwrap(), b"live agent output");
     assert!(
         resources
             .owns(&resources.metadata_path(), &fixture.0)

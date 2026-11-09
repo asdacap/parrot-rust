@@ -7,7 +7,7 @@ use parrot_domain::contracts::paths::SelectedSessionRoot;
 
 use super::{Error, ErrorKind, Result, internal_resource};
 
-const OUTPUT_FILE_NAME: &str = "output-arse.dat";
+const OUTPUT_FILE_NAME: &str = "output.txt";
 
 /// UTF-8-without-BOM append stream shared by live readers and a later session handle.
 pub struct AgentOutputFile {

@@ -244,16 +244,16 @@ impl ActiveWorkBlocker for BoundWork {
     }
 }
 
-/// The source output file is a stable append-only `output-arse.dat`, distinct
+/// The source output file is a stable append-only `output.txt`, distinct
 /// from the randomly named spill files. Closing actually flushes and closes it.
 pub struct AgentOutput {
     path: PathBuf,
     file: Arc<Mutex<Option<File>>>,
 }
 impl AgentOutput {
-    pub fn open(blobs: &Path) -> io::Result<Self> {
-        std::fs::create_dir_all(blobs)?;
-        let path = blobs.join("output-arse.dat");
+    pub fn open(agent_directory: &Path) -> io::Result<Self> {
+        std::fs::create_dir_all(agent_directory)?;
+        let path = agent_directory.join("output.txt");
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             path,
@@ -1393,7 +1393,7 @@ where
             let compaction_blobs =
                 CompactionGroupBlobStore::for_session(root, agent_relative, filenames)
                     .map_err(child)?;
-            let output = Arc::new(AgentOutput::open(&scratch.blob_directory()).map_err(io_child)?);
+            let output = Arc::new(AgentOutput::open(scratch.root()).map_err(io_child)?);
             let log = Arc::new(ScopeLog {
                 user: self.user.clone(),
                 session_id: identity.session.session_id.clone(),

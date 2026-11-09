@@ -278,7 +278,7 @@ fn agent_output_is_created_readable_and_reopened_as_append_only_selected_root_fi
     let root_dir = TempDir::new("agent-output");
     let root = root_dir.root();
     let first = AgentOutputFile::for_session(&root, "agents/agent-1").unwrap();
-    let path = root.path().join("agents/agent-1/output-arse.dat");
+    let path = root.path().join("agents/agent-1/output.txt");
     assert_eq!(first.output_path(), path);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     first.append("first turn €").unwrap();

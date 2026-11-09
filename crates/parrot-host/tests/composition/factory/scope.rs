@@ -1219,7 +1219,7 @@ async fn actual_output_appends_to_stable_file_and_close_rejects_later_writes() {
     let output = AgentOutput::open(&root).unwrap();
     output.append("first").await.unwrap();
     output.append(" second").await.unwrap();
-    assert_eq!(output.path(), root.join("output-arse.dat"));
+    assert_eq!(output.path(), root.join("output.txt"));
     assert_eq!(
         std::fs::read_to_string(output.path()).unwrap(),
         "first second"
