@@ -1,11 +1,12 @@
 use super::{ContextCompactionPolicy, ContextSize, ContextSnapshot, PlanningError, TokenEstimator};
 use parrot_core::{
-    ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot as CoreContextSnapshot,
+    ContextConfiguration, ContextModel, ContextSnapshot as CoreContextSnapshot,
+    compaction::{self as core, CompactionConfiguration, CompactionPlan},
 };
 use parrot_domain::values::config::ModelProfiles;
 use parrot_provider::{
     routing::{aliases::ResolvedModelSelection, registry::ProviderModel},
-    sessions::{Content, Message, Role, Tool},
+    sessions::{Content, Message, Tool},
 };
 
 /// Caller-provided committed metadata is kept intact; constructing a group does not commit it.
@@ -18,42 +19,35 @@ pub struct CompactionGroup<'a> {
 }
 
 pub fn is_complete(messages: &[Message]) -> bool {
-    messages.iter().flat_map(|m| &m.tool_calls).all(|call| {
-        messages
-            .iter()
-            .any(|message| message.role == Role::Tool && message.tool_call_id == call.id)
-    })
+    core::is_complete(&messages.iter().cloned().map(Into::into).collect::<Vec<_>>())
 }
 
 pub fn is_eligible_for_spill(group: &CompactionGroup<'_>) -> bool {
-    group.is_complete
-        && group.messages.first().is_some_and(|message| {
-            message.role == Role::Assistant && !message.tool_calls.is_empty()
-        })
+    core::CompactionGroup {
+        messages: group.messages.iter().cloned().map(Into::into).collect(),
+        is_complete: group.is_complete,
+    }
+    .can_spill()
 }
 
 /// As in source Groups: an assistant call owns only the immediately following tool messages.
 /// These synthetic positional watermarks are not repository sequence numbers.
 pub fn group_messages(messages: &[Message]) -> Vec<CompactionGroup<'_>> {
-    let mut groups = Vec::new();
-    let mut start = 0;
-    while start < messages.len() {
-        let mut end = start + 1;
-        if messages[start].role == Role::Assistant && !messages[start].tool_calls.is_empty() {
-            while end < messages.len() && messages[end].role == Role::Tool {
-                end += 1;
+    let converted: Vec<_> = messages.iter().cloned().map(Into::into).collect();
+    let mut offset = 0;
+    core::group_messages(&converted)
+        .into_iter()
+        .map(|group| {
+            let start = offset;
+            offset += group.messages.len();
+            CompactionGroup {
+                messages: &messages[start..offset],
+                end_watermark: group.end_watermark,
+                has_checkpoint_before: group.has_checkpoint_before,
+                is_complete: group.is_complete,
             }
-        }
-        let slice = &messages[start..end];
-        groups.push(CompactionGroup {
-            messages: slice,
-            end_watermark: groups.len() as i64 + 1,
-            has_checkpoint_before: false,
-            is_complete: is_complete(slice),
-        });
-        start = end;
-    }
-    groups
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +72,31 @@ pub struct PlanningInput<'a> {
     pub groups: &'a [CompactionGroup<'a>],
     pub base_watermark: i64,
     pub fixed_message: &'a Message,
+}
+
+impl PlanningInput<'_> {
+    pub(crate) fn capture_input(&self) -> core::CompactionInput {
+        core::CompactionInput {
+            groups: self
+                .groups
+                .iter()
+                .map(|group| core::CompactionHistoryGroup {
+                    messages: group.messages.iter().cloned().map(Into::into).collect(),
+                    end_watermark: group.end_watermark,
+                    has_checkpoint_before: group.has_checkpoint_before,
+                    is_complete: group.is_complete,
+                })
+                .collect(),
+            base_watermark: self.base_watermark,
+            instructions: self.instructions.into(),
+            messages: self
+                .groups
+                .iter()
+                .flat_map(|group| group.messages.iter().cloned().map(Into::into))
+                .collect(),
+            fixed_message: self.fixed_message.clone().into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -192,18 +211,13 @@ impl CompactionPlanner {
         selected: &ResolvedModelSelection,
         target: Option<&ContextSize>,
     ) -> ContextCompactionPolicy {
-        ContextCompactionPolicy::resolve(
-            selected.context_limit(),
-            target,
-            selected.canonical_model.model.context_window,
-            selected.canonical_model.model.input_token_limit(),
-            self.settings.trigger_percent,
-            self.settings.target_percent,
-            selected
-                .canonical_model
-                .model
-                .output_reserved_input_token_limit(),
-        )
+        let policy = self
+            .capture_compaction_configuration(selected, target)
+            .resolve_policy();
+        ContextCompactionPolicy {
+            trigger_tokens: policy.trigger_tokens,
+            target_tokens: policy.target_tokens,
+        }
     }
 
     pub fn estimate_selected_context(
@@ -222,6 +236,43 @@ impl CompactionPlanner {
         )
     }
 
+    pub(crate) fn capture_compaction_configuration(
+        &self,
+        selected: &ResolvedModelSelection,
+        target: Option<&ContextSize>,
+    ) -> CompactionConfiguration {
+        let mut configuration = self.capture_model_configuration(&selected.canonical_model);
+        configuration.context = self.capture_context_configuration(selected);
+        configuration.target = target.map(Into::into);
+        configuration
+    }
+
+    fn capture_model_configuration(&self, selected: &ProviderModel) -> CompactionConfiguration {
+        let profile = self.profiles.resolve(&selected.selector());
+        CompactionConfiguration {
+            context: ContextConfiguration {
+                model: ContextModel {
+                    canonical_model: selected.selector(),
+                    context_window: selected.model.context_window,
+                    maximum_input_tokens: selected.model.max_input_tokens,
+                    maximum_output_tokens: selected.model.max_output_tokens,
+                },
+                trigger_percent: self.settings.trigger_percent,
+                context_limit: None,
+            },
+            target: None,
+            target_percent: self.settings.target_percent,
+            maximum_input_tokens: self.settings.maximum_input_tokens,
+            summary_output_tokens: self.settings.summary_output_tokens,
+            profile_maximum_input_tokens: profile.maximum_input_tokens,
+            profile_summary_output_tokens: profile.summary_output_tokens,
+            model: selected.model.id.clone(),
+            reasoning: selected.reasoning().map(Into::into),
+            summary_instructions: self.settings.summary_instructions.clone(),
+            summary_prefix: self.settings.summary_prefix.clone(),
+        }
+    }
+
     pub(crate) fn capture_context_configuration(
         &self,
         selected: &ResolvedModelSelection,
@@ -234,13 +285,7 @@ impl CompactionPlanner {
                 maximum_output_tokens: selected.canonical_model.model.max_output_tokens,
             },
             trigger_percent: self.settings.trigger_percent,
-            context_limit: selected.context_limit().map(|limit| {
-                if limit.is_percentage() {
-                    ContextLimit::Percentage(limit.value())
-                } else {
-                    ContextLimit::Tokens(limit.value())
-                }
-            }),
+            context_limit: selected.context_limit().map(Into::into),
         }
     }
 
@@ -310,92 +355,49 @@ impl CompactionPlanner {
         target_budget: Option<i64>,
         input: &PlanningInput<'_>,
     ) -> Result<Option<RetentionPlan>, PlanningError> {
-        let Some(mut plan) = self.plan_retention(selected, target_budget, input)? else {
+        let configuration = self.capture_model_configuration(selected);
+        let definitions: Vec<_> = input.tools.iter().cloned().map(Into::into).collect();
+        let Some(plan) = CompactionPlan::select_for_target(
+            &input.capture_input(),
+            &definitions,
+            &configuration,
+            target_budget,
+            |messages| {
+                Self::estimate_tokens(
+                    selected,
+                    &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
+                )
+            },
+            |instructions, definitions, messages| {
+                Self::estimate_input_tokens(
+                    selected,
+                    instructions,
+                    &definitions
+                        .iter()
+                        .cloned()
+                        .map(Into::into)
+                        .collect::<Vec<_>>(),
+                    &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
+                )
+            },
+        )?
+        else {
             return Ok(None);
         };
-        for (index, group) in input.groups[..plan.keep_group_from].iter().enumerate() {
-            if self.estimate_summary_request_tokens(selected, "", 0, group.messages)?
-                > plan.input_budget
-            {
-                if !is_eligible_for_spill(group) {
-                    return Err(PlanningError::GroupExceedsBudget);
-                }
-                plan.spill_groups.push(index);
-            }
-        }
-        Ok(Some(plan))
-    }
-
-    /// Execution validates and persists oversized groups in source order, rather
-    /// than prevalidating later groups before earlier blob side effects.
-    pub(super) fn plan_retention(
-        &self,
-        selected: &ProviderModel,
-        target_budget: Option<i64>,
-        input: &PlanningInput<'_>,
-    ) -> Result<Option<RetentionPlan>, PlanningError> {
-        let groups = input.groups;
-        let Some(target) = target_budget.filter(|_| groups.len() >= 2) else {
-            return Ok(None);
-        };
-        let mut keep = groups.len() - 1;
-        let fixed = Self::estimate_input_tokens(
-            selected,
-            input.instructions,
-            input.tools,
-            std::slice::from_ref(input.fixed_message),
-        )?;
-        let mut suffix = vec![0; groups.len() + 1];
-        for index in (0..groups.len()).rev() {
-            suffix[index] = add(
-                suffix[index + 1],
-                Self::estimate_tokens(selected, groups[index].messages)?,
-            )?;
-        }
-        let estimate = |index: usize| add(add(fixed, suffix[index])?, 1);
-        let natural_exceeds = estimate(keep)? > target;
-        let input_limit = selected.model.input_token_limit();
-        let mut nearest = None;
-        for (index, group) in groups.iter().enumerate() {
-            if group.has_checkpoint_before {
-                let tokens = estimate(index)?;
-                if tokens <= target || (natural_exceeds && tokens <= i64::from(input_limit)) {
-                    let distance = index.abs_diff(keep);
-                    if nearest.is_none_or(|(best_distance, best_index)| {
-                        (distance, index) < (best_distance, best_index)
-                    }) {
-                        nearest = Some((distance, index));
-                    }
-                }
-            }
-        }
-        if let Some((_, index)) = nearest {
-            keep = index;
-        }
-        if let Some(index) = groups[..keep].iter().position(|group| !group.is_complete) {
-            keep = index;
-        }
-        if keep == 0 || groups[keep - 1].end_watermark <= input.base_watermark {
-            return Ok(None);
-        }
-        let profile = self.profiles.resolve(&selected.selector());
-        let input_budget = i64::from(
-            profile
-                .maximum_input_tokens
-                .unwrap_or(self.settings.maximum_input_tokens)
-                .min(input_limit),
-        );
-        if input_budget <= 0 {
-            return Err(PlanningError::NoCompactionCapacity);
-        }
+        let spill_groups = plan.select_spill_groups(|preceding, tokens, messages| {
+            self.estimate_summary_request_tokens(
+                selected,
+                preceding,
+                tokens,
+                &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
+            )
+        })?;
         Ok(Some(RetentionPlan {
-            keep_group_from: keep,
-            watermark: groups[keep - 1].end_watermark,
-            input_budget,
-            summary_output_tokens: profile
-                .summary_output_tokens
-                .unwrap_or(self.settings.summary_output_tokens),
-            spill_groups: Vec::new(),
+            keep_group_from: plan.keep_group_from,
+            watermark: plan.watermark,
+            input_budget: plan.input_budget,
+            summary_output_tokens: plan.summary_output_tokens,
+            spill_groups,
         }))
     }
 }

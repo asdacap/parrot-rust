@@ -58,6 +58,18 @@ pub struct CompactionSnapshot {
     pub watermark: i64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationHistorySnapshot {
+    pub snapshot: Option<CompactionSnapshot>,
+    pub items: Vec<ConversationHistoryItem>,
+    pub checkpoint_sequences: Vec<i64>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationHistoryItem {
+    pub item: ConversationItem,
+    pub tool_owner_sequence: Option<i64>,
+    pub is_compaction_status: bool,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactionContext {
     pub snapshot: CompactionSnapshot,
     pub status: Option<ConversationItem>,

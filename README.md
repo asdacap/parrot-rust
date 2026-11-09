@@ -39,10 +39,18 @@ Its turn contracts are:
 - `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
 - `Provider`: model invocation and awaited stream cleanup.
 
-Compaction uses two additional contracts: `CompactionEffects` supplies model-aware
-estimates, actual blob notices, and awaited progress; `SummaryProvider` invokes
-private summary requests and joins their streams. Its typed summary/no-summary
-outcome preserves diagnostics without exposing provider stream representations.
+Turn calls borrow request preparation and compaction services together through
+`PreparationDependencies`. Compaction receives configuration and native effects
+through `CompactionDependencies`.
+Core samples instructions, assembles durable conversation groups, computes target
+limits, selects the safe prefix, runs summaries, and fits the actual replacement
+status. `CompactionPreparationEffects` supplies prompt sampling, instruction
+rendering, and preparation lifecycle publication. `CompactionEffects` supplies
+model-aware estimates, actual blob notices, and awaited progress. `StatusRenderer`
+renders the context supplied by core without making fitting decisions.
+`SummaryProvider` invokes private summary requests and joins their streams. Its
+typed summary outcome preserves diagnostics without exposing provider stream
+representations.
 
 Requests, responses, tool execution results, messages, tool definitions, and errors
 are concrete core-owned types. Adapters implement the same interface; they do not
@@ -77,13 +85,31 @@ The core specifies and implements:
   composition, and skill-context size limits.
 
 For core-selected automatic compaction and oversized recovery,
-`States::prepare_compaction` returns a safe-prefix plan and explicitly scoped
-compaction-effect/provider adapters, not a ready provider request. Core constructs
-and invokes the summary requests, then awaits `record_compaction` on success or
-failure before continuing or propagating the error. Settlement returns refreshed
-instructions and whether context was reduced. Native state owns lifecycle events,
-summary/watermark persistence, status fitting, and conversation reload. Inline and
-explicit native paths retain that same boundary around the shared core algorithm.
+`States::read_conversation_state` returns one raw summary and its durable tail,
+stored tool ownership, active checkpoint sequences, and current in-memory messages.
+The durable facts are captured in one transaction. The tail starts after the
+summary watermark, not at the beginning of the archive. Current messages remain
+separate because they can include transient notices.
+
+Core's `prepare_compaction` samples instructions, excludes old compaction-status
+rows, assembles causal groups from stored ownership, derives completeness and
+checkpoint flags, and renders initial status from the current-message estimate.
+The state getter performs no preparation or lifecycle effects and retains no
+pending compaction. Runtime composition supplies configuration and native effects
+independently. Core's `compact_conversation` selects the plan, runs summaries, and
+fits replacement status. State records that outcome with the explicitly supplied
+instructions and tool definitions. After a successful start, preparation failures
+publish failure before returning without recording. Native state retains summary
+and watermark persistence, conversation reload, and terminal publication. Inline
+and explicit native paths
+use the same core preparation and compaction implementation.
+
+Core owns checkpoint selection, incomplete-group protection, watermark progress,
+and final context validation. Status fitting compares complete context snapshots
+and permits at most eight rerenders after the initial rendering. Native planning
+and status conveniences delegate to these core computations. The automatic runtime
+adapter awaits blob publication and locks state only for the spill. It retains no
+state guard during summaries or status rendering.
 
 `States` exposes the latest visible conversation segment and its result, not a
 precomputed work flag. A no-tool assistant candidate can be present while durable
@@ -156,7 +182,7 @@ catalog preparation restores that context after capturing executable snapshots
 and before input promotion, without a separate core state operation.
 
 `parrot-runtime` implements the turn and compaction contracts with private adapters.
-Persistence, prompt rendering, compaction planning and token estimates, blobs,
+Persistence, prompt rendering, configuration capture, native token estimates, blobs,
 security, streaming, accounting, cancellation, events, and session lifecycle stay
 outside the core. Provider representations are translated losslessly at the
 interface, including raw provider extensions and multimodal content. Runtime

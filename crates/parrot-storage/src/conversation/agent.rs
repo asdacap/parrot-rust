@@ -312,6 +312,11 @@ impl AgentHistoryView {
             .active_checkpoint_assistant_sequences(self.agent.clone())
             .await
     }
+    pub async fn read_conversation_state(&self) -> Result<ConversationHistorySnapshot, EventError> {
+        self.repository
+            .read_conversation_state(self.agent.clone())
+            .await
+    }
     pub async fn effective_conversation_groups(
         &self,
     ) -> Result<EffectiveConversationHistory, EventError> {

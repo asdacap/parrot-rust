@@ -5,15 +5,22 @@ pub mod compaction;
 mod context;
 mod protocol;
 mod skills;
+use compaction::CompactionDependencies;
 pub use context::*;
 pub use protocol::*;
 pub use skills::{SkillMention, parse_skill_mentions};
+
+/// Borrows request preparation and independently configured compaction services.
+pub struct PreparationDependencies<'a, 'c> {
+    pub request: &'a mut dyn Preparation,
+    pub compaction: &'a mut CompactionDependencies<'c>,
+}
 
 /// Runs admission, response validation, retry, and completion using the caller-owned budget.
 /// The supplied settings apply to every execution turn drained by this call.
 pub async fn run<'a>(
     states: &mut dyn States,
-    preparation: &mut dyn Preparation,
+    preparation: &mut PreparationDependencies<'_, '_>,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
     options: &TurnOptions,
@@ -51,7 +58,7 @@ pub async fn run<'a>(
 /// Runs one active execution turn using supplied settings and tools captured once.
 pub async fn run_turn<'a>(
     states: &mut dyn States,
-    preparation: &mut dyn Preparation,
+    preparation: &mut PreparationDependencies<'_, '_>,
     tools: &'a dyn Tools,
     provider: &dyn Provider,
     options: &TurnOptions,
@@ -77,7 +84,7 @@ pub async fn run_turn<'a>(
         };
         let inputs = states.promote_input(admission).await?;
         let context = skills
-            .prepare(states, preparation, &inputs, cancellation)
+            .prepare(states, preparation.request, &inputs, cancellation)
             .await?;
         states.record_input_context(&context).await?;
         let Some(flags) = budget.admit(options.maximum_requests) else {
@@ -102,9 +109,14 @@ pub async fn run_turn<'a>(
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(states, definitions, cancellation)
-                    .await?
-                    .reduced
+                if !context::compact_context(
+                    states,
+                    preparation.compaction,
+                    definitions,
+                    cancellation,
+                )
+                .await?
+                .reduced
                 {
                     return Err(error);
                 }

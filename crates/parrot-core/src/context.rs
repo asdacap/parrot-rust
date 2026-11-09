@@ -11,7 +11,7 @@ pub enum ContextLimit {
 }
 
 impl ContextLimit {
-    fn resolve_tokens(&self, context_window: i32) -> Option<i64> {
+    pub fn resolve_tokens(&self, context_window: i32) -> Option<i64> {
         match self {
             Self::Tokens(tokens) => Some(*tokens),
             Self::Percentage(percentage) => {

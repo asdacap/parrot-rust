@@ -241,12 +241,15 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled)
+            CancellationToken::new(&is_cancelled, &cancelled),
         )),
         Err(Error::failed("completion_feedback"))
     );
@@ -287,12 +290,15 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled)
+            CancellationToken::new(&is_cancelled, &cancelled),
         )),
         Err(Error::failed("exit_blockers"))
     );

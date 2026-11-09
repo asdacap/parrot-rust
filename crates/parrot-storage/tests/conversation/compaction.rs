@@ -545,6 +545,9 @@ async fn final_request_state_survives_later_messages_and_reopen_without_duplicat
     let messages = repo.conversation("agent".into()).await.unwrap();
     assert_eq!(messages.len(), 5);
     assert!(messages.iter().all(|item| item.final_phase));
+    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    assert_eq!(state.items.len(), 5);
+    assert!(state.items.iter().all(|item| item.item.final_phase));
     repo.events().database().close().await.unwrap();
 
     let reopened = fixture.repository();

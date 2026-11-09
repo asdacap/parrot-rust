@@ -142,7 +142,7 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     prompt: SessionPrompt,
     conversation: ConversationReadView,
     materialized_tools: std::sync::Mutex<Option<T::Snapshot>>,
-    planner: Arc<crate::compaction::CompactionPlanner>,
+    compactor: crate::compaction::Compactor,
     notices: Notices,
     execution_activity: std::sync::Mutex<Option<i64>>,
 }
@@ -228,7 +228,7 @@ where
             prompt: SessionPrompt::new(config.prompt),
             conversation: conversation.read_view(),
             materialized_tools: std::sync::Mutex::new(None),
-            planner: config.context.compactor().planner_handle(),
+            compactor: config.context.compactor().clone(),
             state: Mutex::new(State {
                 conversation,
                 tool_conversation,
@@ -266,7 +266,8 @@ where
                     .iter()
                     .map(provider_message)
                     .collect::<Vec<_>>();
-                self.planner
+                self.compactor
+                    .planner()
                     .estimate_selected_context(&selection.model, instructions, &tools, &messages)
                     .map_err(TurnError::Planning)
             })

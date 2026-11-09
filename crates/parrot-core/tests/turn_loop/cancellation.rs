@@ -172,16 +172,22 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     let mut context = Context::from_waker(&waker);
     let options = state.capture_options();
     let mut budget = TurnBudget::new(state.unlimited);
+    let mut compaction = MemoryCompaction::default();
+    let mut dependencies = compaction.dependencies();
     let result = {
         let mut preparation = state.preparation();
+        let mut preparation_dependencies = parrot_core::PreparationDependencies {
+            request: &mut preparation,
+            compaction: &mut dependencies,
+        };
         let mut running = std::pin::pin!(run(
             &mut state,
-            &mut preparation,
+            &mut preparation_dependencies,
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         ));
         assert!(running.as_mut().poll(&mut context).is_pending());
         assert!(tools.admitted.load(Ordering::SeqCst));

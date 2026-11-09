@@ -22,6 +22,8 @@ use std::{
 
 #[path = "turn_loop/cancellation.rs"]
 mod cancellation;
+#[path = "turn_loop/compaction_dependencies.rs"]
+mod compaction_dependencies;
 #[path = "turn_loop/completion_policy.rs"]
 mod completion_policy;
 #[path = "turn_loop/context_preparation.rs"]
@@ -39,6 +41,7 @@ mod turn_state;
 mod compaction_support;
 
 use cancellation::CancellationSource;
+use compaction_dependencies::MemoryCompaction;
 
 struct ThreadWake(thread::Thread);
 impl Wake for ThreadWake {
@@ -310,6 +313,7 @@ struct MemoryState {
     compaction_plan: Option<parrot_core::compaction::CompactionPlan>,
     summary_provider: compaction_support::Provider,
     recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
+    fitted_statuses: Vec<String>,
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
@@ -423,6 +427,7 @@ impl MemoryState {
             compaction_plan: None,
             summary_provider: compaction_support::Provider::new([]),
             recorded_compactions: Vec::new(),
+            fitted_statuses: Vec::new(),
             fail_at: None,
         };
         state.enqueue_message(Delivery::Queue, "question");
@@ -536,6 +541,24 @@ impl MemoryState {
         self.run_with(&tools, &provider)
     }
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
+        let mut compaction =
+            MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
+        self.run_with_dependencies(tools, provider, &mut compaction.dependencies())
+    }
+    fn run_with_compaction(
+        &mut self,
+        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
+    ) -> Result<Outcome, Error> {
+        let tools = self.tools.clone();
+        let provider = self.provider.clone();
+        self.run_with_dependencies(&tools, &provider, compaction)
+    }
+    fn run_with_dependencies(
+        &mut self,
+        tools: &dyn Tools,
+        provider: &dyn Provider,
+        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
+    ) -> Result<Outcome, Error> {
         let cancellation = self.cancellation.clone();
         let is_cancelled = || cancellation.is_cancelled();
         let cancelled = || cancellation.cancelled();
@@ -544,7 +567,10 @@ impl MemoryState {
         let mut preparation = self.preparation();
         finish(run(
             self,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction,
+            },
             tools,
             provider,
             &options,
@@ -897,28 +923,65 @@ impl States for MemoryState {
             Ok(self.request().messages.clone())
         })
     }
-    fn prepare_compaction<'a>(
-        &'a mut self,
-        definitions: &'a [ToolDefinition],
-    ) -> BoxFuture<'a, Result<parrot_core::compaction::PreparedCompaction<'a>, Error>> {
+    fn read_conversation_state(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, Error>> {
         Box::pin(async move {
-            self.step("prepare_compaction")?;
-            self.compacted_definitions.push(definitions.to_vec());
-            Ok(parrot_core::compaction::PreparedCompaction {
-                plan: self.compaction_plan.clone(),
-                effects: Box::new(compaction_support::Effects::default()),
-                provider: Box::new(self.summary_provider.clone()),
+            self.trace.step("conversation_state", self.fail_at)?;
+            let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
+                (
+                    plan.groups
+                        .iter()
+                        .flat_map(|group| group.messages.clone())
+                        .collect::<Vec<_>>(),
+                    plan.watermark - plan.keep_group_from as i64 + 1,
+                )
+            } else {
+                (self.request().messages.clone(), 1)
+            };
+            let mut owners = std::collections::BTreeMap::new();
+            let history = messages
+                .into_iter()
+                .enumerate()
+                .map(|(index, message)| {
+                    let sequence = first_sequence + index as i64;
+                    let tool_owner_sequence = owners.get(&message.tool_call_id).copied();
+                    for call in &message.tool_calls {
+                        owners.insert(call.id.clone(), sequence);
+                    }
+                    parrot_core::compaction::ConversationHistoryItem {
+                        sequence,
+                        tool_owner_sequence,
+                        is_compaction_status: false,
+                        message,
+                    }
+                })
+                .collect();
+            Ok(parrot_core::compaction::ConversationState {
+                history,
+                messages: self.request().messages.clone(),
+                ..Default::default()
             })
         })
     }
-    fn record_compaction(
-        &mut self,
-        result: Result<Option<parrot_core::compaction::CompactionResult>, Error>,
-    ) -> BoxFuture<'_, Result<ContextCompaction, Error>> {
+    fn record_compaction<'a>(
+        &'a mut self,
+        instructions: &'a str,
+        definitions: &'a [ToolDefinition],
+        result: Result<Option<parrot_core::compaction::FittedCompaction>, Error>,
+    ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async move {
             self.step("compact")?;
-            self.recorded_compactions.push(result.clone());
-            result?;
+            self.compacted_definitions.push(definitions.to_vec());
+            self.request().instructions = instructions.into();
+            self.recorded_compactions.push(
+                result
+                    .clone()
+                    .map(|result| result.map(|fitted| fitted.result)),
+            );
+            if let Some(fitted) = result? {
+                self.fitted_statuses.push(fitted.status);
+            }
             if let Some(compacted) = self.compactions.pop_front() {
                 self.request().instructions = compacted.instructions;
                 self.request().messages = compacted.messages;
@@ -1142,7 +1205,10 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         assert_eq!(
             finish(run(
                 &mut state,
-                &mut preparation,
+                &mut parrot_core::PreparationDependencies {
+                    request: &mut preparation,
+                    compaction: &mut MemoryCompaction::default().dependencies(),
+                },
                 &tools,
                 &provider,
                 &options,
@@ -1422,12 +1488,15 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("first answer".into()))
     );
@@ -1459,12 +1528,15 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("second answer".into()))
     );
@@ -1492,12 +1564,15 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(
         finish(run(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed(String::new()))
     );
@@ -1527,7 +1602,10 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,

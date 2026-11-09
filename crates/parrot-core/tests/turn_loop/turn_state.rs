@@ -136,12 +136,15 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("first answer".into()))
     );
@@ -152,12 +155,15 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed("second answer".into()))
     );
@@ -169,12 +175,15 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert_eq!(
         finish(run(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
             &mut budget,
-            token
+            token,
         )),
         Ok(Outcome::Completed(String::new()))
     );
@@ -235,7 +244,10 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
@@ -273,7 +285,10 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut preparation,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut MemoryCompaction::default().dependencies(),
+            },
             &tools,
             &provider,
             &options,
