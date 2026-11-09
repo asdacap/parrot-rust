@@ -158,10 +158,7 @@ async fn image_result_uses_bound_actual_filename_and_real_repository_preserves_o
             .as_ref(),
         Some(artifact)
     );
-    let expected_path = fixture
-        .path
-        .join("artifacts")
-        .join(format!("{}.png", artifact.artifact_id));
+    let expected_path = fixture.path.join("artifacts").join(&artifact.artifact_id);
     assert_eq!(
         fixture
             .repository
