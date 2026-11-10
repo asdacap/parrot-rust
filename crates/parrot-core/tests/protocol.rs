@@ -33,15 +33,7 @@ impl States for UnavailableState {
 
 struct UnavailableProvider;
 
-impl Provider for UnavailableProvider {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+impl Provider for UnavailableProvider {}
 
 #[test]
 fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_results() {
@@ -65,7 +57,11 @@ fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_res
 #[test]
 fn unsupported_provider_operations_never_return_a_fake_response_or_token_count() {
     let provider = UnavailableProvider;
-    let invocation = finish(provider.invoke(ProviderRequest::default())).unwrap_err();
+    let invocation = finish(provider.invoke(
+        ProviderRequest::default(),
+        parrot_core::CancellationToken::uncancelled(),
+    ))
+    .unwrap_err();
     assert_eq!(invocation.code, ErrorCode::InvalidOperation);
     assert!(invocation.message.contains("invoke"));
     let estimate = provider

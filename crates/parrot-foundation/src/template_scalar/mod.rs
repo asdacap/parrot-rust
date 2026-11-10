@@ -2,9 +2,7 @@
 
 use crate::config::{ConfigError, Result};
 use parrot_core::{CancellationToken, Error, ErrorKind};
-use parrot_domain::contracts::async_ops::{
-    BoxFuture, Cancellation, OperationError, OperationResult,
-};
+use parrot_domain::contracts::async_ops::{Cancellation, OperationError, OperationResult};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,9 +20,8 @@ impl ScalarPromptTemplateEngine {
         arguments: &BTreeMap<String, String>,
         cancellation: &dyn Cancellation,
     ) -> OperationResult<String, ConfigError> {
-        let source = NativeCancellation(cancellation);
         self.0
-            .render(arguments, CancellationToken::from_provider(&source))
+            .render(arguments, CancellationToken::new(cancellation))
             .map_err(translate_error)
     }
 }
@@ -44,17 +41,5 @@ pub(crate) fn translate_error(error: Error) -> OperationError<ConfigError> {
         OperationError::Cancelled
     } else {
         OperationError::Failed(ConfigError::invalid_data(error.message))
-    }
-}
-
-pub(crate) struct NativeCancellation<'a>(pub(crate) &'a dyn Cancellation);
-
-impl parrot_core::Provider for NativeCancellation<'_> {
-    fn is_cancelled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.0.cancelled()
     }
 }
