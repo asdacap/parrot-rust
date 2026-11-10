@@ -1,11 +1,23 @@
 use super::{
-    CompactionConfiguration, CompactionEffects, CompactionFailure, CompactionInput, CompactionPlan,
-    CompactionResult, FittedCompaction, PlanningError, StatusRenderer, SummaryProvider, compact,
+    CompactionConfiguration, CompactionFailure, CompactionInput, CompactionPlan, CompactionResult,
+    FittedCompaction, compact,
 };
-use crate::{CancellationToken, Content, ContextSnapshot, Message, Role, ToolDefinition};
+use crate::{
+    CancellationToken, Content, ContextSnapshot, Error, Message, Provider, Role, States,
+    ToolDefinition,
+};
 use std::future::Future;
 
-pub async fn fit_status<S, E, F>(
+pub async fn fit_status(states: &dyn States, provider: &dyn Provider) -> Result<String, Error> {
+    let cancellation = CancellationToken::from_provider(provider);
+    fit_status_with(
+        |content| provider.estimate_status_context(content),
+        |context| states.render_status(context, cancellation),
+    )
+    .await
+}
+
+async fn fit_status_with<S, E, F>(
     mut estimate: impl FnMut(&str) -> Result<S, E>,
     mut render: impl FnMut(S) -> F,
 ) -> Result<String, E>
@@ -26,19 +38,19 @@ where
     Ok(content)
 }
 
-pub async fn fit_compaction<E: From<CompactionFailure> + Send>(
+pub async fn fit_compaction(
     input: &CompactionInput,
     definitions: &[ToolDefinition],
     configuration: &CompactionConfiguration,
     result: Option<CompactionResult>,
-    effects: &dyn CompactionEffects<Error = E>,
-    status: &dyn StatusRenderer<Error = E>,
-    cancellation: CancellationToken<'_>,
-) -> Result<Option<FittedCompaction>, E> {
+    states: &dyn States,
+    provider: &dyn Provider,
+) -> Result<Option<FittedCompaction>, Error> {
+    let cancellation = CancellationToken::from_provider(provider);
     let result = result.filter(|result| result.watermark > input.base_watermark);
     let Some(result) = result else {
         let tokens =
-            effects.estimate_context_tokens(&input.instructions, definitions, &input.messages)?;
+            provider.estimate_input_tokens(&input.instructions, definitions, &input.messages)?;
         if tokens > i64::from(configuration.context.model.calculate_input_limit()) {
             return Err(CompactionFailure::NoSafeBoundary.into());
         }
@@ -58,10 +70,13 @@ pub async fn fit_compaction<E: From<CompactionFailure> + Send>(
         {
             *status = message;
         }
-        let tokens = effects.estimate_context_tokens(&input.instructions, definitions, &history)?;
+        let tokens = provider.estimate_input_tokens(&input.instructions, definitions, &history)?;
         Ok(ContextSnapshot::estimate(tokens, &configuration.context))
     };
-    let fitted = fit_status(estimate, |context| status.render(context, cancellation)).await?;
+    let fitted = fit_status_with(estimate, |context| {
+        states.render_status(context, cancellation)
+    })
+    .await?;
     if estimate(&fitted)?.exceeds_input_limit() {
         return Err(CompactionFailure::FittedInputLimitExceeded.into());
     }
@@ -71,36 +86,14 @@ pub async fn fit_compaction<E: From<CompactionFailure> + Send>(
     }))
 }
 
-pub async fn compact_conversation<E>(
+pub async fn compact_conversation(
     input: &CompactionInput,
     definitions: &[ToolDefinition],
     configuration: &CompactionConfiguration,
-    effects: &mut dyn CompactionEffects<Error = E>,
-    provider: &dyn SummaryProvider<Error = E>,
-    status: &dyn StatusRenderer<Error = E>,
-    cancellation: CancellationToken<'_>,
-) -> Result<Option<FittedCompaction>, E>
-where
-    E: From<PlanningError> + From<CompactionFailure> + Send,
-{
-    let plan = CompactionPlan::select(
-        input,
-        definitions,
-        configuration,
-        |messages| effects.estimate_tokens(messages),
-        |instructions, definitions, messages| {
-            effects.estimate_context_tokens(instructions, definitions, messages)
-        },
-    )?;
-    let result = compact(plan, effects, provider, cancellation).await?;
-    fit_compaction(
-        input,
-        definitions,
-        configuration,
-        result,
-        effects,
-        status,
-        cancellation,
-    )
-    .await
+    states: &mut dyn States,
+    provider: &dyn Provider,
+) -> Result<Option<FittedCompaction>, Error> {
+    let plan = CompactionPlan::select(input, definitions, configuration, provider)?;
+    let result = compact(plan, states, provider).await?;
+    fit_compaction(input, definitions, configuration, result, states, provider).await
 }

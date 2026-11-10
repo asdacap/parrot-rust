@@ -3,23 +3,21 @@
 //! Descriptor and argument order are retained. Inputs are owned JSON values, not
 //! host objects or engine values; scalar insertion accepts actual strings only.
 use crate::config::{ConfigError, Configuration, Result, templates::TemplateSpec};
-use crate::template_minijinja::MiniJinjaPromptTemplateEngine;
-use crate::template_scalar::{ScalarPromptTemplateEngine, validate_arguments};
+use crate::template_scalar::{NativeCancellation, translate_error};
+use parrot_core::{CancellationToken, PromptTemplate};
 use parrot_domain::contracts::async_ops::{Cancellation, OperationError, OperationResult};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::Arc;
 
-enum Engine {
-    Scalar(ScalarPromptTemplateEngine),
-    MiniJinja(MiniJinjaPromptTemplateEngine),
-}
+#[cfg(test)]
+mod tests;
 
 struct Template {
     id: String,
     spec: TemplateSpec,
-    allowed: BTreeSet<String>,
-    engine: Engine,
+    compiled: Arc<PromptTemplate>,
 }
 
 impl Template {
@@ -27,28 +25,18 @@ impl Template {
         let id = spec.path.strip_prefix("prompt_templates.").ok_or_else(|| {
             ConfigError::invalid_data(format!("{} must be a prompt template path", spec.path))
         })?;
-        let allowed = spec.allowed.iter().cloned().collect();
-        let engine = match spec.engine.as_str() {
-            "scalar" => Engine::Scalar(ScalarPromptTemplateEngine::compile(
-                &spec.path, &spec.text, &allowed,
-            )?),
-            "minijinja" => Engine::MiniJinja(MiniJinjaPromptTemplateEngine::compile(
-                &spec.path, &spec.text,
-            )?),
-            _ => {
-                // The config reader owns discriminator diagnostics, including the
-                // explicit manual-migration error for historical Scriban input.
-                return Err(ConfigError::invalid_data(format!(
-                    "{}.engine must be scalar or minijinja",
-                    spec.path
-                )));
-            }
-        };
+        let compiled = PromptTemplate::compile(
+            &spec.path,
+            &spec.text,
+            &spec.engine,
+            &spec.allowed,
+            &spec.required,
+        )
+        .map_err(|error| ConfigError::invalid_data(error.message))?;
         Ok(Self {
             id: id.to_owned(),
             spec: spec.clone(),
-            allowed,
-            engine,
+            compiled: Arc::new(compiled),
         })
     }
 }
@@ -137,14 +125,12 @@ impl PromptTemplateCatalog {
         arguments: &[(String, Value)],
         cancellation: &dyn Cancellation,
     ) -> OperationResult<String, ConfigError> {
-        cancellation
-            .check()
-            .map_err(|_| OperationError::Cancelled)?;
-        let names: Vec<_> = arguments.iter().map(|(name, _)| name.clone()).collect();
         let Some(index) = self.indices.get(id) else {
-            // Source list-based Render detects duplicates before looking up the ID.
+            cancellation
+                .check()
+                .map_err(|_| OperationError::Cancelled)?;
             let mut seen = BTreeSet::new();
-            for name in &names {
+            for (name, _) in arguments {
                 if !seen.insert(name) {
                     return Err(OperationError::Failed(ConfigError::invalid_data(format!(
                         "prompt_templates.{id} received duplicate argument '{name}'"
@@ -155,32 +141,19 @@ impl PromptTemplateCatalog {
                 "prompt_templates.{id} is not defined"
             ))));
         };
-        let template = &self.templates[*index];
-        validate_arguments(
-            &template.spec.path,
-            &template.allowed,
-            &template.spec.required,
-            &names,
-        )
-        .map_err(OperationError::Failed)?;
-        cancellation
-            .check()
-            .map_err(|_| OperationError::Cancelled)?;
-        match &template.engine {
-            Engine::Scalar(engine) => {
-                let values = arguments
-                    .iter()
-                    .filter_map(|(name, value)| {
-                        value.as_str().map(|value| (name.clone(), value.to_owned()))
-                    })
-                    .collect();
-                engine.render(&values, cancellation)
-            }
-            Engine::MiniJinja(engine) => {
-                let values: Map<String, Value> = arguments.iter().cloned().collect();
-                engine.render(&values, cancellation)
-            }
-        }
+        let source = NativeCancellation(cancellation);
+        self.templates[*index]
+            .compiled
+            .render(arguments, CancellationToken::from_provider(&source))
+            .map_err(translate_error)
+    }
+
+    /// Shares a compiled template without revalidating or rendering its inputs.
+    pub fn get_template(&self, id: &str) -> Result<Arc<PromptTemplate>> {
+        let index = self.indices.get(id).ok_or_else(|| {
+            ConfigError::invalid_data(format!("prompt_templates.{id} is not defined"))
+        })?;
+        Ok(self.templates[*index].compiled.clone())
     }
 
     pub fn render_skills(

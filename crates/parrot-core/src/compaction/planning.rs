@@ -1,17 +1,8 @@
 use super::{CompactionGroup, CompactionHistoryGroup, CompactionInput, CompactionPlan};
-use crate::{
-    ContextConfiguration, ContextLimit, Error, ErrorCode, Message, Reasoning, Role, ToolDefinition,
-};
+pub use crate::CompactionConfiguration;
+pub use crate::PlanningError;
+use crate::{ContextLimit, Error, ErrorCode, ErrorDetail, Message, Provider, Role, ToolDefinition};
 use std::fmt;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PlanningError {
-    InputLimitExceeded,
-    NoOutputCapacity,
-    NoCompactionCapacity,
-    GroupExceedsBudget,
-    TokenOverflow,
-}
 
 impl fmt::Display for PlanningError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -41,24 +32,10 @@ impl From<PlanningError> for Error {
             } else {
                 ErrorCode::InvalidOperation
             },
+            detail: Some(ErrorDetail::Planning(error)),
             ..Self::failed(error.to_string())
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompactionConfiguration {
-    pub context: ContextConfiguration,
-    pub target: Option<ContextLimit>,
-    pub target_percent: i32,
-    pub maximum_input_tokens: i32,
-    pub summary_output_tokens: i32,
-    pub profile_maximum_input_tokens: Option<i32>,
-    pub profile_summary_output_tokens: Option<i32>,
-    pub model: String,
-    pub reasoning: Option<Reasoning>,
-    pub summary_instructions: String,
-    pub summary_prefix: String,
 }
 
 impl CompactionConfiguration {
@@ -127,43 +104,40 @@ fn cap_tokens(tokens: Option<i64>, input_limit: i32) -> Option<i64> {
     }
 }
 
-fn add<E: From<PlanningError>>(left: i64, right: i64) -> Result<i64, E> {
+fn add(left: i64, right: i64) -> Result<i64, Error> {
     left.checked_add(right)
         .ok_or_else(|| PlanningError::TokenOverflow.into())
 }
 
 impl CompactionPlan {
-    pub fn select<E: From<PlanningError>>(
+    pub fn select(
         input: &CompactionInput,
         definitions: &[ToolDefinition],
         configuration: &CompactionConfiguration,
-        estimate_messages: impl Fn(&[Message]) -> Result<i64, E>,
-        estimate_context: impl Fn(&str, &[ToolDefinition], &[Message]) -> Result<i64, E>,
-    ) -> Result<Option<Self>, E> {
+        provider: &dyn Provider,
+    ) -> Result<Option<Self>, Error> {
         Self::select_for_target(
             input,
             definitions,
             configuration,
             configuration.resolve_policy().target_tokens,
-            estimate_messages,
-            estimate_context,
+            provider,
         )
     }
 
-    pub fn select_for_target<E: From<PlanningError>>(
+    pub fn select_for_target(
         input: &CompactionInput,
         definitions: &[ToolDefinition],
         configuration: &CompactionConfiguration,
         target_tokens: Option<i64>,
-        estimate_messages: impl Fn(&[Message]) -> Result<i64, E>,
-        estimate_context: impl Fn(&str, &[ToolDefinition], &[Message]) -> Result<i64, E>,
-    ) -> Result<Option<Self>, E> {
+        provider: &dyn Provider,
+    ) -> Result<Option<Self>, Error> {
         let groups = &input.groups;
         let Some(target) = target_tokens.filter(|_| groups.len() >= 2) else {
             return Ok(None);
         };
         let mut keep = groups.len() - 1;
-        let fixed = estimate_context(
+        let fixed = provider.estimate_input_tokens(
             &input.instructions,
             definitions,
             std::slice::from_ref(&input.fixed_message),
@@ -172,7 +146,7 @@ impl CompactionPlan {
         for index in (0..groups.len()).rev() {
             suffix[index] = add(
                 suffix[index + 1],
-                estimate_messages(&groups[index].messages)?,
+                provider.estimate_tokens(&groups[index].messages)?,
             )?;
         }
         let estimate = |index: usize| add(add(fixed, suffix[index])?, 1);
@@ -235,13 +209,10 @@ impl CompactionPlan {
         }))
     }
 
-    pub fn select_spill_groups<E: From<PlanningError>>(
-        &self,
-        estimate_summary: impl Fn(&str, i64, &[Message]) -> Result<i64, E>,
-    ) -> Result<Vec<usize>, E> {
+    pub fn select_spill_groups(&self, provider: &dyn Provider) -> Result<Vec<usize>, Error> {
         let mut spill_groups = Vec::new();
         for (index, group) in self.groups[..self.keep_group_from].iter().enumerate() {
-            if estimate_summary("", 0, &group.messages)? > self.input_budget {
+            if provider.estimate_summary_tokens("", 0, &group.messages)? > self.input_budget {
                 if !group.can_spill() {
                     return Err(PlanningError::GroupExceedsBudget.into());
                 }

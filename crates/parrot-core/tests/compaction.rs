@@ -42,14 +42,8 @@ fn run(
     effects: &mut Effects,
     provider: &Provider,
 ) -> Result<Option<parrot_core::compaction::CompactionResult>, Error> {
-    let is_cancelled = || false;
-    let cancelled = || Box::pin(std::future::pending()) as parrot_core::BoxFuture<'_, ()>;
-    finish(compact(
-        plan,
-        effects,
-        provider,
-        CancellationToken::new(&is_cancelled, &cancelled),
-    ))
+    let provider = provider.with_estimates(effects);
+    finish(compact(plan, effects, &provider))
 }
 
 fn texts(request: &ProviderRequest) -> Vec<&str> {
@@ -75,6 +69,18 @@ fn compaction_failures_preserve_cancellation_and_native_diagnostic_categories() 
         parrot_core::ErrorCode::InvalidOperation
     );
     assert_eq!(
+        Error::from(CompactionFailure::TokenOverflow).detail,
+        Some(parrot_core::ErrorDetail::Compaction(
+            CompactionFailure::TokenOverflow
+        ))
+    );
+    assert_eq!(
+        Error::from(CompactionFailure::GroupExceedsBudget).detail,
+        Some(parrot_core::ErrorDetail::Compaction(
+            CompactionFailure::GroupExceedsBudget
+        ))
+    );
+    assert_eq!(
         Error::from(CompactionFailure::Cancelled),
         Error::cancelled()
     );
@@ -86,7 +92,7 @@ fn no_plan_invokes_neither_provider_nor_progress() {
     let provider = Provider::default();
     assert_eq!(run(None, &mut effects, &provider), Ok(None));
     assert!(effects.progress.lock().unwrap().is_empty());
-    assert!(effects.spills.is_empty());
+    assert!(effects.spills.lock().unwrap().is_empty());
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
@@ -217,7 +223,7 @@ fn initial_spills_commit_in_source_order_before_a_later_ineligible_group_fails()
         run(Some(plan), &mut effects, &provider),
         Err(CompactionFailure::GroupExceedsBudget.into())
     );
-    assert_eq!(effects.spills, [original]);
+    assert_eq!(*effects.spills.lock().unwrap(), [original]);
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
@@ -238,7 +244,7 @@ fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
         SummaryResponse::Summary("done".into()),
     ]);
     run(Some(plan), &mut effects, &provider).unwrap().unwrap();
-    assert_eq!(effects.spills, [original]);
+    assert_eq!(*effects.spills.lock().unwrap(), [original]);
     let requests = provider.requests.lock().unwrap();
     assert_eq!(
         texts(&requests[1]),

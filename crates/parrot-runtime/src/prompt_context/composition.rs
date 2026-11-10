@@ -38,6 +38,17 @@ impl fmt::Display for PromptError {
     }
 }
 impl std::error::Error for PromptError {}
+impl From<parrot_core::Error> for PromptError {
+    fn from(error: parrot_core::Error) -> Self {
+        if error.kind == parrot_core::ErrorKind::Cancelled {
+            Self::Cancelled
+        } else if error.detail == Some(parrot_core::ErrorDetail::PromptContext) {
+            Self::Context(error.message)
+        } else {
+            Self::Template(error.message)
+        }
+    }
+}
 pub type PromptResult<T> = Result<T, PromptError>;
 
 /// Owns raw contributor state. Empty defaults mean this source does not own that contribution.

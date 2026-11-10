@@ -238,25 +238,11 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     state.fail_at = Some("completion_feedback");
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(false);
-    let mut preparation = state.preparation();
+
+    state.budget = TurnBudget::new(false);
+
     assert_eq!(
-        finish(run_turn(
-            &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
-            &tools,
-            &provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
-        )),
+        finish(run_turn(&mut state, &tools, &provider)),
         Err(Error::failed("completion_feedback"))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
@@ -276,7 +262,7 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     );
     assert!(!state.trace.values().iter().any(|step| step == "complete"));
     assert_eq!(state.trace.values().last().unwrap(), "completion_feedback");
-    assert!(budget.admit(1).is_none());
+    assert!(state.budget.admit(1).is_none());
 }
 
 #[test]
@@ -290,25 +276,11 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     state.fail_at = Some("exit_blockers");
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(false);
-    let mut preparation = state.preparation();
+
+    state.budget = TurnBudget::new(false);
+
     assert_eq!(
-        finish(run_turn(
-            &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
-            &tools,
-            &provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
-        )),
+        finish(run_turn(&mut state, &tools, &provider)),
         Err(Error::failed("exit_blockers"))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
@@ -326,5 +298,5 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     );
     assert!(!state.trace.values().iter().any(|step| step == "complete"));
     assert_eq!(state.trace.values().last().unwrap(), "exit_blockers");
-    assert!(budget.admit(1).is_none());
+    assert!(state.budget.admit(1).is_none());
 }

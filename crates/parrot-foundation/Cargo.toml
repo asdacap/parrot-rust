@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+parrot-core = { path = "../parrot-core" }
 parrot-domain = { path = "../parrot-domain" }
 tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "macros", "net", "io-util", "time"] }
 reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-tls"] }

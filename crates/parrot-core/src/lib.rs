@@ -4,32 +4,22 @@ pub mod budget;
 pub mod compaction;
 mod context;
 mod protocol;
+pub mod rendering;
 mod skills;
-use compaction::CompactionDependencies;
+pub mod template;
 pub use context::*;
 pub use protocol::*;
 pub use skills::{SkillMention, parse_skill_mentions};
 
-/// Borrows request preparation and independently configured compaction services.
-pub struct PreparationDependencies<'a, 'c> {
-    pub request: &'a mut dyn Preparation,
-    pub compaction: &'a mut CompactionDependencies<'c>,
-}
-
-/// Runs admission, response validation, retry, and completion using the caller-owned budget.
-/// The supplied settings apply to every execution turn drained by this call.
-pub async fn run<'a>(
+/// Drains ready turns using state-backed settings and the invocation budget.
+pub async fn run(
     states: &mut dyn States,
-    preparation: &mut PreparationDependencies<'_, '_>,
-    tools: &'a dyn Tools,
+    tools: &dyn Tools,
     provider: &dyn Provider,
-    options: &TurnOptions,
-    budget: &mut budget::TurnBudget,
-    cancellation: CancellationToken<'a>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
     loop {
-        if cancellation.is_cancelled() {
+        if provider.is_cancelled() {
             return Err(Error::cancelled());
         }
         let turn = states.get_last_turn().await?;
@@ -38,36 +28,36 @@ pub async fn run<'a>(
         {
             return Ok(Outcome::Completed(answer));
         }
-        match run_turn(
-            states,
-            preparation,
-            tools,
-            provider,
-            options,
-            budget,
-            cancellation,
-        )
-        .await?
-        {
+        match run_turn(states, tools, provider).await? {
             Outcome::Completed(completed) => answer = completed,
             Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
         }
     }
 }
 
-/// Runs one active execution turn using supplied settings and tools captured once.
-pub async fn run_turn<'a>(
+/// Runs one active turn using state-backed settings and tools captured once.
+pub async fn run_turn(
     states: &mut dyn States,
-    preparation: &mut PreparationDependencies<'_, '_>,
-    tools: &'a dyn Tools,
+    tools: &dyn Tools,
     provider: &dyn Provider,
-    options: &TurnOptions,
-    budget: &mut budget::TurnBudget,
-    cancellation: CancellationToken<'a>,
 ) -> Result<Outcome, Error> {
+    let mut budget = states.read_turn_budget()?;
+    let result = execute_turn(states, tools, provider, &mut budget).await;
+    states.write_turn_budget(budget)?;
+    result
+}
+
+async fn execute_turn(
+    states: &mut dyn States,
+    tools: &dyn Tools,
+    provider: &dyn Provider,
+    budget: &mut TurnBudget,
+) -> Result<Outcome, Error> {
+    let cancellation = CancellationToken::from_provider(provider);
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
+    let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
     budget.begin_turn();
     let catalog = tools.capture_catalog().await?;
     let mut compacted_oversized = false;
@@ -83,9 +73,7 @@ pub async fn run_turn<'a>(
             InputAdmission::SteersOrNextQueued
         };
         let inputs = states.promote_input(admission).await?;
-        let context = skills
-            .prepare(states, preparation.request, &inputs, cancellation)
-            .await?;
+        let context = skills.prepare(states, &inputs, cancellation).await?;
         states.record_input_context(&context).await?;
         let Some(flags) = budget.admit(options.maximum_requests) else {
             return Ok(Outcome::BudgetExhausted);
@@ -95,28 +83,17 @@ pub async fn run_turn<'a>(
         } else {
             &catalog.normal
         };
-        let request = context::prepare_request(
-            states,
-            preparation,
-            definitions,
-            flags,
-            options,
-            cancellation,
-        )
-        .await?;
+        let request =
+            context::prepare_request(states, provider, definitions, flags, &options, cancellation)
+                .await?;
         let attempt = budget.count_request();
         let response = match provider.invoke(request).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(
-                    states,
-                    preparation.compaction,
-                    definitions,
-                    cancellation,
-                )
-                .await?
-                .reduced
+                if !context::compact_context(states, provider, definitions)
+                    .await?
+                    .reduced
                 {
                     return Err(error);
                 }
@@ -126,9 +103,9 @@ pub async fn run_turn<'a>(
         };
         compacted_oversized = false;
         if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
-            let content = preparation
-                .request
-                .render_template("agent-session.truncated-tool-call", &[])?;
+            let content =
+                rendering::render_template(states, "agent-session.truncated-tool-call", &[])
+                    .await?;
             states.record_retry(&content, attempt).await?;
             continue;
         }
@@ -137,9 +114,8 @@ pub async fn run_turn<'a>(
             .iter()
             .any(|call| serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err())
         {
-            let content = preparation
-                .request
-                .render_template("agent-session.invalid-tool-call", &[])?;
+            let content =
+                rendering::render_template(states, "agent-session.invalid-tool-call", &[]).await?;
             states.record_retry(&content, attempt).await?;
             continue;
         }
@@ -157,7 +133,7 @@ pub async fn run_turn<'a>(
             }
             continue;
         }
-        let messages = preparation.request.get_exit_blockers().await?;
+        let messages = states.get_exit_blockers().await?;
         if messages.is_empty() {
             return Ok(Outcome::Completed(states.complete_turn(&response).await?));
         }

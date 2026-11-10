@@ -1,85 +1,128 @@
 use super::*;
 use parrot_core::compaction::{
-    CompactionConfiguration, CompactionPreparationEffects, ConversationHistoryItem,
-    ConversationState, ConversationSummary, StatusRenderer, prepare_compaction,
+    CompactionConfiguration, ConversationHistoryItem, ConversationState, ConversationSummary,
+    prepare_compaction,
 };
-use parrot_core::{BoxFuture, ContextConfiguration, ContextModel, ContextSnapshot, Message};
+use parrot_core::{
+    AgentIdentityDescription, BoxFuture, ConfigKey, ConfigValue, ContextConfiguration,
+    ContextModel, ContextSnapshot, ErrorCode, ErrorDetail, Message, ModelAliasDescription,
+    SkillCatalogEntry, States,
+};
 use std::sync::Mutex;
+
+fn native_error(stage: &str) -> Error {
+    Error {
+        code: ErrorCode::Io,
+        response_body: format!("native diagnostic for {stage}"),
+        detail: Some(ErrorDetail::Compaction(CompactionFailure::NoSummary(
+            stage.into(),
+        ))),
+        ..Error::failed(stage)
+    }
+}
 
 #[derive(Default)]
 struct Preparation {
     events: Mutex<Vec<String>>,
     failure: Option<&'static str>,
     fail_publication: bool,
+    raw: ConversationState,
+    contexts: Mutex<Vec<ContextSnapshot>>,
 }
 
-impl CompactionPreparationEffects for Preparation {
-    type Error = Error;
+impl States for Preparation {
+    fn get_config(&self, _: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
+        Box::pin(async { Err(Error::failed("preparation has no configured templates")) })
+    }
 
-    fn report_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             if self.failure == Some("start") {
-                return Err(Error::failed("start"));
+                return Err(native_error("start"));
             }
             self.events.lock().unwrap().push("started".into());
             Ok(())
         })
     }
 
-    fn sample_epoch<'a, 'c>(
-        &'a self,
-        cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'c: 'a,
-    {
+    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            if cancellation.is_cancelled() {
+            if self.failure == Some("cancel") {
                 return Err(Error::cancelled());
             }
             if self.failure == Some("sample") {
-                return Err(Error::failed("sample"));
+                return Err(native_error("sample"));
             }
             Ok(())
         })
     }
 
-    fn render_instructions<'a, 'c>(
-        &'a self,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
+    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async move {
             if self.failure == Some("instructions") {
-                return Err(Error::failed("instructions"));
+                return Err(native_error("instructions"));
             }
-            Ok("sampled instructions".into())
+            Ok(vec![(
+                "fixture:instructions".into(),
+                "sampled instructions".into(),
+            )])
         })
     }
 
-    fn report_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>> {
+    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn read_model_aliases(&self) -> BoxFuture<'_, Result<Vec<ModelAliasDescription>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn read_agent_identity(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<AgentIdentityDescription>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async { Ok(String::new()) })
+    }
+
+    fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
+        Box::pin(async move {
+            if self.failure == Some("read") {
+                return Err(native_error("read"));
+            }
+            Ok(self.raw.clone())
+        })
+    }
+
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.events.lock().unwrap().push(message);
             if self.fail_publication {
-                return Err(Error::failed("failed publication"));
+                return Err(native_error("failed publication"));
             }
             Ok(())
         })
     }
-}
 
-#[derive(Default)]
-struct Status {
-    contexts: Mutex<Vec<ContextSnapshot>>,
-    failure: bool,
-}
-
-impl StatusRenderer for Status {
-    type Error = Error;
-
-    fn render<'a, 'c>(
+    fn render_status<'a, 'c>(
         &'a self,
         context: ContextSnapshot,
         _: CancellationToken<'c>,
@@ -89,11 +132,56 @@ impl StatusRenderer for Status {
     {
         Box::pin(async move {
             self.contexts.lock().unwrap().push(context);
-            if self.failure {
-                return Err(Error::failed("status"));
+            if self.failure == Some("status") {
+                return Err(native_error("status"));
             }
             Ok("initial status".into())
         })
+    }
+}
+
+struct Estimates {
+    tokens: i64,
+    failure: bool,
+    requests: Mutex<Vec<parrot_core::ProviderRequest>>,
+}
+
+impl Estimates {
+    fn new(tokens: i64) -> Self {
+        Self {
+            tokens,
+            failure: false,
+            requests: Mutex::default(),
+        }
+    }
+}
+
+impl parrot_core::Provider for Estimates {
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        Box::pin(std::future::pending())
+    }
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        tools: &[parrot_core::ToolDefinition],
+        messages: &[Message],
+    ) -> Result<i64, Error> {
+        self.requests
+            .lock()
+            .unwrap()
+            .push(parrot_core::ProviderRequest {
+                instructions: instructions.into(),
+                tools: tools.to_vec(),
+                messages: messages.to_vec(),
+                ..Default::default()
+            });
+        if self.failure {
+            return Err(native_error("estimate"));
+        }
+        Ok(self.tokens)
     }
 }
 
@@ -133,8 +221,6 @@ fn item(sequence: i64, message: Message, owner: Option<i64>) -> ConversationHist
 
 #[test]
 fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view() {
-    let preparation = Preparation::default();
-    let status = Status::default();
     let assistant = Message {
         role: Role::Assistant,
         tool_calls: vec![ToolCall {
@@ -176,24 +262,16 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         name: "advertised".into(),
         ..Default::default()
     }];
-    let estimates = Mutex::new(Vec::new());
-    let is_cancelled = || false;
-    let cancelled = || Box::pin(std::future::pending()) as BoxFuture<'_, ()>;
+    let provider = Estimates::new(37);
+    let mut preparation = Preparation {
+        raw,
+        ..Default::default()
+    };
     let input = finish(prepare_compaction(
-        std::future::ready(Ok(raw)),
+        &mut preparation,
+        &provider,
         &definitions,
         &configuration(),
-        &preparation,
-        &status,
-        |instructions, tools, messages| {
-            estimates.lock().unwrap().push((
-                instructions.to_owned(),
-                tools.to_vec(),
-                messages.to_vec(),
-            ));
-            Ok(37)
-        },
-        CancellationToken::new(&is_cancelled, &cancelled),
     ))
     .unwrap();
 
@@ -225,12 +303,13 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
             ..message("initial status")
         }
     );
+    let estimates = provider.requests.lock().unwrap();
+    assert_eq!(estimates.len(), 1);
+    assert_eq!(estimates[0].instructions, "sampled instructions");
+    assert_eq!(estimates[0].tools, definitions);
+    assert_eq!(estimates[0].messages, current);
     assert_eq!(
-        *estimates.lock().unwrap(),
-        [("sampled instructions".into(), definitions, current)]
-    );
-    assert_eq!(
-        *status.contexts.lock().unwrap(),
+        *preparation.contexts.lock().unwrap(),
         [ContextSnapshot::estimate(37, &configuration().context)]
     );
     assert_eq!(*preparation.events.lock().unwrap(), ["started"]);
@@ -265,16 +344,15 @@ fn preparation_preserves_incomplete_roots_and_does_not_promote_orphaned_results(
         checkpoint_sequences: vec![2],
         ..Default::default()
     };
-    let is_cancelled = || false;
-    let cancelled = || Box::pin(std::future::pending()) as BoxFuture<'_, ()>;
+    let mut preparation = Preparation {
+        raw,
+        ..Default::default()
+    };
     let input = finish(prepare_compaction(
-        std::future::ready(Ok(raw)),
+        &mut preparation,
+        &Estimates::new(1),
         &[],
         &configuration(),
-        &Preparation::default(),
-        &Status::default(),
-        |_, _, _| Ok(1),
-        CancellationToken::new(&is_cancelled, &cancelled),
     ))
     .unwrap();
     assert_eq!(input.base_watermark, 0);
@@ -295,42 +373,24 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         "status",
         "cancel",
     ] {
-        let preparation = Preparation {
+        let mut preparation = Preparation {
             failure: Some(stage),
             ..Default::default()
         };
-        let status = Status {
-            failure: stage == "status",
-            ..Default::default()
+        let provider = Estimates {
+            failure: stage == "estimate",
+            ..Estimates::new(0)
         };
-        let raw = async {
-            if stage == "read" {
-                Err(Error::failed(stage))
-            } else {
-                Ok(ConversationState::default())
-            }
-        };
-        let is_cancelled = || stage == "cancel";
-        let cancelled = || Box::pin(std::future::pending()) as BoxFuture<'_, ()>;
         let outcome = finish(prepare_compaction(
-            raw,
+            &mut preparation,
+            &provider,
             &[],
             &configuration(),
-            &preparation,
-            &status,
-            |_, _, _| {
-                if stage == "estimate" {
-                    Err(Error::failed(stage))
-                } else {
-                    Ok(0)
-                }
-            },
-            CancellationToken::new(&is_cancelled, &cancelled),
         ));
         let error = if stage == "cancel" {
             Error::cancelled()
         } else {
-            Error::failed(stage)
+            native_error(stage)
         };
         assert_eq!(outcome, Err(error.clone()));
         let expected = if stage == "start" {
@@ -341,23 +401,18 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         assert_eq!(*preparation.events.lock().unwrap(), expected);
     }
 
-    let preparation = Preparation {
+    let mut preparation = Preparation {
         failure: Some("sample"),
         fail_publication: true,
         ..Default::default()
     };
-    let is_cancelled = || false;
-    let cancelled = || Box::pin(std::future::pending()) as BoxFuture<'_, ()>;
     assert_eq!(
         finish(prepare_compaction(
-            std::future::ready(Ok(ConversationState::default())),
+            &mut preparation,
+            &Estimates::new(0),
             &[],
             &configuration(),
-            &preparation,
-            &Status::default(),
-            |_, _, _| Ok(0),
-            CancellationToken::new(&is_cancelled, &cancelled),
         )),
-        Err(Error::failed("failed publication"))
+        Err(native_error("failed publication"))
     );
 }

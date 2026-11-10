@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn state_supplies_fresh_instructions_to_an_independent_preparation() {
+fn state_supplies_fresh_raw_instructions_on_each_request() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("answer"),
@@ -18,44 +18,20 @@ fn state_supplies_fresh_instructions_to_an_independent_preparation() {
             messages: Vec::new(),
         })
         .collect();
-    let mut preparation = state.preparation();
-    preparation.request = MemoryState::new([]).request;
-    preparation.request().instructions = "not the state instructions".into();
+
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(state.unlimited);
-    let mut compaction = MemoryCompaction::new(
-        state.compaction_plan.clone(),
-        state.summary_provider.clone(),
-    );
-    let cancellation = state.cancellation.clone();
-    let is_cancelled = || cancellation.is_cancelled();
-    let cancelled = || cancellation.cancelled();
+
+    state.budget = TurnBudget::new(state.unlimited);
 
     assert_eq!(
-        finish(run(
-            &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut compaction.dependencies(),
-            },
-            &tools,
-            &provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
-        )),
+        finish(run(&mut state, &tools, &provider)),
         Ok(Outcome::Completed("answer".into()))
     );
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].instructions, "first state instructions");
     assert_eq!(requests[1].instructions, "updated state instructions");
-    assert_eq!(
-        preparation.request().instructions,
-        "not the state instructions"
-    );
 }
 
 #[test]
@@ -260,4 +236,53 @@ fn context_preparation_and_message_read_errors_stop_before_provider_invocation()
             stage == "messages"
         );
     }
+}
+
+#[test]
+fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_templates() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.request().instructions = "raw system instructions".into();
+    state.prompt_templates = vec![
+        ("memory:00-list".into(), "configured.list".into()),
+        ("memory:10-scalar".into(), "configured.scalar".into()),
+    ];
+    state.template_arguments.insert(
+        "memory:00-list".into(),
+        vec![
+            ("title".into(), serde_json::json!("literal {{ untouched }}")),
+            ("items".into(), serde_json::json!(["alpha", "beta"])),
+        ],
+    );
+    state.template_arguments.insert(
+        "memory:10-scalar".into(),
+        vec![("content".into(), serde_json::json!("opaque {title}"))],
+    );
+    state
+        .template_engines
+        .insert("configured.list".into(), "minijinja".into());
+    state.skill_templates.lock().unwrap().extend([
+        (
+            "configured.list".into(),
+            "{{ title }}{% for item in items %}[{{ item }}]{% endfor %}".into(),
+        ),
+        ("configured.scalar".into(), "configured {content}".into()),
+    ]);
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+
+    assert_eq!(
+        finish(run_turn(&mut state, &tools, &provider)),
+        Ok(Outcome::Completed("answer".into()))
+    );
+
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].instructions,
+        "literal {{ untouched }}[alpha][beta]\n\nconfigured opaque {title}\n\nraw system instructions"
+    );
+    assert_eq!(
+        state.capture_request_estimates()[0].instructions,
+        requests[0].instructions
+    );
 }

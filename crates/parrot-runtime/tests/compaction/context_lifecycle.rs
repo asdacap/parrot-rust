@@ -6,6 +6,69 @@ use parrot_storage::{
 };
 
 #[tokio::test]
+async fn core_template_failure_retains_native_prompt_error_and_terminal_publication() {
+    struct MissingArguments;
+    impl SystemPrompt for MissingArguments {
+        fn renew_epoch(&mut self) {}
+        fn read_prompt_templates(&self) -> Vec<(String, String)> {
+            vec![(
+                "test:missing-arguments".into(),
+                "context.standing-instruction".into(),
+            )]
+        }
+    }
+
+    let fixture = Fixture::new();
+    let history = fixture.history();
+    user(&history, "existing").await;
+    let provider = Scripted::default();
+    let selection = provider.selection(10000);
+    let sessions = ProviderSessions::new();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let prompt = SessionPrompt::new(Box::new(MissingArguments));
+    let status = Status::default();
+    let events = Events::new(history.clone());
+    let mut controller = fixture.controller(history, 90);
+
+    let error = controller
+        .compact_epoch(
+            EpochInput {
+                selection: &selection,
+                tools: &[],
+                conversation: &mut conversation,
+                prompt: &prompt,
+                sessions: &sessions,
+                status: &status,
+                events: &events,
+            },
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ContextError::Prompt(parrot_runtime::prompt_context::PromptError::Template(_))
+    ));
+    assert!(provider.requests.lock().unwrap().is_empty());
+    {
+        let published = events.published.lock().unwrap();
+        assert_eq!(published.len(), 2);
+        assert!(published[0].has_compaction_started());
+        assert!(published[1].has_compaction_failed());
+    }
+    sessions.close().await.unwrap();
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn pending_and_initial_status_fit_actual_next_promotion_before_commit_once() {
     for depth in [0, 1] {
         let fixture = Fixture::with_identity("agent", "mode");

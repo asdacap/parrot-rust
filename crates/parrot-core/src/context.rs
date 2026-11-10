@@ -1,14 +1,12 @@
+use crate::{
+    ContextCadence, ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint,
+    ContextSnapshot, TokenCalibration,
+};
 mod preparation;
 pub(crate) use preparation::{compact_context, prepare_request};
 
 use crate::{Error, ErrorCode, ErrorKind};
 use std::fmt;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ContextLimit {
-    Tokens(i64),
-    Percentage(i64),
-}
 
 impl ContextLimit {
     pub fn resolve_tokens(&self, context_window: i32) -> Option<i64> {
@@ -19,14 +17,6 @@ impl ContextLimit {
             }
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextModel {
-    pub canonical_model: String,
-    pub context_window: i32,
-    pub maximum_input_tokens: i32,
-    pub maximum_output_tokens: i32,
 }
 
 impl ContextModel {
@@ -56,24 +46,6 @@ impl ContextModel {
                 .max(0)
         })
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextConfiguration {
-    pub model: ContextModel,
-    pub trigger_percent: i32,
-    pub context_limit: Option<ContextLimit>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextSnapshot {
-    pub estimated_tokens: i64,
-    pub context_limit: i32,
-    pub usage_percent: Option<i32>,
-    pub trigger_percent: i32,
-    pub input_limit: i32,
-    pub trigger_tokens: Option<i64>,
-    pub has_context_limit_override: bool,
 }
 
 impl ContextSnapshot {
@@ -161,30 +133,11 @@ impl ContextSnapshot {
                 message: "The compacted conversation exceeds the selected model input limit."
                     .into(),
                 response_body: String::new(),
+                detail: None,
             });
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextReminderCheckpoint {
-    pub canonical_model: String,
-    pub context_limit: i32,
-    pub percentage: i32,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextCompaction {
-    pub instructions: String,
-    pub reduced: bool,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TokenCalibration {
-    selector: Option<String>,
-    estimated_input_tokens: i64,
-    actual_input_tokens: i32,
 }
 
 impl TokenCalibration {
@@ -259,6 +212,7 @@ impl From<OutputTokenError> for Error {
             code: ErrorCode::InvalidOperation,
             message: value.to_string(),
             response_body: String::new(),
+            detail: None,
         }
     }
 }
@@ -287,21 +241,9 @@ impl From<ContextCadenceError> for Error {
             code: ErrorCode::Unexpected,
             message: value.to_string(),
             response_body: String::new(),
+            detail: None,
         }
     }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ContextCadence {
-    canonical_model: Option<String>,
-    context_window: Option<i32>,
-    effective_history_size: i64,
-    observed_band: i32,
-    reported_band: i32,
-    suppress_next_increase: bool,
-    initialized: bool,
-    checkpoint: Option<ContextReminderCheckpoint>,
-    restored: bool,
 }
 
 impl ContextCadence {

@@ -357,41 +357,21 @@ impl CompactionPlanner {
     ) -> Result<Option<RetentionPlan>, PlanningError> {
         let configuration = self.capture_model_configuration(selected);
         let definitions: Vec<_> = input.tools.iter().cloned().map(Into::into).collect();
+        let provider = PlanningProvider::new(self, selected);
         let Some(plan) = CompactionPlan::select_for_target(
             &input.capture_input(),
             &definitions,
             &configuration,
             target_budget,
-            |messages| {
-                Self::estimate_tokens(
-                    selected,
-                    &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
-                )
-            },
-            |instructions, definitions, messages| {
-                Self::estimate_input_tokens(
-                    selected,
-                    instructions,
-                    &definitions
-                        .iter()
-                        .cloned()
-                        .map(Into::into)
-                        .collect::<Vec<_>>(),
-                    &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
-                )
-            },
-        )?
+            &provider,
+        )
+        .map_err(recover_planning_error)?
         else {
             return Ok(None);
         };
-        let spill_groups = plan.select_spill_groups(|preceding, tokens, messages| {
-            self.estimate_summary_request_tokens(
-                selected,
-                preceding,
-                tokens,
-                &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
-            )
-        })?;
+        let spill_groups = plan
+            .select_spill_groups(&provider)
+            .map_err(recover_planning_error)?;
         Ok(Some(RetentionPlan {
             keep_group_from: plan.keep_group_from,
             watermark: plan.watermark,
@@ -399,5 +379,75 @@ impl CompactionPlanner {
             summary_output_tokens: plan.summary_output_tokens,
             spill_groups,
         }))
+    }
+}
+
+pub(crate) struct PlanningProvider<'a> {
+    planner: &'a CompactionPlanner,
+    selected: &'a ProviderModel,
+}
+
+impl<'a> PlanningProvider<'a> {
+    pub(crate) fn new(planner: &'a CompactionPlanner, selected: &'a ProviderModel) -> Self {
+        Self { planner, selected }
+    }
+}
+
+impl parrot_core::Provider for PlanningProvider<'_> {
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+    fn cancelled(&self) -> parrot_core::BoxFuture<'_, ()> {
+        Box::pin(std::future::pending())
+    }
+    fn estimate_tokens(
+        &self,
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        CompactionPlanner::estimate_tokens(
+            self.selected,
+            &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
+        )
+        .map_err(Into::into)
+    }
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        CompactionPlanner::estimate_input_tokens(
+            self.selected,
+            instructions,
+            &definitions
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect::<Vec<_>>(),
+            &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
+        )
+        .map_err(Into::into)
+    }
+    fn estimate_summary_tokens(
+        &self,
+        preceding: &str,
+        tokens: i64,
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        self.planner
+            .estimate_summary_request_tokens(
+                self.selected,
+                preceding,
+                tokens,
+                &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
+            )
+            .map_err(Into::into)
+    }
+}
+
+fn recover_planning_error(error: parrot_core::Error) -> PlanningError {
+    match error.detail {
+        Some(parrot_core::ErrorDetail::Planning(error)) => error,
+        _ => panic!("pure compaction planning returned a non-planning error"),
     }
 }

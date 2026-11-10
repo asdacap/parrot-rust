@@ -2,8 +2,7 @@ use super::{CompactionPlanner, CompactionSettings, ContextSize, PlanningError, P
 use parrot_core::{
     CancellationToken, ProviderRequest,
     compaction::{
-        self as core, CompactionEffects, CompactionFailure, CompactionPlan, CompactionProgress,
-        SummaryProvider, SummaryResponse,
+        self as core, CompactionFailure, CompactionPlan, CompactionProgress, SummaryResponse,
     },
 };
 use parrot_domain::{
@@ -17,7 +16,7 @@ use parrot_provider::{
     sessions::{self, Content, Event, Message, ProviderSessions, Request, Role, Tool},
 };
 use parrot_storage::artifacts::compaction::{self as artifact, CompactionGroupBlobStore};
-use std::{fmt, marker::PhantomData, ops::DerefMut, sync::Arc};
+use std::{fmt, sync::Arc};
 
 /// Compaction progress and retry publication are awaited before execution continues.
 pub trait CompactionObserver: Send + Sync {
@@ -184,15 +183,9 @@ impl Compactor {
         let definitions: Vec<parrot_core::ToolDefinition> =
             input.tools.iter().cloned().map(Into::into).collect();
         let estimates = CompactionEstimates::new(self, selected);
-        CompactionPlan::select(
-            &input_data,
-            &definitions,
-            &configuration,
-            |messages| estimates.estimate_tokens(messages),
-            |instructions, definitions, messages| {
-                estimates.estimate_context_tokens(instructions, definitions, messages)
-            },
-        )
+        let provider = super::planning::PlanningProvider::new(self.planner(), &estimates.selected);
+        CompactionPlan::select(&input_data, &definitions, &configuration, &provider)
+            .map_err(CompactionError::from)
     }
 
     pub(crate) async fn run_plan(
@@ -201,22 +194,24 @@ impl Compactor {
         estimates: CompactionEstimates,
         resources: CompactionResources<'_>,
     ) -> Result<Option<CompactionResult>, CompactionError> {
-        let is_cancelled = || resources.cancellation.is_cancelled();
-        let cancelled = || resources.cancellation.cancelled();
-        let token = CancellationToken::new(&is_cancelled, &cancelled);
-        let provider = SummaryProviderAdapter::<_, CompactionError>::new(
-            estimates.selected.clone(),
+        let errors = NativeErrors::new();
+        let provider = CompactionProvider::new(
+            &estimates,
             resources.sessions,
             BorrowedObserver(resources.observer),
+            resources.cancellation,
+            &errors,
         );
-        let mut effects = CompactionEffectsAdapter::new(
-            estimates,
-            resources.blobs,
-            BorrowedObserver(resources.observer),
-        );
-        core::compact(plan, &mut effects, &provider, token)
+        let mut states = CompactionStates {
+            estimates: &estimates,
+            blobs: std::sync::Mutex::new(resources.blobs),
+            observer: resources.observer,
+            errors: &errors,
+        };
+        core::compact(plan, &mut states, &provider)
             .await
             .map(|result| result.map(Into::into))
+            .map_err(|error| errors.restore(error, CompactionError::from))
     }
 }
 
@@ -346,106 +341,231 @@ impl CompactionEstimates {
     }
 }
 
-pub(crate) struct CompactionEffectsAdapter<B, O, E> {
-    estimates: CompactionEstimates,
-    blobs: B,
-    observer: O,
-    error: PhantomData<fn() -> E>,
+/// Retains native error identity across core's concrete error protocol.
+pub(crate) struct NativeErrors<E> {
+    original: std::sync::Mutex<Option<E>>,
 }
 
-impl<B, O, E> CompactionEffectsAdapter<B, O, E> {
-    pub(crate) fn new(estimates: CompactionEstimates, blobs: B, observer: O) -> Self {
+impl<E> NativeErrors<E> {
+    pub(crate) fn new() -> Self {
         Self {
-            estimates,
-            blobs,
-            observer,
-            error: PhantomData,
+            original: std::sync::Mutex::new(None),
+        }
+    }
+
+    pub(crate) fn capture(&self, error: E, diagnostic: parrot_core::Error) -> parrot_core::Error {
+        *self.original.lock().expect("compaction errors poisoned") = Some(error);
+        diagnostic
+    }
+
+    pub(crate) fn restore(
+        &self,
+        error: parrot_core::Error,
+        convert: impl FnOnce(parrot_core::Error) -> E,
+    ) -> E {
+        self.original
+            .lock()
+            .expect("compaction errors poisoned")
+            .take()
+            .unwrap_or_else(|| convert(error))
+    }
+}
+
+pub(crate) fn describe_error(error: &CompactionError) -> parrot_core::Error {
+    use parrot_core::{Error, ErrorCode};
+    let mut diagnostic = match error {
+        CompactionError::Planning(error) => Error::from(*error),
+        CompactionError::Cancelled => Error::cancelled(),
+        CompactionError::InvalidOperation(message) => Error {
+            code: ErrorCode::InvalidOperation,
+            ..Error::failed(message.clone())
+        },
+        _ => Error::failed(error.to_string()),
+    };
+    diagnostic.response_body = error.response_body().to_owned();
+    diagnostic
+}
+
+impl From<parrot_core::Error> for CompactionError {
+    fn from(error: parrot_core::Error) -> Self {
+        use parrot_core::{ErrorDetail, ErrorKind};
+        match error.detail {
+            Some(ErrorDetail::Planning(error)) => error.into(),
+            Some(ErrorDetail::Compaction(error)) => error.into(),
+            Some(ErrorDetail::Template) => Self::Template(error.message),
+            Some(ErrorDetail::PromptContext) => Self::InvalidOperation(error.message),
+            None if error.kind == ErrorKind::Cancelled => Self::Cancelled,
+            None => Self::InvalidOperation(error.message),
         }
     }
 }
 
-impl<B, O, E> CompactionEffects for CompactionEffectsAdapter<B, O, E>
-where
-    B: DerefMut<Target = CompactionGroupBlobStore> + Send + Sync,
-    O: CompactionObserver,
-    E: From<CompactionError> + From<CompactionFailure> + Send,
-{
-    type Error = E;
+struct CompactionStates<'a> {
+    estimates: &'a CompactionEstimates,
+    blobs: std::sync::Mutex<&'a mut CompactionGroupBlobStore>,
+    observer: &'a dyn CompactionObserver,
+    errors: &'a NativeErrors<CompactionError>,
+}
 
-    fn estimate_tokens(&self, messages: &[parrot_core::Message]) -> Result<i64, E> {
-        self.estimates.estimate_tokens(messages).map_err(Into::into)
-    }
-
-    fn estimate_summary_tokens(
+impl parrot_core::States for CompactionStates<'_> {
+    fn get_config(
         &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[parrot_core::Message],
-    ) -> Result<i64, E> {
-        self.estimates
-            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
-            .map_err(Into::into)
-    }
-
-    fn estimate_context_tokens(
-        &self,
-        instructions: &str,
-        definitions: &[parrot_core::ToolDefinition],
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, E> {
-        self.estimates
-            .estimate_context_tokens(instructions, definitions, messages)
-            .map_err(Into::into)
+        _: parrot_core::ConfigKey,
+    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, parrot_core::Error>> {
+        Box::pin(async {
+            Err(parrot_core::Error::failed(
+                "configuration is unavailable for a selected compaction plan",
+            ))
+        })
     }
 
     fn spill_group<'a, 'c>(
-        &'a mut self,
+        &'a self,
         messages: &'a [parrot_core::Message],
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::Message>, E>>
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::Message>, parrot_core::Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
             self.estimates
-                .spill_group(&mut self.blobs, messages, cancellation)
-                .map_err(Into::into)
+                .spill_group(
+                    &mut self.blobs.lock().expect("compaction blobs poisoned"),
+                    messages,
+                    cancellation,
+                )
+                .map_err(|error| {
+                    let diagnostic = describe_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
         })
     }
 
-    fn report_progress<'a, 'c>(
+    fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: CompactionProgress,
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), E>>
+    ) -> BoxFuture<'a, Result<(), parrot_core::Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
             self.observer
-                .observe_progress(
-                    CompactionProgressEvent {
-                        phase: CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
-                        completed_groups: progress.completed_groups as u64,
-                        total_groups: progress.total_groups as u64,
-                        ..CompactionProgressEvent::new()
-                    },
-                    &CoreCancellation(cancellation),
-                )
+                .observe_progress(progress_event(progress), &CoreCancellation(cancellation))
                 .await
-                .map_err(|error| CompactionError::from(error).into())
+                .map_err(CompactionError::from)
+                .map_err(|error| {
+                    let diagnostic = describe_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
         })
     }
 }
 
-pub(crate) struct SummaryProviderAdapter<'a, O, E> {
+pub(crate) fn progress_event(progress: CompactionProgress) -> CompactionProgressEvent {
+    CompactionProgressEvent {
+        phase: CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
+        completed_groups: progress.completed_groups as u64,
+        total_groups: progress.total_groups as u64,
+        ..CompactionProgressEvent::new()
+    }
+}
+
+pub(crate) struct CompactionProvider<'a, O, E> {
+    estimates: &'a CompactionEstimates,
+    collector: SummaryProviderAdapter<'a, O>,
+    cancellation: &'a dyn Cancellation,
+    errors: &'a NativeErrors<E>,
+}
+
+impl<'a, O, E> CompactionProvider<'a, O, E> {
+    pub(crate) fn new(
+        estimates: &'a CompactionEstimates,
+        sessions: &'a ProviderSessions,
+        observer: O,
+        cancellation: &'a dyn Cancellation,
+        errors: &'a NativeErrors<E>,
+    ) -> Self {
+        Self {
+            estimates,
+            collector: SummaryProviderAdapter::new(estimates.selected.clone(), sessions, observer),
+            cancellation,
+            errors,
+        }
+    }
+}
+
+impl<O: CompactionObserver, E: From<CompactionError> + Send> parrot_core::Provider
+    for CompactionProvider<'_, O, E>
+{
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        self.cancellation.cancelled()
+    }
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        self.estimates
+            .estimate_context_tokens(instructions, definitions, messages)
+            .map_err(|error| {
+                let diagnostic = describe_error(&error);
+                self.errors.capture(error.into(), diagnostic)
+            })
+    }
+    fn estimate_tokens(
+        &self,
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        self.estimates.estimate_tokens(messages).map_err(|error| {
+            let diagnostic = describe_error(&error);
+            self.errors.capture(error.into(), diagnostic)
+        })
+    }
+    fn estimate_summary_tokens(
+        &self,
+        preceding: &str,
+        tokens: i64,
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        self.estimates
+            .estimate_summary_tokens(preceding, tokens, messages)
+            .map_err(|error| {
+                let diagnostic = describe_error(&error);
+                self.errors.capture(error.into(), diagnostic)
+            })
+    }
+    fn summarize<'a, 'c>(
+        &'a self,
+        request: ProviderRequest,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<SummaryResponse, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.collector
+                .summarize_native(request, cancellation)
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_error(&error);
+                    self.errors.capture(error.into(), diagnostic)
+                })
+        })
+    }
+}
+
+pub(crate) struct SummaryProviderAdapter<'a, O> {
     selected: ProviderModel,
     sessions: &'a ProviderSessions,
     observer: O,
-    error: PhantomData<fn() -> E>,
 }
 
-impl<'a, O, E> SummaryProviderAdapter<'a, O, E> {
+impl<'a, O> SummaryProviderAdapter<'a, O> {
     pub(crate) fn new(
         selected: ProviderModel,
         sessions: &'a ProviderSessions,
@@ -455,33 +575,20 @@ impl<'a, O, E> SummaryProviderAdapter<'a, O, E> {
             selected,
             sessions,
             observer,
-            error: PhantomData,
         }
     }
 }
 
-impl<O: CompactionObserver, E: From<CompactionError> + Send> SummaryProvider
-    for SummaryProviderAdapter<'_, O, E>
-{
-    type Error = E;
-
-    fn summarize<'a, 'c>(
-        &'a self,
+impl<O: CompactionObserver> SummaryProviderAdapter<'_, O> {
+    pub(crate) async fn summarize_native(
+        &self,
         request: ProviderRequest,
-        cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<SummaryResponse, E>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.collect(request.into(), CoreCancellation(cancellation))
-                .await
-                .map_err(Into::into)
-        })
+        cancellation: CancellationToken<'_>,
+    ) -> Result<SummaryResponse, CompactionError> {
+        self.collect(request.into(), CoreCancellation(cancellation))
+            .await
     }
-}
 
-impl<O: CompactionObserver, E> SummaryProviderAdapter<'_, O, E> {
     async fn collect(
         &self,
         request: Request,

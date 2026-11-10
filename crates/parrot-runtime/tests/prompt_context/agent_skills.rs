@@ -383,13 +383,10 @@ async fn catalog_template_failure_is_reported_by_build_not_lookup_or_begin_turn(
         .unwrap();
     let (_, router) = crate::route(Vec::new());
     let selection = router.resolve("unused/vendor/model").unwrap();
-    assert!(
-        prompt
-            .build(&selection)
-            .unwrap_err()
-            .to_string()
-            .contains("64 KiB")
-    );
+    assert!(matches!(
+        prompt.build(&selection),
+        Err(PromptError::Context(message)) if message.contains("64 KiB")
+    ));
 }
 
 #[tokio::test]

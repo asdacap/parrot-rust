@@ -1,40 +1,21 @@
 use super::*;
 
 #[test]
-fn core_records_prepared_prompts_without_shared_prompt_state() {
+fn core_records_native_pending_prompts_once() {
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     let prompt = Message {
         role: Role::System,
         contents: vec![Content::Text("caller-owned prompt".into())],
         ..Message::default()
     };
-    let mut preparation = state.preparation();
-    preparation.prompts = Arc::new(Mutex::new(MemoryPromptData::default()));
-    preparation
-        .prompts()
-        .pending_prompts
-        .push_back(prompt.clone());
+
+    state.prompts().pending_prompts.push_back(prompt.clone());
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let mut compaction = MemoryCompaction::new(None, state.summary_provider.clone());
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(state.unlimited);
-    let cancellation = state.cancellation.clone();
-    let is_cancelled = || cancellation.is_cancelled();
-    let cancelled = || cancellation.cancelled();
 
-    let result = finish(run_turn(
-        &mut state,
-        &mut parrot_core::PreparationDependencies {
-            request: &mut preparation,
-            compaction: &mut compaction.dependencies(),
-        },
-        &tools,
-        &provider,
-        &options,
-        &mut budget,
-        CancellationToken::new(&is_cancelled, &cancelled),
-    ));
+    state.budget = TurnBudget::new(state.unlimited);
+
+    let result = finish(run_turn(&mut state, &tools, &provider));
 
     assert_eq!(result, Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.recorded_prompts, [prompt.clone()]);
@@ -51,7 +32,7 @@ fn core_records_prepared_prompts_without_shared_prompt_state() {
         );
     }
     assert!(state.prompts().pending_prompts.is_empty());
-    assert_eq!(preparation.prompts().acknowledged_prompts.len(), 1);
+    assert_eq!(state.prompts().acknowledged_prompts.len(), 1);
 }
 
 #[test]
@@ -69,7 +50,6 @@ fn pending_steer_and_status_prompts_are_fitted_without_a_context_reminder() {
         state.request().estimate_script = [100, 150, 160, 160].into();
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert!(state.prompts().rendered_reminders.is_empty());
         assert!(state.reminder_appends.is_empty());
         assert_eq!(state.recorded_prompts, [prompt.clone()]);
         assert_eq!(
@@ -177,7 +157,7 @@ fn pending_prompt_failures_stop_before_later_effects() {
 }
 
 #[test]
-fn final_phase_sends_the_steer_rendered_by_preparation() {
+fn final_phase_sends_the_configured_steer() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.maximum = 1;
     state.skill_templates.lock().unwrap().insert(
@@ -430,9 +410,6 @@ fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage
     assert_eq!(state.reminder_appends.len(), 1);
     assert_eq!(state.reminder_appends[0].0.percentage, 50);
     assert_eq!(state.reminder_appends[0].2, 55);
-    let rendered = state.prompts().rendered_reminders.clone();
-    assert_eq!(rendered[0].0.usage_percent, Some(55));
-    assert_eq!(rendered[0].1, 50);
     let request = state.request();
     let estimates = &request.estimates;
     assert_eq!(estimates[1].tokens, 630);
@@ -611,7 +588,6 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
     state.request().estimated_input_tokens = i64::MAX;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.compacted_definitions.is_empty());
-    assert!(state.prompts().rendered_reminders.is_empty());
     assert!(state.reminder_appends.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
@@ -689,7 +665,7 @@ fn restored_cadence_is_saved_even_when_the_observation_is_invalid() {
 }
 
 #[test]
-fn pending_context_reminders_use_preparation_template_overrides() {
+fn pending_context_reminders_use_configured_template_overrides() {
     for override_limit in [false, true] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
         state.prime_context(490);
@@ -721,7 +697,7 @@ fn pending_context_reminders_use_preparation_template_overrides() {
 }
 
 #[test]
-fn retry_messages_use_preparation_template_overrides() {
+fn retry_messages_use_configured_template_overrides() {
     for (reply, key, content) in [
         (
             Reply::truncated("cut"),
