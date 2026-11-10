@@ -42,6 +42,15 @@ impl ToolPresenter for SetAgentTasksToolPresenter {
         call: &ToolCallPresentation,
         terminal: &ToolTerminalPresentation,
     ) -> PresenterResult<Option<Presentation>> {
+        let status = terminal.resolve_status();
+        if status == ToolTerminalStatus::Succeeded && terminal.result_present {
+            return Ok(Some(Presentation::Tool(ToolReport::terminal(
+                format!("tool call {}", call.tool_name),
+                ToolBlock::from_status(terminal.result.clone()),
+                status,
+                self.metadata(),
+            ))));
+        }
         let mut without_arguments = call.clone();
         without_arguments.arguments_json.clear();
         self.generic.present_terminal(&without_arguments, terminal)

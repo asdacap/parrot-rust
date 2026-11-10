@@ -98,6 +98,79 @@ fn known_child_graphs_nest_without_changing_the_original() {
 }
 
 #[test]
+fn self_rows_stay_ordinary_while_dedicated_composites_nest_their_own_graphs() {
+    let mut hidden_self = node("hidden self", "", 2, "");
+    hidden_self.hidden = true;
+    let mut hidden_worker = node("hidden worker", "", 2, "active-worker");
+    hidden_worker.hidden = true;
+    let owner = wire::AgentTaskProgressSnapshot {
+        root_nodes: vec![
+            node("root self", "", 2, ""),
+            hidden_self.clone(),
+            node("composite", "", 2, "composite-agent"),
+            node("dedicated leaf", "", 1, "leaf-agent"),
+            hidden_worker,
+        ],
+        ..Default::default()
+    };
+    let trees = BTreeMap::from([
+        ("owner-agent".into(), owner.clone()),
+        (
+            "composite-agent".into(),
+            wire::AgentTaskProgressSnapshot {
+                root_nodes: vec![
+                    node("inner self", "", 1, ""),
+                    hidden_self,
+                    node("inner composite", "", 2, "inner-agent"),
+                ],
+                ..Default::default()
+            },
+        ),
+        (
+            "inner-agent".into(),
+            wire::AgentTaskProgressSnapshot {
+                root_nodes: vec![node("grandchild self", "", 2, "")],
+                ..Default::default()
+            },
+        ),
+    ]);
+    let nested = AgentTaskProgressFormatter::nest(&owner, &trees);
+    assert_eq!(
+        AgentTaskProgressFormatter::format(&nested).join("\n"),
+        "Agent tasks:\n◐ root self\n◐ composite\n├ ○ inner self\n└ ◐ inner composite\n  └ ◐ grandchild self\n○ dedicated leaf"
+    );
+    assert_eq!(
+        parrot_cli::dispatch::task_format::ProgressFormatter::format(&nested).join("\n"),
+        "Agent tasks:\n◐ root self\n◐ composite\n├── ○ inner self\n└── ◐ inner composite\n    └── ◐ grandchild self\n○ dedicated leaf"
+    );
+    let active = BTreeSet::from(["owner-agent".into(), "active-worker".into()]);
+    let lines = BTreeMap::from([
+        (
+            "owner-agent".into(),
+            TaskAgentLine::new("owner live line", None),
+        ),
+        (
+            "active-worker".into(),
+            TaskAgentLine::new("worker live line", None),
+        ),
+    ]);
+    let text = row_text(&nested, Some(&lines), Some(&active));
+    assert_eq!(
+        text,
+        "Agent tasks:\n◐ root self\n◐ composite\n├ ○ inner self\n└ ◐ inner composite\n  └ ◐ grandchild self\n○ dedicated leaf\nworker live line hidden worker"
+    );
+    assert_eq!(
+        AgentTaskProgressFormatter::get_embedded_agent_session_ids(&nested, &lines, &active),
+        ["active-worker"]
+    );
+    assert_eq!(
+        AgentTaskProgressFormatter::get_visible_child_graph_owner_session_ids(&nested, &active),
+        ["composite-agent", "inner-agent"]
+    );
+    assert_eq!(owner, trees["owner-agent"]);
+}
+
+#[test]
 fn pending_and_starting_tasks_have_no_unrelated_agent_links() {
     let snapshot = wire::AgentTaskProgressSnapshot {
         root_nodes: vec![node("pending", "", 1, ""), node("starting", "", 2, "")],

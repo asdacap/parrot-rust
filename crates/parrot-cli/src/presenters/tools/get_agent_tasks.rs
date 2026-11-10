@@ -76,6 +76,7 @@ impl GetAgentTasksToolPresenter {
     ) -> PresenterResult<()> {
         if execution {
             rows.push(format!("Description: {}", Self::text(task, "description")?));
+            Self::optional(task, "assigned_to", "Assigned to", indent, rows)?;
             Self::optional(task, "agent_name", "Agent", indent, rows)?;
         }
         let dependencies = task
@@ -176,8 +177,13 @@ impl ToolPresenter for GetAgentTasksToolPresenter {
                     continue;
                 }
                 let state = Self::text(task, "state")?;
+                let assignment = if task.get("assigned_to").is_some() {
+                    format!(" · Assigned to: {}", Self::text(task, "assigned_to")?)
+                } else {
+                    String::new()
+                };
                 rows.push(format!(
-                    "{} {state} · {} · {}",
+                    "{} {state} · {} · {}{assignment}",
                     Self::icon(state)?,
                     Self::text(task, "name")?,
                     Self::text(task, "description")?

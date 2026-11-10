@@ -25,6 +25,32 @@ fn render(args: &str, result: &str, width: usize) -> Vec<String> {
     .unwrap()
 }
 #[test]
+fn assignments_display_in_summary_and_detail_without_replacing_legacy_agent_names() {
+    for assigned_to in ["self", "/root/worker"] {
+        let summary = serde_json::json!([{
+            "name": "task", "description": "Do work", "state": "running",
+            "assigned_to": assigned_to
+        }]);
+        assert!(
+            render("{}", &summary.to_string(), 32768)
+                .join("\n")
+                .contains(&format!("Assigned to: {assigned_to}"))
+        );
+        let mut detail: serde_json::Value = serde_json::from_str(LEAF).unwrap();
+        detail["assigned_to"] = assigned_to.into();
+        detail["agent_name"] = "legacy-worker".into();
+        let text = render(r#"{"name":"task"}"#, &detail.to_string(), 32768).join("\n");
+        assert!(text.contains(&format!("Assigned to: {assigned_to}")));
+        assert!(text.contains("Agent: legacy-worker"));
+    }
+    assert!(
+        !render(r#"{"name":"task"}"#, LEAF, 32768)
+            .join("\n")
+            .contains("Assigned to:")
+    );
+}
+
+#[test]
 fn live_labels_select_query_form() {
     for (args, label) in [
         ("{}", "Agent tasks"),
