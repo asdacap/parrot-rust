@@ -5,9 +5,9 @@ use parrot_domain::{
 use parrot_host::web::router::WebClient;
 use tonic::Code;
 
-use crate::dispatch::dialog::{DialogOption, SlashDialog};
+use crate::dispatch::dialog::{DialogOption, SlashDialog, load};
 
-use super::{CommandContext, SlashCommand, SlashFailure, load_command, native_call};
+use super::{CommandContext, SlashCommand, SlashFailure, native_call};
 
 #[derive(Clone)]
 pub struct ModeSelection {
@@ -25,7 +25,7 @@ impl ModeSelection {
         cancellation: &dyn Cancellation,
     ) -> Result<Option<String>, SlashFailure> {
         let mut client = self.client.clone();
-        let listed = load_command(
+        let listed = load(
             dialog,
             "Loading modes…",
             native_call(
@@ -113,7 +113,7 @@ impl SlashCommand for ModesCommand {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
-            let listed = load_command(
+            let listed = load(
                 context.dialog,
                 "Loading modes…",
                 native_call(
@@ -153,7 +153,7 @@ impl SlashCommand for SessionsCommand {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
-            let listed = load_command(
+            let listed = load(
                 context.dialog,
                 "Loading sessions…",
                 native_call(
@@ -247,7 +247,7 @@ impl SlashCommand for StatusCommand {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
-            let status = load_command(
+            let status = load(
                 context.dialog,
                 "Loading status…",
                 native_call(

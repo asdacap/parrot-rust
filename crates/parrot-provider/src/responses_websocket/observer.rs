@@ -22,5 +22,6 @@ pub trait WebSocketAttemptObserver: Send {
 pub enum WebSocketAttemptOutcome<'a> {
     Completed,
     Failed(&'a WebSocketError),
+    CredentialsFailed(&'a crate::provider_error::Error),
     Disposed,
 }

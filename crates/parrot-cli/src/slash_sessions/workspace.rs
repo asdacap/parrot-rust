@@ -7,8 +7,8 @@ use parrot_domain::{
 };
 use tonic::Code;
 
-use super::{CommandContext, SlashCommand, SlashFailure, load_command};
-use crate::dispatch::dialog::DialogOption;
+use super::{CommandContext, SlashCommand, SlashFailure};
+use crate::dispatch::dialog::{DialogOption, load};
 
 /// Consumer seam for the original ITerminalSessionController. The terminal
 /// owner implements navigation/binding; this command does not recreate it.
@@ -68,7 +68,7 @@ impl WorkspaceSessionsCommand {
         context: &mut CommandContext<'_>,
         cancellation: &dyn Cancellation,
     ) -> Result<(), NavigationFailure> {
-        let listed = navigation_load(
+        let listed = load(
             context.dialog,
             "Loading workspace sessions…",
             self.navigation.list(cancellation),
@@ -116,7 +116,7 @@ impl WorkspaceSessionsCommand {
             return Ok(());
         }
         context.activity.wait_until_idle(cancellation).await?;
-        navigation_load(
+        load(
             context.dialog,
             "Loading selected session…",
             self.navigation.load(&selected.id, cancellation),
@@ -160,38 +160,6 @@ impl SlashCommand for WorkspaceSessionsCommand {
             }
         })
     }
-}
-
-async fn navigation_load<T: Send>(
-    dialog: &mut dyn crate::dispatch::dialog::SlashDialog,
-    activity: &str,
-    work: BoxFuture<'_, Result<T, NavigationFailure>>,
-    cancellation: &dyn Cancellation,
-) -> Result<T, NavigationFailure> {
-    let mut original = None;
-    let result = load_command(
-        dialog,
-        activity,
-        async {
-            match work.await {
-                Ok(value) => Ok(value),
-                Err(failure) => {
-                    let projected = match &failure {
-                        NavigationFailure::Rpc(status) => SlashFailure::Rpc(status.clone()),
-                        NavigationFailure::Recoverable(message)
-                        | NavigationFailure::Other(message) => {
-                            SlashFailure::Command(message.clone())
-                        }
-                    };
-                    original = Some(failure);
-                    Err(projected)
-                }
-            }
-        },
-        cancellation,
-    )
-    .await;
-    result.map_err(|failure| original.unwrap_or_else(|| failure.into()))
 }
 
 /// The actual storage producer uses yyyy-MM-ddTHH:mm:ss.fffffff+00:00;

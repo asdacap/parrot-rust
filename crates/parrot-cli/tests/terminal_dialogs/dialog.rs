@@ -524,7 +524,7 @@ async fn load_shows_spinner_frames_returns_result_and_clears_input() {
     let loaded = dialog::load(
         &mut dialog(&host),
         "Loading models…",
-        async { Ok(DialogOption::new("id", "Label", "description")) },
+        async { Ok::<_, Status>(DialogOption::new("id", "Label", "description")) },
         &TestCancellation::default(),
     )
     .await
@@ -570,6 +570,43 @@ async fn load_propagates_failure_and_still_clears_input() {
 }
 
 #[tokio::test]
+async fn typed_load_preserves_work_failure_before_ui_failure_and_always_clears_input() {
+    use parrot_cli::slash_sessions::SlashFailure;
+
+    for work_fails in [true, false] {
+        let cancellation = Arc::new(TestCancellation::default());
+        let host = Arc::new(ScriptedHost {
+            cancel_after_frame: Some((1, cancellation.clone())),
+            ..ScriptedHost::default()
+        });
+        let result = dialog::load(
+            &mut dialog(&host),
+            "Loading",
+            async {
+                if work_fails {
+                    Err(SlashFailure::Command("work failed".into()))
+                } else {
+                    Ok(42)
+                }
+            },
+            cancellation.as_ref(),
+        )
+        .await;
+        match result.unwrap_err() {
+            SlashFailure::Command(message) => {
+                assert!(work_fails);
+                assert_eq!(message, "work failed");
+            }
+            SlashFailure::Rpc(status) => {
+                assert!(!work_fails);
+                assert_eq!(status.code(), Code::Cancelled);
+            }
+        }
+        assert_eq!(host.rendered(80).last().unwrap(), &vec![vec!["> "]]);
+    }
+}
+
+#[tokio::test]
 async fn typed_dialog_load_records_activity_and_joins_successful_work() {
     let host = ScriptedHost::new([]);
     let completed = AtomicBool::new(false);
@@ -579,7 +616,7 @@ async fn typed_dialog_load_records_activity_and_joins_successful_work() {
         async {
             tokio::task::yield_now().await;
             completed.store(true, Ordering::Release);
-            Ok("result")
+            Ok::<_, Status>("result")
         },
         &TestCancellation::default(),
     )
@@ -777,17 +814,17 @@ async fn load_observer_cancellation_drops_borrowed_work_without_detaching_it() {
     let host = ScriptedHost::new([]);
     let dropped = Arc::new(AtomicBool::new(false));
     let marker = Dropped(dropped.clone());
-    let result = dialog(&host)
-        .load(
-            "Loading",
-            Box::pin(async {
-                let _marker = marker;
-                cancellation.cancel();
-                std::future::pending::<Result<(), Status>>().await
-            }),
-            &cancellation,
-        )
-        .await;
+    let result = dialog::load(
+        &mut dialog(&host),
+        "Loading",
+        async {
+            let _marker = marker;
+            cancellation.cancel();
+            std::future::pending::<Result<(), Status>>().await
+        },
+        &cancellation,
+    )
+    .await;
     assert_eq!(result.unwrap_err().code(), Code::Cancelled);
     assert!(dropped.load(Ordering::Acquire));
     assert_eq!(host.rendered(80).last().unwrap(), &vec![vec!["> "]]);

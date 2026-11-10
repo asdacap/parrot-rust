@@ -164,6 +164,22 @@ impl SessionDatabase {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> Result<T, DatabaseError> + Send + 'static,
     {
+        self.admit_with_error(key, cancellation, operation)
+    }
+
+    /// Preserves the operation's error type while converting database failures.
+    pub fn admit_with_error<K, T, E, F>(
+        &self,
+        key: K,
+        cancellation: &dyn Cancellation,
+        operation: F,
+    ) -> Result<CommitTicket<K, T, E>, AdmissionError<E>>
+    where
+        K: Clone + Eq + Send + Sync + 'static,
+        T: Send + 'static,
+        E: From<DatabaseError> + Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
+    {
         let sender = self
             .inner
             .sender
@@ -174,33 +190,34 @@ impl SessionDatabase {
         }
         let sender = sender
             .as_ref()
-            .ok_or(AdmissionError::Rejected(DatabaseError::Closed))?;
+            .ok_or_else(|| AdmissionError::Rejected(E::from(DatabaseError::Closed)))?;
         let (finished_tx, finished_rx) = oneshot::channel();
         let receipt_key = key.clone();
         let work = Box::new(move |connection: &mut Connection| {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // Microsoft.Data.Sqlite's default BeginTransaction is immediate.
                 let transaction = connection
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(DatabaseError::from)?;
                 let output = operation(&transaction)?;
-                transaction.commit()?;
+                transaction.commit().map_err(DatabaseError::from)?;
                 Ok(Committed::after_commit(CommitReceipt::new(
                     receipt_key,
                     output,
                 )))
             }))
-            .unwrap_or(Err(DatabaseError::CommandPanicked));
+            .unwrap_or_else(|_| Err(E::from(DatabaseError::CommandPanicked)));
             let _ = finished_tx.send(result);
         });
         sender
             .send(Job::Transaction(work))
-            .map_err(|_| AdmissionError::Rejected(DatabaseError::WorkerStopped))?;
+            .map_err(|_| AdmissionError::Rejected(E::from(DatabaseError::WorkerStopped)))?;
         Ok(CommitTicket::new(
             key,
             Box::pin(async move {
                 finished_rx
                     .await
-                    .map_err(|_| DatabaseError::WorkerStopped)?
+                    .map_err(|_| E::from(DatabaseError::WorkerStopped))?
             }),
         ))
     }

@@ -1,6 +1,7 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::responses::{ResponsesEvent, ResponsesParser};
 use parrot_provider::responses_websocket::*;
+use parrot_provider::sessions::Error as ProviderError;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -33,7 +34,7 @@ impl HeaderSource for HeadersSource {
     fn headers<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Headers, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Headers, ProviderError>> {
         Box::pin(async { Ok(vec![]) })
     }
 }
@@ -66,7 +67,7 @@ impl HttpFallback for Http {
         _: Vec<u8>,
         state: String,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
         self.trace.opens.lock().unwrap().push(state);
         let trace = self.trace.clone();
         let legacy = self.legacy;
@@ -90,7 +91,7 @@ impl HttpEvents for Legacy {
     fn next<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
         self.0.pulls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(Some(ResponsesEvent::TextDelta("legacy".into()))) })
     }
@@ -113,17 +114,17 @@ impl HttpEvents for PullHttp {
     fn next<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
         panic!("lifecycle override must be used, not legacy next")
     }
     fn next_event<'a>(
         &'a mut self,
         token: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<SessionEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<SessionEvent>, ProviderError>> {
         self.trace.pulls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             if token.is_cancelled() {
-                return Err(WebSocketError::Cancelled);
+                return Err(ProviderError::Cancelled);
             }
             let event = match self.step {
                 0 => Some(SessionEvent::HttpRequestStarted),
@@ -135,7 +136,9 @@ impl HttpEvents for PullHttp {
                 2 => {
                     self.trace.reads.fetch_add(1, Ordering::SeqCst);
                     if self.fail_body {
-                        return Err(WebSocketError::Transport("HTTP body failed".into()));
+                        return Err(ProviderError::Socket(WebSocketError::Transport(
+                            "HTTP body failed".into(),
+                        )));
                     }
                     Some(SessionEvent::Response(ResponsesEvent::TextDelta(
                         "hello".into(),
@@ -360,9 +363,9 @@ async fn lifecycle_cancellation_and_body_error_do_not_replay_or_advance_again() 
         assert_eq!(
             error,
             if cancel {
-                WebSocketError::Cancelled
+                ProviderError::Cancelled
             } else {
-                WebSocketError::Transport("HTTP body failed".into())
+                ProviderError::Socket(WebSocketError::Transport("HTTP body failed".into()))
             }
         );
         assert_eq!(call.next(&token).await.unwrap(), None);

@@ -6,7 +6,7 @@ use crate::{
     slash_sessions::SlashFailure,
 };
 
-use super::{load_command, model_alias::resolve, model_selection::ModelSelection, rpc};
+use super::{load, model_alias::resolve, model_selection::ModelSelection, rpc};
 
 /// The same model picker is consumed by /model, /model-alias, and session clear.
 #[derive(Clone)]
@@ -45,7 +45,7 @@ impl ModelWizard {
         cancellation: &dyn Cancellation,
     ) -> Result<Option<String>, SlashFailure> {
         let mut client = self.client.clone();
-        let listed = load_command(
+        let listed = load(
             dialog,
             "Loading models…",
             rpc(

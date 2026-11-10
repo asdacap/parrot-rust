@@ -14,9 +14,9 @@ pub use repository::AppendOutcome;
 pub use terminal::{CloseTurnError, TurnClosure, TurnCommit, TurnKey};
 pub use types::*;
 
-use crate::database::{SessionDatabase, Transaction, extract_usage_keys};
+use crate::database::{DatabaseError, SessionDatabase, Transaction, extract_usage_keys};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
-use parrot_domain::contracts::storage::{AdmissionError, CommitReceipt, CommitTicket, Committed};
+use parrot_domain::contracts::storage::{AdmissionError, CommitTicket, Committed};
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_domain::values::identifiers::Identifier;
 use protobuf::Message;
@@ -71,8 +71,7 @@ impl EventRepository {
         &self.inner.context
     }
 
-    /// Transfer one complete repository transaction. Repository validation errors
-    /// roll back through the existing actor's SQLite user-error boundary.
+    /// Transfers one complete repository transaction, preserving validation errors.
     pub fn admit<K, T, F>(
         &self,
         key: K,
@@ -84,40 +83,29 @@ impl EventRepository {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> Result<T, EventError> + Send + 'static,
     {
-        let ticket = self
-            .inner
+        self.inner
             .database
-            .admit(key, cancellation, move |tx| {
-                operation(tx).map_err(error::rollback)
-            })
-            .map_err(|error| match error {
-                AdmissionError::Cancelled => AdmissionError::Cancelled,
-                AdmissionError::Rejected(error) => AdmissionError::Rejected(error.into()),
-            })?;
-        let key = ticket.key().clone();
-        Ok(CommitTicket::new(
-            key,
-            Box::pin(async move {
-                let receipt = ticket
-                    .into_completion()
-                    .await
-                    .map_err(EventError::from)?
-                    .into_value();
-                let key = receipt.key().clone();
-                Ok(Committed::after_commit(CommitReceipt::new(
-                    key,
-                    receipt.into_output(),
-                )))
-            }),
-        ))
+            .admit_with_error(key, cancellation, operation)
     }
     pub async fn transaction<T, F>(&self, operation: F) -> Result<T, EventError>
     where
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> Result<T, EventError> + Send + 'static,
     {
+        self.transact(operation).await
+    }
+
+    /// Executes a transaction without changing the operation's domain error.
+    pub async fn transact<T, E, F>(&self, operation: F) -> Result<T, E>
+    where
+        T: Send + 'static,
+        E: From<DatabaseError> + Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
+    {
         let ticket = self
-            .admit((), &NeverCancelled, operation)
+            .inner
+            .database
+            .admit_with_error((), &NeverCancelled, operation)
             .map_err(|error| match error {
                 AdmissionError::Rejected(error) => error,
                 AdmissionError::Cancelled => unreachable!("noncancelled admission"),

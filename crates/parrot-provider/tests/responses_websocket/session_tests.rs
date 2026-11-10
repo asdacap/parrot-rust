@@ -1,6 +1,7 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::responses::*;
 use parrot_provider::responses_websocket::*;
+use parrot_provider::sessions::Error as ProviderError;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -34,7 +35,7 @@ impl HeaderSource for HeadersSource {
     fn headers<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Headers, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Headers, ProviderError>> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(vec![("Authorization".into(), "synthetic".into())]) })
     }
@@ -147,7 +148,7 @@ impl HttpEvents for HttpStream {
     fn next<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
         let event = if self.sent {
             None
         } else {
@@ -166,7 +167,7 @@ impl HttpFallback for Http {
         body: Vec<u8>,
         state: String,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
         self.calls.lock().unwrap().push((body, state));
         Box::pin(async { Ok(Box::new(HttpStream { sent: false }) as Box<dyn HttpEvents>) })
     }
@@ -362,7 +363,7 @@ fn setup_options(
 async fn drain(
     call: &mut SessionCall<'_>,
     cancel: &dyn Cancellation,
-) -> Result<Vec<SessionEvent>, WebSocketError> {
+) -> Result<Vec<SessionEvent>, ProviderError> {
     let mut events = Vec::new();
     while let Some(event) = call.next(cancel).await? {
         events.push(event);
@@ -535,12 +536,12 @@ async fn source_pinned_session_failure_categories_preserve_or_wrap_exact_types()
         match failure {
             failure @ (WebSocketError::Socket { .. } | WebSocketError::Wire(_)) => assert_eq!(
                 actual,
-                WebSocketError::TransportFailure {
+                ProviderError::Socket(WebSocketError::TransportFailure {
                     message: "Responses WebSocket transport failed.".into(),
                     cause: Box::new(failure),
-                }
+                })
             ),
-            failure => assert_eq!(actual, failure),
+            failure => assert_eq!(actual, ProviderError::Socket(failure)),
         }
         assert_eq!(wire.connects.load(Ordering::SeqCst), 1);
         assert!(http.calls.lock().unwrap().is_empty());
@@ -580,7 +581,9 @@ async fn source_generic_catch_wraps_actual_t27_parser_errors_with_their_causes()
                 ));
             }
             let failure = call.next(&cancel).await.unwrap_err();
-            let WebSocketError::TransportFailure { message, cause } = failure else {
+            let ProviderError::Socket(WebSocketError::TransportFailure { message, cause }) =
+                failure
+            else {
                 panic!("parser {category} was not wrapped");
             };
             assert_eq!(message, "Responses WebSocket transport failed.");
@@ -663,7 +666,10 @@ async fn source_pinned_one_byte_request_limit_rejects_websocket_before_payload()
             .next(&cancel)
             .await
             .unwrap_err();
-        assert_eq!(failure, WebSocketError::RequestTooLarge { maximum: 1 });
+        assert_eq!(
+            failure,
+            ProviderError::Socket(WebSocketError::RequestTooLarge { maximum: 1 })
+        );
         assert!(failure.to_string().contains("exceeds 1 bytes"));
         assert_eq!(wire.connects.load(Ordering::SeqCst), 1);
         assert!(wire.sent.lock().unwrap().is_empty());
@@ -683,10 +689,14 @@ async fn source_pinned_http_limit_error_routes_without_websocket_or_error_replay
             body: Vec<u8>,
             _: String,
             _: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+        ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
             self.0.fetch_add(1, Ordering::SeqCst);
             assert!(body.len() > 1);
-            Box::pin(async { Err(WebSocketError::RequestTooLarge { maximum: 1 }) })
+            Box::pin(async {
+                Err(ProviderError::Socket(WebSocketError::RequestTooLarge {
+                    maximum: 1,
+                }))
+            })
         }
     }
     for provider_id in ["configured", "chatgpt"] {
@@ -716,7 +726,10 @@ async fn source_pinned_http_limit_error_routes_without_websocket_or_error_replay
                 ));
             }
             let failure = call.next(&cancel).await.unwrap_err();
-            assert_eq!(failure, WebSocketError::RequestTooLarge { maximum: 1 });
+            assert_eq!(
+                failure,
+                ProviderError::Socket(WebSocketError::RequestTooLarge { maximum: 1 })
+            );
             assert!(failure.to_string().contains("exceeds 1 bytes"));
             assert_eq!(call.next(&cancel).await, Ok(None));
             assert_eq!(http.0.load(Ordering::SeqCst), 1);
@@ -901,14 +914,14 @@ async fn generic_socket_errors_preserve_cause_and_existing_transport_errors_pass
             .await
             .unwrap_err();
         if failure == wrapped {
-            assert_eq!(actual, wrapped);
+            assert_eq!(actual, ProviderError::Socket(wrapped.clone()));
         } else {
             assert_eq!(
                 actual,
-                WebSocketError::TransportFailure {
+                ProviderError::Socket(WebSocketError::TransportFailure {
                     message: "Responses WebSocket transport failed.".into(),
                     cause: Box::new(failure)
-                }
+                })
             );
         }
         assert!(http.calls.lock().unwrap().is_empty());
@@ -931,7 +944,7 @@ async fn second_named_error_is_not_recovered_again() {
     ));
     assert!(matches!(
         call.next(&cancel).await,
-        Err(WebSocketError::Response(_))
+        Err(ProviderError::Socket(WebSocketError::Response(_)))
     ));
     assert_eq!(wire.connects.load(Ordering::SeqCst), 2);
 }
@@ -967,7 +980,7 @@ async fn unsupported_upgrade_selects_sticky_http_but_other_status_throws() {
         } else {
             assert!(matches!(
                 call.next(&cancel).await,
-                Err(WebSocketError::Upgrade { .. })
+                Err(ProviderError::Socket(WebSocketError::Upgrade { .. }))
             ));
             assert!(http.calls.lock().unwrap().is_empty());
         }
@@ -1026,7 +1039,7 @@ async fn invisible_transport_failure_and_cancellation_keep_websockets_enabled() 
                 .unwrap()
                 .next(&cancel)
                 .await,
-            Err(failure)
+            Err(ProviderError::Socket(failure))
         );
         drain(
             &mut session.call(request(&["two"], None, ""), &http).unwrap(),
@@ -1040,6 +1053,50 @@ async fn invisible_transport_failure_and_cancellation_keep_websockets_enabled() 
 }
 
 #[tokio::test]
+async fn credential_socket_cancellation_preserves_the_original_error_after_caller_cancellation() {
+    struct CancelledHeaders(Arc<Cancel>);
+    impl HeaderSource for CancelledHeaders {
+        fn headers<'a>(
+            &'a self,
+            _: &'a dyn Cancellation,
+        ) -> BoxFuture<'a, Result<Headers, ProviderError>> {
+            self.0.0.store(true, Ordering::SeqCst);
+            Box::pin(async { Err(ProviderError::Socket(WebSocketError::Cancelled)) })
+        }
+    }
+    let cancel = Arc::new(Cancel(AtomicBool::new(false)));
+    let wire = Arc::new(Wire::default());
+    let client = WebSocketClient::new(
+        Arc::new(Scripts {
+            scripts: Mutex::new(VecDeque::new()),
+            wire: wire.clone(),
+            turn_state: String::new(),
+        }),
+        "https://example.invalid/responses",
+        None,
+        None,
+        usize::MAX,
+    )
+    .unwrap();
+    let mut session = Session::new(
+        "test",
+        Arc::new(CancelledHeaders(cancel.clone())),
+        client,
+        false,
+    );
+    let http = Http::default();
+    let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+    assert_eq!(
+        call.next(cancel.as_ref()).await,
+        Err(ProviderError::Socket(WebSocketError::Cancelled))
+    );
+    assert!(cancel.is_cancelled());
+    assert_eq!(call.next(cancel.as_ref()).await, Ok(None));
+    assert_eq!(wire.connects.load(Ordering::SeqCst), 0);
+    assert!(http.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn cancellation_after_visible_output_does_not_make_http_sticky() {
     let (mut session, wire, http, cancel) = setup(
         vec![Ok(vec![text()]), Ok(vec![completed("fresh", json!([]))])],
@@ -1048,7 +1105,7 @@ async fn cancellation_after_visible_output_does_not_make_http_sticky() {
     let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
     call.next(&cancel).await.unwrap();
     cancel.0.store(true, Ordering::SeqCst);
-    assert_eq!(call.next(&cancel).await, Err(WebSocketError::Cancelled));
+    assert_eq!(call.next(&cancel).await, Err(ProviderError::Cancelled));
     drop(call);
     cancel.0.store(false, Ordering::SeqCst);
     drain(
