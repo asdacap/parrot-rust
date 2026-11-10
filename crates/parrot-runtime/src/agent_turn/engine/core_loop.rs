@@ -1,4 +1,5 @@
 use super::*;
+use crate::tool_settlement::ToolFactory;
 use parrot_core::{
     ContextCompaction as CoreContextCompaction, ContextSnapshot as CoreContextSnapshot,
     Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse,
@@ -12,14 +13,9 @@ mod provider;
 mod states;
 use states::RuntimeStates;
 mod tools;
+use tools::RuntimeTools;
 
-struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
-    backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S>,
-    captured: std::sync::Mutex<Option<CapturedTools<T::Snapshot>>>,
-}
-
-struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
+struct RuntimeProvider<'a, S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S>,
 }
@@ -112,8 +108,7 @@ pub(super) async fn run<S, T>(
 ) -> (Result<Execution, TurnError>, Option<TurnKey>)
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     let initialized = {
         let mut guard = backend.state.lock().await;
@@ -173,9 +168,27 @@ where
             {
                 return Ok(parrot_core::Outcome::Completed(answer));
             }
+
+            let tool_events = ContextEmitter::new(
+                &backend.history,
+                backend.publisher.as_ref(),
+                &backend.broker,
+                backend.event_id.as_ref(),
+            );
             let tools = RuntimeTools {
-                backend,
+                config: &backend.tool_execution,
+                factory: backend.tools.as_ref(),
+                materialized: &backend.materialized_tools,
+                execution: &backend.tool_execution_cycle,
+                state: &backend.state,
+                history: &backend.history,
+                prompt: &backend.prompt,
+                sessions: &backend.sessions,
+                usage: &backend.usage,
+                capture: backend.selection.as_ref(),
                 binding: &binding,
+                events: &tool_events,
+                interrupted_result: &backend.notices.interrupted_result,
                 captured: std::sync::Mutex::new(None),
             };
             let provider = RuntimeProvider {
@@ -226,7 +239,7 @@ where
                         .await?;
                     loop {
                         let snapshot = backend.snapshot(&selection)?;
-                        let definitions = backend.tools.definitions(&snapshot).to_vec();
+                        let definitions = snapshot.definitions().to_vec();
                         let status = backend.status.bind(&selection);
                         let outcome = state
                             .context
@@ -324,8 +337,7 @@ pub(super) async fn interrupt<S, T>(
 ) -> Result<(), TurnError>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     let binding = TurnBinding::new();
     let mut budget = parrot_core::TurnBudget::new(backend.agent_limits.disable_max_turns);

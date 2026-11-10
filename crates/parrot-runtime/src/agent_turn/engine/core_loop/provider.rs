@@ -1,10 +1,10 @@
 use super::*;
+use crate::tool_settlement::ToolFactory;
 
 impl<S, T> parrot_core::Provider for RuntimeProvider<'_, S, T>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     fn estimate_input_tokens(
         &self,

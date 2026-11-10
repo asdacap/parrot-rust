@@ -9,6 +9,7 @@ use super::{
     tool_conversation::ToolConversation,
     usage::SessionUsageRecorder,
 };
+use crate::tool_settlement::{ToolExecutionConfig, ToolFactory, ToolSnapshot};
 use crate::{
     active_work::exit_reminders::{ExitReminders, ReminderError},
     compaction::{
@@ -18,6 +19,7 @@ use crate::{
     event_broker::{BrokerError, EventBroker},
     prompt_context::{SessionPrompt, SystemPrompt},
 };
+use parrot_domain::values::tools::ToolCycleImageBudget;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -55,7 +57,7 @@ mod core_loop;
 
 pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 
-pub struct RuntimeConfig<S: AccessSnapshot, T: TurnTools<S>> {
+pub struct RuntimeConfig<S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> {
     pub identity: SessionIdentity,
     pub agent_limits: AgentLimitsConfig,
     pub history: AgentHistoryView,
@@ -63,6 +65,7 @@ pub struct RuntimeConfig<S: AccessSnapshot, T: TurnTools<S>> {
     pub publisher: Arc<Publisher>,
     pub selection: Arc<dyn SelectionSource<S>>,
     pub tools: Arc<T>,
+    pub tool_execution: ToolExecutionConfig,
     pub prompt: Box<dyn SystemPrompt>,
     pub skills: Arc<dyn TurnSkills>,
     pub context: ContextController,
@@ -116,7 +119,7 @@ impl ProviderUsage for State {
 
 /// A real storage/provider backend. No service has a success default, and no
 /// concrete filesystem/security implementation is constructed by the drain.
-pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
+pub struct RuntimeBackend<S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> {
     identity: SessionIdentity,
     agent_limits: AgentLimitsConfig,
     history: AgentHistoryView,
@@ -124,6 +127,8 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     publisher: Arc<Publisher>,
     selection: Arc<dyn SelectionSource<S>>,
     tools: Arc<T>,
+    tool_execution: ToolExecutionConfig,
+    tool_execution_cycle: Mutex<Option<Arc<ToolCycleImageBudget>>>,
     skills: Arc<dyn TurnSkills>,
     templates: Arc<PromptTemplateCatalog>,
     status: Arc<dyn TurnStatus<S>>,
@@ -139,20 +144,20 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
     state: Mutex<State>,
     prompt: SessionPrompt,
     conversation: ConversationReadView,
-    materialized_tools: std::sync::Mutex<Option<T::Snapshot>>,
+    materialized_tools: std::sync::Mutex<Option<ToolSnapshot<S>>>,
     compactor: crate::compaction::Compactor,
     notices: Notices,
     execution_activity: std::sync::Mutex<Option<i64>>,
 }
 struct Notices {
     runaway: String,
+    interrupted_result: String,
 }
 
 impl<S, T> RuntimeBackend<S, T>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     pub async fn new(config: RuntimeConfig<S, T>) -> Result<Arc<Self>, TurnError> {
         Self::with_sessions(config, ProviderSessions::new()).await
@@ -192,6 +197,7 @@ where
         };
         let notices = Notices {
             runaway: render("agent-session.runaway")?,
+            interrupted_result: render("agent-session.interrupted-result")?,
         };
         Ok(Arc::new(Self {
             identity: config.identity,
@@ -201,6 +207,8 @@ where
             publisher: config.publisher,
             selection: config.selection,
             tools: config.tools,
+            tool_execution: config.tool_execution,
+            tool_execution_cycle: Mutex::new(None),
             skills: config.skills,
             templates: config.templates,
             status: config.status,
@@ -236,7 +244,7 @@ where
         &self,
         selection: &TurnSelection<S>,
     ) -> Result<Vec<sessions::Tool>, TurnError> {
-        Ok(self.tools.definitions(&self.snapshot(selection)?).to_vec())
+        Ok(self.snapshot(selection)?.definitions().to_vec())
     }
     /// Capture current actual inputs without waiting for the drain, tools or summary.
     pub async fn observe_context(
@@ -312,7 +320,7 @@ where
         let mut guard = self.state.lock().await;
         let state = &mut *guard;
         let snapshot = self.snapshot(selection)?;
-        let definitions = self.tools.definitions(&snapshot).to_vec();
+        let definitions = snapshot.definitions().to_vec();
         let status = self.status.bind(selection);
         let events = ContextEmitter::new(
             &self.history,
@@ -359,18 +367,18 @@ where
             .await
             .map_err(TurnError::Publication)
     }
-    fn snapshot(&self, selection: &TurnSelection<S>) -> Result<T::Snapshot, TurnError> {
+    fn snapshot(&self, selection: &TurnSelection<S>) -> Result<ToolSnapshot<S>, TurnError> {
         let mut materialized = self
             .materialized_tools
             .lock()
             .expect("tool catalog poisoned");
         if materialized.is_none() {
-            *materialized = Some(self.tools.materialize()?);
+            *materialized = Some(ToolSnapshot::document(self.tools.materialize()?)?);
         }
-        self.tools.permitted(
-            materialized.as_ref().expect("materialized above"),
-            selection,
-        )
+        Ok(materialized
+            .as_ref()
+            .expect("materialized above")
+            .permitted_by(&selection.profile))
     }
 
     async fn fail(&self, message: String, body: String) -> Result<(), TurnError> {
@@ -387,8 +395,7 @@ where
 impl<S, T> super::lifecycle::AgentSession<RuntimeBackend<S, T>>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     /// Accepts an owned mutation; dropping its observer cannot drop an admitted
     /// SQLite commit or leave the live reminder instance stale.
@@ -648,8 +655,7 @@ impl ContextEvents for ContextEmitter<'_> {
 impl<S, T> RuntimeBackend<S, T>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     async fn emit_execution(
         &self,
@@ -687,8 +693,7 @@ enum ExecutionCorrelation {
 impl<S, T> RuntimeBackend<S, T>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     fn start_execution(
         &self,
@@ -766,8 +771,7 @@ where
 impl<S, T> DrainBackend for RuntimeBackend<S, T>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
+    T: ToolFactory<S> + ?Sized + 'static,
 {
     type Selection = TurnSelection<S>;
     fn admit(

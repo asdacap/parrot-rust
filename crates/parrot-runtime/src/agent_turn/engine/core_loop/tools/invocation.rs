@@ -9,7 +9,7 @@ use parrot_storage::{
 };
 use std::time::Instant;
 
-impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
+impl<S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> RuntimeTools<'_, S, T> {
     pub(super) fn invoke<'a>(
         &'a self,
         resources: InvocationResources<'a, S>,
@@ -48,22 +48,26 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                 history,
                 call,
                 tool,
-                "started",
-                DiagnosticSeverity::Information,
-                None,
-                None,
-                None,
+                ToolDiagnostic {
+                    operation: "started",
+                    severity: DiagnosticSeverity::Information,
+                    outcome: None,
+                    error_code: None,
+                    began: None,
+                },
             );
             let Some(tool) = tool else {
                 self.diagnostic(
                     history,
                     call,
                     None,
-                    "finished",
-                    DiagnosticSeverity::Warning,
-                    Some("unknown_tool"),
-                    None,
-                    Some(began),
+                    ToolDiagnostic {
+                        operation: "finished",
+                        severity: DiagnosticSeverity::Warning,
+                        outcome: Some("unknown_tool"),
+                        error_code: None,
+                        began: Some(began),
+                    },
                 );
                 return self.fail(call, format!("unknown tool {}", call.name));
             };
@@ -192,11 +196,13 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                     history,
                     call,
                     Some(tool),
-                    "finished",
-                    DiagnosticSeverity::Information,
-                    Some(if yielded { "yielded" } else { "completed" }),
-                    None,
-                    Some(began),
+                    ToolDiagnostic {
+                        operation: "finished",
+                        severity: DiagnosticSeverity::Information,
+                        outcome: Some(if yielded { "yielded" } else { "completed" }),
+                        error_code: None,
+                        began: Some(began),
+                    },
                 );
                 Ok(ToolExecutionResult {
                     result: ToolResult {
@@ -218,11 +224,13 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                         history,
                         call,
                         Some(tool),
-                        "finished",
-                        DiagnosticSeverity::Information,
-                        Some("cancelled"),
-                        None,
-                        Some(began),
+                        ToolDiagnostic {
+                            operation: "finished",
+                            severity: DiagnosticSeverity::Information,
+                            outcome: Some("cancelled"),
+                            error_code: None,
+                            began: Some(began),
+                        },
                     );
                     Ok(self.cancel(call))
                 }
@@ -236,11 +244,13 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                         history,
                         call,
                         Some(tool),
-                        "finished",
-                        DiagnosticSeverity::Error,
-                        Some("failed"),
-                        Some(code),
-                        Some(began),
+                        ToolDiagnostic {
+                            operation: "finished",
+                            severity: DiagnosticSeverity::Error,
+                            outcome: Some("failed"),
+                            error_code: Some(code),
+                            began: Some(began),
+                        },
                     );
                     self.fail(call, error.message)
                 }
@@ -253,7 +263,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                 call_id: call.id.clone(),
                 tool_name: call.name.clone(),
                 status: ToolStatus::Cancelled,
-                text: self.interrupted_result.clone(),
+                text: self.interrupted_result.into(),
                 error_message: String::new(),
                 images: Vec::new(),
             },
@@ -282,29 +292,32 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
             yielded_process: None,
         })
     }
-    #[allow(clippy::too_many_arguments)]
     fn diagnostic(
         &self,
         history: &AgentHistoryView,
         call: &ToolCall,
         tool: Option<&ToolHandle<S>>,
-        operation: &str,
-        severity: DiagnosticSeverity,
-        outcome: Option<&str>,
-        error_code: Option<&str>,
-        began: Option<Instant>,
+        record: ToolDiagnostic<'_>,
     ) {
         self.config.diagnostics.write(&DiagnosticEvent {
             agent_session_id: Some(history.agent_session_id().into()),
             correlation_id: Some(call.id.clone()),
             tool_name: tool.map(|tool| tool.definition().name.clone()),
-            outcome: outcome.map(str::to_owned),
-            error_code: error_code.map(str::to_owned),
-            duration_milliseconds: began
+            outcome: record.outcome.map(str::to_owned),
+            error_code: record.error_code.map(str::to_owned),
+            duration_milliseconds: record
+                .began
                 .map(|start| start.elapsed().as_millis().min(i64::MAX as u128) as i64),
-            ..DiagnosticEvent::new("tool", operation, severity)
+            ..DiagnosticEvent::new("tool", record.operation, record.severity)
         });
     }
+}
+struct ToolDiagnostic<'a> {
+    operation: &'a str,
+    severity: DiagnosticSeverity,
+    outcome: Option<&'a str>,
+    error_code: Option<&'a str>,
+    began: Option<Instant>,
 }
 struct ActiveTool<'a> {
     activity: &'a AgentSessionActivity,
