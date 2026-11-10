@@ -1,10 +1,10 @@
 use super::*;
 use parrot_core::{
     CompletionFeedback as CoreCompletionFeedback, ContextCompaction as CoreContextCompaction,
-    ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorCode, ErrorKind,
-    PendingPrompt, PromptPublication, ProviderRequest, ProviderResponse, States as CoreStates,
-    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult,
-    ToolStatus, TurnOptions,
+    ContextReminder, ContextReminderPublication, ContextSnapshot as CoreContextSnapshot,
+    Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse,
+    States as CoreStates, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition,
+    ToolResult, ToolStatus, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -18,6 +18,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
 
 struct RuntimeEventPublisher<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
+    cancellation: &'a dyn Cancellation,
 }
 
 impl<S, T> parrot_core::EventPublisher for RuntimeEventPublisher<'_, S, T>
@@ -26,6 +27,15 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .sample_epoch(self.cancellation)
+                .await
+                .map_err(Into::into)
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             self.backend
@@ -302,7 +312,10 @@ where
                     &mut states,
                     &tools,
                     &provider,
-                    &RuntimeEventPublisher { backend },
+                    &RuntimeEventPublisher {
+                        backend,
+                        cancellation,
+                    },
                     parrot_core::CancellationToken::new(cancellation),
                 )
                 .await
@@ -401,9 +414,11 @@ where
                 key => self
                     .backend
                     .templates
-                    .get_template(key.get_prompt_template_id().ok_or_else(|| {
-                        TurnError::Service("unsupported template configuration key".into())
-                    })?)
+                    .get_template(
+                        crate::prompt_context::get_prompt_template_id(key).ok_or_else(|| {
+                            TurnError::Service("unsupported template configuration key".into())
+                        })?,
+                    )
                     .map(ConfigValue::PromptTemplate)
                     .map_err(|error| {
                         TurnError::Prompt(crate::prompt_context::PromptError::Template(
@@ -430,27 +445,6 @@ where
                 .await
                 .context
                 .get_last_context_reminder()
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn read_pending_prompt(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::Message>, CoreError>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn acknowledge_pending_prompt<'a>(
-        &'a mut self,
-        _: &'a PendingPrompt,
-        _: &'a CoreContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), CoreError>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .sample_epoch(self.cancellation)
                 .await
                 .map_err(Into::into)
         })
@@ -813,33 +807,23 @@ where
             Ok(())
         })
     }
-    fn record_pending_prompt<'a>(
+    fn record_context_reminder<'a>(
         &'a mut self,
-        prompt: &'a PendingPrompt,
-    ) -> BoxFuture<'a, Result<Option<PromptPublication>, CoreError>> {
+        reminder: &'a ContextReminder,
+    ) -> BoxFuture<'a, Result<Option<ContextReminderPublication>, CoreError>> {
         adapt_operation(async move {
-            let PendingPrompt::ContextReminder {
-                checkpoint,
-                content,
-                observed_percentage,
-            } = prompt
-            else {
-                return Err(TurnError::Service(
-                    "ordinary pending prompt recording is unsupported".into(),
-                ));
-            };
             let mut state = self.backend.state.lock().await;
             let state = &mut *state;
             let published = state
                 .context
                 .append_context_reminder(
                     &mut state.conversation,
-                    checkpoint.clone(),
-                    content.clone(),
-                    *observed_percentage,
+                    reminder.checkpoint.clone(),
+                    reminder.content.clone(),
+                    reminder.observed_percentage,
                 )
                 .await?;
-            Ok(published.map(|event| PromptPublication {
+            Ok(published.map(|event| ContextReminderPublication {
                 kind: event.agent_notice().kind.clone(),
                 notice: event.agent_notice().notice.clone(),
                 event_id: event.id,
@@ -847,9 +831,9 @@ where
             }))
         })
     }
-    fn publish_pending_prompt(
+    fn publish_context_reminder(
         &mut self,
-        receipt: PromptPublication,
+        receipt: ContextReminderPublication,
     ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             let mut event = Event {

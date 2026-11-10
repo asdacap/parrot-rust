@@ -313,16 +313,6 @@ impl ContextStatus for Status {
     ) -> BoxFuture<'a, ContextResult<String>> {
         Box::pin(async { Ok("status".into()) })
     }
-    fn observe_fitted<'a>(
-        &'a self,
-        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            estimate("status")?;
-            Ok("status".into())
-        })
-    }
 }
 impl TurnStatus<Security> for Status {
     fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {

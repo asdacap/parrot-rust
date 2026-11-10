@@ -1,12 +1,12 @@
 use parrot_core::{
     BoxFuture, CancellationToken, CompletionFeedback, ConfigKey, ConfigValue, Content,
-    ContextCompaction, ContextConfiguration, ContextModel, ContextReminderCheckpoint,
-    ContextSnapshot, ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind,
-    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PendingMessage, PendingPrompt,
-    PromotedInput, PromptPublication, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
-    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus,
-    Tools, TurnOptions,
+    ContextCompaction, ContextConfiguration, ContextModel, ContextReminder,
+    ContextReminderCheckpoint, ContextReminderPublication, ContextSnapshot, ConversationTurn,
+    Delivery, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
+    InputAdmission, Message, Outcome, PendingMessage, PromotedInput, PromptTemplate, Provider,
+    ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention,
+    SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
+    ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions,
 };
@@ -51,6 +51,9 @@ struct MemoryEventPublisher {
 }
 
 impl EventPublisher for MemoryEventPublisher {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.compacting.store(true, Ordering::SeqCst);
@@ -379,8 +382,6 @@ struct MemoryRequestData {
 struct MemoryPromptData {
     exit_blockers: VecDeque<Vec<String>>,
     checkpoint: Option<ContextReminderCheckpoint>,
-    pending_prompts: VecDeque<Message>,
-    acknowledged_prompts: Vec<ContextSnapshot>,
 }
 
 struct MemoryState {
@@ -391,7 +392,7 @@ struct MemoryState {
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
     prompts: Arc<Mutex<MemoryPromptData>>,
-    skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
+    skill_templates: Arc<Mutex<BTreeMap<ConfigKey, String>>>,
     recorded_input_contexts: Vec<DerivedContext>,
     tools: MemoryTools,
     provider: MemoryProvider,
@@ -410,7 +411,6 @@ struct MemoryState {
     reminder_appends: Vec<(ContextReminderCheckpoint, String, i32)>,
     append_reminder: bool,
     reminder_publications: usize,
-    recorded_prompts: Vec<Message>,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(PendingMessage, Message)>,
     next_input: usize,
@@ -434,7 +434,7 @@ struct MemoryState {
     system_prompts: Vec<(String, String)>,
     prompt_templates: Vec<(String, ConfigKey)>,
     template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
-    template_engines: BTreeMap<String, String>,
+    template_engines: BTreeMap<ConfigKey, String>,
 }
 impl MemoryState {
     fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
@@ -479,35 +479,35 @@ impl MemoryState {
             prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
                 (
-                    "agent-session.context-reminder".into(),
+                    ConfigKey::ContextReminderTemplate,
                     "configured reminder".into(),
                 ),
                 (
-                    "agent-session.context-limit-reminder".into(),
+                    ConfigKey::ContextLimitReminderTemplate,
                     "configured reminder".into(),
                 ),
                 (
-                    "agent-session.truncated-tool-call".into(),
+                    ConfigKey::TruncatedToolCallTemplate,
                     "truncated tool calls".into(),
                 ),
                 (
-                    "agent-session.invalid-tool-call".into(),
+                    ConfigKey::InvalidToolCallTemplate,
                     "invalid tool calls".into(),
                 ),
                 (
-                    "agent-session.final-request".into(),
+                    ConfigKey::FinalRequestTemplate,
                     "Finish the current turn.".into(),
                 ),
                 (
-                    "context.skill-selected".into(),
+                    ConfigKey::SkillSelectedTemplate,
                     "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
                 ),
                 (
-                    "context.skill-unavailable".into(),
+                    ConfigKey::SkillUnavailableTemplate,
                     "<skill-unavailable>\n<name>{name}</name>\n<message>{message}</message>\n</skill-unavailable>".into(),
                 ),
                 (
-                    "context.skill-too-large".into(),
+                    ConfigKey::SkillTooLargeTemplate,
                     "<skill-too-large>\n<name>{name}</name>\n<path>{path}</path>\n<message>The skill instructions exceed the {limit_bytes}-byte injection limit and were not loaded.</message>\n</skill-too-large>".into(),
                 ),
             ].into())),
@@ -546,7 +546,6 @@ impl MemoryState {
             reminder_appends: Vec::new(),
             append_reminder: true,
             reminder_publications: 0,
-            recorded_prompts: Vec::new(),
             last_turn: None,
             pending_messages: VecDeque::new(),
             next_input: 0,
@@ -728,18 +727,17 @@ impl States for MemoryState {
                     ))
                 }
                 key => {
-                    let key = key
-                        .get_prompt_template_id()
-                        .ok_or_else(|| Error::unsupported("configuration"))?;
-                    if key == "agent-session.context-reminder"
-                        || key == "agent-session.context-limit-reminder"
-                    {
+                    if matches!(
+                        key,
+                        ConfigKey::ContextReminderTemplate
+                            | ConfigKey::ContextLimitReminderTemplate
+                    ) {
                         self.trace.step("reminder", self.fail_at)?;
                     }
                     self.trace.step("render_template", self.fail_at)?;
                     let templates = self.skill_templates.lock().unwrap();
                     let text = templates
-                        .get(key)
+                        .get(&key)
                         .ok_or_else(|| Error::failed("unknown template"))?;
                     let allowed = [
                         "name",
@@ -766,11 +764,11 @@ impl States for MemoryState {
                     .map(str::to_owned);
                     let engine = self
                         .template_engines
-                        .get(key)
+                        .get(&key)
                         .map_or("scalar", String::as_str);
                     Ok(ConfigValue::PromptTemplate(Arc::new(
                         PromptTemplate::compile(
-                            &format!("prompt_templates.{key}"),
+                            &format!("test.{key:?}"),
                             text,
                             engine,
                             &allowed,
@@ -803,34 +801,11 @@ impl States for MemoryState {
             Ok(self.prompts().checkpoint.clone())
         })
     }
-    fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
-        Box::pin(async move {
-            self.step("pending_prompt")?;
-            Ok(self.prompts().pending_prompts.front().cloned())
-        })
-    }
-    fn acknowledge_pending_prompt<'a>(
-        &'a mut self,
-        prompt: &'a PendingPrompt,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move {
-            self.step("acknowledge_prompt")?;
-            self.prompts().acknowledged_prompts.push(context.clone());
-            if let PendingPrompt::Message(_) = prompt {
-                self.prompts().pending_prompts.pop_front();
-            }
-            Ok(())
-        })
-    }
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async move {
             self.step("exit_blockers")?;
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
         })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
     }
     fn render_status<'a, 'c>(
         &'a self,
@@ -1018,7 +993,6 @@ impl States for MemoryState {
                     self.append_turn_message(message.clone());
                     PromotedInput {
                         input_id: input.input_id,
-                        message_id: input.message_id,
                         message,
                     }
                 })
@@ -1110,55 +1084,39 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn record_pending_prompt<'a>(
+    fn record_context_reminder<'a>(
         &'a mut self,
-        prompt: &'a PendingPrompt,
-    ) -> BoxFuture<'a, Result<Option<PromptPublication>, Error>> {
+        reminder: &'a ContextReminder,
+    ) -> BoxFuture<'a, Result<Option<ContextReminderPublication>, Error>> {
         Box::pin(async move {
-            self.step("record_prompt")?;
-            let kind = match prompt {
-                PendingPrompt::ContextReminder {
-                    checkpoint,
-                    content,
-                    observed_percentage,
-                } => {
-                    self.step("append_reminder")?;
-                    self.reminder_appends.push((
-                        checkpoint.clone(),
-                        content.clone(),
-                        *observed_percentage,
-                    ));
-                    if !self.append_reminder {
-                        return Ok(None);
-                    }
-                    self.prompts().checkpoint = Some(checkpoint.clone());
-                    "context_reminder"
-                }
-                PendingPrompt::Message(_) => "prompt",
-            };
-            let message = prompt.render_message();
-            self.recorded_prompts.push(message.clone());
+            self.step("append_reminder")?;
+            self.reminder_appends.push((
+                reminder.checkpoint.clone(),
+                reminder.content.clone(),
+                reminder.observed_percentage,
+            ));
+            if !self.append_reminder {
+                return Ok(None);
+            }
+            self.prompts().checkpoint = Some(reminder.checkpoint.clone());
+            let message = reminder.render_message();
             self.request().messages.push(message.clone());
             self.append_turn_message(message);
-            Ok(Some(PromptPublication {
-                event_id: "memory-prompt".into(),
+            Ok(Some(ContextReminderPublication {
+                event_id: "memory-reminder".into(),
                 agent_session_id: "memory-session".into(),
-                kind: kind.into(),
-                notice: "prompt recorded".into(),
+                kind: "context_reminder".into(),
+                notice: "context reminder recorded".into(),
             }))
         })
     }
-    fn publish_pending_prompt(
+    fn publish_context_reminder(
         &mut self,
-        receipt: PromptPublication,
+        _: ContextReminderPublication,
     ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            if receipt.kind == "context_reminder" {
-                self.reminder_publications += 1;
-                self.step("publish_reminder")?;
-            } else {
-                self.step("publish_prompt")?;
-            }
+            self.reminder_publications += 1;
+            self.step("publish_reminder")?;
             Ok(())
         })
     }
@@ -1330,7 +1288,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "context_configuration",
             "token_calibration",
             "estimate",
-            "pending_prompt",
             "checkpoint",
             "messages",
             "context_configuration",
@@ -1347,7 +1304,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "context_configuration",
             "token_calibration",
             "estimate",
-            "pending_prompt",
             "checkpoint",
             "messages",
             "context_configuration",

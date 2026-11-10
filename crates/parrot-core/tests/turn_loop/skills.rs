@@ -218,7 +218,7 @@ fn core_uses_configured_templates_without_interpreting_skill_body_text() {
         SkillContent::Text("literal {name} & <body>".into()),
     );
     state.skill_templates.lock().unwrap().insert(
-        "context.skill-selected".into(),
+        ConfigKey::SkillSelectedTemplate,
         "configured [{name}] => {content}".into(),
     );
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
@@ -381,7 +381,7 @@ fn an_unusable_diagnostic_template_fails_before_any_content_read() {
         .skill_templates
         .lock()
         .unwrap()
-        .insert("context.skill-unavailable".into(), "x".repeat(1024 * 1024));
+        .insert(ConfigKey::SkillUnavailableTemplate, "x".repeat(1024 * 1024));
     assert_eq!(
         state.run(),
         Err(Error::failed(

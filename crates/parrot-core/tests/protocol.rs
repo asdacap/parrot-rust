@@ -38,9 +38,9 @@ impl Provider for UnavailableProvider {}
 #[test]
 fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_results() {
     let mut states = UnavailableState;
-    let pending = finish(states.read_pending_prompt()).unwrap_err();
-    assert_eq!(pending.code, ErrorCode::InvalidOperation);
-    assert!(pending.message.contains("read_pending_prompt"));
+    let reminder = finish(states.get_last_context_reminder()).unwrap_err();
+    assert_eq!(reminder.code, ErrorCode::InvalidOperation);
+    assert!(reminder.message.contains("get_last_context_reminder"));
     let blockers = finish(states.get_exit_blockers()).unwrap_err();
     assert_eq!(blockers.code, ErrorCode::InvalidOperation);
     assert!(blockers.message.contains("get_exit_blockers"));

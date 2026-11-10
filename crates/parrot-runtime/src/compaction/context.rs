@@ -101,25 +101,13 @@ impl From<parrot_core::compaction::CompactionFailure> for ContextError {
 }
 pub type ContextResult<T> = Result<T, ContextError>;
 
-/// The actual status owner binds its agent/profile/selection in this adapter.
-/// Fitting must evaluate the supplied estimator against the actual rendered status.
+/// Renders status for the bound agent, profile, and selection using the supplied context.
 pub trait ContextStatus: Send + Sync {
     fn observe<'a>(
         &'a self,
         context: &'a ContextSnapshot,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<String>>;
-    fn observe_fitted<'a>(
-        &'a self,
-        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(crate::active_work::status::fit_context_status(
-            self,
-            estimate,
-            cancellation,
-        ))
-    }
 }
 
 /// `emit` persists a new event; `publish_committed` requires its real transaction receipt.
@@ -365,17 +353,35 @@ impl ContextController {
             }));
         }
         let instructions = input.prompt.build(input.selection, cancellation).await?;
-        let estimate = |content: &str| -> ContextResult<ContextSnapshot> {
-            let mut candidate = history.clone();
-            candidate.push(Message::system(content));
-            Ok(self.compactor.planner().estimate_selected_context(
-                input.selection,
-                &instructions,
-                input.tools,
-                &candidate,
-            )?)
+        let request = parrot_core::ProviderRequest {
+            instructions,
+            messages: history.into_iter().map(Into::into).collect(),
+            tools: input.tools.iter().cloned().map(Into::into).collect(),
+            ..parrot_core::ProviderRequest::default()
         };
-        input.status.observe_fitted(&estimate, cancellation).await
+        let configuration = self
+            .compactor
+            .planner()
+            .capture_context_configuration(input.selection);
+        let estimates = CompactionEstimates::new(&self.compactor, input.selection);
+        let errors = NativeErrors::new();
+        let provider = EpochProvider {
+            estimates: &estimates,
+            errors: &errors,
+        };
+        let states = StatusStates {
+            status: input.status,
+            errors: &errors,
+        };
+        parrot_core::compaction::fit_status(
+            &request,
+            &configuration,
+            &states,
+            &provider,
+            parrot_core::CancellationToken::new(cancellation),
+        )
+        .await
+        .map_err(|error| errors.restore(error, |error| ContextError::Operation(error.message)))
     }
 
     pub async fn inject_final_provider_request_prompt(
@@ -546,7 +552,9 @@ impl ContextController {
             let controller = tokio::sync::Mutex::new(&mut *self);
             let publisher = EpochEventPublisher {
                 controller: &controller,
+                prompt: input.prompt,
                 events: input.events,
+                cancellation,
                 errors: &errors,
             };
             let mut states = EpochStates {
@@ -807,11 +815,25 @@ impl ContextController {
 
 struct EpochEventPublisher<'a> {
     controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
+    prompt: &'a SessionPrompt,
     events: &'a dyn ContextEvents,
+    cancellation: &'a dyn Cancellation,
     errors: &'a NativeErrors<ContextError>,
 }
 
 impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.prompt
+                .sample_epoch(self.cancellation)
+                .await
+                .map_err(|error| {
+                    let error = ContextError::from(error);
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
         Box::pin(async move {
             self.controller
@@ -924,20 +946,12 @@ impl parrot_core::States for EpochStates<'_> {
                 key => self
                     .templates
                     .get_template(
-                        key.get_prompt_template_id()
+                        crate::prompt_context::get_prompt_template_id(key)
                             .ok_or_else(|| parrot_core::Error::unsupported("configuration"))?,
                     )
                     .map(ConfigValue::PromptTemplate)
                     .map_err(|error| self.capture_error(PromptError::Template(error.to_string()))),
             }
-        })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .sample_epoch(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
         })
     }
     fn read_conversation_state(
@@ -1185,6 +1199,50 @@ impl Cancellation for Uncancelled {
     }
     fn cancelled(&self) -> BoxFuture<'_, ()> {
         Box::pin(std::future::pending())
+    }
+}
+
+struct StatusStates<'a> {
+    status: &'a dyn ContextStatus,
+    errors: &'a NativeErrors<ContextError>,
+}
+
+impl parrot_core::States for StatusStates<'_> {
+    fn get_config(
+        &self,
+        _: parrot_core::ConfigKey,
+    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, parrot_core::Error>> {
+        Box::pin(async { Err(parrot_core::Error::unsupported("States.get_config")) })
+    }
+
+    fn render_status<'a, 'c>(
+        &'a self,
+        context: CoreContextSnapshot,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.status
+                .observe(
+                    &ContextSnapshot {
+                        estimated_tokens: context.estimated_tokens,
+                        context_limit: context.context_limit,
+                        usage_percent: context.usage_percent,
+                        trigger_percent: context.trigger_percent,
+                        input_limit: context.input_limit,
+                        trigger_tokens: context.trigger_tokens,
+                        has_context_limit_override: context.has_context_limit_override,
+                    },
+                    &cancellation,
+                )
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
     }
 }
 

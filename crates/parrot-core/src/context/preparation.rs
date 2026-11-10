@@ -1,7 +1,7 @@
 use crate::{
-    CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration,
-    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, PendingPrompt, Provider,
-    ProviderRequest, States, ToolDefinition, TurnOptions,
+    CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration, ContextReminder,
+    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, Provider, ProviderRequest,
+    States, ToolDefinition, TurnOptions,
     budget::TurnFlags,
     compaction::{compact_conversation, prepare_compaction},
     rendering::{render_instructions, render_template},
@@ -41,14 +41,11 @@ pub(crate) async fn compact_context(
         .await
 }
 
-async fn prepare_pending_prompt(
+async fn prepare_context_reminder(
     states: &mut dyn States,
     context: &ContextSnapshot,
     configuration: &ContextConfiguration,
-) -> Result<Option<PendingPrompt>, Error> {
-    if let Some(prompt) = states.read_pending_prompt().await? {
-        return Ok(Some(PendingPrompt::Message(prompt)));
-    }
+) -> Result<Option<ContextReminder>, Error> {
     let last_reminder = states.get_last_context_reminder().await?;
     let canonical_model = &configuration.model.canonical_model;
     let Some(percentage) =
@@ -87,7 +84,7 @@ async fn prepare_pending_prompt(
         ConfigKey::ContextReminderTemplate
     };
     let content = render_template(states, key, &arguments).await?;
-    Ok(Some(PendingPrompt::ContextReminder {
+    Ok(Some(ContextReminder {
         checkpoint: ContextReminderCheckpoint {
             canonical_model: canonical_model.clone(),
             context_limit: context.context_limit,
@@ -136,9 +133,9 @@ pub(crate) async fn prepare_request(
         context = ContextSnapshot::estimate(estimate, &configuration);
         context.ensure_input_fits()?;
     }
-    if let Some(prompt) = prepare_pending_prompt(states, &context, &configuration).await? {
+    if let Some(reminder) = prepare_context_reminder(states, &context, &configuration).await? {
         let mut candidate = messages.clone();
-        candidate.push(prompt.render_message());
+        candidate.push(reminder.render_message());
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
         if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
@@ -152,22 +149,8 @@ pub(crate) async fn prepare_request(
                 .into_context()?;
             let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
             ContextSnapshot::estimate(estimate, &configuration).ensure_input_fits()?;
-        } else {
-            let receipt = states.record_pending_prompt(&prompt).await?;
-            let acknowledged = if receipt.is_some() {
-                messages = states.read_messages().await?;
-                let estimate =
-                    provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-                ContextSnapshot::estimate(estimate, &configuration)
-            } else {
-                inserted
-            };
-            states
-                .acknowledge_pending_prompt(&prompt, &acknowledged)
-                .await?;
-            if let Some(receipt) = receipt {
-                states.publish_pending_prompt(receipt).await?;
-            }
+        } else if let Some(receipt) = states.record_context_reminder(&reminder).await? {
+            states.publish_context_reminder(receipt).await?;
         }
     }
     let messages = states.read_messages().await?;

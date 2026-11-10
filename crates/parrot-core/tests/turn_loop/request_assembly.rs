@@ -274,14 +274,14 @@ fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_tem
     );
     state
         .template_engines
-        .insert("context.agent-scratch".into(), "minijinja".into());
+        .insert(ConfigKey::AgentScratchTemplate, "minijinja".into());
     state.skill_templates.lock().unwrap().extend([
         (
-            "context.agent-scratch".into(),
+            ConfigKey::AgentScratchTemplate,
             "{{ title }}{% for item in items %}[{{ item }}]{% endfor %}".into(),
         ),
         (
-            "context.agent-history".into(),
+            ConfigKey::AgentHistoryTemplate,
             "configured {content}".into(),
         ),
     ]);

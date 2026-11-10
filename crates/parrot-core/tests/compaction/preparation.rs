@@ -34,9 +34,21 @@ struct PreparationEventPublisher {
     events: Mutex<Vec<String>>,
     fail_start: bool,
     fail_publication: bool,
+    failure: Option<&'static str>,
 }
 
 impl EventPublisher for PreparationEventPublisher {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            if self.failure == Some("cancel") {
+                return Err(Error::cancelled());
+            }
+            if self.failure == Some("sample") {
+                return Err(native_error("sample"));
+            }
+            Ok(())
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             if self.fail_start {
@@ -66,18 +78,6 @@ impl States for Preparation {
                 }
                 _ => Err(Error::failed("preparation has no configured templates")),
             }
-        })
-    }
-
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            if self.failure == Some("cancel") {
-                return Err(Error::cancelled());
-            }
-            if self.failure == Some("sample") {
-                return Err(native_error("sample"));
-            }
-            Ok(())
         })
     }
 
@@ -380,6 +380,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         };
         let publisher = PreparationEventPublisher {
             fail_start: stage == "start",
+            failure: Some(stage),
             ..Default::default()
         };
         let outcome = finish(prepare_compaction(
@@ -404,12 +405,10 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         assert_eq!(*publisher.events.lock().unwrap(), expected);
     }
 
-    let mut preparation = Preparation {
-        failure: Some("sample"),
-        ..Default::default()
-    };
+    let mut preparation = Preparation::default();
     let publisher = PreparationEventPublisher {
         fail_publication: true,
+        failure: Some("sample"),
         ..Default::default()
     };
     assert_eq!(

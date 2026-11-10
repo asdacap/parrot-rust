@@ -304,7 +304,6 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
         finish(state.promote_input(InputAdmission::SteersOnly)),
         Ok(vec![PromotedInput {
             input_id: "promoted-input".into(),
-            message_id: "original-message".into(),
             message: message.clone(),
         }])
     );

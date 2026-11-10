@@ -79,11 +79,7 @@ impl SessionPrompt {
         self.read_prompt_templates(cancellation)
             .await?
             .into_iter()
-            .map(|(source, id)| {
-                parrot_core::ConfigKey::from_prompt_template_id(&id)
-                    .map(|key| (source, key))
-                    .map_err(Into::into)
-            })
+            .map(|(source, id)| super::resolve_prompt_template_key(&id).map(|key| (source, key)))
             .collect()
     }
 

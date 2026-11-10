@@ -6,6 +6,76 @@ use parrot_storage::{
 };
 
 #[tokio::test]
+async fn status_fitting_preserves_native_render_errors_without_committing() {
+    enum FailingStatus {
+        Argument,
+        Cancelled,
+    }
+    impl ContextStatus for FailingStatus {
+        fn observe<'a>(
+            &'a self,
+            _: &'a ContextSnapshot,
+            _: &'a dyn Cancellation,
+        ) -> BoxFuture<'a, ContextResult<String>> {
+            Box::pin(async move {
+                Err(match self {
+                    Self::Argument => ContextError::Argument("original render error".into()),
+                    Self::Cancelled => ContextError::Cancelled,
+                })
+            })
+        }
+    }
+
+    for status in [FailingStatus::Argument, FailingStatus::Cancelled] {
+        let fixture = Fixture::new();
+        let history = fixture.history();
+        user(&history, "existing").await;
+        let provider = Scripted::default();
+        let selection = provider.selection(10000);
+        let sessions = ProviderSessions::new();
+        let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+        let prompt = EpochPrompt::default();
+        let events = Events::new(history.clone());
+        let mut controller = fixture.controller(history, 90);
+
+        let error = controller
+            .inject_status(
+                EpochInput {
+                    selection: &selection,
+                    tools: &[],
+                    conversation: &mut conversation,
+                    prompt: &prompt.prompt,
+                    sessions: &sessions,
+                    status: &status,
+                    events: &events,
+                },
+                1,
+                "mode",
+                &NeverCancelled,
+            )
+            .await
+            .unwrap_err();
+        match status {
+            FailingStatus::Argument => assert!(matches!(
+                error,
+                ContextError::Argument(message) if message == "original render error"
+            )),
+            FailingStatus::Cancelled => assert!(matches!(error, ContextError::Cancelled)),
+        }
+        assert_eq!(conversation.messages().len(), 1);
+        assert!(events.published.lock().unwrap().is_empty());
+        sessions.close().await.unwrap();
+        fixture
+            .repository
+            .events()
+            .database()
+            .close()
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn core_template_failure_retains_native_prompt_error_and_terminal_publication() {
     struct MissingArguments;
     impl SystemPrompt for MissingArguments {
@@ -150,7 +220,8 @@ async fn pending_and_initial_status_fit_actual_next_promotion_before_commit_once
                 .unwrap(),
             StatusInjection::Complete
         );
-        assert_eq!(status.estimates.lock().unwrap().as_slice(), &[expected]);
+        let rendered = status.estimates.lock().unwrap().clone();
+        assert_eq!(rendered.last(), Some(&expected));
         assert_eq!(prompt.sampled.load(Ordering::SeqCst), 1);
         assert_eq!(conversation.messages().len(), 2);
         assert_eq!(conversation.messages()[1].content(), status.fitted);
@@ -175,7 +246,10 @@ async fn pending_and_initial_status_fit_actual_next_promotion_before_commit_once
             StatusInjection::Complete
         );
         assert_eq!(conversation.messages().len(), 2);
-        assert_eq!(status.estimates.lock().unwrap().len(), 1);
+        assert_eq!(
+            status.estimates.lock().unwrap().as_slice(),
+            rendered.as_slice()
+        );
         assert_eq!(events.published.lock().unwrap().len(), 1);
         assert!(events.committed.lock().unwrap().is_empty());
         // Source project-only status notices are retained broadcasts, not durable Event rows.

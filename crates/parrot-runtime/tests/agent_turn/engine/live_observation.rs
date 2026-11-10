@@ -383,17 +383,6 @@ impl ContextStatus for ReentrantStatus {
             Ok("actual reentrant status".into())
         })
     }
-    fn observe_fitted<'a>(
-        &'a self,
-        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            self.capture(cancellation).await?;
-            estimate("actual reentrant status")?;
-            Ok("actual reentrant status".into())
-        })
-    }
 }
 struct ReentrantBinding(Arc<ReentrantStatus>);
 impl TurnStatus<Security> for ReentrantBinding {

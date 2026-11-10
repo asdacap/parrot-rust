@@ -100,10 +100,6 @@ pub trait Provider: Send + Sync {
     fn estimate_tokens(&self, _messages: &[Message]) -> Result<i64, Error> {
         Err(Error::unsupported("Provider.estimate_tokens"))
     }
-    /// Estimates the complete context after substituting the supplied status content.
-    fn estimate_status_context(&self, _content: &str) -> Result<ContextSnapshot, Error> {
-        Err(Error::unsupported("Provider.estimate_status_context"))
-    }
     /// Estimates preceding summary, accumulated chunk, and the next atomic group.
     fn estimate_summary_tokens(
         &self,
@@ -160,7 +156,6 @@ pub trait Tools: Send + Sync {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromotedInput {
     pub input_id: String,
-    pub message_id: String,
     pub message: Message,
 }
 
@@ -210,41 +205,37 @@ pub struct SkillCatalogEntry {
     pub prompt_visible: bool,
 }
 
-/// A prepared message with the information needed to record it.
+/// A prepared context reminder with the information needed to record it.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PendingPrompt {
-    Message(Message),
-    ContextReminder {
-        checkpoint: crate::ContextReminderCheckpoint,
-        content: String,
-        observed_percentage: i32,
-    },
+pub struct ContextReminder {
+    pub checkpoint: ContextReminderCheckpoint,
+    pub content: String,
+    pub observed_percentage: i32,
 }
 
-impl PendingPrompt {
+impl ContextReminder {
     pub fn render_message(&self) -> Message {
-        match self {
-            Self::Message(message) => message.clone(),
-            Self::ContextReminder { content, .. } => Message {
-                role: Role::System,
-                contents: vec![Content::Text(content.clone())],
-                ..Message::default()
-            },
+        Message {
+            role: Role::System,
+            contents: vec![Content::Text(self.content.clone())],
+            ..Message::default()
         }
     }
 }
 
-/// A recorded prompt notice awaiting publication after prompt acknowledgement.
+/// A recorded context reminder notice awaiting publication.
 #[derive(Debug, Eq, PartialEq)]
-pub struct PromptPublication {
+pub struct ContextReminderPublication {
     pub event_id: String,
     pub agent_session_id: String,
     pub kind: String,
     pub notice: String,
 }
 
-/// Publishes compaction lifecycle notifications independently of conversation state.
+/// Publishes lifecycle notifications independently of conversation state.
 pub trait EventPublisher: Send + Sync {
+    /// Begins a prompt epoch before instructions are read, awaiting native refresh hooks.
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction start without request cancellation.
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction failure without request cancellation.
@@ -273,25 +264,9 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_last_context_reminder")) })
     }
-    /// Reads an optional native prompt without choosing or rendering context reminders.
-    fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_pending_prompt")) })
-    }
-    /// Acknowledges a supplied native prompt without changing context reminders.
-    fn acknowledge_pending_prompt<'a>(
-        &'a mut self,
-        _prompt: &'a PendingPrompt,
-        _context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.acknowledge_pending_prompt")) })
-    }
     /// Joins accepted mutations and reads ordered completion blockers.
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_exit_blockers")) })
-    }
-    /// Refreshes raw epoch observations without rendering instructions.
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.sample_epoch")) })
     }
     /// Observes native status for the exact context selected by core.
     fn render_status<'a, 'c>(
@@ -417,22 +392,21 @@ pub trait States: Send + Sync {
     fn record_steer<'a>(&'a mut self, _content: &'a str) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.record_steer")) })
     }
-    /// Persists the supplied prompt after core checks the request's token limits.
+    /// Persists the supplied context reminder after core checks the request's token limits.
     /// Updates the conversation and returns a publication receipt only on insertion.
     /// Returns `None` for a duplicate. Does not publish the receipt.
-    fn record_pending_prompt<'a>(
+    fn record_context_reminder<'a>(
         &'a mut self,
-        _prompt: &'a PendingPrompt,
-    ) -> BoxFuture<'a, Result<Option<PromptPublication>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_pending_prompt")) })
+        _reminder: &'a ContextReminder,
+    ) -> BoxFuture<'a, Result<Option<ContextReminderPublication>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_context_reminder")) })
     }
-    /// Publishes the supplied receipt without cancellation.
-    /// Core calls this after acknowledging the recorded prompt.
-    fn publish_pending_prompt(
+    /// Publishes the recorded context reminder notice without cancellation.
+    fn publish_context_reminder(
         &mut self,
-        _receipt: PromptPublication,
+        _receipt: ContextReminderPublication,
     ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.publish_pending_prompt")) })
+        Box::pin(async { Err(Error::unsupported("States.publish_context_reminder")) })
     }
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
@@ -998,85 +972,6 @@ pub enum ConfigKey {
     AgentPathEnvironmentTemplate,
     AgentScratchTemplate,
     AgentHistoryTemplate,
-}
-
-const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
-    (ConfigKey::AgentsFileTemplate, "context.agents-file"),
-    (ConfigKey::AgentIdentityTemplate, "system.agent-identity"),
-    (
-        ConfigKey::StandingInstructionTemplate,
-        "context.standing-instruction",
-    ),
-    (ConfigKey::SkillCatalogTemplate, "context.skills"),
-    (
-        ConfigKey::SkillUnavailableTemplate,
-        "context.skill-unavailable",
-    ),
-    (ConfigKey::SkillSelectedTemplate, "context.skill-selected"),
-    (ConfigKey::SkillTooLargeTemplate, "context.skill-too-large"),
-    (
-        ConfigKey::ContextReminderTemplate,
-        "agent-session.context-reminder",
-    ),
-    (
-        ConfigKey::ContextLimitReminderTemplate,
-        "agent-session.context-limit-reminder",
-    ),
-    (
-        ConfigKey::FinalRequestTemplate,
-        "agent-session.final-request",
-    ),
-    (
-        ConfigKey::TruncatedToolCallTemplate,
-        "agent-session.truncated-tool-call",
-    ),
-    (
-        ConfigKey::InvalidToolCallTemplate,
-        "agent-session.invalid-tool-call",
-    ),
-    (
-        ConfigKey::OptionalCliUtilitiesTemplate,
-        "context.optional-cli-utilities",
-    ),
-    (
-        ConfigKey::ExpectedCliUtilitiesTemplate,
-        "context.expected-cli-utilities",
-    ),
-    (ConfigKey::PlatformTemplate, "context.platform"),
-    (
-        ConfigKey::WorkingDirectoryTemplate,
-        "system.working-directory",
-    ),
-    (ConfigKey::GitRepositoryTemplate, "context.git-repository"),
-    (ConfigKey::SubagentsTemplate, "context.subagents"),
-    (
-        ConfigKey::SecurityProfileTemplate,
-        "context.security-profile",
-    ),
-    (
-        ConfigKey::AgentPathEnvironmentTemplate,
-        "context.agent-path-environment",
-    ),
-    (ConfigKey::AgentScratchTemplate, "context.agent-scratch"),
-    (ConfigKey::AgentHistoryTemplate, "context.agent-history"),
-];
-
-impl ConfigKey {
-    pub fn get_prompt_template_id(self) -> Option<&'static str> {
-        PROMPT_TEMPLATE_CONFIG_KEYS
-            .iter()
-            .find_map(|(key, id)| (*key == self).then_some(*id))
-    }
-    pub fn from_prompt_template_id(id: &str) -> Result<Self, Error> {
-        PROMPT_TEMPLATE_CONFIG_KEYS
-            .iter()
-            .find_map(|(key, candidate)| (*candidate == id).then_some(*key))
-            .ok_or_else(|| {
-                Error::template(format!(
-                    "prompt_templates.{id} is not an enumerated core prompt template"
-                ))
-            })
-    }
 }
 
 pub enum ConfigValue {
