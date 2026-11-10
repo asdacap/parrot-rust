@@ -1869,5 +1869,7 @@ async fn actual_fresh_store_normalizes_blank_mode_before_initializing_canonical_
 
 #[path = "assignment_response_recovery.rs"]
 mod assignment_response_recovery;
+#[path = "assignment_workflow.rs"]
+mod assignment_workflow;
 #[path = "legacy_task_migration.rs"]
 mod legacy_task_migration;

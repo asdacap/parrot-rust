@@ -156,7 +156,11 @@ pub(super) async fn agent_invoke(
     )
     .await
 }
-async fn set_tasks(fixture: &Fixture, root: &Arc<Scope<Security>>, tasks: Value) {
+pub(super) async fn set_tasks(
+    fixture: &Fixture,
+    root: &Arc<Scope<Security>>,
+    tasks: Value,
+) -> (ToolInvocation, String) {
     let controller = root
         .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
         .unwrap();
@@ -168,6 +172,7 @@ async fn set_tasks(fixture: &Fixture, root: &Arc<Scope<Security>>, tasks: Value)
     )
     .unwrap();
     let turn = root.selection().capture().unwrap();
+    let call_id = Identifier::event_id().unwrap();
     let arguments_json = json!({"tasks":tasks}).to_string();
     // The actual TaskTool captures a durable invoking batch for history forks.
     // Establish that source input rather than using a nonexistent sequence zero.
@@ -181,7 +186,7 @@ async fn set_tasks(fixture: &Fixture, root: &Arc<Scope<Security>>, tasks: Value)
     message
         .tool_calls
         .push(parrot_storage::conversation::ToolCall {
-            id: "adapter-set-call".into(),
+            id: call_id.clone(),
             name: "set_agent_tasks".into(),
             arguments_json: arguments_json.clone(),
         });
@@ -197,13 +202,14 @@ async fn set_tasks(fixture: &Fixture, root: &Arc<Scope<Security>>, tasks: Value)
         .last()
         .unwrap()
         .sequence;
+    let invocation = ToolInvocation {
+        call_id: call_id.clone(),
+        assistant_sequence,
+        arguments_json,
+    };
     let output = tool
         .invoke(
-            ToolInvocation {
-                call_id: "adapter-set-call".into(),
-                assistant_sequence,
-                arguments_json,
-            },
+            invocation.clone(),
             InvocationContext::new(
                 SharedSecurity(turn.security.clone()),
                 ContextSelection::external(turn),
@@ -218,13 +224,14 @@ async fn set_tasks(fixture: &Fixture, root: &Arc<Scope<Security>>, tasks: Value)
     event.agent_session_id = root.identity().session.session_id.clone();
     let mut message = parrot_storage::conversation::ConversationMessage::text(
         parrot_storage::conversation::MessageRole::Tool,
-        output.text,
+        output.text.clone(),
     );
-    message.tool_call_id = "adapter-set-call".into();
+    message.tool_call_id.clone_from(&call_id);
     root.history()
         .append_conversation(event, message)
         .await
         .unwrap();
+    (invocation, output.text)
 }
 fn task(name: &str, payload: &str, result: Option<&str>) -> Value {
     let mut value = json!({"name":name,"description":format!("Complete {name}"),"payload":payload,"acceptance_criteria":"return the requested strict verdict","model":"local/model"});

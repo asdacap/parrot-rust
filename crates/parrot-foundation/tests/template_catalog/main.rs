@@ -26,6 +26,19 @@ fn custom(text: &str, allowed: &[&str], required: &[&str]) -> PromptTemplateCata
         .unwrap()
         .1
 }
+fn assert_current_composite(rendered: &str, values: &serde_json::Value) {
+    // Only the authorized composite historical text is superseded, not its rendering contract.
+    for value in values.as_object().unwrap().values() {
+        assert!(rendered.contains(value.as_str().unwrap()));
+    }
+    assert!(rendered.contains("Perform inner tasks assigned to self in your current agent"));
+    assert!(rendered.contains("record each self task's outcome and result with set_agent_tasks"));
+    assert!(rendered.contains("Your final JSON does not complete an inner self task"));
+    for verdict in ["accept", "reject_and_halt", "reject_and_retry"] {
+        assert!(rendered.contains(&format!("\"verdict\":\"{verdict}\"")));
+    }
+}
+
 fn config_error(content: &str) -> String {
     match PromptTemplateCatalog::from_content(content, &environment()) {
         Err(error) => error.0,
@@ -60,11 +73,11 @@ const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
 #[test]
 fn m6_full_configuration_compiles_and_renders_retained_independent_source_models() {
     let (configuration, catalog) = PromptTemplateCatalog::from_content("", &environment()).unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 106);
+    assert_eq!(configuration.prompt_templates.len(), 109);
     let inventory = fixture(&(A.to_owned() + "catalog-inventory.json"));
     let migration = fixture(&(A.to_owned() + "bundled-migration-map.json"));
     let actual: Vec<_> = catalog.descriptors().collect();
-    assert_eq!(actual.len(), 106);
+    assert_eq!(actual.len(), 109);
     let (_, legacy_warning) = actual
         .iter()
         .find(|(id, _)| *id == "session.legacy-resume-warning")
@@ -112,10 +125,12 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
         );
         if original["engine"] == "scalar" {
             assert_eq!(spec.engine, "scalar");
-            assert_eq!(
-                spec.text,
-                product_changes::align_product_text(id, original["text"].as_str().unwrap())
-            );
+            if *id != "agent-task.composite" {
+                assert_eq!(
+                    spec.text,
+                    product_changes::align_product_text(id, original["text"].as_str().unwrap())
+                );
+            }
         } else {
             let mapped = migration["entries"]
                 .as_array()
@@ -145,6 +160,10 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
                 &CancellationState::Active,
             )
             .unwrap();
+        if row["template_id"] == "agent-task.composite" {
+            assert_current_composite(&rendered, &row["arguments"]);
+            continue;
+        }
         assert_eq!(
             rendered,
             product_changes::align_product_text(
@@ -331,7 +350,7 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
             .render("agent-task.stop-succeeded", &[], &CancellationState::Active)
             .unwrap()
     );
-    assert_eq!(config.prompt_templates.len(), 106);
+    assert_eq!(config.prompt_templates.len(), 109);
 }
 
 #[test]
@@ -671,7 +690,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     let new = "prompt_templates:\n  custom.structured:\n    engine: minijinja\n    template: '{{ value }}'\n    allowed_arguments: [value]\n    required_arguments: [value]\n";
     std::fs::write(&path, new).unwrap();
     let (config, catalog) = PromptTemplateCatalog::load(&path, &predefined, &env).unwrap();
-    assert_eq!(config.prompt_templates.len(), 107);
+    assert_eq!(config.prompt_templates.len(), 110);
     assert_eq!(
         catalog
             .render(
@@ -694,14 +713,19 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
         {
             continue;
         }
+        let rendered = catalog
+            .render(
+                row["template_id"].as_str().unwrap(),
+                &arguments(&row["arguments"]),
+                &CancellationState::Active,
+            )
+            .unwrap();
+        if row["template_id"] == "agent-task.composite" {
+            assert_current_composite(&rendered, &row["arguments"]);
+            continue;
+        }
         assert_eq!(
-            catalog
-                .render(
-                    row["template_id"].as_str().unwrap(),
-                    &arguments(&row["arguments"]),
-                    &CancellationState::Active
-                )
-                .unwrap(),
+            rendered,
             product_changes::align_product_text(
                 row["template_id"].as_str().unwrap(),
                 row["expected"].as_str().unwrap(),

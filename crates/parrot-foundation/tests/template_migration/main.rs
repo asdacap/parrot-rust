@@ -285,7 +285,10 @@ const CONSOLIDATED_IDS: [&str; 2] = [
     "agent-task.assignment-context",
     "compact-context-tool.result",
 ];
-const NATIVE_SCALAR_IDS: [&str; 6] = [
+const NATIVE_MINIJINJA_IDS: [&str; 1] = ["agent-task.set-assigned"];
+const NATIVE_SCALAR_IDS: [&str; 8] = [
+    "agent-task.self-dependency",
+    "agent-task.notification-assigned-self",
     "agent-session.crashed-tool-result",
     "agent-session.progress-reminder",
     "exec-command.stderr-summary",
@@ -363,8 +366,8 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
     let new = yaml::parse_root(&compose(system_new)).unwrap();
     let old_templates = mapping(field(&old, "prompt_templates"));
     let new_templates = mapping(field(&new, "prompt_templates"));
-    assert_eq!(old_templates.len(), 101);
-    assert_eq!(new_templates.len(), 106);
+    assert_eq!(old_templates.len(), 104);
+    assert_eq!(new_templates.len(), 109);
     let expected_ids = expected
         .iter()
         .map(|row| row["id"].as_str().unwrap())
@@ -372,6 +375,7 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
         .chain(AGENT_COMMUNICATION_IDS)
         .chain(["session.legacy-resume-warning"])
         .chain(NATIVE_SCALAR_IDS)
+        .chain(NATIVE_MINIJINJA_IDS)
         .collect::<BTreeSet<_>>();
     assert_eq!(
         new_templates
@@ -386,6 +390,7 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
             !CONSOLIDATED_IDS.contains(&scalar(id).unwrap())
                 && !AGENT_COMMUNICATION_IDS.contains(&scalar(id).unwrap())
                 && !NATIVE_SCALAR_IDS.contains(&scalar(id).unwrap())
+                && !NATIVE_MINIJINJA_IDS.contains(&scalar(id).unwrap())
         })
         .collect::<Vec<_>>();
     let new_templates = new_templates
@@ -394,6 +399,7 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
             !CONSOLIDATED_IDS.contains(&scalar(id).unwrap())
                 && !AGENT_COMMUNICATION_IDS.contains(&scalar(id).unwrap())
                 && !NATIVE_SCALAR_IDS.contains(&scalar(id).unwrap())
+                && !NATIVE_MINIJINJA_IDS.contains(&scalar(id).unwrap())
                 && scalar(id) != Some("session.legacy-resume-warning")
         })
         .collect::<Vec<_>>();
@@ -466,7 +472,22 @@ fn retained_templates_match_the_independent_source_inventory_and_goldens() {
             .unwrap();
             engine.render(argument_values, &NoCancellation).unwrap()
         };
-        assert_eq!(output, expected_output, "source-golden M6: {id}");
+        if id == "agent-task.composite" {
+            // The approved self-completion instruction supersedes only historical text parity.
+            for value in argument_values.values() {
+                assert!(output.contains(value.as_str().unwrap()));
+            }
+            assert!(output.contains("Perform inner tasks assigned to self in your current agent"));
+            assert!(
+                output.contains("record each self task's outcome and result with set_agent_tasks")
+            );
+            assert!(output.contains("Your final JSON does not complete an inner self task"));
+            for verdict in ["accept", "reject_and_halt", "reject_and_retry"] {
+                assert!(output.contains(&format!("\"verdict\":\"{verdict}\"")));
+            }
+        } else {
+            assert_eq!(output, expected_output, "source-golden M6: {id}");
+        }
     }
     assert_eq!(scalar_count, 79);
     assert_eq!(minijinja_count, 10);
