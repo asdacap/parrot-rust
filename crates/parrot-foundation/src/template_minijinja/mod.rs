@@ -1,7 +1,7 @@
 //! Bounded native-Jinja prompt rendering through the shared core implementation.
 
 use crate::config::{ConfigError, Result};
-use crate::template_scalar::{NativeCancellation, translate_error};
+use crate::template_scalar::translate_error;
 use parrot_core::CancellationToken;
 use parrot_domain::contracts::async_ops::{Cancellation, OperationResult};
 use serde_json::{Map, Value};
@@ -32,9 +32,8 @@ impl MiniJinjaPromptTemplateEngine {
         arguments: &Map<String, Value>,
         cancellation: &dyn Cancellation,
     ) -> OperationResult<String, ConfigError> {
-        let source = NativeCancellation(cancellation);
         self.0
-            .render(arguments, CancellationToken::from_provider(&source))
+            .render(arguments, CancellationToken::new(cancellation))
             .map_err(translate_error)
     }
 }

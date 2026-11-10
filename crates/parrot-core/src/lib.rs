@@ -17,10 +17,11 @@ pub async fn run(
     tools: &dyn Tools,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
+    cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
     loop {
-        if provider.is_cancelled() {
+        if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
         let turn = states.get_last_turn().await?;
@@ -29,7 +30,7 @@ pub async fn run(
         {
             return Ok(Outcome::Completed(answer));
         }
-        match run_turn(states, tools, provider, publisher).await? {
+        match run_turn(states, tools, provider, publisher, cancellation).await? {
             Outcome::Completed(completed) => answer = completed,
             Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
         }
@@ -42,9 +43,18 @@ pub async fn run_turn(
     tools: &dyn Tools,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
+    cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut budget = states.read_turn_budget()?;
-    let result = execute_turn(states, tools, provider, publisher, &mut budget).await;
+    let result = execute_turn(
+        states,
+        tools,
+        provider,
+        publisher,
+        cancellation,
+        &mut budget,
+    )
+    .await;
     states.write_turn_budget(budget)?;
     result
 }
@@ -54,9 +64,9 @@ async fn execute_turn(
     tools: &dyn Tools,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
+    cancellation: CancellationToken<'_>,
     budget: &mut TurnBudget,
 ) -> Result<Outcome, Error> {
-    let cancellation = CancellationToken::from_provider(provider);
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
@@ -97,11 +107,11 @@ async fn execute_turn(
         )
         .await?;
         let attempt = budget.count_request();
-        let response = match provider.invoke(request).await {
+        let response = match provider.invoke(request, cancellation).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(states, provider, publisher, definitions)
+                if !context::compact_context(states, provider, publisher, definitions, cancellation)
                     .await?
                     .reduced
                 {

@@ -123,14 +123,6 @@ impl Estimates {
 }
 
 impl parrot_core::Provider for Estimates {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-
-    fn cancelled(&self) -> parrot_core::BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -164,7 +156,12 @@ impl parrot_core::Provider for Estimates {
 fn core_status_fitting_compares_the_complete_snapshot_and_caps_rerenders() {
     let provider = Estimates::new(StatusEstimate::Rebase);
     let status = Status::new("actual status");
-    let fitted = finish(fit_status(&status, &provider)).unwrap();
+    let fitted = finish(fit_status(
+        &status,
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
+    ))
+    .unwrap();
     assert_eq!(fitted, "actual status");
     assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
     assert_eq!(status.contexts.lock().unwrap().len(), 2);
@@ -174,7 +171,12 @@ fn core_status_fitting_compares_the_complete_snapshot_and_caps_rerenders() {
         text: None,
         contexts: Mutex::default(),
     };
-    let fitted = finish(fit_status(&status, &provider)).unwrap();
+    let fitted = finish(fit_status(
+        &status,
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
+    ))
+    .unwrap();
     assert_eq!(provider.calls.load(Ordering::SeqCst), 9);
     assert_eq!(status.contexts.lock().unwrap().len(), 9);
     assert_eq!(fitted, "9");
@@ -192,7 +194,11 @@ fn core_status_fitting_propagates_estimate_failure_before_rendering() {
     };
     let provider = Estimates::new(StatusEstimate::Failure(error.clone()));
     let status = Status::new("must not render");
-    let outcome = finish(fit_status(&status, &provider));
+    let outcome = finish(fit_status(
+        &status,
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
+    ));
     assert_eq!(outcome, Err(error));
     assert!(status.contexts.lock().unwrap().is_empty());
 }
@@ -208,6 +214,7 @@ fn core_fits_actual_status_and_validates_the_final_replacement() {
         Some(result()),
         &status,
         &provider,
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap()
     .unwrap();
@@ -235,6 +242,7 @@ fn core_fits_actual_status_and_validates_the_final_replacement() {
             Some(result()),
             &status,
             &provider,
+            parrot_core::CancellationToken::uncancelled()
         )),
         Err(CompactionFailure::FittedInputLimitExceeded.into())
     );
@@ -254,6 +262,7 @@ fn core_no_progress_checks_current_messages_without_rendering_status() {
             Some(result()),
             &status,
             &provider,
+            parrot_core::CancellationToken::uncancelled()
         )),
         Ok(None)
     );
@@ -278,6 +287,7 @@ fn core_no_progress_checks_current_messages_without_rendering_status() {
                 None,
                 &status,
                 &provider,
+                parrot_core::CancellationToken::uncancelled()
             )),
             Err(CompactionFailure::NoSafeBoundary.into())
         );

@@ -1,7 +1,6 @@
 //! Awaited context epochs over the authoritative storage history.
 use super::execution::{
-    CompactionEstimates, CompactionProvider, CoreCancellation, NativeErrors, describe_error,
-    progress_event,
+    CompactionEstimates, CompactionProvider, NativeErrors, describe_error, progress_event,
 };
 use super::{
     CompactionError, CompactionObserver, CompactionResult, Compactor, ContextCadence, ContextSize,
@@ -605,7 +604,6 @@ impl ContextController {
                 &estimates,
                 input.sessions,
                 ContextObserver(input.events),
-                cancellation,
                 &errors,
             );
             let prepared = parrot_core::compaction::prepare_compaction(
@@ -614,6 +612,7 @@ impl ContextController {
                 &publisher,
                 &definitions,
                 &configuration,
+                parrot_core::CancellationToken::new(cancellation),
             )
             .await
             .map_err(|error| errors.restore(error, ContextError::from))?;
@@ -623,6 +622,7 @@ impl ContextController {
                 &configuration,
                 &mut states,
                 &provider,
+                parrot_core::CancellationToken::new(cancellation),
             )
             .await
             .map_err(|error| errors.restore(error, ContextError::from));
@@ -1010,7 +1010,7 @@ impl parrot_core::States for EpochStates<'_> {
                         trigger_tokens: context.trigger_tokens,
                         has_context_limit_override: context.has_context_limit_override,
                     },
-                    &CoreCancellation(cancellation),
+                    &cancellation,
                 )
                 .await
                 .map_err(|error| self.capture_error(error))
@@ -1044,7 +1044,7 @@ impl parrot_core::States for EpochStates<'_> {
     {
         Box::pin(async move {
             self.events
-                .observe_progress(progress_event(progress), &CoreCancellation(cancellation))
+                .observe_progress(progress_event(progress), &cancellation)
                 .await
                 .map_err(CompactionError::from)
                 .map_err(|error| self.capture_error(error))

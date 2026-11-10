@@ -166,12 +166,6 @@ impl Estimates {
 }
 
 impl parrot_core::Provider for Estimates {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -283,6 +277,7 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         &publisher,
         &definitions,
         &configuration(),
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
 
@@ -366,6 +361,7 @@ fn preparation_preserves_incomplete_roots_and_does_not_promote_orphaned_results(
         &publisher,
         &[],
         &configuration(),
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
     assert_eq!(input.base_watermark, 0);
@@ -404,6 +400,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
             &publisher,
             &[],
             &configuration(),
+            parrot_core::CancellationToken::uncancelled(),
         ));
         let error = if stage == "cancel" {
             Error::cancelled()
@@ -434,6 +431,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
             &publisher,
             &[],
             &configuration(),
+            parrot_core::CancellationToken::uncancelled()
         )),
         Err(native_error("failed publication"))
     );

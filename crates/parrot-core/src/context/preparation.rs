@@ -12,15 +12,30 @@ pub(crate) async fn compact_context(
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
+    cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
     let configuration = states
         .get_config(ConfigKey::Compaction)
         .await?
         .into_compaction()?;
-    let input =
-        prepare_compaction(states, provider, publisher, definitions, &configuration).await?;
-    let compacted =
-        compact_conversation(&input, definitions, &configuration, states, provider).await;
+    let input = prepare_compaction(
+        states,
+        provider,
+        publisher,
+        definitions,
+        &configuration,
+        cancellation,
+    )
+    .await?;
+    let compacted = compact_conversation(
+        &input,
+        definitions,
+        &configuration,
+        states,
+        provider,
+        cancellation,
+    )
+    .await;
     states
         .record_compaction(&input.instructions, definitions, compacted)
         .await
@@ -128,7 +143,7 @@ pub(crate) async fn prepare_request(
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        instructions = compact_context(states, provider, publisher, definitions)
+        instructions = compact_context(states, provider, publisher, definitions, cancellation)
             .await?
             .instructions;
         messages = states.read_messages().await?;
@@ -148,7 +163,7 @@ pub(crate) async fn prepare_request(
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
         if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            instructions = compact_context(states, provider, publisher, definitions)
+            instructions = compact_context(states, provider, publisher, definitions, cancellation)
                 .await?
                 .instructions;
             messages = states.read_messages().await?;

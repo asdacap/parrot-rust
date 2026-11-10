@@ -43,7 +43,12 @@ fn run(
     provider: &Provider,
 ) -> Result<Option<parrot_core::compaction::CompactionResult>, Error> {
     let provider = provider.with_estimates(effects);
-    finish(compact(plan, effects, &provider))
+    finish(compact(
+        plan,
+        effects,
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
+    ))
 }
 
 fn texts(request: &ProviderRequest) -> Vec<&str> {

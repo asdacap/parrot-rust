@@ -130,7 +130,12 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     state.budget = TurnBudget::new(false);
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed("first answer".into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
@@ -138,7 +143,12 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert_eq!(state.final_requests, [0]);
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed("second answer".into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
@@ -147,7 +157,12 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     assert_eq!(state.final_requests, [0, 1]);
 
     assert_eq!(
-        finish(run(&mut state, &tools, &provider)),
+        finish(run(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed(String::new()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
@@ -202,7 +217,12 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
     state.budget = TurnBudget::new(false);
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed("answer".into()))
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
@@ -229,7 +249,12 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     state.budget = TurnBudget::new(false);
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed("answer".into()))
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
@@ -388,13 +413,23 @@ fn sequential_run_turn_calls_retain_the_total_settlement_extension_limit() {
     let provider = state.provider.clone();
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed("first answer".into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert_eq!(state.applied_results.len(), 1);
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::BudgetExhausted)
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 6);
@@ -421,7 +456,12 @@ fn provider_errors_write_the_consumed_request_budget_back_to_states() {
     let provider = state.provider.clone();
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Err(Error::failed("provider failure"))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
@@ -437,7 +477,15 @@ fn budget_read_failures_stop_before_turn_effects_and_do_not_attempt_writeback() 
     state.budget_read_error = Some(error.clone());
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    assert_eq!(finish(run_turn(&mut state, &tools, &provider)), Err(error));
+    assert_eq!(
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
+        Err(error)
+    );
     assert_eq!(state.budget_writes, 0);
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert!(state.trace.values().is_empty());
@@ -459,7 +507,15 @@ fn budget_writeback_failures_take_precedence_after_successful_and_failed_request
         state.budget_write_error = Some(error.clone());
         let tools = state.tools.clone();
         let provider = state.provider.clone();
-        assert_eq!(finish(run_turn(&mut state, &tools, &provider)), Err(error));
+        assert_eq!(
+            finish(run_turn(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref())
+            )),
+            Err(error)
+        );
         assert_eq!(state.budget_writes, 1);
         assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     }

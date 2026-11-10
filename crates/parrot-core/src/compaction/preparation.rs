@@ -16,8 +16,8 @@ pub async fn prepare_compaction(
     publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     configuration: &CompactionConfiguration,
+    cancellation: CancellationToken<'_>,
 ) -> Result<CompactionInput, Error> {
-    let cancellation = CancellationToken::from_provider(provider);
     publisher.report_compaction_started().await?;
     let outcome: Result<CompactionInput, Error> = async {
         states.sample_epoch().await?;

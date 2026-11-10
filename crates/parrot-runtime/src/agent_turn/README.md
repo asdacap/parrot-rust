@@ -248,14 +248,14 @@ AGENTS files, model guidance, identity, standing instructions, and catalog metad
 These getters do not expand templates. Core reads that state and renders the ordered
 instruction sections using concrete templates from `States::get_config`. `ConfigKey`
 selects turn, context, compaction, or prompt-template configuration. The turn entry
-points accept `States`, `Tools`, `Provider`, and `EventPublisher`. The publisher
-reports compaction start and preparation failure independently of request cancellation.
-State retains request status bindings, sampled epoch inputs, and the drain's request
-budget. Provider supplies cancellation, model-specific token estimates, and private
-summary calls. Core owns reminder rendering and cadence decisions, while State stores
-cadence and durable checkpoints. Turn and standalone compaction both use State,
-Provider, and EventPublisher rather than separate preparation, status, summary, or
-compaction-effect contracts. Core records
+points accept `States`, `Tools`, `Provider`, `EventPublisher`, and the runtime's cancellation token.
+The publisher reports compaction start and preparation failure independently of request cancellation.
+Core passes that token to provider calls, tools, and compaction. State retains request
+status bindings, sampled epoch inputs, and the drain's request budget. Provider supplies
+model-specific token estimates, model invocation, and private summary calls. Core owns
+reminder rendering and cadence decisions, while State stores cadence and durable
+checkpoints. Turn and standalone compaction both use State, Provider, and EventPublisher rather than
+separate preparation, status, summary, or compaction-effect contracts. Core records
 the derived skill context through `States::record_input_context` before request-budget
 admission. Nonempty
 selected skill context follows its input. The placement fixture supplies raw
