@@ -12,11 +12,11 @@ async fn settlement_joins_stopped_generation_until_actual_stop_record_is_durable
     let provider = Gate::new();
     let stop_record = Gate::new();
     h.provider.script("a", [Reply::held("answer", &provider)]);
-    set(&owner, vec![task("a")]).await;
+    set(&owner, vec![dedicated(task("a"))]).await;
     provider.entered().await;
     let worker = h.factory.get("a");
     *worker.task_session.record_gate.lock().unwrap() = Some(stop_record.clone());
-    set(&owner, vec![state("a", Canceled)]).await;
+    set(&owner, vec![dedicated(state("a", Canceled))]).await;
     stop_record.entered().await;
     assert!(
         !h.histories

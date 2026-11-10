@@ -19,7 +19,11 @@ async fn dependency_order_failure_blocking_transitive_reset_and_retained_workers
     }
     set(
         &root,
-        vec![task("a"), dependent("b", "a"), dependent("c", "b")],
+        vec![
+            dedicated(task("a")),
+            dedicated(dependent("b", "a")),
+            dedicated(dependent("c", "b")),
+        ],
     )
     .await;
     gates[0].entered().await;
@@ -49,7 +53,7 @@ async fn dependency_order_failure_blocking_transitive_reset_and_retained_workers
     gates[2].open();
     assert!(complete(&root).await.iter().all(|task| task.hidden));
     let retained = h.registry.snapshot_scopes();
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     gates[3].entered().await;
     assert_eq!(
         snapshot(&root)
@@ -103,7 +107,11 @@ async fn rejected_failure_holds_dependents_until_retry_acceptance_or_cancel_then
             .script("a", [Reply::text("halt"), Reply::text("answer")]);
         set(
             &root,
-            vec![task("a"), dependent("b", "a"), dependent("c", "b")],
+            vec![
+                dedicated(task("a")),
+                dedicated(dependent("b", "a")),
+                dedicated(dependent("c", "b")),
+            ],
         )
         .await;
         let failed = wait_tasks(&root, |tasks| tasks[0].state == Failed).await;
@@ -114,7 +122,7 @@ async fn rejected_failure_holds_dependents_until_retry_acceptance_or_cancel_then
         assert_eq!(failed[0].failure.as_deref(), Some("broken"));
         assert!(!failed.iter().any(|task| task.hidden));
         assert!(requests(&h.provider, "b").is_empty());
-        let mut update = state("a", resolution);
+        let mut update = dedicated(state("a", resolution));
         update.result = (resolution == Succeeded).then(|| "manual".into());
         set(&root, vec![update]).await;
         if resolution == Canceled {
@@ -125,7 +133,7 @@ async fn rejected_failure_holds_dependents_until_retry_acceptance_or_cancel_then
                     .all(|task| task.state == Canceled && task.hidden)
             );
             assert!(requests(&h.provider, "b").is_empty());
-            set(&root, vec![task("a")]).await;
+            set(&root, vec![dedicated(task("a"))]).await;
         }
         complete(&root).await;
         assert_eq!(
@@ -198,7 +206,7 @@ async fn running_visibility_updates_preserve_execution_detail_and_terminal_resul
         let root = h.root("owner").await;
         let gate = Gate::new();
         h.provider.script("a", [Reply::held("answer", &gate)]);
-        set(&root, vec![task("a"), state("blocker", Failed)]).await;
+        set(&root, vec![dedicated(task("a")), state("blocker", Failed)]).await;
         gate.entered().await;
         let scope = h.factory.get("a");
         for value in [true, false, hidden] {
@@ -207,7 +215,7 @@ async fn running_visibility_updates_preserve_execution_detail_and_terminal_resul
                 vec![Task {
                     state: Running,
                     hidden: value,
-                    ..task("a")
+                    ..dedicated(task("a"))
                 }],
             )
             .await;

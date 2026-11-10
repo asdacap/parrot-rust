@@ -62,6 +62,22 @@ prompt_templates:
       AgentTask update accepted ({count} tasks). State changes are delivered as notifications.
     allowed_arguments: [count]
     required_arguments: [count]
+  agent-task.self-dependency:
+    template: "\n[{name}] {description}\nResult: {result}"
+    allowed_arguments: [name, description, result]
+    required_arguments: [name, description, result]
+  agent-task.notification-assigned-self:
+    template: |-
+      AgentTask assigned to self: {name}
+      Description: {description}
+      Instruction:
+      {instruction}
+      Acceptance criteria: {acceptance_criteria}
+      Direct dependency results:
+      {dependencies}
+      Perform this task in your current agent. Complete it with set_agent_tasks by recording its outcome and result. Your final response does not complete this self assignment. Other assigned tasks remain out of scope.
+    allowed_arguments: [name, description, instruction, acceptance_criteria, dependencies]
+    required_arguments: [name, description, instruction, acceptance_criteria, dependencies]
   agent-task.notification-succeeded:
     template: |-
       AgentTask succeeded: {name}

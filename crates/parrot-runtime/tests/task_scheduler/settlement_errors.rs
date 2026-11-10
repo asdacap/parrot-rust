@@ -15,7 +15,7 @@ async fn final_publish_failure_remains_primary_while_actual_execution_and_failin
     let stop_record = Gate::new();
     *built.task_session.record_gate.lock().unwrap() = Some(initial_notification.clone());
     h.provider.script("a", [Reply::held("answer", &provider)]);
-    set(&owner, vec![task("a")]).await;
+    set(&owner, vec![dedicated(task("a"))]).await;
     provider.entered().await;
     initial_notification.entered().await;
     let tasks: Vec<_> = (0..900)
@@ -56,12 +56,11 @@ async fn final_publish_failure_remains_primary_while_actual_execution_and_failin
     bounded(async {
         loop {
             let saved = owner.agent_state().load().await.unwrap().unwrap();
-            if saved
-                .tasks
-                .entries
-                .iter()
-                .all(|entry| entry.pending_stop.is_none())
-            {
+            if saved.tasks.entries.iter().all(|entry| {
+                entry
+                    .capture_worker()
+                    .is_none_or(|worker| worker.pending_stop.is_none())
+            }) {
                 break;
             }
             tokio::task::yield_now().await;

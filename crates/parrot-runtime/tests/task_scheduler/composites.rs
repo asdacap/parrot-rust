@@ -110,7 +110,10 @@ async fn nested_graph_is_owned_by_child_and_receives_dependency_history_only_whe
         .script("parent", [Reply::held("answer", &parent_gate)]);
     h.provider
         .script("source", [Reply::held("source-reply", &source_gate)]);
-    let children = vec![dependent("dependent", "source"), task("source")];
+    let children = vec![
+        dedicated(dependent("dependent", "source")),
+        dedicated(task("source")),
+    ];
     set(&root, vec![composite("parent", children.clone())]).await;
     parent_gate.entered().await;
     let parent = h

@@ -18,7 +18,11 @@ async fn success_wakes_owner_before_graph_completes_initial_update_only_records_
     h.provider.script("b", [Reply::held("answer", &second)]);
     let owner = h.factory.get("owner");
     owner.task_session.send_failures.store(2, Ordering::SeqCst);
-    set(&root, vec![task("a"), dependent("b", "a")]).await;
+    set(
+        &root,
+        vec![dedicated(task("a")), dedicated(dependent("b", "a"))],
+    )
+    .await;
     first.entered().await;
     owner
         .task_session
@@ -117,7 +121,11 @@ async fn settling_drains_pending_notifications_as_records_without_waking() {
     h.provider.script("a", [Reply::held("answer", &gate)]);
     set(
         &root,
-        vec![task("a"), dependent("b", "a"), state("failed", Failed)],
+        vec![
+            dedicated(task("a")),
+            dedicated(dependent("b", "a")),
+            state("failed", Failed),
+        ],
     )
     .await;
     gate.entered().await;
@@ -223,7 +231,7 @@ async fn progress_revisions_are_durable_replayable_and_diagnostics_contain_only_
     let gate = Gate::new();
     h.provider
         .script("private-task", [Reply::held("answer", &gate)]);
-    set(&root, vec![task("private-task")]).await;
+    set(&root, vec![dedicated(task("private-task"))]).await;
     gate.entered().await;
     gate.open();
     complete(&root).await;
@@ -299,7 +307,11 @@ async fn exhausted_notice_send_retains_intent_without_blocking_later_delivery() 
     h.provider.script("b", [Reply::held("answer", &second)]);
     let owner = h.factory.get("owner");
     owner.task_session.send_failures.store(3, Ordering::SeqCst);
-    set(&root, vec![task("a"), dependent("b", "a")]).await;
+    set(
+        &root,
+        vec![dedicated(task("a")), dedicated(dependent("b", "a"))],
+    )
+    .await;
     first.entered().await;
     first.open();
     second.entered().await;

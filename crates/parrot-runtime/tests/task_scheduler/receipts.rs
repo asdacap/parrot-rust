@@ -20,7 +20,7 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
     let key = call(17, "accepted");
     let first = scheduler
         .set_tool_tasks(
-            vec![task("a")],
+            vec![dedicated(task("a"))],
             root.selection().current().unwrap(),
             HistoryForkBoundary::AfterCompletedHistory,
             key.clone(),
@@ -28,7 +28,7 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
         .unwrap();
     let duplicate = scheduler
         .set_tool_tasks(
-            vec![task("a"), task("must-not-exist")],
+            vec![dedicated(task("a")), dedicated(task("must-not-exist"))],
             root.selection().current().unwrap(),
             HistoryForkBoundary::AfterCompletedHistory,
             key.clone(),
@@ -41,6 +41,7 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
     assert_eq!(before.tasks.entries.len(), 1);
     assert_eq!(before.tasks.accepted_calls.len(), 1);
     let generation = before.tasks.entries[0]
+        .borrow_worker()
         .runner
         .as_ref()
         .unwrap()
@@ -51,7 +52,7 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
     assert_eq!(
         scheduler
             .set_tool_tasks(
-                vec![task("a")],
+                vec![dedicated(task("a"))],
                 root.selection().current().unwrap(),
                 HistoryForkBoundary::AfterCompletedHistory,
                 key
@@ -71,6 +72,7 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
             .unwrap()
             .tasks
             .entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
@@ -79,7 +81,7 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
     );
     scheduler
         .set_tool_tasks(
-            vec![task("a")],
+            vec![dedicated(task("a"))],
             root.selection().current().unwrap(),
             HistoryForkBoundary::AfterCompletedHistory,
             call(17, "explicit-reset"),
@@ -92,6 +94,7 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
     let saved = root.agent_state().load().await.unwrap().unwrap();
     assert_ne!(
         saved.tasks.entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
@@ -218,7 +221,7 @@ async fn crash_after_graph_acceptance_replays_without_resetting_resumed_attempt(
     let scheduler = root.get_service::<Scheduler>().unwrap();
     scheduler
         .set_tool_tasks(
-            vec![task("a")],
+            vec![dedicated(task("a"))],
             root.selection().current().unwrap(),
             HistoryForkBoundary::AfterCompletedHistory,
             key.clone(),
@@ -229,7 +232,11 @@ async fn crash_after_graph_acceptance_replays_without_resetting_resumed_attempt(
         .unwrap();
     held.entered().await;
     let saved = root.agent_state().load().await.unwrap().unwrap();
-    let old = saved.tasks.entries[0].runner.clone().unwrap();
+    let old = saved.tasks.entries[0]
+        .borrow_worker()
+        .runner
+        .clone()
+        .unwrap();
     let identity = root.identity().clone();
     scheduler.suspend().join().await.unwrap();
     first.close().await;
@@ -240,7 +247,7 @@ async fn crash_after_graph_acceptance_replays_without_resetting_resumed_attempt(
     assert_eq!(
         scheduler
             .set_tool_tasks(
-                vec![task("a")],
+                vec![dedicated(task("a"))],
                 restored.selection().current().unwrap(),
                 HistoryForkBoundary::AfterCompletedHistory,
                 key
@@ -260,6 +267,7 @@ async fn crash_after_graph_acceptance_replays_without_resetting_resumed_attempt(
             .unwrap()
             .tasks
             .entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap(),

@@ -28,11 +28,14 @@ use parrot_domain::{
     },
     values::{
         agent_state::{
-            AcceptedTaskCall, AgentStateUpdate, ForkBoundarySnapshot, NotificationCheckpoint,
-            SelectionSnapshot, TaskEntrySnapshot, TaskForkModeSnapshot, TaskGraphSnapshot,
+            AcceptedTaskCall, AgentStateUpdate, DedicatedTaskExecutionSnapshot,
+            ForkBoundarySnapshot, NotificationCheckpoint, SelectionSnapshot, TaskEntrySnapshot,
+            TaskExecutionSnapshot, TaskForkModeSnapshot, TaskGraphSnapshot,
             TaskNotificationSnapshot, TaskResultClaim, TaskRunnerCheckpoint, TaskStopCheckpoint,
         },
-        agent_tasks::{ExecutionStatus, Task, TaskCallIdentity},
+        agent_tasks::{
+            ExecutionStatus, Task, TaskAssignee, TaskCallIdentity, TaskPayload, TaskView,
+        },
         identifiers::Identifier,
     },
 };
@@ -53,6 +56,7 @@ pub const PROGRESS_KIND: &str = "agent_task_progress";
 pub struct TaskDetail {
     pub task: Task,
     pub agent_name: Option<String>,
+    pub assigned_to: Option<TaskAssignee>,
 }
 struct Entry<S: RestrictableAccessSnapshot + 'static> {
     task: Task,
@@ -60,6 +64,14 @@ struct Entry<S: RestrictableAccessSnapshot + 'static> {
     selection: CapturedSelection,
     boundary: HistoryForkBoundary,
     fork_mode: ForkHistoryMode,
+    execution: TaskExecution<S>,
+}
+enum TaskExecution<S: RestrictableAccessSnapshot + 'static> {
+    Unassigned,
+    Owner { generation_id: String },
+    Dedicated(Box<DedicatedExecution<S>>),
+}
+struct DedicatedExecution<S: RestrictableAccessSnapshot + 'static> {
     worker_session_id: Option<String>,
     runner: Option<TaskRunnerCheckpoint>,
     pending_stop: Option<TaskStopCheckpoint>,
@@ -167,14 +179,14 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             scheduler.ensure_healthy(&state)?;
             if state.suspended
                 || !state.entries[self.index]
-                    .run
-                    .as_ref()
+                    .capture_worker()
+                    .and_then(|worker| worker.run.as_ref())
                     .is_some_and(|run| Arc::ptr_eq(run, &self.run))
                 || checkpoint.generation_id != self.run.generation_id
             {
                 return Err(ChildError::Cancelled);
             }
-            state.entries[self.index].runner = Some(checkpoint);
+            state.entries[self.index].borrow_worker_mut().runner = Some(checkpoint);
             scheduler.save_graph(&mut state).await
         })
     }
@@ -269,56 +281,81 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             }
         }
         let mut entries = Vec::new();
+        let mut owner_running = false;
         for entry in saved.tasks.entries {
-            if entry.task.state == ExecutionStatus::Running && entry.runner.is_none() {
-                return Err(ChildError::registry(
-                    "running task has no saved runner checkpoint",
-                ));
-            }
-            if let Some(runner) = &entry.runner {
-                if runner.original_task.name != entry.task.name
-                    || runner.current_task.name != entry.task.name
-                    || runner.generation_id.is_empty()
-                    || runner.prompt_message_id.is_empty()
-                    || runner.attempt == 0
-                    || runner
-                        .outcome
+            let execution = match entry.execution {
+                TaskExecutionSnapshot::Unassigned => {
+                    if entry.task.state == ExecutionStatus::Running {
+                        return Err(ChildError::registry("running task has no saved assignment"));
+                    }
+                    TaskExecution::Unassigned
+                }
+                TaskExecutionSnapshot::Owner { generation_id } => {
+                    if generation_id.is_empty()
+                        || entry.task.model.is_some()
+                        || !matches!(entry.task.payload, TaskPayload::Instruction(_))
+                        || (entry.task.state == ExecutionStatus::Running && owner_running)
+                    {
+                        return Err(ChildError::registry("owner task assignment is invalid"));
+                    }
+                    owner_running |= entry.task.state == ExecutionStatus::Running;
+                    TaskExecution::Owner { generation_id }
+                }
+                TaskExecutionSnapshot::Dedicated { worker } => {
+                    if entry.task.state == ExecutionStatus::Running && worker.runner.is_none() {
+                        return Err(ChildError::registry(
+                            "running task has no saved runner checkpoint",
+                        ));
+                    }
+                    if let Some(runner) = &worker.runner {
+                        if runner.original_task.name != entry.task.name
+                            || runner.current_task.name != entry.task.name
+                            || runner.generation_id.is_empty()
+                            || runner.prompt_message_id.is_empty()
+                            || runner.attempt == 0
+                            || runner
+                                .outcome
+                                .as_ref()
+                                .is_some_and(|outcome| outcome.name != entry.task.name)
+                        {
+                            return Err(ChildError::registry(
+                                "task runner checkpoint does not match its task",
+                            ));
+                        }
+                    }
+                    if let Some(reference) = worker
+                        .runner
                         .as_ref()
-                        .is_some_and(|outcome| outcome.name != entry.task.name)
-                {
-                    return Err(ChildError::registry(
-                        "task runner checkpoint does not match its task",
-                    ));
+                        .and_then(|runner| runner.response_reference.as_ref())
+                    {
+                        if worker.worker_session_id.as_deref()
+                            != Some(reference.worker_session_id.as_str())
+                            || worker.runner.as_ref().is_some_and(|runner| {
+                                runner.prompt_message_id != reference.initial_message_id
+                            })
+                        {
+                            return Err(ChildError::registry(
+                                "task response reference does not match its worker prompt",
+                            ));
+                        }
+                    }
+                    if let Some(stop) = &worker.pending_stop {
+                        if worker.worker_session_id.as_deref()
+                            != Some(stop.worker_session_id.as_str())
+                            || !saved.tasks.notifications.iter().any(|notice| {
+                                notice.message_id == stop.notice_message_id
+                                    && notice.target_session_id == stop.worker_session_id
+                                    && !notice.wake
+                            })
+                        {
+                            return Err(ChildError::registry(
+                                "task stop intent has no matching worker notification",
+                            ));
+                        }
+                    }
+                    TaskExecution::Dedicated(Box::new(DedicatedExecution::restore(*worker)))
                 }
-            }
-            if let Some(reference) = entry
-                .runner
-                .as_ref()
-                .and_then(|runner| runner.response_reference.as_ref())
-            {
-                if entry.worker_session_id.as_deref() != Some(reference.worker_session_id.as_str())
-                    || entry.runner.as_ref().is_some_and(|runner| {
-                        runner.prompt_message_id != reference.initial_message_id
-                    })
-                {
-                    return Err(ChildError::registry(
-                        "task response reference does not match its worker prompt",
-                    ));
-                }
-            }
-            if let Some(stop) = &entry.pending_stop {
-                if entry.worker_session_id.as_deref() != Some(stop.worker_session_id.as_str())
-                    || !saved.tasks.notifications.iter().any(|notice| {
-                        notice.message_id == stop.notice_message_id
-                            && notice.target_session_id == stop.worker_session_id
-                            && !notice.wake
-                    })
-                {
-                    return Err(ChildError::registry(
-                        "task stop intent has no matching worker notification",
-                    ));
-                }
-            }
+            };
             entries.push(Entry {
                 task: entry.task,
                 diagnostic_id: entry.diagnostic_id,
@@ -346,16 +383,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     TaskForkModeSnapshot::Parent => ForkHistoryMode::Parent,
                     TaskForkModeSnapshot::Empty => ForkHistoryMode::Empty,
                 },
-                worker_session_id: entry.worker_session_id,
-                runner: entry.runner,
-                pending_stop: entry.pending_stop,
-                terminal_notification: entry.terminal_notification,
-                scope: None,
-                run: None,
-                last_execution: None,
-                stopping_run: None,
-                reserved_admission: None,
-                recovered_stop_admission: None,
+                execution,
             });
         }
         let fresh = entries.is_empty() && saved.tasks.notifications.is_empty();
@@ -413,16 +441,19 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         }
         let mut normalized = false;
         for entry in &mut state.entries {
-            if let Some(stop) = &entry.pending_stop {
+            let TaskExecution::Dedicated(worker) = &mut entry.execution else {
+                continue;
+            };
+            if let Some(stop) = &worker.pending_stop {
                 if entry.task.state == ExecutionStatus::Running {
                     entry.task.state = ExecutionStatus::Pending;
                     normalized = true;
                 }
                 if !stop.stopped {
-                    entry.recovered_stop_admission = self.concurrency.acquire(true);
+                    worker.recovered_stop_admission = self.concurrency.acquire(true);
                 }
-            } else if entry.task.state == ExecutionStatus::Running && entry.runner.is_some() {
-                entry.reserved_admission = self.concurrency.acquire(true);
+            } else if entry.task.state == ExecutionStatus::Running && worker.runner.is_some() {
+                worker.reserved_admission = self.concurrency.acquire(true);
             }
         }
         if normalized {
@@ -487,8 +518,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     async fn release_reserved_admissions(&self) {
         let mut state = self.gate.lock().await;
         for entry in &mut state.entries {
-            entry.reserved_admission = None;
-            entry.recovered_stop_admission = None;
+            if let Some(worker) = entry.capture_worker_mut() {
+                worker.reserved_admission = None;
+                worker.recovered_stop_admission = None;
+            }
         }
     }
     async fn join_capacity_observer(&self) -> ChildResult<()> {
@@ -619,16 +652,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         },
                         boundary,
                         fork_mode: scheduler.config.configuration.fork_history_mode,
-                        worker_session_id: None,
-                        runner: None,
-                        pending_stop: None,
-                        terminal_notification: None,
-                        scope: None,
-                        run: None,
-                        last_execution: None,
-                        stopping_run: None,
-                        reserved_admission: None,
-                        recovered_stop_admission: None,
+                        execution: TaskExecution::Unassigned,
                     });
                 }
             }
@@ -704,6 +728,23 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             })
             .collect()
     }
+    pub async fn capture_views(&self) -> Vec<TaskView> {
+        self.admitted().await;
+        let state = self.gate.lock().await;
+        state
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let mut task = entry.task.clone();
+                task.state = effective(&state, index);
+                TaskView {
+                    task,
+                    assigned_to: entry.capture_assignee(),
+                }
+            })
+            .collect()
+    }
     pub async fn capture_detail(&self, name: &str) -> Option<TaskDetail> {
         self.admitted().await;
         let state = self.gate.lock().await;
@@ -714,9 +755,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             TaskDetail {
                 task,
                 agent_name: entry
-                    .scope
-                    .as_ref()
+                    .capture_worker()
+                    .and_then(|worker| worker.scope.as_ref())
                     .map(|scope| scope.identity().session.name.clone()),
+                assigned_to: entry.capture_assignee(),
             }
         })
     }
@@ -804,14 +846,16 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 let sessions = state
                     .entries
                     .iter()
-                    .filter(|entry| entry.run.is_some() || entry.stopping_run.is_some())
-                    .filter_map(|entry| entry.scope.as_ref())
+                    .filter_map(Entry::capture_worker)
+                    .filter(|worker| worker.run.is_some() || worker.stopping_run.is_some())
+                    .filter_map(|worker| worker.scope.as_ref())
                     .map(|scope| scope.get_service::<dyn TaskSession>())
                     .collect::<ChildResult<Vec<_>>>()?;
                 let runs = state
                     .entries
                     .iter()
-                    .filter_map(|entry| entry.run.clone())
+                    .filter_map(Entry::capture_worker)
+                    .filter_map(|worker| worker.run.clone())
                     .collect::<Vec<_>>();
                 (sessions, runs, state.executions.clone())
             };
@@ -917,7 +961,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     }
     fn apply(&self, state: &mut State<S>, index: usize, mut incoming: Task) -> ChildResult<()> {
         let stored = state.entries[index].task.clone();
-        if state.entries[index].owns_attempt()
+        if (state.entries[index].owns_attempt() || state.entries[index].owns_self())
             && incoming.state == ExecutionStatus::Running
             && has_same_definition(&stored, &incoming)
         {
@@ -944,7 +988,18 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         {
             self.reset_dependents(state, &stored.name)?;
         }
-        state.entries[index].runner = None;
+        if let Some(worker) = state.entries[index].capture_worker_mut() {
+            worker.runner = None;
+        }
+        if incoming.state == ExecutionStatus::Pending
+            && state.entries[index]
+                .capture_worker()
+                .is_none_or(|worker| worker.pending_stop.is_none())
+            || !has_same_definition(&stored, &incoming)
+                && matches!(state.entries[index].execution, TaskExecution::Owner { .. })
+        {
+            state.entries[index].execution = TaskExecution::Unassigned;
+        }
         state.entries[index].task = incoming;
         Ok(())
     }
@@ -972,7 +1027,15 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 if state.entries[index].owns_attempt() {
                     self.stop_run(state, index, "agent-task.stop-dependency-reset")?;
                 }
-                state.entries[index].runner = None;
+                if let Some(worker) = state.entries[index].capture_worker_mut() {
+                    worker.runner = None;
+                }
+                if state.entries[index]
+                    .capture_worker()
+                    .is_none_or(|worker| worker.pending_stop.is_none())
+                {
+                    state.entries[index].execution = TaskExecution::Unassigned;
+                }
                 let task = &mut state.entries[index].task;
                 task.state = ExecutionStatus::Pending;
                 task.result = None;
@@ -984,10 +1047,12 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     async fn reconcile(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<bool> {
         let mut changed = false;
         for index in 0..state.entries.len() {
-            if state.entries[index].owns_attempt()
+            if (state.entries[index].owns_attempt() || state.entries[index].owns_self())
                 && effective(state, index) == ExecutionStatus::Canceled
             {
-                self.stop_run(state, index, "agent-task.stop-dependency-canceled")?;
+                if state.entries[index].owns_attempt() {
+                    self.stop_run(state, index, "agent-task.stop-dependency-canceled")?;
+                }
                 state.entries[index].task.state = ExecutionStatus::Pending;
                 changed = true;
             }
@@ -996,9 +1061,34 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         if state.settling || state.suspended || !state.execution_active {
             return Ok(changed);
         }
+        if !state.entries.iter().any(Entry::owns_self) {
+            if let Some(index) = state.entries.iter().enumerate().find_map(|(index, entry)| {
+                (entry.task.state == ExecutionStatus::Pending
+                    && effective(state, index) == ExecutionStatus::Pending
+                    && entry.task.model.is_none()
+                    && matches!(entry.task.payload, TaskPayload::Instruction(_))
+                    && !entry.owns_attempt()
+                    && entry
+                        .capture_worker()
+                        .is_none_or(|worker| worker.pending_stop.is_none())
+                    && entry.task.dependencies.iter().all(|name| {
+                        find(state, name).is_some_and(|dependency| {
+                            state.entries[dependency].task.state == ExecutionStatus::Succeeded
+                        })
+                    }))
+                .then_some(index)
+            }) {
+                self.assign_self(state, index).await?;
+                changed = true;
+            }
+        }
         state.waiting_for_capacity = false;
         for index in 0..state.entries.len() {
-            if state.entries[index].pending_stop.is_some()
+            if state.entries[index]
+                .capture_worker()
+                .is_some_and(|worker| worker.pending_stop.is_some())
+                && (state.entries[index].task.model.is_some()
+                    || matches!(state.entries[index].task.payload, TaskPayload::Tasks(_)))
                 && state.entries[index].task.state == ExecutionStatus::Pending
                 && effective(state, index) == ExecutionStatus::Pending
                 && state.entries[index].task.dependencies.iter().all(|name| {
@@ -1008,7 +1098,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 })
             {
                 if let Some(admission) = self.concurrency.acquire(false) {
-                    if state.entries[index].runner.is_none() {
+                    if state.entries[index].borrow_worker().runner.is_none() {
                         let task = state.entries[index].task.clone();
                         let siblings = state
                             .entries
@@ -1026,21 +1116,26 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                                     .clone()
                             })
                             .collect();
-                        state.entries[index].runner =
+                        state.entries[index].borrow_worker_mut().runner =
                             Some(self.runner.begin(task, siblings, dependencies)?);
                     }
                     state.entries[index].task.state = ExecutionStatus::Running;
                     self.save_graph(state).await?;
-                    state.entries[index].reserved_admission = Some(admission);
+                    state.entries[index].borrow_worker_mut().reserved_admission = Some(admission);
                     changed = true;
                 } else {
                     state.waiting_for_capacity = true;
                 }
             }
             let entry = &state.entries[index];
-            if entry.run.is_none()
-                && entry.pending_stop.is_none()
-                && (entry.task.state == ExecutionStatus::Running && entry.runner.is_some()
+            if !entry.owns_self()
+                && entry
+                    .capture_worker()
+                    .is_none_or(|worker| worker.run.is_none() && worker.pending_stop.is_none())
+                && (entry.task.state == ExecutionStatus::Running
+                    && entry
+                        .capture_worker()
+                        .is_some_and(|worker| worker.runner.is_some())
                     || entry.task.state == ExecutionStatus::Pending)
                 && matches!(
                     effective(state, index),
@@ -1057,9 +1152,59 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         }
         Ok(changed)
     }
+    async fn assign_self(&self, state: &mut State<S>, index: usize) -> ChildResult<()> {
+        let task = state.entries[index].task.clone();
+        let TaskPayload::Instruction(instruction) = &task.payload else {
+            unreachable!("owner assignments are instruction tasks");
+        };
+        let generation_id = Identifier::event_id()
+            .map_err(|error| ChildError::failure("unexpected", error.to_string()))?;
+        let mut dependencies = String::new();
+        for name in &task.dependencies {
+            let dependency = &state.entries[find(state, name).expect("validated dependency")].task;
+            dependencies.push_str(&render(
+                &self.config.configuration,
+                "agent-task.self-dependency",
+                &[
+                    ("name", name),
+                    ("description", &dependency.description),
+                    ("result", dependency.result.as_deref().unwrap_or("")),
+                ],
+            )?);
+        }
+        self.enqueue(
+            state,
+            "agent-task.notification-assigned-self",
+            &[
+                ("name", &task.name),
+                ("description", &task.description),
+                ("instruction", instruction),
+                ("acceptance_criteria", &task.acceptance_criteria),
+                ("dependencies", &dependencies),
+            ],
+            true,
+        )?;
+        let entry = &mut state.entries[index];
+        entry.execution = TaskExecution::Owner { generation_id };
+        entry.task.state = ExecutionStatus::Running;
+        entry.task.result = None;
+        entry.task.failure = None;
+        self.save_graph(state).await
+    }
     async fn start(self: &Arc<Self>, state: &mut State<S>, index: usize) -> ChildResult<bool> {
         self.ensure_healthy(state)?;
+        if !matches!(state.entries[index].execution, TaskExecution::Dedicated(_)) {
+            state.entries[index].execution = TaskExecution::Dedicated(Box::new(
+                DedicatedExecution::restore(DedicatedTaskExecutionSnapshot {
+                    worker_session_id: None,
+                    runner: None,
+                    pending_stop: None,
+                    terminal_notification: None,
+                }),
+            ));
+        }
         let admission = state.entries[index]
+            .borrow_worker_mut()
             .reserved_admission
             .take()
             .or_else(|| self.concurrency.acquire(false));
@@ -1073,7 +1218,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             |error| self.failure_diagnostic("execution", error),
         )
         .await;
-        if state.entries[index].runner.is_none() {
+        if state.entries[index].borrow_worker().runner.is_none() {
             let task = state.entries[index].task.clone();
             let siblings = state
                 .entries
@@ -1091,15 +1236,16 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         .clone()
                 })
                 .collect();
-            state.entries[index].runner = Some(self.runner.begin(task, siblings, dependencies)?);
+            state.entries[index].borrow_worker_mut().runner =
+                Some(self.runner.begin(task, siblings, dependencies)?);
             self.save_graph(state).await?;
         }
-        if state.entries[index].scope.is_none() {
+        if state.entries[index].borrow_worker().scope.is_none() {
             match self.spawn(state, index).await {
                 Ok(scope) => {
-                    state.entries[index].worker_session_id =
+                    state.entries[index].borrow_worker_mut().worker_session_id =
                         Some(scope.identity().session.session_id.clone());
-                    state.entries[index].scope = Some(scope);
+                    state.entries[index].borrow_worker_mut().scope = Some(scope);
                     self.save_graph(state).await?;
                 }
                 Err(ChildError::Suspended) => {
@@ -1112,7 +1258,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     state.entries[index].task.state = ExecutionStatus::Failed;
                     state.entries[index].task.result = None;
                     state.entries[index].task.failure = Some(error.to_string());
-                    state.entries[index].runner = None;
+                    state.entries[index].borrow_worker_mut().runner = None;
                     self.enqueue(
                         state,
                         "agent-task.notification-failed",
@@ -1133,6 +1279,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         state.entries[index].task.failure = None;
         self.save_graph(state).await?;
         let checkpoint = state.entries[index]
+            .borrow_worker()
             .runner
             .as_ref()
             .expect("runner checkpoint");
@@ -1146,8 +1293,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             ready: Arc::new(Readiness::default()),
         });
         let entry = &mut state.entries[index];
-        entry.run = Some(run.clone());
-        let previous = entry.last_execution.clone();
+        entry.borrow_worker_mut().run = Some(run.clone());
+        let previous = entry.borrow_worker().last_execution.clone();
         let execution =
             Operation::start(
                 self.clone()
@@ -1156,7 +1303,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         state.reservations.retain(|ready| !ready.is_ready());
         state.reservations.push(run.ready.clone());
         let entry = &mut state.entries[index];
-        entry.last_execution = Some(execution.clone());
+        entry.borrow_worker_mut().last_execution = Some(execution.clone());
         self.diagnostic(entry, "running", run.started);
         state.executions.push(execution);
         Ok(true)
@@ -1194,7 +1341,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             task.dependencies
                 .first()
                 .and_then(|name| find(state, name))
-                .and_then(|dependency| state.entries[dependency].scope.as_ref())
+                .and_then(|dependency| state.entries[dependency].capture_worker())
+                .and_then(|worker| worker.scope.as_ref())
                 .map(|scope| HistorySource::Sibling(scope.session().clone()))
                 .unwrap_or(HistorySource::Parent)
         } else {
@@ -1252,8 +1400,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         return Err(ChildError::Cancelled);
                     }
                     let entry = &state.entries[index];
-                    let checkpoint = entry.runner.clone().ok_or(ChildError::Cancelled)?;
+                    let checkpoint = entry
+                        .borrow_worker()
+                        .runner
+                        .clone()
+                        .ok_or(ChildError::Cancelled)?;
                     let session = entry
+                        .borrow_worker()
                         .scope
                         .as_ref()
                         .ok_or_else(|| {
@@ -1282,8 +1435,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             let mut state = self.gate.lock().await;
             if state.suspended
                 || !state.entries[index]
-                    .run
-                    .as_ref()
+                    .capture_worker()
+                    .and_then(|worker| worker.run.as_ref())
                     .is_some_and(|current| Arc::ptr_eq(current, &run))
             {
                 run.ready.finish(Err(ChildError::Cancelled));
@@ -1296,7 +1449,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             let completed = match result {
                 Ok(outcome) => self.complete(&mut state, index, outcome, &run).await,
                 Err(ChildError::Cancelled) if run.cancellation.is_cancelled() => {
-                    state.entries[index].run = None;
+                    state.entries[index].borrow_worker_mut().run = None;
                     Ok(())
                 }
                 Err(error) => {
@@ -1316,7 +1469,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         run: &Run,
     ) -> ChildResult<()> {
         let entry = &mut state.entries[index];
-        entry.run = None;
+        entry.borrow_worker_mut().run = None;
         entry.task.state = outcome.state;
         entry.task.result = outcome.result.clone();
         entry.task.failure = outcome.failure.clone();
@@ -1357,8 +1510,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         result
     }
     fn stop_run(&self, state: &mut State<S>, index: usize, template: &str) -> ChildResult<()> {
-        if state.entries[index].pending_stop.is_some() {
-            state.entries[index].reserved_admission = None;
+        if state.entries[index].borrow_worker().pending_stop.is_some() {
+            state.entries[index].borrow_worker_mut().reserved_admission = None;
             return Ok(());
         }
         let reason = render(&self.config.configuration, template, &[])?;
@@ -1368,18 +1521,23 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             &[("reason", &reason)],
         )?;
         let entry = &mut state.entries[index];
-        let run = entry.run.take();
-        let checkpoint = entry.runner.take().expect("owned runner checkpoint");
-        let Some(worker) = entry.worker_session_id.clone() else {
+        let run = entry.borrow_worker_mut().run.take();
+        let checkpoint = entry
+            .borrow_worker_mut()
+            .runner
+            .take()
+            .expect("owned runner checkpoint");
+        let Some(worker) = entry.borrow_worker().worker_session_id.clone() else {
             return Ok(());
         };
         let message_id = Identifier::message_id()
             .map_err(|error| ChildError::failure("unexpected", error.to_string()))?;
-        entry.stopping_run = run.clone();
+        entry.borrow_worker_mut().stopping_run = run.clone();
         if run.is_none() {
-            entry.recovered_stop_admission = entry.reserved_admission.take();
+            entry.borrow_worker_mut().recovered_stop_admission =
+                entry.borrow_worker_mut().reserved_admission.take();
         }
-        entry.pending_stop = Some(TaskStopCheckpoint {
+        entry.borrow_worker_mut().pending_stop = Some(TaskStopCheckpoint {
             generation_id: checkpoint.generation_id,
             prompt_message_id: checkpoint.prompt_message_id,
             worker_session_id: worker.clone(),
@@ -1495,9 +1653,12 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         }
                     }
                     .into(),
-                    agent_session_id: entry.scope.as_ref().map_or_else(String::new, |scope| {
-                        scope.identity().session.session_id.clone()
-                    }),
+                    agent_session_id: entry
+                        .capture_worker()
+                        .and_then(|worker| worker.scope.as_ref())
+                        .map_or_else(String::new, |scope| {
+                            scope.identity().session.session_id.clone()
+                        }),
                     ..AgentTaskProgressNode::new()
                 })
                 .collect(),
@@ -1569,6 +1730,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         state
                             .entries
                             .iter()
+                            .filter_map(Entry::capture_worker)
                             .find_map(|entry| {
                                 if entry.runner.as_ref().is_some_and(|runner| {
                                     runner.prompt_message_id == claim.claim_id
@@ -1633,8 +1795,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         {
             let error = state_error(error);
             state.persistence_failure = Some(error.clone());
-            for entry in &state.entries {
-                if let Some(run) = &entry.run {
+            for worker in state.entries.iter().filter_map(Entry::capture_worker) {
+                if let Some(run) = &worker.run {
                     run.ready.finish(Err(error.clone()));
                 }
             }
@@ -1655,10 +1817,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let mut state = self.gate.lock().await;
         self.ensure_healthy(&state)?;
         for entry in &mut state.entries {
-            if entry.scope.is_some() {
+            let TaskExecution::Dedicated(worker) = &mut entry.execution else {
+                continue;
+            };
+            if worker.scope.is_some() {
                 continue;
             }
-            let scope = if let Some(id) = &entry.worker_session_id {
+            let scope = if let Some(id) = &worker.worker_session_id {
                 Some(children.get(id).cloned().ok_or_else(|| {
                     ChildError::registry(format!(
                         "task worker is not a retained direct child: {id}"
@@ -1673,8 +1838,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 None
             };
             if let Some(scope) = scope {
-                entry.worker_session_id = Some(scope.identity().session.session_id.clone());
-                entry.scope = Some(scope);
+                worker.worker_session_id = Some(scope.identity().session.session_id.clone());
+                worker.scope = Some(scope);
             }
         }
         self.save_graph(&mut state).await
@@ -1687,10 +1852,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             .iter()
             .enumerate()
             .filter(|(index, entry)| {
+                let Some(worker) = entry.capture_worker() else {
+                    return false;
+                };
                 entry.task.state == ExecutionStatus::Running
-                    || entry.pending_stop.is_some()
+                    || worker.pending_stop.is_some()
                     || (entry.task.state == ExecutionStatus::Pending
-                        && (entry.runner.is_some()
+                        && (worker.runner.is_some()
                             || (effective(&state, *index) == ExecutionStatus::Pending
                                 && entry.task.dependencies.iter().all(|name| {
                                     find(&state, name).is_some_and(|dependency| {
@@ -1699,7 +1867,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                                     })
                                 }))))
             })
-            .filter_map(|(_, entry)| entry.worker_session_id.clone())
+            .filter_map(|(_, entry)| {
+                entry
+                    .capture_worker()
+                    .and_then(|worker| worker.worker_session_id.clone())
+            })
             .collect()
     }
     /// Reserves graph-owned executions and waits only for their startup reservations.
@@ -1756,20 +1928,27 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             return Ok(());
         }
         for index in 0..state.entries.len() {
-            let Some(stop) = state.entries[index].pending_stop.clone() else {
+            let Some(stop) = state.entries[index]
+                .capture_worker()
+                .and_then(|worker| worker.pending_stop.clone())
+            else {
                 continue;
             };
             if !state.stopping.insert(stop.generation_id.clone()) {
                 continue;
             }
             let worker = state.entries[index]
+                .borrow_worker()
                 .scope
                 .as_ref()
                 .ok_or_else(|| ChildError::registry("stopped task worker is unresolved"))?
                 .get_service::<dyn TaskSession>()?;
-            let live = state.entries[index].stopping_run.clone();
-            let previous = state.entries[index].last_execution.clone();
-            let reserved_admission = state.entries[index].recovered_stop_admission.take();
+            let live = state.entries[index].borrow_worker().stopping_run.clone();
+            let previous = state.entries[index].borrow_worker().last_execution.clone();
+            let reserved_admission = state.entries[index]
+                .borrow_worker_mut()
+                .recovered_stop_admission
+                .take();
             let scheduler = self.clone();
             let ready = Arc::new(Readiness::default());
             state.reservations.retain(|ready| !ready.is_ready());
@@ -1825,7 +2004,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     {
                         let mut state = scheduler.gate.lock().await;
                         scheduler.ensure_healthy(&state)?;
-                        if let Some(current) = &mut state.entries[index].pending_stop {
+                        if let Some(current) =
+                            &mut state.entries[index].borrow_worker_mut().pending_stop
+                        {
                             if current.generation_id != stop.generation_id {
                                 return Err(ChildError::Cancelled);
                             }
@@ -1914,12 +2095,16 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             return Ok(());
         }
         for value in state.notifications.clone() {
-            let stop_notice = state.entries.iter().any(|entry| {
-                entry
-                    .pending_stop
-                    .as_ref()
-                    .is_some_and(|stop| stop.notice_message_id == value.message_id)
-            });
+            let stop_notice = state
+                .entries
+                .iter()
+                .filter_map(Entry::capture_worker)
+                .any(|entry| {
+                    entry
+                        .pending_stop
+                        .as_ref()
+                        .is_some_and(|stop| stop.notice_message_id == value.message_id)
+                });
             if stop_notice
                 || !value.ready
                 || !state.notifications_active
@@ -1935,7 +2120,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 state
                     .entries
                     .iter()
-                    .filter_map(|entry| entry.scope.as_ref())
+                    .filter_map(Entry::capture_worker)
+                    .filter_map(|worker| worker.scope.as_ref())
                     .find(|scope| scope.identity().session.session_id == value.target_session_id)
                     .ok_or_else(|| {
                         ChildError::registry("notification target is not a retained task worker")
@@ -1976,6 +2162,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         self.ensure_healthy(&state)?;
         state.notifications.retain(|notice| notice.message_id != id);
         for entry in &mut state.entries {
+            let Some(entry) = entry.capture_worker_mut() else {
+                continue;
+            };
             if entry
                 .pending_stop
                 .as_ref()
@@ -1996,9 +2185,16 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             }
         }
         self.save_graph(&mut state).await?;
-        self.reconcile(&mut state).await?;
-        self.save_graph(&mut state).await?;
+        let changed = self.reconcile(&mut state).await?;
+        if changed {
+            self.publish(&mut state).await?;
+        } else {
+            self.save_graph(&mut state).await?;
+        }
         self.kick_stops(&mut state)?;
+        if changed {
+            self.kick_notifications(&mut state)?;
+        }
         Ok(())
     }
     fn failure_diagnostic(&self, operation: &'static str, error: &ChildError) {
@@ -2024,13 +2220,72 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         });
     }
 }
+impl<S: RestrictableAccessSnapshot + 'static> DedicatedExecution<S> {
+    fn restore(snapshot: DedicatedTaskExecutionSnapshot) -> Self {
+        Self {
+            worker_session_id: snapshot.worker_session_id,
+            runner: snapshot.runner,
+            pending_stop: snapshot.pending_stop,
+            terminal_notification: snapshot.terminal_notification,
+            scope: None,
+            run: None,
+            last_execution: None,
+            stopping_run: None,
+            reserved_admission: None,
+            recovered_stop_admission: None,
+        }
+    }
+    fn snapshot(&self) -> DedicatedTaskExecutionSnapshot {
+        DedicatedTaskExecutionSnapshot {
+            worker_session_id: self.worker_session_id.clone(),
+            runner: self.runner.clone(),
+            pending_stop: self.pending_stop.clone(),
+            terminal_notification: self.terminal_notification.clone(),
+        }
+    }
+}
 impl<S: RestrictableAccessSnapshot + 'static> Entry<S> {
+    fn capture_worker(&self) -> Option<&DedicatedExecution<S>> {
+        match &self.execution {
+            TaskExecution::Dedicated(worker) => Some(worker),
+            TaskExecution::Unassigned | TaskExecution::Owner { .. } => None,
+        }
+    }
+    fn capture_worker_mut(&mut self) -> Option<&mut DedicatedExecution<S>> {
+        match &mut self.execution {
+            TaskExecution::Dedicated(worker) => Some(worker),
+            TaskExecution::Unassigned | TaskExecution::Owner { .. } => None,
+        }
+    }
+    fn borrow_worker(&self) -> &DedicatedExecution<S> {
+        self.capture_worker().expect("dedicated task execution")
+    }
+    fn borrow_worker_mut(&mut self) -> &mut DedicatedExecution<S> {
+        self.capture_worker_mut().expect("dedicated task execution")
+    }
     fn owns_attempt(&self) -> bool {
-        self.run.is_some()
-            || (matches!(
-                self.task.state,
-                ExecutionStatus::Pending | ExecutionStatus::Running
-            ) && self.runner.is_some())
+        self.capture_worker().is_some_and(|worker| {
+            worker.run.is_some()
+                || (matches!(
+                    self.task.state,
+                    ExecutionStatus::Pending | ExecutionStatus::Running
+                ) && worker.runner.is_some())
+        })
+    }
+    fn owns_self(&self) -> bool {
+        matches!(self.execution, TaskExecution::Owner { .. })
+            && self.task.state == ExecutionStatus::Running
+    }
+    fn capture_assignee(&self) -> Option<TaskAssignee> {
+        match &self.execution {
+            TaskExecution::Owner { .. } => Some(TaskAssignee::Owner),
+            TaskExecution::Dedicated(worker) => {
+                worker.scope.as_ref().map(|scope| TaskAssignee::Dedicated {
+                    agent_path: format!("/{}", scope.identity().name_path.join("/")),
+                })
+            }
+            TaskExecution::Unassigned => None,
+        }
     }
     fn snapshot(&self) -> TaskEntrySnapshot {
         TaskEntrySnapshot {
@@ -2060,10 +2315,15 @@ impl<S: RestrictableAccessSnapshot + 'static> Entry<S> {
                 ForkHistoryMode::Parent => TaskForkModeSnapshot::Parent,
                 ForkHistoryMode::Empty => TaskForkModeSnapshot::Empty,
             },
-            worker_session_id: self.worker_session_id.clone(),
-            runner: self.runner.clone(),
-            pending_stop: self.pending_stop.clone(),
-            terminal_notification: self.terminal_notification.clone(),
+            execution: match &self.execution {
+                TaskExecution::Unassigned => TaskExecutionSnapshot::Unassigned,
+                TaskExecution::Owner { generation_id } => TaskExecutionSnapshot::Owner {
+                    generation_id: generation_id.clone(),
+                },
+                TaskExecution::Dedicated(worker) => TaskExecutionSnapshot::Dedicated {
+                    worker: Box::new(worker.snapshot()),
+                },
+            },
         }
     }
 }

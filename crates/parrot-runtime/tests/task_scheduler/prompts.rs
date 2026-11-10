@@ -8,7 +8,14 @@ const PRECEDENCE: &str = "This task is your current assignment and supersedes pr
 async fn delivered_default_assignment_places_precedence_after_dependency_context() {
     let h = Harness::new();
     let root = h.root("owner").await;
-    set(&root, vec![task("first"), dependent("current", "first")]).await;
+    set(
+        &root,
+        vec![
+            dedicated(task("first")),
+            dedicated(dependent("current", "first")),
+        ],
+    )
+    .await;
     complete(&root).await;
     let calls = requests(&h.provider, "current");
     assert_eq!(calls.len(), 1);

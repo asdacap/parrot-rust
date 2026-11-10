@@ -15,6 +15,7 @@ mod receipts;
 mod recovery;
 mod retained;
 mod retries;
+mod self_assignment;
 mod settlement;
 mod settlement_errors;
 mod settlement_record;

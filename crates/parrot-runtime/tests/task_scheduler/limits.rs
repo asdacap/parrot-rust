@@ -39,7 +39,7 @@ async fn response_repairs_reset_for_each_rejected_attempt_and_preserve_carried_r
             Reply::text("bad-three"),
         ],
     );
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     let done = wait_tasks(&root, |tasks| tasks[0].state == Failed).await;
     assert_eq!(done[0].result.as_deref(), Some("carried replacement"));
     assert_eq!(
@@ -94,7 +94,11 @@ async fn assert_retained_turn_bounds_result_feedback_and_dependency_summary(expe
         },
     );
     h.provider.script("a", [Reply::text("large-result")]);
-    set(&root, vec![task("a"), dependent("b", "a")]).await;
+    set(
+        &root,
+        vec![dedicated(task("a")), dedicated(dependent("b", "a"))],
+    )
+    .await;
     let done = wait_tasks(&root, |tasks| tasks[0].state == Failed).await;
     assert_eq!(done[0].result.as_deref(), Some(expected.as_str()));
     assert_eq!(
@@ -102,7 +106,7 @@ async fn assert_retained_turn_bounds_result_feedback_and_dependency_summary(expe
         Some(format!("{}\n[truncated]", "é".repeat(16 * 1024)).as_str())
     );
     let manual = format!("{}tail", "😀".repeat(8 * 1024));
-    let mut update = state("a", Succeeded);
+    let mut update = dedicated(state("a", Succeeded));
     update.result = Some(manual);
     set(&root, vec![update]).await;
     complete(&root).await;
@@ -149,7 +153,7 @@ async fn provider_execution_failure_is_terminal_without_invoking_parser() {
         .lock()
         .unwrap()
         .push_back(parrot_provider::sessions::Error::Cancelled);
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     let done = wait_tasks(&root, |tasks| tasks[0].state == Failed).await;
     assert!(
         done[0]

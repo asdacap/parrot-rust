@@ -122,6 +122,10 @@ pub fn task(name: &str) -> Task {
         failure: None,
     }
 }
+pub fn dedicated(mut task: Task) -> Task {
+    task.model.get_or_insert_with(|| "first".into());
+    task
+}
 pub fn state(name: &str, state: ExecutionStatus) -> Task {
     Task {
         state,
@@ -550,13 +554,13 @@ impl parrot_domain::contracts::agent_state::AgentStateStore for GraphState {
                 let old = self.inner.load().await?.unwrap();
                 if next.entries.iter().any(|entry| {
                     entry
-                        .runner
-                        .as_ref()
+                        .capture_worker()
+                        .and_then(|worker| worker.runner.as_ref())
                         .is_some_and(|runner| runner.response_reference.is_some())
                 }) && old.tasks.entries.iter().all(|entry| {
                     entry
-                        .runner
-                        .as_ref()
+                        .capture_worker()
+                        .and_then(|worker| worker.runner.as_ref())
                         .is_none_or(|runner| runner.response_reference.is_none())
                 }) && self.faults.fail_response.swap(false, Ordering::SeqCst)
                 {
@@ -568,7 +572,7 @@ impl parrot_domain::contracts::agent_state::AgentStateStore for GraphState {
                     return Err(failure());
                 }
             }
-            let stopped = matches!(&value, parrot_domain::values::agent_state::AgentStateUpdate::Tasks(graph) if graph.entries.iter().any(|entry| entry.pending_stop.as_ref().is_some_and(|stop| stop.stopped)));
+            let stopped = matches!(&value, parrot_domain::values::agent_state::AgentStateUpdate::Tasks(graph) if graph.entries.iter().any(|entry| entry.capture_worker().and_then(|worker| worker.pending_stop.as_ref()).is_some_and(|stop| stop.stopped)));
             let saved = self.inner.update(value).await?;
             if selected && stopped && self.faults.fail_stopped.swap(false, Ordering::SeqCst) {
                 return Err(failure());
@@ -578,5 +582,42 @@ impl parrot_domain::contracts::agent_state::AgentStateStore for GraphState {
             }
             Ok(saved)
         })
+    }
+}
+
+/// Borrows the dedicated execution represented by a saved test graph entry.
+pub trait SavedTaskExecution {
+    fn borrow_worker(&self) -> &parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot;
+    fn borrow_worker_mut(
+        &mut self,
+    ) -> &mut parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot;
+    fn capture_worker(
+        &self,
+    ) -> Option<&parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot>;
+}
+impl SavedTaskExecution for parrot_domain::values::agent_state::TaskEntrySnapshot {
+    fn borrow_worker(&self) -> &parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot {
+        self.capture_worker()
+            .expect("expected dedicated task snapshot")
+    }
+    fn borrow_worker_mut(
+        &mut self,
+    ) -> &mut parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot {
+        match &mut self.execution {
+            parrot_domain::values::agent_state::TaskExecutionSnapshot::Dedicated { worker } => {
+                worker
+            }
+            _ => panic!("expected dedicated task snapshot"),
+        }
+    }
+    fn capture_worker(
+        &self,
+    ) -> Option<&parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot> {
+        match &self.execution {
+            parrot_domain::values::agent_state::TaskExecutionSnapshot::Dedicated { worker } => {
+                Some(worker)
+            }
+            _ => None,
+        }
     }
 }

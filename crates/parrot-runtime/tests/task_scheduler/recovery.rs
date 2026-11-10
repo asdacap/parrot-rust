@@ -77,10 +77,14 @@ async fn recovery_prepares_all_owners_before_pending_admission_and_preserves_red
         first
             .provider
             .script("pending", [Reply::held("answer", &resumed[3])]);
-        set(&later, vec![task("b"), task("c")]).await;
+        set(&later, vec![dedicated(task("b")), dedicated(task("c"))]).await;
         initial[1].entered().await;
         initial[2].entered().await;
-        set(&earlier, vec![task("a"), task("pending")]).await;
+        set(
+            &earlier,
+            vec![dedicated(task("a")), dedicated(task("pending"))],
+        )
+        .await;
         initial[0].entered().await;
         assert_eq!(snapshot(&earlier).await[1].state, Pending);
         for root in [&earlier, &later] {
@@ -140,8 +144,11 @@ async fn recovery_prepares_all_owners_before_pending_admission_and_preserves_red
         ] {
             let current = root.agent_state().load().await.unwrap().unwrap().tasks;
             for (current, saved) in current.entries.iter().zip(&saved.entries) {
-                assert_eq!(current.worker_session_id, saved.worker_session_id);
-                assert_eq!(current.runner, saved.runner);
+                assert_eq!(
+                    current.borrow_worker().worker_session_id,
+                    saved.borrow_worker().worker_session_id
+                );
+                assert_eq!(current.borrow_worker().runner, saved.borrow_worker().runner);
             }
         }
         let free_owner = second.root("free-owner").await;
@@ -149,7 +156,7 @@ async fn recovery_prepares_all_owners_before_pending_admission_and_preserves_red
         second
             .provider
             .script("free", [Reply::held("answer", &free)]);
-        set(&free_owner, vec![task("free")]).await;
+        set(&free_owner, vec![dedicated(task("free"))]).await;
         free.entered().await;
 
         resumed[1].open();
@@ -196,10 +203,10 @@ async fn recovery_normalizes_pending_stops_under_zero_budget_before_waiting_owne
         first
             .provider
             .script("d", [Reply::held("answer", &resumed[3])]);
-        set(&root, vec![task("a"), task("b")]).await;
+        set(&root, vec![dedicated(task("a")), dedicated(task("b"))]).await;
         initial[0].entered().await;
         initial[1].entered().await;
-        set(&waiting, vec![task("c"), task("d")]).await;
+        set(&waiting, vec![dedicated(task("c")), dedicated(task("d"))]).await;
         initial[2].entered().await;
         assert_eq!(snapshot(&waiting).await[1].state, Pending);
         waiting
@@ -212,12 +219,13 @@ async fn recovery_normalizes_pending_stops_under_zero_budget_before_waiting_owne
         let record = Gate::new();
         let worker = first.factory.get("a");
         *worker.task_session.record_gate.lock().unwrap() = Some(record.clone());
-        let mut replacement = task("a");
+        let mut replacement = dedicated(task("a"));
         replacement.acceptance_criteria = "replacement".into();
         set(&root, vec![replacement]).await;
         record.entered().await;
         wait_saved(&root, |graph| {
-            graph.entries[0].task.state == Running && graph.entries[0].pending_stop.is_some()
+            graph.entries[0].task.state == Running
+                && graph.entries[0].borrow_worker().pending_stop.is_some()
         })
         .await;
         root.get_service::<Scheduler>()
@@ -233,7 +241,12 @@ async fn recovery_normalizes_pending_stops_under_zero_budget_before_waiting_owne
         freeze(&first, &waiting).await;
         let mut saved = root.agent_state().load().await.unwrap().unwrap().tasks;
         assert_eq!(saved.entries[0].task.state, Running);
-        saved.entries[0].pending_stop.as_mut().unwrap().stopped = stopped;
+        saved.entries[0]
+            .borrow_worker_mut()
+            .pending_stop
+            .as_mut()
+            .unwrap()
+            .stopped = stopped;
         root.agent_state()
             .update(AgentStateUpdate::Tasks(saved.clone()))
             .await
@@ -297,7 +310,15 @@ async fn suspension_releases_prepared_recovery_admissions_without_changing_check
     for (name, gate) in ["a", "b", "c"].into_iter().zip(&held) {
         first.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&root, vec![task("a"), task("b"), task("c")]).await;
+    set(
+        &root,
+        vec![
+            dedicated(task("a")),
+            dedicated(task("b")),
+            dedicated(task("c")),
+        ],
+    )
+    .await;
     for gate in &held {
         gate.entered().await;
     }
@@ -319,7 +340,11 @@ async fn suspension_releases_prepared_recovery_admissions_without_changing_check
     for (name, gate) in ["new-a", "new-b"].into_iter().zip(&available) {
         second.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&fresh, vec![task("new-a"), task("new-b")]).await;
+    set(
+        &fresh,
+        vec![dedicated(task("new-a")), dedicated(task("new-b"))],
+    )
+    .await;
     for gate in &available {
         gate.entered().await;
     }
@@ -343,7 +368,15 @@ async fn failed_recovery_activation_releases_prepared_usage_during_suspension() 
             [Reply::held("answer", gate), Reply::held("answer", gate)],
         );
     }
-    set(&root, vec![task("a"), task("b"), task("c")]).await;
+    set(
+        &root,
+        vec![
+            dedicated(task("a")),
+            dedicated(task("b")),
+            dedicated(task("c")),
+        ],
+    )
+    .await;
     for gate in &held {
         gate.entered().await;
     }
@@ -373,7 +406,11 @@ async fn failed_recovery_activation_releases_prepared_usage_during_suspension() 
     for (name, gate) in ["new-a", "new-b"].into_iter().zip(&available) {
         third.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&fresh, vec![task("new-a"), task("new-b")]).await;
+    set(
+        &fresh,
+        vec![dedicated(task("new-a")), dedicated(task("new-b"))],
+    )
+    .await;
     for gate in &available {
         gate.entered().await;
     }
@@ -392,12 +429,12 @@ async fn suspended_stop_record_preserves_notice_without_poisoning_close_and_repl
     first
         .provider
         .script("a", [Reply::held("answer", &provider)]);
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     provider.entered().await;
     let worker = first.factory.get("a");
     let record = Gate::new();
     *worker.task_session.record_gate.lock().unwrap() = Some(record.clone());
-    set(&root, vec![state("a", Canceled)]).await;
+    set(&root, vec![dedicated(state("a", Canceled))]).await;
     record.entered().await;
     let scheduler = root.get_service::<Scheduler>().unwrap();
     first.registry.freeze_admissions().join().await.unwrap();
@@ -416,7 +453,11 @@ async fn suspended_stop_record_preserves_notice_without_poisoning_close_and_repl
     first.registry.shutdown().join().await.unwrap();
     let saved = root.agent_state().load().await.unwrap().unwrap();
     assert_eq!(saved.tasks.entries[0].task.state, Canceled);
-    let stop = saved.tasks.entries[0].pending_stop.as_ref().unwrap();
+    let stop = saved.tasks.entries[0]
+        .borrow_worker()
+        .pending_stop
+        .as_ref()
+        .unwrap();
     assert!(stop.stopped);
     assert!(
         saved
@@ -428,7 +469,10 @@ async fn suspended_stop_record_preserves_notice_without_poisoning_close_and_repl
     let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
     let restored = second.reopen_root(root.identity().clone()).await;
     activate(&restored).await;
-    wait_saved(&restored, |graph| graph.entries[0].pending_stop.is_none()).await;
+    wait_saved(&restored, |graph| {
+        graph.entries[0].borrow_worker().pending_stop.is_none()
+    })
+    .await;
     assert_eq!(snapshot(&restored).await[0].state, Canceled);
     assert_eq!(requests(&second.provider, "a").len(), 1);
     freeze(&second, &restored).await;
@@ -443,7 +487,7 @@ async fn registry_freeze_during_task_worker_construction_preserves_pending_attem
     let scheduler = root.get_service::<Scheduler>().unwrap();
     let update = scheduler
         .set_tasks(
-            vec![task("held-construction")],
+            vec![dedicated(task("held-construction"))],
             root.selection().current().unwrap(),
             HistoryForkBoundary::AfterCompletedHistory,
         )
@@ -458,7 +502,11 @@ async fn registry_freeze_during_task_worker_construction_preserves_pending_attem
     let before = root.agent_state().load().await.unwrap().unwrap();
     assert_eq!(before.tasks.entries[0].task.state, Pending);
     assert!(before.tasks.entries[0].task.failure.is_none());
-    let attempt = before.tasks.entries[0].runner.as_ref().unwrap();
+    let attempt = before.tasks.entries[0]
+        .borrow_worker()
+        .runner
+        .as_ref()
+        .unwrap();
     assert_eq!(attempt.attempt, 1);
     let generation = attempt.generation_id.clone();
     let identity = root.identity().clone();
@@ -475,6 +523,7 @@ async fn registry_freeze_during_task_worker_construction_preserves_pending_attem
             .unwrap()
             .tasks
             .entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
@@ -549,17 +598,26 @@ async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() 
         ],
     );
     let root = first.root("owner").await;
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     held.entered().await;
     let worker_id = first.factory.get("a").history.agent_session_id().to_owned();
     let before = root.agent_state().load().await.unwrap().unwrap();
     let prompt_id = before.tasks.entries[0]
+        .borrow_worker()
         .runner
         .as_ref()
         .unwrap()
         .prompt_message_id
         .clone();
-    assert_eq!(before.tasks.entries[0].runner.as_ref().unwrap().attempt, 2);
+    assert_eq!(
+        before.tasks.entries[0]
+            .borrow_worker()
+            .runner
+            .as_ref()
+            .unwrap()
+            .attempt,
+        2
+    );
     let identity = root.identity().clone();
     freeze(&first, &root).await;
     let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
@@ -589,6 +647,7 @@ async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() 
             .unwrap()
             .tasks
             .entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
@@ -603,7 +662,11 @@ async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() 
         Some("leaf response invalid: second invalid envelope")
     );
     let saved = restored.agent_state().load().await.unwrap().unwrap();
-    let runner = saved.tasks.entries[0].runner.as_ref().unwrap();
+    let runner = saved.tasks.entries[0]
+        .borrow_worker()
+        .runner
+        .as_ref()
+        .unwrap();
     assert_eq!(
         (
             runner.attempt,
@@ -649,13 +712,13 @@ async fn missing_graph_worker_binding_adopts_retained_scope_without_construction
         ],
     );
     let root = first.root("owner").await;
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     held.entered().await;
     let worker_id = first.factory.get("a").history.agent_session_id().to_owned();
     let identity = root.identity().clone();
     freeze(&first, &root).await;
     let mut saved = root.agent_state().load().await.unwrap().unwrap();
-    saved.tasks.entries[0].worker_session_id = None;
+    saved.tasks.entries[0].borrow_worker_mut().worker_session_id = None;
     saved.tasks.entries[0].task.state = Pending;
     root.agent_state()
         .update(AgentStateUpdate::Tasks(saved.tasks))
@@ -684,6 +747,7 @@ async fn missing_graph_worker_binding_adopts_retained_scope_without_construction
         .unwrap()
         .tasks
         .entries[0]
+        .borrow_worker()
         .runner
         .as_ref()
         .unwrap()
@@ -717,7 +781,7 @@ async fn failed_graph_write_faults_closed_and_cannot_launch_queued_updates() {
     let update = || {
         scheduler
             .set_tasks(
-                vec![task("a")],
+                vec![dedicated(task("a"))],
                 root.selection().current().unwrap(),
                 HistoryForkBoundary::AfterCompletedHistory,
             )
@@ -746,7 +810,7 @@ async fn saved_cancel_before_worker_stop_never_restarts_the_old_provider() {
     let held = Gate::new();
     first.provider.script("a", [Reply::held("answer", &held)]);
     let root = first.root("owner").await;
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     held.entered().await;
     *first.factory.graph_faults.owner.lock().unwrap() = "owner".into();
     first
@@ -758,7 +822,7 @@ async fn saved_cancel_before_worker_stop_never_restarts_the_old_provider() {
     assert!(
         scheduler
             .set_tasks(
-                vec![state("a", Canceled)],
+                vec![dedicated(state("a", Canceled))],
                 root.selection().current().unwrap(),
                 HistoryForkBoundary::AfterCompletedHistory
             )
@@ -768,13 +832,21 @@ async fn saved_cancel_before_worker_stop_never_restarts_the_old_provider() {
             .is_err()
     );
     let saved = root.agent_state().load().await.unwrap().unwrap();
-    assert!(saved.tasks.entries[0].pending_stop.is_some());
+    assert!(
+        saved.tasks.entries[0]
+            .borrow_worker()
+            .pending_stop
+            .is_some()
+    );
     let identity = root.identity().clone();
     freeze(&first, &root).await;
     let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
     let restored = second.reopen_root(identity).await;
     activate(&restored).await;
-    wait_saved(&restored, |graph| graph.entries[0].pending_stop.is_none()).await;
+    wait_saved(&restored, |graph| {
+        graph.entries[0].borrow_worker().pending_stop.is_none()
+    })
+    .await;
     assert_eq!(snapshot(&restored).await[0].state, Canceled);
     assert_eq!(requests(&second.provider, "a").len(), 1);
     freeze(&second, &restored).await;
@@ -793,13 +865,14 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
             ],
         );
         let root = first.root("owner").await;
-        set(&root, vec![task("a")]).await;
+        set(&root, vec![dedicated(task("a"))]).await;
         held.entered().await;
         let worker = first.factory.get("a");
         worker.task_session.ack_failures.store(1, Ordering::SeqCst);
         held.open();
         wait_saved(&root, |graph| {
             graph.entries[0]
+                .borrow_worker()
                 .runner
                 .as_ref()
                 .is_some_and(|runner| runner.response_reference.is_some())
@@ -817,7 +890,11 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
         })
         .await;
         let saved = root.agent_state().load().await.unwrap().unwrap();
-        let runner = saved.tasks.entries[0].runner.as_ref().unwrap();
+        let runner = saved.tasks.entries[0]
+            .borrow_worker()
+            .runner
+            .as_ref()
+            .unwrap();
         let reference = runner.response_reference.clone().unwrap();
         let claim = parrot_domain::values::agent_state::TaskResultClaim {
             owner_session_id: root.identity().session.session_id.clone(),
@@ -850,9 +927,10 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
             .unwrap()
             .tasks
             .entries[0]
+            .borrow_worker()
             .runner
             .clone();
-        let mut visible = state("a", Running);
+        let mut visible = dedicated(state("a", Running));
         visible.hidden = true;
         set(&restored, vec![visible]).await;
         assert_eq!(
@@ -864,6 +942,7 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
                 .unwrap()
                 .tasks
                 .entries[0]
+                .borrow_worker()
                 .runner,
             checkpoint
         );
@@ -894,6 +973,7 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
                 .unwrap()
                 .tasks
                 .entries[0]
+                .borrow_worker()
                 .runner
                 .as_ref()
                 .unwrap()
@@ -919,9 +999,12 @@ async fn canceling_waiter_does_not_cancel_or_message_unrelated_predecessor() {
         .await
         .unwrap();
     held.entered().await;
-    set(&root, vec![task("a")]).await;
-    set(&root, vec![state("a", Canceled)]).await;
-    wait_saved(&root, |graph| graph.entries[0].pending_stop.is_none()).await;
+    set(&root, vec![dedicated(task("a"))]).await;
+    set(&root, vec![dedicated(state("a", Canceled))]).await;
+    wait_saved(&root, |graph| {
+        graph.entries[0].borrow_worker().pending_stop.is_none()
+    })
+    .await;
     assert!(!predecessor.execution.is_finished());
     assert!(
         worker
@@ -958,7 +1041,7 @@ async fn shared_worker_activation_waits_for_rightful_reservation_not_provider_co
         ],
     );
     let root = first.root("owner").await;
-    set(&root, vec![task("A!"), task("a")]).await;
+    set(&root, vec![dedicated(task("A!")), dedicated(task("a"))]).await;
     held.entered().await;
     let identity = root.identity().clone();
     freeze(&first, &root).await;
@@ -1088,7 +1171,7 @@ async fn nested_graph_outbox_stays_gated_until_parent_worker_reservation_is_read
         ],
     );
     let root = first.root("owner").await;
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     held.entered().await;
     let identity = root.identity().clone();
     freeze(&first, &root).await;
@@ -1112,9 +1195,9 @@ async fn nested_graph_outbox_stays_gated_until_parent_worker_reservation_is_read
     let mut graph = child_store.load().await.unwrap().unwrap().tasks;
     let mut entry = root_snapshot.tasks.entries[0].clone();
     entry.task = state("inner", Succeeded);
-    entry.worker_session_id = None;
-    entry.runner = None;
-    entry.pending_stop = None;
+    entry.borrow_worker_mut().worker_session_id = None;
+    entry.borrow_worker_mut().runner = None;
+    entry.borrow_worker_mut().pending_stop = None;
     graph.entries = vec![entry];
     graph.complete = true;
     graph.all_resolved = true;
@@ -1165,6 +1248,7 @@ async fn nested_graph_outbox_stays_gated_until_parent_worker_reservation_is_read
         })
         .await;
     let prompt_id = root_snapshot.tasks.entries[0]
+        .borrow_worker()
         .runner
         .as_ref()
         .unwrap()
@@ -1190,7 +1274,7 @@ async fn failed_parent_response_save_keeps_claim_until_recovery_consumes_origina
     let held = Gate::new();
     first.provider.script("a", [Reply::held("answer", &held)]);
     let root = first.root("owner").await;
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     held.entered().await;
     *first.factory.graph_faults.owner.lock().unwrap() = "owner".into();
     first
@@ -1213,6 +1297,7 @@ async fn failed_parent_response_save_keeps_claim_until_recovery_consumes_origina
     let saved = root.agent_state().load().await.unwrap().unwrap();
     assert!(
         saved.tasks.entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
@@ -1251,7 +1336,7 @@ async fn persisted_stopped_flag_still_releases_matching_canceled_result_claim() 
     let held = Gate::new();
     first.provider.script("a", [Reply::held("answer", &held)]);
     let root = first.root("owner").await;
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     held.entered().await;
     *first.factory.graph_faults.owner.lock().unwrap() = "owner".into();
     first
@@ -1259,9 +1344,10 @@ async fn persisted_stopped_flag_still_releases_matching_canceled_result_claim() 
         .graph_faults
         .fail_stopped
         .store(true, Ordering::SeqCst);
-    set(&root, vec![state("a", Canceled)]).await;
+    set(&root, vec![dedicated(state("a", Canceled))]).await;
     wait_saved(&root, |graph| {
         graph.entries[0]
+            .borrow_worker()
             .pending_stop
             .as_ref()
             .is_some_and(|stop| stop.stopped)
@@ -1296,7 +1382,10 @@ async fn persisted_stopped_flag_still_releases_matching_canceled_result_claim() 
     let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
     let restored = second.reopen_root(identity).await;
     activate(&restored).await;
-    wait_saved(&restored, |graph| graph.entries[0].pending_stop.is_none()).await;
+    wait_saved(&restored, |graph| {
+        graph.entries[0].borrow_worker().pending_stop.is_none()
+    })
+    .await;
     assert!(
         restored
             .children()
@@ -1327,14 +1416,15 @@ async fn restored_dependency_cancellation_stops_saved_runner_before_later_reset(
     set(
         &root,
         vec![
-            state("dependency", Succeeded),
-            dependent("child", "dependency"),
+            dedicated(state("dependency", Succeeded)),
+            dedicated(dependent("child", "dependency")),
         ],
     )
     .await;
     held.entered().await;
     let original = root.agent_state().load().await.unwrap().unwrap();
     let old_prompt = original.tasks.entries[1]
+        .borrow_worker()
         .runner
         .as_ref()
         .unwrap()
@@ -1350,7 +1440,12 @@ async fn restored_dependency_cancellation_stops_saved_runner_before_later_reset(
     freeze(&first, &root).await;
     let mut saved = root.agent_state().load().await.unwrap().unwrap();
     saved.tasks.entries[0].task.state = Canceled;
-    assert!(saved.tasks.entries[1].pending_stop.is_none());
+    assert!(
+        saved.tasks.entries[1]
+            .borrow_worker()
+            .pending_stop
+            .is_none()
+    );
     root.agent_state()
         .update(AgentStateUpdate::Tasks(saved.tasks))
         .await
@@ -1359,16 +1454,18 @@ async fn restored_dependency_cancellation_stops_saved_runner_before_later_reset(
     let restored = second.reopen_root(identity).await;
     activate(&restored).await;
     wait_saved(&restored, |graph| {
-        graph.entries[1].pending_stop.is_none() && graph.entries[1].runner.is_none()
+        graph.entries[1].borrow_worker().pending_stop.is_none()
+            && graph.entries[1].borrow_worker().runner.is_none()
     })
     .await;
     assert_eq!(snapshot(&restored).await[1].state, Canceled);
     assert_eq!(requests(&second.provider, "child").len(), 1);
-    set(&restored, vec![task("dependency")]).await;
+    set(&restored, vec![dedicated(task("dependency"))]).await;
     complete(&restored).await;
     let saved = restored.agent_state().load().await.unwrap().unwrap();
     assert_ne!(
         saved.tasks.entries[1]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
@@ -1387,7 +1484,7 @@ async fn restored_dependency_cancellation_stops_saved_runner_before_later_reset(
 async fn saved_outcome_finalizes_ownership_and_reserves_new_dependents_before_activation_returns() {
     let first = Harness::new();
     let root = first.root("owner").await;
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     complete(&root).await;
     let worker = first.factory.get("a");
     worker
@@ -1408,11 +1505,11 @@ async fn saved_outcome_finalizes_ownership_and_reserves_new_dependents_before_ac
     freeze(&first, &root).await;
     let mut saved = root.agent_state().load().await.unwrap().unwrap();
     let mut dependent_entry = saved.tasks.entries[0].clone();
-    dependent_entry.task = dependent("b", "a");
+    dependent_entry.task = dedicated(dependent("b", "a"));
     dependent_entry.diagnostic_id = "dependent-diagnostic".into();
-    dependent_entry.worker_session_id = None;
-    dependent_entry.runner = None;
-    dependent_entry.terminal_notification = None;
+    dependent_entry.borrow_worker_mut().worker_session_id = None;
+    dependent_entry.borrow_worker_mut().runner = None;
+    dependent_entry.borrow_worker_mut().terminal_notification = None;
     saved.tasks.entries[0].task.state = Running;
     saved.tasks.entries.push(dependent_entry);
     saved.tasks.complete = false;

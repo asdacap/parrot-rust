@@ -26,7 +26,7 @@ async fn retry_attempt_limit_replacement_instruction_carried_result_and_feedback
         "a",
         (1..=3).map(|index| Reply::text(&format!("retry-{index}"))),
     );
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     let done = wait_tasks(&root, |tasks| tasks[0].state == Failed).await;
     assert_eq!(done[0].result.as_deref(), Some("replacement 3"));
     assert_eq!(
@@ -72,7 +72,7 @@ async fn parser_repair_limit_is_separate_from_attempt_limit_and_invalid_response
                 Reply::text(if succeeds { "answer" } else { "invalid-two" }),
             ],
         );
-        set(&root, vec![task("a")]).await;
+        set(&root, vec![dedicated(task("a"))]).await;
         let done = wait_tasks(&root, |tasks| tasks[0].state != Running).await;
         assert_eq!(done[0].state, if succeeds { Succeeded } else { Failed });
         assert_eq!(
@@ -117,7 +117,7 @@ async fn halt_and_accept_terminate_without_consuming_another_attempt() {
             },
         );
         h.provider.script("a", [Reply::text("terminal")]);
-        set(&root, vec![task("a")]).await;
+        set(&root, vec![dedicated(task("a"))]).await;
         let done = wait_tasks(&root, |tasks| tasks[0].state != Running).await;
         assert_eq!(done[0].state, if accept_final { Succeeded } else { Failed });
         assert_eq!(done[0].result.as_deref(), Some("terminal result"));

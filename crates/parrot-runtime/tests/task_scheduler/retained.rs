@@ -10,23 +10,23 @@ async fn restarted_hidden_task_runs_on_retained_agent_and_hides_again_on_success
     let gate = Gate::new();
     h.provider
         .script("a", [Reply::text("answer"), Reply::held("answer", &gate)]);
-    set(&owner, vec![task("a")]).await;
+    set(&owner, vec![dedicated(task("a"))]).await;
     assert!(complete(&owner).await[0].hidden);
     let retained = owner.children().find("a").unwrap();
-    set(&owner, vec![state("a", Succeeded)]).await;
+    set(&owner, vec![dedicated(state("a", Succeeded))]).await;
     assert!(!snapshot(&owner).await[0].hidden);
     set(
         &owner,
         vec![Task {
             hidden: true,
-            ..task("a")
+            ..dedicated(task("a"))
         }],
     )
     .await;
     gate.entered().await;
     assert!(snapshot(&owner).await[0].hidden);
     assert_eq!(snapshot(&owner).await[0].state, Running);
-    set(&owner, vec![state("a", Running)]).await;
+    set(&owner, vec![dedicated(state("a", Running))]).await;
     assert!(!snapshot(&owner).await[0].hidden);
     gate.open();
     assert!(complete(&owner).await[0].hidden);
@@ -50,7 +50,7 @@ async fn child_creation_result_and_failure_are_preserved_while_diagnostic_fields
                 },
             );
         }
-        set(&owner, vec![task("secret-child")]).await;
+        set(&owner, vec![dedicated(task("secret-child"))]).await;
         let done = wait_tasks(&owner, |tasks| tasks[0].state != Running).await;
         assert_eq!(done[0].state, if failure { Failed } else { Succeeded });
         if failure {

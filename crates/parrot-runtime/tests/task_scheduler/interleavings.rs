@@ -17,13 +17,13 @@ async fn recursive_declarations_do_not_control_child_visibility_or_independent_s
     ] {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    let leaf = task("leaf");
+    let leaf = dedicated(task("leaf"));
     let branch = composite("branch", vec![leaf.clone()]);
     let root_task = composite("root-task", vec![branch.clone(), task("peer")]);
     set(&owner, vec![root_task.clone()]).await;
     root_gate.entered().await;
     let root_scope = owner.children().find("root-task").unwrap();
-    set(&root_scope, vec![branch.clone(), task("peer")]).await;
+    set(&root_scope, vec![branch.clone(), dedicated(task("peer"))]).await;
     branch_gate.entered().await;
     peer_gate.entered().await;
     let branch_scope = root_scope.children().find("branch").unwrap();
@@ -31,7 +31,7 @@ async fn recursive_declarations_do_not_control_child_visibility_or_independent_s
     leaf_gate.entered().await;
     let hidden_leaf = Task {
         hidden: true,
-        ..task("leaf")
+        ..dedicated(task("leaf"))
     };
     let hidden_branch = Task {
         hidden: true,
@@ -109,7 +109,11 @@ async fn dependency_cancel_and_reset_stop_actual_running_dependent_and_restart_o
         );
         set(
             &owner,
-            vec![task("a"), dependent("b", "a"), dependent("c", "b")],
+            vec![
+                dedicated(task("a")),
+                dedicated(dependent("b", "a")),
+                dedicated(dependent("c", "b")),
+            ],
         )
         .await;
         first.entered().await;
@@ -118,7 +122,10 @@ async fn dependency_cancel_and_reset_stop_actual_running_dependent_and_restart_o
         let retained = owner.children().find("b").unwrap();
         set(
             &owner,
-            vec![state("a", if cancel { Canceled } else { Pending })],
+            vec![dedicated(state(
+                "a",
+                if cancel { Canceled } else { Pending },
+            ))],
         )
         .await;
         let reason = if cancel {
@@ -142,7 +149,7 @@ async fn dependency_cancel_and_reset_stop_actual_running_dependent_and_restart_o
                     .iter()
                     .all(|task| task.state == Canceled)
             );
-            set(&owner, vec![task("a")]).await;
+            set(&owner, vec![dedicated(task("a"))]).await;
         }
         second.entered().await;
         assert_eq!(

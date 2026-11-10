@@ -27,11 +27,11 @@ async fn replacement_initial_enqueue_follows_durable_generation_without_holding_
             Reply::held("answer", &new_provider),
         ],
     );
-    set(&owner, vec![task("a")]).await;
+    set(&owner, vec![dedicated(task("a"))]).await;
     old_provider.entered().await;
     let worker = h.factory.get("a");
     *worker.task_session.record_gate.lock().unwrap() = Some(old_stop_record.clone());
-    let mut replacement = task("a");
+    let mut replacement = dedicated(task("a"));
     replacement.acceptance_criteria = "replacement acceptance".into();
     set(&owner, vec![replacement.clone()]).await;
     old_stop_record.entered().await;
@@ -52,13 +52,18 @@ async fn replacement_initial_enqueue_follows_durable_generation_without_holding_
         .unwrap()
         .tasks
         .entries[0]
+        .borrow_worker()
         .runner
         .clone()
         .unwrap();
     *worker.task_session.enqueue_hook.lock().unwrap() = Some(Box::new(move || {
         let saved: parrot_domain::values::agent_state::AgentStateSnapshot =
             serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
-        let checkpoint = saved.tasks.entries[0].runner.as_ref().unwrap();
+        let checkpoint = saved.tasks.entries[0]
+            .borrow_worker()
+            .runner
+            .as_ref()
+            .unwrap();
         assert_eq!(checkpoint.generation_id, expected.generation_id);
         assert_eq!(checkpoint.prompt_message_id, expected.prompt_message_id);
         assert_eq!(

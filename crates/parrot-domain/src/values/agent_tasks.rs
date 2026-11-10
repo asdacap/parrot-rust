@@ -50,6 +50,18 @@ pub enum ExecutionStatus {
     Canceled,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TaskAssignee {
+    Owner,
+    Dedicated { agent_path: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskView {
+    pub task: Task,
+    pub assigned_to: Option<TaskAssignee>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeafResponse {
     pub result: String,
     pub verdict: AcceptanceVerdict,

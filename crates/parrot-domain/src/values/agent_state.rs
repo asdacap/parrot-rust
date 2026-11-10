@@ -3,7 +3,7 @@
 use super::agent_tasks::{Task, TaskCallIdentity};
 use serde::{Deserialize, Serialize};
 
-pub const AGENT_STATE_VERSION: u64 = 1;
+pub const AGENT_STATE_VERSION: u64 = 2;
 pub const AGENT_STATE_FILE_NAME: &str = "agent-state.json";
 pub const AGENT_STATE_STAGING_FILE_NAME: &str = "agent-state.json.tmp";
 
@@ -90,10 +90,28 @@ pub struct TaskEntrySnapshot {
     pub diagnostic_id: String,
     pub selection: SelectionSnapshot,
     pub fork_boundary: ForkBoundarySnapshot,
+    pub fork_mode: TaskForkModeSnapshot,
+    pub execution: TaskExecutionSnapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TaskExecutionSnapshot {
+    Unassigned,
+    Owner {
+        generation_id: String,
+    },
+    Dedicated {
+        worker: Box<DedicatedTaskExecutionSnapshot>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DedicatedTaskExecutionSnapshot {
     pub worker_session_id: Option<String>,
     pub runner: Option<TaskRunnerCheckpoint>,
     pub terminal_notification: Option<NotificationCheckpoint>,
-    pub fork_mode: TaskForkModeSnapshot,
     pub pending_stop: Option<TaskStopCheckpoint>,
 }
 

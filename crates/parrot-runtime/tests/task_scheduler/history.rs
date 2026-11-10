@@ -128,7 +128,7 @@ async fn manual_retained_worker_reuses_original_selection_scope_delivery_history
             .agent_name
             .is_none()
     );
-    set(&root, vec![task("new-agent")]).await;
+    set(&root, vec![dedicated(task("new-agent"))]).await;
     complete(&root).await;
     assert_eq!(h.registry.snapshot_scopes().len(), 3);
     h.close().await;
@@ -163,12 +163,16 @@ async fn fork_modes_use_first_declared_dependency_not_completion_order_and_retai
                 accept(&format!("{name}-marker")),
             );
         }
-        let mut next = dependent("next", "second");
+        let mut next = dedicated(dependent("next", "second"));
         next.dependencies.push("first".into());
-        set(&root, vec![next, task("second"), task("first")]).await;
+        set(
+            &root,
+            vec![next, dedicated(task("second")), dedicated(task("first"))],
+        )
+        .await;
         first.entered().await;
         wait_tasks(&root, |tasks| tasks[1].state == Succeeded).await;
-        let mut updated = dependent("next", "first");
+        let mut updated = dedicated(dependent("next", "first"));
         updated.dependencies.push("second".into());
         set(&root, vec![updated]).await;
         assert!(
@@ -205,7 +209,7 @@ async fn fork_modes_use_first_declared_dependency_not_completion_order_and_retai
         assert!(prompt(next).contains("[first] Do first\nResult: first-marker"));
         assert!(prompt(next).contains("[second] Do second\nResult: second-marker"));
         let retained = root.children().find("next").unwrap();
-        let mut updated = dependent("next", "second");
+        let mut updated = dedicated(dependent("next", "second"));
         updated.dependencies.push("first".into());
         set(&root, vec![updated]).await;
         complete(&root).await;
@@ -241,7 +245,11 @@ async fn deferred_entry_preserves_original_selection_and_before_invoking_batch_b
     bounded(
         scheduler
             .set_tasks(
-                vec![state("manual", Failed), dependent("next", "manual")],
+                vec![
+                    task("owner-slot"),
+                    state("manual", Failed),
+                    dependent("next", "manual"),
+                ],
                 root.selection().current().unwrap(),
                 HistoryForkBoundary::BeforeToolBatch {
                     assistant_sequence: invocation,
@@ -267,6 +275,15 @@ async fn deferred_entry_preserves_original_selection_and_before_invoking_batch_b
         }],
     )
     .await;
+    wait_tasks(&root, |tasks| {
+        tasks
+            .iter()
+            .any(|task| task.name == "next" && task.state == Succeeded)
+    })
+    .await;
+    let mut owner_done = state("owner-slot", Succeeded);
+    owner_done.result = Some("Owner slot resolved".into());
+    set(&root, vec![owner_done]).await;
     complete(&root).await;
     let next = requests(&h.provider, "next");
     assert_eq!(next[0].model, "first");
@@ -274,7 +291,14 @@ async fn deferred_entry_preserves_original_selection_and_before_invoking_batch_b
     assert!(!conversation(&next[0]).contains("invoking-batch-marker"));
     assert!(!conversation(&next[0]).contains("later-owner-marker"));
     assert!(prompt(&next[0]).contains("Result: manual accepted"));
-    assert_eq!(h.registry.snapshot_scopes().len(), 2);
+    assert_eq!(
+        h.registry
+            .snapshot_scopes()
+            .iter()
+            .filter(|scope| scope.identity().session.name != "owner-slot")
+            .count(),
+        2
+    );
     h.close().await;
 }
 
@@ -286,7 +310,14 @@ async fn explicit_success_of_active_dependency_forks_safe_prefix_not_incomplete_
     let root = h.root("owner").await;
     let gate = Gate::new();
     h.provider.script("source", [Reply::held("answer", &gate)]);
-    set(&root, vec![task("source"), dependent("next", "source")]).await;
+    set(
+        &root,
+        vec![
+            dedicated(task("source")),
+            dedicated(dependent("next", "source")),
+        ],
+    )
+    .await;
     gate.entered().await;
     let source = root.children().find("source").unwrap();
     h.histories
@@ -300,7 +331,7 @@ async fn explicit_success_of_active_dependency_forks_safe_prefix_not_incomplete_
         &root,
         vec![Task {
             result: Some("accepted while active".into()),
-            ..state("source", Succeeded)
+            ..dedicated(state("source", Succeeded))
         }],
     )
     .await;
@@ -347,7 +378,10 @@ async fn compacted_original_boundary_fails_deferred_task_without_creating_a_work
     bounded(
         scheduler
             .set_tasks(
-                vec![state("manual", Failed), dependent("next", "manual")],
+                vec![
+                    dedicated(state("manual", Failed)),
+                    dedicated(dependent("next", "manual")),
+                ],
                 root.selection().current().unwrap(),
                 HistoryForkBoundary::BeforeToolBatch {
                     assistant_sequence: launch,
@@ -386,7 +420,7 @@ async fn compacted_original_boundary_fails_deferred_task_without_creating_a_work
         &root,
         vec![Task {
             result: Some("accepted".into()),
-            ..state("manual", Succeeded)
+            ..dedicated(state("manual", Succeeded))
         }],
     )
     .await;

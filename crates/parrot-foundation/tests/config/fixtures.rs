@@ -67,7 +67,9 @@ pub const AGENT_COMMUNICATION_IDS: [&str; 8] = [
     "agent-session.final-request-interrupted",
 ];
 
-pub const NATIVE_SCALAR_IDS: [&str; 6] = [
+pub const NATIVE_SCALAR_IDS: [&str; 8] = [
+    "agent-task.self-dependency",
+    "agent-task.notification-assigned-self",
     "agent-session.crashed-tool-result",
     "agent-session.progress-reminder",
     "exec-command.stderr-summary",

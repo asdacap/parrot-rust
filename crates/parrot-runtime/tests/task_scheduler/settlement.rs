@@ -25,11 +25,11 @@ async fn restarted_generation_waits_for_actual_provider_close_and_stop_record_be
             Reply::held("answer", &replacement),
         ],
     );
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     running.entered().await;
     let built = h.factory.get("a");
     *built.task_session.record_gate.lock().unwrap() = Some(stop_record.clone());
-    let mut updated = task("a");
+    let mut updated = dedicated(task("a"));
     updated.payload =
         parrot_domain::values::agent_tasks::TaskPayload::Instruction("new instruction".into());
     set(&root, vec![updated]).await;
@@ -110,13 +110,13 @@ async fn running_terminal_updates_stop_and_record_exact_reason_without_overwriti
         let root = h.root("owner").await;
         let gate = Gate::new();
         h.provider.script("a", [Reply::held("answer", &gate)]);
-        set(&root, vec![task("a")]).await;
+        set(&root, vec![dedicated(task("a"))]).await;
         gate.entered().await;
         let update = Task {
             state,
             result: (state == Succeeded).then(|| "manual".into()),
             failure: (state == Failed).then(|| "owner failure".into()),
-            ..task("a")
+            ..dedicated(task("a"))
         };
         set(&root, vec![update]).await;
         let built = h.factory.get("a");
@@ -154,7 +154,7 @@ async fn dropping_set_observer_keeps_admitted_spawn_and_all_observers_share_spaw
     let scheduler = root.get_service::<Scheduler>().unwrap();
     let observer = scheduler
         .set_tasks(
-            vec![task("a")],
+            vec![dedicated(task("a"))],
             root.selection().current().unwrap(),
             HistoryForkBoundary::AfterCompletedHistory,
         )
@@ -214,9 +214,9 @@ async fn scope_settlement_cancels_nested_graphs_before_session_resources_and_is_
             Reply::held("answer", &second_gate),
         ],
     );
-    set(&first_owner, vec![task("worker")]).await;
+    set(&first_owner, vec![dedicated(task("worker"))]).await;
     first_gate.entered().await;
-    set(&second_owner, vec![task("worker")]).await;
+    set(&second_owner, vec![dedicated(task("worker"))]).await;
     second_gate.entered().await;
     assert!(!Arc::ptr_eq(
         &first_owner.get_service::<Scheduler>().unwrap(),
@@ -229,7 +229,7 @@ async fn scope_settlement_cancels_nested_graphs_before_session_resources_and_is_
         .get_service::<Scheduler>()
         .unwrap()
         .set_tasks(
-            vec![task("x")],
+            vec![dedicated(task("x"))],
             first_owner.selection().current().unwrap(),
             HistoryForkBoundary::AfterCompletedHistory,
         )
@@ -249,7 +249,7 @@ async fn scope_settlement_cancels_nested_graphs_before_session_resources_and_is_
     let nested_gate = Gate::new();
     h.provider
         .script("nested", [Reply::held("answer", &nested_gate)]);
-    set(&nested, vec![task("nested")]).await;
+    set(&nested, vec![dedicated(task("nested"))]).await;
     nested_gate.entered().await;
     let nested_output = h.factory.get("nested").output.clone();
     assert_eq!(nested_output.closes.load(Ordering::SeqCst), 0);
@@ -258,7 +258,11 @@ async fn scope_settlement_cancels_nested_graphs_before_session_resources_and_is_
     assert_eq!(snapshot(&second_owner).await[0].state, Canceled);
     assert_eq!(snapshot(&nested).await[0].state, Canceled);
     let saved = second_owner.agent_state().load().await.unwrap().unwrap();
-    let stopped = saved.tasks.entries[0].pending_stop.as_ref().unwrap();
+    let stopped = saved.tasks.entries[0]
+        .borrow_worker()
+        .pending_stop
+        .as_ref()
+        .unwrap();
     assert!(stopped.stopped);
     assert!(
         saved

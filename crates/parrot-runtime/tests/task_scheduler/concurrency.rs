@@ -42,10 +42,18 @@ async fn suspension_joins_held_executions_and_releases_capacity_after_observer_s
             }],
         );
     }
-    set(&first, vec![task("a"), task("b")]).await;
+    set(&first, vec![dedicated(task("a")), dedicated(task("b"))]).await;
     gates[0].entered().await;
     gates[1].entered().await;
-    set(&failing, vec![task("c"), task("d"), task("pending")]).await;
+    set(
+        &failing,
+        vec![
+            dedicated(task("c")),
+            dedicated(task("d")),
+            dedicated(task("pending")),
+        ],
+    )
+    .await;
     gates[2].entered().await;
     gates[3].entered().await;
     assert_eq!(snapshot(&failing).await[2].state, Pending);
@@ -74,7 +82,15 @@ async fn suspension_joins_held_executions_and_releases_capacity_after_observer_s
     for (name, gate) in ["e", "f", "g"].into_iter().zip(&available) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&third, vec![task("e"), task("f"), task("g")]).await;
+    set(
+        &third,
+        vec![
+            dedicated(task("e")),
+            dedicated(task("f")),
+            dedicated(task("g")),
+        ],
+    )
+    .await;
     for gate in &available {
         gate.entered().await;
     }
@@ -100,10 +116,14 @@ async fn observer_save_failure_rolls_back_admission_before_shutdown() {
     for (name, gate) in ["a", "b", "c"].into_iter().zip(&gates) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&first, vec![task("a"), task("b")]).await;
+    set(&first, vec![dedicated(task("a")), dedicated(task("b"))]).await;
     gates[0].entered().await;
     gates[1].entered().await;
-    set(&failing, vec![task("c"), task("pending")]).await;
+    set(
+        &failing,
+        vec![dedicated(task("c")), dedicated(task("pending"))],
+    )
+    .await;
     gates[2].entered().await;
     assert_eq!(snapshot(&failing).await[1].state, Pending);
     *h.factory.graph_faults.owner.lock().unwrap() = "failing-owner".into();
@@ -119,7 +139,7 @@ async fn observer_save_failure_rolls_back_admission_before_shutdown() {
     for (name, gate) in ["d", "e"].into_iter().zip(&available) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&third, vec![task("d"), task("e")]).await;
+    set(&third, vec![dedicated(task("d")), dedicated(task("e"))]).await;
     for gate in &available {
         gate.entered().await;
     }
@@ -148,7 +168,16 @@ async fn default_budget_leaves_fourth_pending_and_free_task_exit_returns_extra_s
     for (name, gate) in ["a", "b", "c", "d"].into_iter().zip(&gates) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&root, vec![task("a"), task("b"), task("c"), task("d")]).await;
+    set(
+        &root,
+        vec![
+            dedicated(task("a")),
+            dedicated(task("b")),
+            dedicated(task("c")),
+            dedicated(task("d")),
+        ],
+    )
+    .await;
     for gate in &gates[..3] {
         gate.entered().await;
     }
@@ -185,7 +214,15 @@ async fn increasing_limit_wakes_pending_tasks_without_another_tool_update() {
     for (name, gate) in ["a", "b", "c"].into_iter().zip(&gates) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&root, vec![task("a"), task("b"), task("c")]).await;
+    set(
+        &root,
+        vec![
+            dedicated(task("a")),
+            dedicated(task("b")),
+            dedicated(task("c")),
+        ],
+    )
+    .await;
     gates[0].entered().await;
     assert_eq!(snapshot(&root).await[1].state, Pending);
     budget.set_limit(2);
@@ -216,12 +253,21 @@ async fn decreasing_limit_to_zero_keeps_held_runs_and_each_owners_free_allowance
     for (name, gate) in ["a", "b", "c", "d", "e", "f"].into_iter().zip(&gates) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&root, vec![task("a"), task("b"), task("c"), task("d")]).await;
+    set(
+        &root,
+        vec![
+            dedicated(task("a")),
+            dedicated(task("b")),
+            dedicated(task("c")),
+            dedicated(task("d")),
+        ],
+    )
+    .await;
     for gate in &gates[..3] {
         gate.entered().await;
     }
     budget.set_limit(0);
-    set(&other, vec![task("e"), task("f")]).await;
+    set(&other, vec![dedicated(task("e")), dedicated(task("f"))]).await;
     gates[4].entered().await;
     assert_eq!(snapshot(&other).await[1].state, Pending);
     assert_eq!(
@@ -260,10 +306,10 @@ async fn another_owner_wakes_without_a_tool_update_when_shared_capacity_is_relea
     for (name, gate) in ["a", "b", "c", "d"].into_iter().zip(&gates) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&first, vec![task("a"), task("b")]).await;
+    set(&first, vec![dedicated(task("a")), dedicated(task("b"))]).await;
     gates[0].entered().await;
     gates[1].entered().await;
-    set(&second, vec![task("c"), task("d")]).await;
+    set(&second, vec![dedicated(task("c")), dedicated(task("d"))]).await;
     gates[2].entered().await;
     assert_eq!(snapshot(&second).await[1].state, Pending);
     gates[0].open();
@@ -289,7 +335,11 @@ async fn zero_budget_allows_nested_owner_and_wakes_its_next_task_on_free_exit() 
     h.provider
         .script("nested", [Reply::held("answer", &child_gate)]);
     h.provider.script("nested-next", [Reply::text("answer")]);
-    set(&root, vec![task("parent"), task("next")]).await;
+    set(
+        &root,
+        vec![dedicated(task("parent")), dedicated(task("next"))],
+    )
+    .await;
     parent_gate.entered().await;
     let parent = h
         .registry
@@ -297,7 +347,11 @@ async fn zero_budget_allows_nested_owner_and_wakes_its_next_task_on_free_exit() 
         .into_iter()
         .find(|scope| scope.identity().session.name == "parent")
         .unwrap();
-    set(&parent, vec![task("nested"), task("nested-next")]).await;
+    set(
+        &parent,
+        vec![dedicated(task("nested")), dedicated(task("nested-next"))],
+    )
+    .await;
     child_gate.entered().await;
     assert_eq!(snapshot(&root).await[1].state, Pending);
     assert_eq!(snapshot(&parent).await[1].state, Pending);
@@ -317,14 +371,14 @@ async fn cancellation_returns_capacity_once_and_pending_work_still_runs() {
     let gate = Gate::new();
     h.provider.script("a", [Reply::held("answer", &gate)]);
     h.provider.script("b", [Reply::text("answer")]);
-    set(&root, vec![task("a"), task("b")]).await;
+    set(&root, vec![dedicated(task("a")), dedicated(task("b"))]).await;
     gate.entered().await;
     set(
         &root,
-        vec![state(
+        vec![dedicated(state(
             "a",
             parrot_domain::values::agent_tasks::ExecutionStatus::Canceled,
-        )],
+        ))],
     )
     .await;
     wait_tasks(&root, |tasks| tasks[1].state == Succeeded).await;
@@ -354,7 +408,7 @@ async fn retry_keeps_free_admission_until_the_task_finishes() {
         [Reply::text("retry"), Reply::held("answer", &retry_gate)],
     );
     h.provider.script("b", [Reply::text("answer")]);
-    set(&root, vec![task("a"), task("b")]).await;
+    set(&root, vec![dedicated(task("a")), dedicated(task("b"))]).await;
     retry_gate.entered().await;
     assert_eq!(snapshot(&root).await[1].state, Pending);
     assert!(requests(&h.provider, "b").is_empty());
@@ -379,7 +433,7 @@ async fn failed_worker_construction_rolls_back_the_free_admission() {
         },
     );
     h.provider.script("b", [Reply::text("answer")]);
-    set(&root, vec![task("a"), task("b")]).await;
+    set(&root, vec![dedicated(task("a")), dedicated(task("b"))]).await;
     wait_tasks(&root, |tasks| tasks[1].state == Succeeded).await;
     assert_eq!(
         snapshot(&root).await[0].state,
@@ -403,10 +457,10 @@ async fn zero_budget_replacement_reserves_after_old_run_exits_before_stop_record
             Reply::held("answer", &replacement),
         ],
     );
-    set(&root, vec![task("a")]).await;
+    set(&root, vec![dedicated(task("a"))]).await;
     old.entered().await;
     *h.factory.get("a").task_session.record_gate.lock().unwrap() = Some(record.clone());
-    let mut update = task("a");
+    let mut update = dedicated(task("a"));
     update.acceptance_criteria = "changed".into();
     set(&root, vec![update]).await;
     record.entered().await;
@@ -430,20 +484,20 @@ async fn canceling_reserved_replacement_returns_capacity_to_another_owner() {
     for (name, gate) in ["a", "b", "c", "d"].into_iter().zip(&gates) {
         h.provider.script(name, [Reply::held("answer", gate)]);
     }
-    set(&root, vec![task("a"), task("b")]).await;
+    set(&root, vec![dedicated(task("a")), dedicated(task("b"))]).await;
     gates[0].entered().await;
     gates[1].entered().await;
     let record = Gate::new();
     *h.factory.get("a").task_session.record_gate.lock().unwrap() = Some(record.clone());
-    let mut update = task("a");
+    let mut update = dedicated(task("a"));
     update.acceptance_criteria = "changed".into();
     set(&root, vec![update]).await;
     record.entered().await;
     wait_tasks(&root, |tasks| tasks[0].state == Running).await;
-    set(&other, vec![task("c"), task("d")]).await;
+    set(&other, vec![dedicated(task("c")), dedicated(task("d"))]).await;
     gates[2].entered().await;
     assert_eq!(snapshot(&other).await[1].state, Pending);
-    set(&root, vec![state("a", Canceled)]).await;
+    set(&root, vec![dedicated(state("a", Canceled))]).await;
     gates[3].entered().await;
     record.open();
     for gate in &gates[1..] {

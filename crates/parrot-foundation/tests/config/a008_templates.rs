@@ -66,7 +66,7 @@ fn a008_active_catalog_retains_source_descriptors_except_explicit_migrations() {
     );
     assert!(!expected.iter().any(|row| row["engine"] == "scriban"));
     let configuration = fixtures::fixture_configuration("").unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 106);
+    assert_eq!(configuration.prompt_templates.len(), 108);
     for id in fixtures::CONSOLIDATED_IDS {
         assert_eq!(configuration.prompt_templates[id].engine, "minijinja");
     }
