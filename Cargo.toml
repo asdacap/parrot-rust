@@ -41,9 +41,6 @@ opt-level = 1
 codegen-units = 256
 incremental = true
 
-[profile.dev]
-debug = "line-tables-only"
-
 [workspace.lints.rust]
 warnings = "deny"
 
