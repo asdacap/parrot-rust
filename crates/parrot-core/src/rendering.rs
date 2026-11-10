@@ -19,14 +19,6 @@ pub(crate) async fn render_template(
 
 pub(crate) async fn render_instructions(states: &mut dyn States) -> Result<String, Error> {
     let mut sections = states.capture_system_prompt_sections().await?;
-    let bindings = states
-        .get_config(ConfigKey::SystemPromptBindings)
-        .await?
-        .into_system_prompt_bindings()?;
-    for (source_key, key) in bindings {
-        let arguments = states.read_template_arguments(&source_key).await?;
-        sections.push((source_key, render_template(states, key, &arguments).await?));
-    }
     let files = states.read_agents_files().await?;
     if !files.is_empty() {
         let template = states

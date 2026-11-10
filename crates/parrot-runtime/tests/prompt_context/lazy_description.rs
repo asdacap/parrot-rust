@@ -19,7 +19,56 @@ fn template_source_materialization_does_not_render() {
 }
 
 #[tokio::test]
-async fn raw_template_getters_return_literal_state_with_a_broken_template() {
+async fn system_prompt_reads_render_provider_templates_without_reinterpreting_arguments() {
+    let catalog = templates(
+        "prompt_templates:\n  custom.list:\n    engine: minijinja\n    template: '{{ title }}{% for item in items %}[{{ item }}]{% endfor %}'\n    allowed_arguments: [title, items]\n    required_arguments: [title, items]\n  custom.scalar:\n    template: 'configured {content}'\n    allowed_arguments: [content]\n    required_arguments: [content]\n",
+    );
+    let provider = CompositeSystemPromptProvider::new(
+        "test:root",
+        vec![
+            Arc::new(TemplateSystemPromptProvider::new(
+                "test:20-scalar",
+                "custom.scalar",
+                vec![("content".into(), "opaque {title}".into())],
+                catalog.clone(),
+            )),
+            Arc::new(TemplateSystemPromptProvider::new(
+                "test:10-list",
+                "custom.list",
+                vec![
+                    ("title".into(), "literal {{ untouched }}".into()),
+                    ("items".into(), serde_json::json!(["alpha", "beta"])),
+                ],
+                catalog,
+            )),
+        ],
+    )
+    .unwrap();
+    let prompt = SessionPrompt::new(provider.materialize(&identity()).unwrap());
+    let cancellation = parrot_storage::events::NeverCancelled;
+    prompt.ensure_epoch(&cancellation).await.unwrap();
+
+    assert_eq!(
+        prompt
+            .read_system_prompts(&selection(), &cancellation)
+            .await
+            .unwrap(),
+        [
+            (
+                "test:10-list".into(),
+                "literal {{ untouched }}[alpha][beta]".into(),
+            ),
+            ("test:20-scalar".into(), "configured opaque {title}".into()),
+        ]
+    );
+    assert_eq!(
+        prompt.build(&selection(), &cancellation).await.unwrap(),
+        "literal {{ untouched }}[alpha][beta]\n\nconfigured opaque {title}"
+    );
+}
+
+#[tokio::test]
+async fn provider_template_failures_surface_when_reading_system_prompts() {
     let provider = TemplateSystemPromptProvider::new(
         "test:broken-template",
         "context.agent-scratch",
@@ -31,40 +80,13 @@ async fn raw_template_getters_return_literal_state_with_a_broken_template() {
     let prompt = SessionPrompt::new(provider.materialize(&identity()).unwrap());
     let cancellation = parrot_storage::events::NeverCancelled;
 
-    assert!(
+    prompt.ensure_epoch(&cancellation).await.unwrap();
+    assert!(matches!(
         prompt
             .read_system_prompts(&selection(), &cancellation)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(
-        prompt.read_prompt_templates(&cancellation).await.unwrap(),
-        [(
-            "test:broken-template".into(),
-            "context.agent-scratch".into()
-        )]
-    );
-    assert_eq!(
-        prompt
-            .read_template_arguments("test:broken-template", &cancellation)
-            .await
-            .unwrap(),
-        [(
-            "path".into(),
-            serde_json::Value::String("literal {path}".into())
-        )]
-    );
-    assert_eq!(
-        prompt
-            .read_core_prompt_bindings(&cancellation)
-            .await
-            .unwrap(),
-        [(
-            "test:broken-template".into(),
-            parrot_core::ConfigKey::AgentScratchTemplate
-        )]
-    );
+            .await,
+        Err(PromptError::Template(_))
+    ));
     assert!(matches!(
         prompt.build(&selection(), &cancellation).await,
         Err(PromptError::Template(_))
@@ -184,7 +206,7 @@ async fn model_template_failures_surface_when_reading_system_prompts() {
 }
 
 #[tokio::test]
-async fn core_bindings_reject_configured_templates_without_an_explicit_key() {
+async fn system_prompt_reads_support_custom_template_ids() {
     let provider = TemplateSystemPromptProvider::new(
         "test:custom-template",
         "custom.section",
@@ -200,11 +222,13 @@ async fn core_bindings_reject_configured_templates_without_an_explicit_key() {
         prompt.build(&selection(), &cancellation).await.unwrap(),
         "custom section"
     );
-    let error = prompt
-        .read_core_prompt_bindings(&cancellation)
-        .await
-        .unwrap_err();
-    assert!(matches!(error, PromptError::Template(message) if message.contains("custom.section")));
+    assert_eq!(
+        prompt
+            .read_system_prompts(&selection(), &cancellation)
+            .await
+            .unwrap(),
+        [("test:custom-template".into(), "custom section".into())]
+    );
 }
 
 #[test]

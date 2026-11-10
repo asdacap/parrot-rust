@@ -1016,12 +1016,6 @@ impl parrot_core::States for EpochStates<'_> {
             match key {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(self.configuration.clone())),
                 ConfigKey::Context => Ok(ConfigValue::Context(self.configuration.context.clone())),
-                ConfigKey::SystemPromptBindings => self
-                    .prompt
-                    .read_core_prompt_bindings(self.cancellation)
-                    .await
-                    .map(ConfigValue::SystemPromptBindings)
-                    .map_err(|error| self.capture_error(error)),
                 ConfigKey::Turn => Err(parrot_core::Error::failed(
                     "turn configuration is unavailable for a compaction epoch",
                 )),
@@ -1157,18 +1151,6 @@ impl parrot_core::States for EpochStates<'_> {
         Box::pin(async move {
             self.prompt
                 .read_skill_catalog(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_template_arguments<'a>(
-        &'a self,
-        source_key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_template_arguments(source_key, self.cancellation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })

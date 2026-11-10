@@ -430,14 +430,6 @@ where
                             .capture_compaction_configuration(&selection.model, None),
                     ))
                 }
-                ConfigKey::SystemPromptBindings => self
-                    .backend
-                    .prompt
-                    .read_core_prompt_bindings(self.cancellation)
-                    .await
-                    .map(ConfigValue::SystemPromptBindings)
-                    .map_err(ContextError::from)
-                    .map_err(Into::into),
                 key => self
                     .backend
                     .templates
@@ -616,19 +608,6 @@ where
             backend
                 .prompt
                 .read_system_prompts(&selection.model, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_template_arguments<'a>(
-        &'a self,
-        source_key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_template_arguments(source_key, self.cancellation)
                 .await
                 .map_err(ContextError::from)
                 .map_err(Into::into)

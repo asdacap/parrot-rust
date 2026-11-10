@@ -244,10 +244,11 @@ through `States::resolve_skill_references`, and deduplicates stable identities b
 bodies through `States::read_skill_content`. Native backing owns catalog lookup
 and authorized file reads. Core owns skill-context formatting, limits, and loaded
 paths. `States::capture_system_prompt_sections` supplies native system-prompt sections.
-The runtime model contributor composes alias descriptions, selected model-profile
+Providers render their own templates and keep template identities and arguments
+private. The runtime model contributor composes alias descriptions, selected model-profile
 guidance, and selected alias augmentation into one opaque section. `States` also
-exposes template identities and arguments, AGENTS files, identity, standing
-instructions, and catalog metadata. Core renders those remaining raw inputs using
+exposes AGENTS files, identity, standing instructions, and catalog metadata.
+Core renders those remaining raw inputs using
 concrete templates from `States::get_config` and orders all sections. `ConfigKey`
 selects turn, context, compaction, or prompt-template configuration. The turn entry
 points accept `States`, `Tools`, `Provider`, `EventPublisher`, and the runtime's cancellation token.

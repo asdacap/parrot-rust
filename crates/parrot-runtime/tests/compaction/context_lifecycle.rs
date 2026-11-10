@@ -76,17 +76,8 @@ async fn status_fitting_preserves_native_render_errors_without_committing() {
 }
 
 #[tokio::test]
-async fn core_template_failure_retains_native_prompt_error_and_terminal_publication() {
-    struct MissingArguments;
-    impl SystemPrompt for MissingArguments {
-        fn renew_epoch(&mut self) {}
-        fn read_prompt_templates(&self) -> Vec<(String, String)> {
-            vec![(
-                "test:missing-arguments".into(),
-                "context.standing-instruction".into(),
-            )]
-        }
-    }
+async fn provider_template_failure_retains_native_prompt_error_and_terminal_publication() {
+    use parrot_runtime::prompt_context::{SystemPromptProvider, TemplateSystemPromptProvider};
 
     let fixture = Fixture::new();
     let history = fixture.history();
@@ -95,7 +86,16 @@ async fn core_template_failure_retains_native_prompt_error_and_terminal_publicat
     let selection = provider.selection(10000);
     let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-    let prompt = SessionPrompt::new(Box::new(MissingArguments));
+    let prompt = SessionPrompt::new(
+        TemplateSystemPromptProvider::new(
+            "test:missing-arguments",
+            "context.standing-instruction",
+            Vec::new(),
+            templates(),
+        )
+        .materialize(&Default::default())
+        .unwrap(),
+    );
     let status = Status::default();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history, 90);

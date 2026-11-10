@@ -321,20 +321,13 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.report_compaction_progress")) })
     }
 
-    /// Reads native system-prompt sections and their namespace keys.
+    /// Reads rendered provider-owned system-prompt sections and their namespace keys.
     /// Retains native request bindings and samples epoch inputs without rendering
     /// core-owned templates.
     fn capture_system_prompt_sections(
         &mut self,
     ) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.capture_system_prompt_sections")) })
-    }
-    /// Reads literal template arguments for the supplied registered source.
-    fn read_template_arguments<'a>(
-        &'a self,
-        _source_key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_template_arguments")) })
     }
     /// Reads sampled AGENTS paths and unwrapped file contents.
     fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
@@ -921,7 +914,6 @@ pub enum ConfigKey {
     Turn,
     Context,
     Compaction,
-    SystemPromptBindings,
     AgentsFileTemplate,
     AgentIdentityTemplate,
     StandingInstructionTemplate,
@@ -938,24 +930,12 @@ pub enum ConfigKey {
     InvalidToolCallTemplate,
     CrashedToolTemplate,
     ToolErrorTemplate,
-    OptionalCliUtilitiesTemplate,
-    ExpectedCliUtilitiesTemplate,
-    PlatformTemplate,
-    WorkingDirectoryTemplate,
-    GitRepositoryTemplate,
-    SubagentsTemplate,
-    SecurityProfileTemplate,
-    AgentPathEnvironmentTemplate,
-    AgentScratchTemplate,
-    AgentHistoryTemplate,
 }
 
 pub enum ConfigValue {
     Turn(TurnOptions),
     Context(ContextConfiguration),
     Compaction(CompactionConfiguration),
-    /// Ordered namespace keys and their explicitly enumerated template configuration keys.
-    SystemPromptBindings(Vec<(String, ConfigKey)>),
     PromptTemplate(Arc<PromptTemplate>),
 }
 
@@ -976,14 +956,6 @@ impl ConfigValue {
         match self {
             Self::Compaction(value) => Ok(value),
             _ => Err(Error::failed("expected compaction configuration")),
-        }
-    }
-    pub fn into_system_prompt_bindings(self) -> Result<Vec<(String, ConfigKey)>, Error> {
-        match self {
-            Self::SystemPromptBindings(value) => Ok(value),
-            _ => Err(Error::failed(
-                "expected system prompt bindings configuration",
-            )),
         }
     }
     pub fn into_prompt_template(self) -> Result<Arc<PromptTemplate>, Error> {

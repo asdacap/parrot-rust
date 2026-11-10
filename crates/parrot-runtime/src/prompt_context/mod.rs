@@ -5,7 +5,7 @@ pub use agents::AgentsPromptProvider;
 pub(crate) use agents::decode_agents_text as decode_source_text;
 mod composition;
 mod core_templates;
-pub(crate) use core_templates::{get_prompt_template_id, resolve_prompt_template_key};
+pub(crate) use core_templates::get_prompt_template_id;
 mod rendering;
 mod session;
 pub use rendering::{

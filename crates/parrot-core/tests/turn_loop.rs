@@ -451,9 +451,6 @@ struct MemoryState {
     compaction: Arc<Mutex<MemoryCompaction>>,
     compacting: Arc<AtomicBool>,
     system_prompts: Vec<(String, String)>,
-    prompt_templates: Vec<(String, ConfigKey)>,
-    template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
-    template_engines: BTreeMap<ConfigKey, String>,
 }
 impl MemoryState {
     fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
@@ -587,9 +584,6 @@ impl MemoryState {
             compaction,
             compacting,
             system_prompts: Vec::new(),
-            prompt_templates: Vec::new(),
-            template_arguments: BTreeMap::new(),
-            template_engines: BTreeMap::new(),
         };
         state.enqueue_message(Delivery::Queue, "question");
         state
@@ -871,14 +865,6 @@ impl States for MemoryState {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(
                     self.compaction.lock().unwrap().configuration.clone(),
                 )),
-                ConfigKey::SystemPromptBindings => {
-                    if self.fail_at == Some("prompt_templates") {
-                        return Err(Error::failed("prompt_templates"));
-                    }
-                    Ok(ConfigValue::SystemPromptBindings(
-                        self.prompt_templates.clone(),
-                    ))
-                }
                 key => {
                     if matches!(
                         key,
@@ -904,8 +890,6 @@ impl States for MemoryState {
                         "notification_interval",
                         "trigger",
                         "trigger_tokens",
-                        "items",
-                        "title",
                         "instruction",
                         "skills",
                         "depth",
@@ -915,15 +899,11 @@ impl States for MemoryState {
                         "agent_name",
                     ]
                     .map(str::to_owned);
-                    let engine = self
-                        .template_engines
-                        .get(&key)
-                        .map_or("scalar", String::as_str);
                     Ok(ConfigValue::PromptTemplate(Arc::new(
                         PromptTemplate::compile(
                             &format!("test.{key:?}"),
                             text,
-                            engine,
+                            "scalar",
                             &allowed,
                             &[],
                         )?,
@@ -1041,18 +1021,6 @@ impl States for MemoryState {
             let mut sections = self.system_prompts.clone();
             sections.push(("memory:instructions".into(), instructions));
             Ok(sections)
-        })
-    }
-    fn read_template_arguments<'a>(
-        &'a self,
-        key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>> {
-        Box::pin(async move {
-            Ok(self
-                .template_arguments
-                .get(key)
-                .cloned()
-                .unwrap_or_default())
         })
     }
     fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
