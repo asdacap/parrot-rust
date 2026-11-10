@@ -282,7 +282,7 @@ async fn production_requests_use_loaded_inline_prompt_overrides() {
     let path = fixture.root.join("config.yaml");
     std::fs::write(
         &path,
-        "model: local/test\nskills:\n  enabled: false\nsystem_prompts:\n  runtime:system-context:01-base: PROMPT-CUSTOM-BASE\nprofiles:\n  build:\n    prompt: PROMPT-CUSTOM-BUILD\n",
+        "model: local/test\nskills:\n  enabled: false\nsystem_prompts:\n  runtime:system-context:01-base: PROMPT-CUSTOM-BASE\nprofiles:\n  build:\n    prompt: PROMPT-CUSTOM-BUILD\nprompt_templates:\n  context.security-profile:\n    template: 'PROMPT-CUSTOM-SECURITY {{ sandbox_enabled }}'\n",
     )
     .unwrap();
     let environment = BTreeMap::from([(
@@ -345,6 +345,8 @@ async fn production_requests_use_loaded_inline_prompt_overrides() {
             .unwrap()
             .content();
         assert_eq!(prompt.matches("PROMPT-CUSTOM-BASE").count(), 1);
+        assert_eq!(prompt.matches("PROMPT-CUSTOM-SECURITY True").count(), 1);
+        assert!(!prompt.contains("The following configured sandbox rules"));
         if prompt.contains("Child agent session:") {
             assert!(!status.contains("PROMPT-CUSTOM-BUILD"));
             assert_eq!(

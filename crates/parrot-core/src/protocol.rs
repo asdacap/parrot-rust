@@ -1011,6 +1011,7 @@ pub enum ConfigKey {
     WorkingDirectoryTemplate,
     GitRepositoryTemplate,
     SubagentsTemplate,
+    SecurityProfileTemplate,
     AgentPathEnvironmentTemplate,
     AgentScratchTemplate,
     AgentHistoryTemplate,
@@ -1066,6 +1067,10 @@ const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
     ),
     (ConfigKey::GitRepositoryTemplate, "context.git-repository"),
     (ConfigKey::SubagentsTemplate, "context.subagents"),
+    (
+        ConfigKey::SecurityProfileTemplate,
+        "context.security-profile",
+    ),
     (
         ConfigKey::AgentPathEnvironmentTemplate,
         "context.agent-path-environment",
