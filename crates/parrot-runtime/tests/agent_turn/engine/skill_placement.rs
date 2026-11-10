@@ -89,7 +89,7 @@ async fn skill_session(
     first_path: &str,
     second_path: &str,
     templates: Arc<PromptTemplateCatalog>,
-) -> AgentSession<RuntimeBackend<Security, SettledTools>> {
+) -> AgentSession<RuntimeBackend<Security>> {
     let broker = Arc::new(EventBroker::new());
     let trace = Arc::new(Trace::default());
     let publisher: Arc<RuntimePublisher> = Arc::new(Publisher {
@@ -164,7 +164,7 @@ async fn skill_session(
 }
 
 async fn send_skill_input(
-    session: &AgentSession<RuntimeBackend<Security, SettledTools>>,
+    session: &AgentSession<RuntimeBackend<Security>>,
     prompt: &str,
 ) -> parrot_runtime::agent_turn::lifecycle::SendResult {
     bounded(session.send(

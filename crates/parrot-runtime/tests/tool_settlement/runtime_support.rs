@@ -75,10 +75,7 @@ pub(super) async fn runtime(
     fixture: &Fixture,
     provider: &Scripted,
     handles: Vec<ToolHandle<Security>>,
-) -> (
-    AgentSession<RuntimeBackend<Security, Factory>>,
-    Arc<Factory>,
-) {
+) -> (AgentSession<RuntimeBackend<Security>>, Arc<Factory>) {
     runtime_with_publisher(
         fixture,
         provider,
@@ -92,10 +89,7 @@ pub(super) async fn runtime_with_publisher(
     provider: &Scripted,
     handles: Vec<ToolHandle<Security>>,
     publisher: Arc<Publisher>,
-) -> (
-    AgentSession<RuntimeBackend<Security, Factory>>,
-    Arc<Factory>,
-) {
+) -> (AgentSession<RuntimeBackend<Security>>, Arc<Factory>) {
     let broker = Arc::new(EventBroker::new());
     let publisher: Arc<parrot_runtime::agent_turn::engine::Publisher> = publisher;
     let templates = templates();
@@ -166,7 +160,7 @@ pub(super) async fn runtime_with_publisher(
     (AgentSession::new(backend, Arc::new(Signal::new())), factory)
 }
 pub(super) async fn send(
-    session: &AgentSession<RuntimeBackend<Security, Factory>>,
+    session: &AgentSession<RuntimeBackend<Security>>,
 ) -> parrot_runtime::agent_turn::lifecycle::SendResult {
     bounded(session.send(
         vec![ConversationPart::text("current question")],

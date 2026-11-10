@@ -1,5 +1,4 @@
 use super::*;
-use crate::tool_settlement::ToolFactory;
 use parrot_core::{
     ContextCompaction as CoreContextCompaction, ContextSnapshot as CoreContextSnapshot,
     Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse,
@@ -97,14 +96,13 @@ impl From<TurnError> for CoreError {
     }
 }
 
-pub(super) async fn run<S, T>(
-    backend: &RuntimeBackend<S, T>,
+pub(super) async fn run<S>(
+    backend: &RuntimeBackend<S>,
     cancellation: &dyn Cancellation,
     work: &dyn DrainWork,
 ) -> (Result<Execution, TurnError>, Option<TurnKey>)
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized + 'static,
 {
     let initialized = {
         let mut guard = backend.state.lock().await;
@@ -339,14 +337,13 @@ where
     (execution, failed_key)
 }
 
-pub(super) async fn interrupt<S, T>(
-    backend: &RuntimeBackend<S, T>,
+pub(super) async fn interrupt<S>(
+    backend: &RuntimeBackend<S>,
     work: &dyn DrainWork,
     key: &TurnKey,
 ) -> Result<(), TurnError>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized + 'static,
 {
     let binding = TurnBinding::new();
     let mut budget = parrot_core::TurnBudget::new(backend.agent_limits.disable_max_turns);

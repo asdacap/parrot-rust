@@ -9,7 +9,7 @@ use parrot_storage::{
 };
 use std::time::Instant;
 
-impl<S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> RuntimeTools<'_, S, T> {
+impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
     pub(super) fn invoke<'a>(
         &'a self,
         resources: InvocationResources<'a, S>,

@@ -188,13 +188,12 @@ impl<C: SessionControl> ContextControl<C> {
     }
     /// Bind once after the real session is constructed. The weak edge avoids a
     /// session -> retained tool -> control -> session ownership cycle.
-    pub fn bind_session<S, T>(
+    pub fn bind_session<S>(
         &self,
-        session: Weak<AgentSession<RuntimeBackend<S, T>>>,
+        session: Weak<AgentSession<RuntimeBackend<S>>>,
     ) -> Result<(), Failure>
     where
         S: AccessSnapshot + 'static,
-        T: parrot_runtime::tool_settlement::ToolFactory<S> + ?Sized + 'static,
     {
         self.external
             .set(Arc::new(move |target, cancellation| {

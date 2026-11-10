@@ -31,7 +31,7 @@ impl ToolFactory<Security> for EdgeTools {
     }
 }
 struct EdgeRuntime {
-    session: AgentSession<RuntimeBackend<Security, EdgeTools>>,
+    session: AgentSession<RuntimeBackend<Security>>,
 }
 impl EdgeRuntime {
     async fn new(

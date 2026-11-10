@@ -203,7 +203,7 @@ where
 /// The two-phase cell breaks only constructor cycles. Admission binds the real
 /// catalog exactly once; observing an unbound cell is an error, never an empty
 /// or successful substitute catalog.
-pub struct BoundCatalog<S: RestrictableAccessSnapshot + 'static>(OnceLock<Arc<CatalogAdapter<S>>>);
+struct BoundCatalog<S: RestrictableAccessSnapshot + 'static>(OnceLock<Arc<CatalogAdapter<S>>>);
 impl<S: RestrictableAccessSnapshot + 'static> BoundCatalog<S> {
     fn new() -> Self {
         Self(OnceLock::new())

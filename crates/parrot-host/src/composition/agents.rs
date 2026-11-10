@@ -46,8 +46,7 @@ use parrot_tools::agents::{
     status::{StatusChild, StatusProcess, StatusSnapshot},
 };
 
-pub type RuntimeSession<S> =
-    AgentSession<RuntimeBackend<S, super::factory::scope::BoundCatalog<S>>>;
+pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S>>;
 
 /// Registered beside the actual runtime session in its owning scope. These are
 /// the same activity and work observations supplied to the drain, not copies.

@@ -11,9 +11,9 @@ use parrot_storage::diagnostics::DiagnosticEvent;
 
 mod invocation;
 
-pub(super) struct RuntimeTools<'a, S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> {
+pub(super) struct RuntimeTools<'a, S: AccessSnapshot + 'static> {
     pub(super) config: &'a ToolExecutionConfig,
-    pub(super) factory: &'a T,
+    pub(super) factory: &'a dyn ToolFactory<S>,
     pub(super) materialized: &'a std::sync::Mutex<Option<ToolSnapshot<S>>>,
     pub(super) execution: &'a tokio::sync::Mutex<Option<Arc<ToolCycleImageBudget>>>,
     pub(super) state: &'a Mutex<State>,
@@ -39,10 +39,9 @@ struct InvocationResources<'a, S: AccessSnapshot + 'static> {
     cancellation: &'a dyn Cancellation,
 }
 
-impl<S, T> parrot_core::Tools for RuntimeTools<'_, S, T>
+impl<S> parrot_core::Tools for RuntimeTools<'_, S>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized,
 {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, CoreError>> {
         adapt_operation(async move {
@@ -202,10 +201,9 @@ where
     }
 }
 
-impl<S, T> RuntimeTools<'_, S, T>
+impl<S> RuntimeTools<'_, S>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized,
 {
     fn event(&self, history: &AgentHistoryView) -> Result<Event, TurnError> {
         Ok(Event {

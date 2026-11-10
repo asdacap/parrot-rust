@@ -75,7 +75,7 @@ use std::{
 };
 use tokio::sync::{Mutex as AsyncMutex, oneshot};
 
-pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S, super::scope::BoundCatalog<S>>>;
+pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S>>;
 pub type ScopeBinder<S> = Arc<dyn Fn(&Arc<Scope<S>>) -> ChildResult<()> + Send + Sync>;
 type RuntimeTaskScheduler<S> =
     TaskScheduler<S, parrot_tools::task_artifacts::TaskArtifactParserAdapter>;

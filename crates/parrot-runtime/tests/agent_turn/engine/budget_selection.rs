@@ -49,7 +49,7 @@ impl ToolFactory<Security> for BudgetTools {
     }
 }
 struct BudgetRuntime {
-    session: AgentSession<RuntimeBackend<Security, BudgetTools>>,
+    session: AgentSession<RuntimeBackend<Security>>,
     selection: Arc<Selection>,
     activity: Arc<Activity>,
 }

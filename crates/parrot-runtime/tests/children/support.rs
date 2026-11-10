@@ -434,7 +434,7 @@ impl SessionActivity for Activity {
     fn turn_finished(&self, _: &str, _: &str, _: Option<&str>) {}
     fn assistant_message(&self, _: &str) {}
 }
-pub type Backend = RuntimeBackend<Security, Tools>;
+pub type Backend = RuntimeBackend<Security>;
 pub type Adapter = SessionAdapter<Security, Backend>;
 pub struct Built {
     pub adapter: Arc<Adapter>,

@@ -378,7 +378,7 @@ impl SelectionSource<Security> for Selection {
     }
 }
 
-pub(super) type Backend = RuntimeBackend<Security, Factory>;
+pub(super) type Backend = RuntimeBackend<Security>;
 
 /// A caller-bound test bridge for precisely the Wait operation. Other operations
 /// deliberately fail if used; no canned successful runtime results are supplied.

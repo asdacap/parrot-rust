@@ -353,7 +353,7 @@ struct RuntimeOverrides {
     state: Option<Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>>,
     parent_completion: Option<Arc<dyn ParentCompletion>>,
 }
-type Backend = RuntimeBackend<Security, Tools>;
+type Backend = RuntimeBackend<Security>;
 struct Runtime {
     session: AgentSession<Backend>,
     publisher: Arc<Publisher>,

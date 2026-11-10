@@ -244,7 +244,7 @@ impl ToolFactory<Security> for UsageTools {
 async fn usage_runtime(
     fixture: &Fixture,
     provider: Scripted,
-) -> AgentSession<RuntimeBackend<Security, UsageTools>> {
+) -> AgentSession<RuntimeBackend<Security>> {
     let tools = Arc::new(UsageTools::default());
     let trace = tools.0.trace.clone();
     let broker = Arc::new(EventBroker::new());
@@ -340,7 +340,7 @@ async fn usage_runtime(
     AgentSession::new(backend, Arc::new(Signal::new()))
 }
 
-async fn send_usage(session: &AgentSession<RuntimeBackend<Security, UsageTools>>, text: &str) {
+async fn send_usage(session: &AgentSession<RuntimeBackend<Security>>, text: &str) {
     let sent = bounded(session.send(
         vec![ConversationPart::text(text)],
         id(),

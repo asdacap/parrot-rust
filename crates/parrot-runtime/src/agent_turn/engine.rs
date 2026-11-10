@@ -57,14 +57,14 @@ mod core_loop;
 
 pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 
-pub struct RuntimeConfig<S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> {
+pub struct RuntimeConfig<S: AccessSnapshot + 'static> {
     pub identity: SessionIdentity,
     pub agent_limits: AgentLimitsConfig,
     pub history: AgentHistoryView,
     pub broker: Arc<EventBroker>,
     pub publisher: Arc<Publisher>,
     pub selection: Arc<dyn SelectionSource<S>>,
-    pub tools: Arc<T>,
+    pub tools: Arc<dyn ToolFactory<S>>,
     pub tool_execution: ToolExecutionConfig,
     pub prompt: Box<dyn SystemPrompt>,
     pub skills: Arc<dyn TurnSkills>,
@@ -119,14 +119,14 @@ impl ProviderUsage for State {
 
 /// A real storage/provider backend. No service has a success default, and no
 /// concrete filesystem/security implementation is constructed by the drain.
-pub struct RuntimeBackend<S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> {
+pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     identity: SessionIdentity,
     agent_limits: AgentLimitsConfig,
     history: AgentHistoryView,
     broker: Arc<EventBroker>,
     publisher: Arc<Publisher>,
     selection: Arc<dyn SelectionSource<S>>,
-    tools: Arc<T>,
+    tools: Arc<dyn ToolFactory<S>>,
     tool_execution: ToolExecutionConfig,
     tool_execution_cycle: Mutex<Option<Arc<ToolCycleImageBudget>>>,
     skills: Arc<dyn TurnSkills>,
@@ -154,17 +154,16 @@ struct Notices {
     interrupted_result: String,
 }
 
-impl<S, T> RuntimeBackend<S, T>
+impl<S> RuntimeBackend<S>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized + 'static,
 {
-    pub async fn new(config: RuntimeConfig<S, T>) -> Result<Arc<Self>, TurnError> {
+    pub async fn new(config: RuntimeConfig<S>) -> Result<Arc<Self>, TurnError> {
         Self::with_sessions(config, ProviderSessions::new()).await
     }
 
     pub async fn with_sessions(
-        config: RuntimeConfig<S, T>,
+        config: RuntimeConfig<S>,
         sessions: ProviderSessions,
     ) -> Result<Arc<Self>, TurnError> {
         if config.identity.session_id != config.history.agent_session_id() {
@@ -396,10 +395,9 @@ where
     }
 }
 
-impl<S, T> super::lifecycle::AgentSession<RuntimeBackend<S, T>>
+impl<S> super::lifecycle::AgentSession<RuntimeBackend<S>>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized + 'static,
 {
     /// Accepts an owned mutation; dropping its observer cannot drop an admitted
     /// SQLite commit or leave the live reminder instance stale.
@@ -638,10 +636,9 @@ impl ContextEvents for ContextEmitter<'_> {
     }
 }
 
-impl<S, T> RuntimeBackend<S, T>
+impl<S> RuntimeBackend<S>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized + 'static,
 {
     async fn emit_execution(
         &self,
@@ -676,10 +673,9 @@ enum ExecutionCorrelation {
     Legacy,
     Correlated(String),
 }
-impl<S, T> RuntimeBackend<S, T>
+impl<S> RuntimeBackend<S>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized + 'static,
 {
     fn start_execution(
         &self,
@@ -754,10 +750,9 @@ where
     }
 }
 
-impl<S, T> DrainBackend for RuntimeBackend<S, T>
+impl<S> DrainBackend for RuntimeBackend<S>
 where
     S: AccessSnapshot + 'static,
-    T: ToolFactory<S> + ?Sized + 'static,
 {
     type Selection = TurnSelection<S>;
     fn admit(

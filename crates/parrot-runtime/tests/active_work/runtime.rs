@@ -279,7 +279,7 @@ impl CompletionStateSource for CallbackBinding {
         })
     }
 }
-type Backend = RuntimeBackend<Security, Tools>;
+type Backend = RuntimeBackend<Security>;
 struct Built {
     identity: Arc<AgentIdentity>,
     session: AgentSession<Backend>,
