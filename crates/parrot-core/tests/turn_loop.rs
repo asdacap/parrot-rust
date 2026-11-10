@@ -387,7 +387,7 @@ struct MemoryState {
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
     compacting: Arc<AtomicBool>,
-    prompt_templates: Vec<(String, String)>,
+    prompt_templates: Vec<(String, ConfigKey)>,
     template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
     template_engines: BTreeMap<String, String>,
 }
@@ -674,7 +674,18 @@ impl States for MemoryState {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(
                     self.compaction.lock().unwrap().configuration.clone(),
                 )),
-                ConfigKey::PromptTemplate(key) => {
+                ConfigKey::SystemPromptBindings => {
+                    if self.fail_at == Some("prompt_templates") {
+                        return Err(Error::failed("prompt_templates"));
+                    }
+                    Ok(ConfigValue::SystemPromptBindings(
+                        self.prompt_templates.clone(),
+                    ))
+                }
+                key => {
+                    let key = key
+                        .get_prompt_template_id()
+                        .ok_or_else(|| Error::unsupported("configuration"))?;
                     if key == "agent-session.context-reminder"
                         || key == "agent-session.context-limit-reminder"
                     {
@@ -683,7 +694,7 @@ impl States for MemoryState {
                     self.trace.step("render_template", self.fail_at)?;
                     let templates = self.skill_templates.lock().unwrap();
                     let text = templates
-                        .get(&key)
+                        .get(key)
                         .ok_or_else(|| Error::failed("unknown template"))?;
                     let allowed = [
                         "name",
@@ -711,7 +722,7 @@ impl States for MemoryState {
                     .map(str::to_owned);
                     let engine = self
                         .template_engines
-                        .get(&key)
+                        .get(key)
                         .map_or("scalar", String::as_str);
                     Ok(ConfigValue::PromptTemplate(Arc::new(
                         PromptTemplate::compile(
@@ -887,9 +898,6 @@ impl States for MemoryState {
             }
             Ok(vec![("memory:instructions".into(), instructions)])
         })
-    }
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async move { Ok(self.prompt_templates.clone()) })
     }
     fn read_template_arguments<'a>(
         &'a self,

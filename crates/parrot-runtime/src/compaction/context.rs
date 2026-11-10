@@ -905,14 +905,23 @@ impl parrot_core::States for EpochStates<'_> {
             match key {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(self.configuration.clone())),
                 ConfigKey::Context => Ok(ConfigValue::Context(self.configuration.context.clone())),
-                ConfigKey::PromptTemplate(id) => self
-                    .templates
-                    .get_template(&id)
-                    .map(ConfigValue::PromptTemplate)
-                    .map_err(|error| self.capture_error(PromptError::Template(error.to_string()))),
+                ConfigKey::SystemPromptBindings => self
+                    .prompt
+                    .read_core_prompt_bindings(self.cancellation)
+                    .await
+                    .map(ConfigValue::SystemPromptBindings)
+                    .map_err(|error| self.capture_error(error)),
                 ConfigKey::Turn => Err(parrot_core::Error::failed(
                     "turn configuration is unavailable for a compaction epoch",
                 )),
+                key => self
+                    .templates
+                    .get_template(
+                        key.get_prompt_template_id()
+                            .ok_or_else(|| parrot_core::Error::unsupported("configuration"))?,
+                    )
+                    .map(ConfigValue::PromptTemplate)
+                    .map_err(|error| self.capture_error(PromptError::Template(error.to_string()))),
             }
         })
     }
@@ -1025,17 +1034,6 @@ impl parrot_core::States for EpochStates<'_> {
         Box::pin(async move {
             self.prompt
                 .read_system_prompts(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_prompt_templates(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_prompt_templates(self.cancellation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })
