@@ -5,7 +5,7 @@ use parrot_runtime::agent_turn::lifecycle::ExecutionStatus;
 async fn actual_runtime_preserves_native_yielded_process_metadata_and_records_core_result() {
     let fixture = Fixture::new();
     let mut tool = RecordingTool::new(&fixture, "process", ParallelSafety::Sequential);
-    let yielded = protocol::YieldedShellProcess {
+    let mut yielded = protocol::YieldedShellProcess {
         process_id: "owned-process".into(),
         name: "named process".into(),
         inventory_instance_id: "inventory-instance".into(),
@@ -15,6 +15,10 @@ async fn actual_runtime_preserves_native_yielded_process_metadata_and_records_co
         activity_kind: protobuf::EnumOrUnknown::from_i32(-37),
         ..protocol::YieldedShellProcess::new()
     };
+    yielded
+        .special_fields
+        .mut_unknown_fields()
+        .add_varint(127, 12345);
     tool.output.yielded_process = Some(yielded.clone());
     let tool = Arc::new(tool);
     let mut first = Step::complete("tool request");

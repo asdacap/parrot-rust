@@ -6,8 +6,7 @@ pub use snapshot::ToolSnapshot;
 
 use crate::agent_turn::{
     services::{
-        SelectionSource, ToolExecutionChunk, ToolExecutionResult, TurnError, TurnResources,
-        TurnSelection, TurnTools,
+        SelectionSource, ToolExecutionChunk, TurnError, TurnResources, TurnSelection, TurnTools,
     },
     usage::SessionUsageRecorder,
 };
@@ -119,7 +118,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
         snapshot: &ToolSnapshot<S>,
         capture: &dyn SelectionSource<S>,
         cancellation: &dyn Cancellation,
-    ) -> Result<Vec<ToolExecutionResult>, TurnError> {
+    ) -> Result<Vec<ToolResult>, TurnError> {
         let mut execution = self.execution.lock().await;
         let first = request
             .calls
@@ -188,7 +187,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
         if cancellation.is_cancelled()
             || results
                 .iter()
-                .any(|result| result.result.status == ToolStatus::Cancelled)
+                .any(|result| result.status == ToolStatus::Cancelled)
         {
             results.extend(
                 request.calls[admitted..]
@@ -225,7 +224,7 @@ impl<S: AccessSnapshot + 'static> TurnTools<S> for ToolSettlement<S> {
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<S>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, TurnError>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, TurnError>> {
         Box::pin(self.execute_inner(
             request,
             resources,

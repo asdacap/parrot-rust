@@ -86,10 +86,7 @@ impl TurnTools<Security> for SettledTools {
         _: &'a Self::Snapshot,
         _: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<
-        'a,
-        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
-    > {
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
         Box::pin(async move {
             let mut results = Vec::new();
             for call in request.calls {
@@ -102,16 +99,14 @@ impl TurnTools<Security> for SettledTools {
                     ..Default::default()
                 });
                 resources.events.emit(started, cancellation).await?;
-                results.push(parrot_runtime::agent_turn::services::ToolExecutionResult {
-                    result: parrot_core::ToolResult {
-                        call_id: call.id,
-                        tool_name: call.name,
-                        status: parrot_core::ToolStatus::Finished,
-                        text: "settled".into(),
-                        error_message: String::new(),
-                        images: Vec::new(),
-                    },
-                    yielded_process: None,
+                results.push(parrot_core::ToolResult {
+                    call_id: call.id,
+                    tool_name: call.name,
+                    status: parrot_core::ToolStatus::Finished,
+                    text: "settled".into(),
+                    error_message: String::new(),
+                    images: Vec::new(),
+                    metadata: None,
                 });
             }
             Ok(results)
