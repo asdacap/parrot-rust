@@ -8,7 +8,7 @@ permissions:
 
 concurrency:
   group: parrot-check-${{ github.repository }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   native:
@@ -59,15 +59,21 @@ jobs:
           export CARGO_NET_OFFLINE=true npm_config_offline=true PYTHONDONTWRITEBYTECODE=1
           export HOME="$RUNNER_TEMP/parrot-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.profile }}"
           mkdir -p "$HOME"
-          nix develop --offline --no-write-lock-file --command npm --prefix web ci --offline --no-audit --no-fund
-          nix develop --offline --no-write-lock-file --command npm --prefix web run build
-          T57_TEST_SHELL="$(nix develop --offline --no-write-lock-file --command bash -c 'command -v bash')"
-          export T57_TEST_SHELL
           export PARROT_T64_BROWSER_MODULES="$PWD/web/node_modules"
-          nix develop --offline --no-write-lock-file --command cargo fmt --all -- --check
           pids=()
+          (
+            nix develop --offline --no-write-lock-file --command npm --prefix web ci --offline --no-audit --no-fund
+            nix develop --offline --no-write-lock-file --command npm --prefix web run build
+          ) &
+          npm_pid="$!"
+          pids+=("$npm_pid")
+          nix develop --offline --no-write-lock-file --command cargo fmt --all -- --check &
+          pids+=("$!")
           nix develop --offline --no-write-lock-file --command python3 -B -m pytest -n auto tests/skills/queue tests/ci &
           pids+=("$!")
+          wait "$npm_pid"
+          T57_TEST_SHELL="$(nix develop --offline --no-write-lock-file --command bash -c 'command -v bash')"
+          export T57_TEST_SHELL
           (
             nix develop --offline --no-write-lock-file --command cargo clippy --workspace --all-targets --locked -- -D warnings
             nix develop --offline --no-write-lock-file --command cargo build --locked -p parrot-storage --example t17-crash-probe
