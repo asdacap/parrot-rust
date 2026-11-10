@@ -62,167 +62,6 @@ fn stored_context_reminders_are_not_repeated_on_tool_followups_or_later_turns() 
 }
 
 #[test]
-fn core_records_native_pending_prompts_once() {
-    let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
-    let prompt = Message {
-        role: Role::System,
-        contents: vec![Content::Text("caller-owned prompt".into())],
-        ..Message::default()
-    };
-
-    state.prompts().pending_prompts.push_back(prompt.clone());
-    let tools = state.tools.clone();
-    let provider = state.provider.clone();
-
-    state.budget = TurnBudget::new(state.unlimited);
-
-    let result = finish(run_turn(
-        &mut state,
-        &tools,
-        &provider,
-        CancellationToken::new(provider.cancellation.as_ref()),
-    ));
-
-    assert_eq!(result, Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.recorded_prompts, [prompt.clone()]);
-    let requests = provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    for request in requests.iter() {
-        assert_eq!(
-            request
-                .messages
-                .iter()
-                .filter(|message| *message == &prompt)
-                .count(),
-            1
-        );
-    }
-    assert!(state.prompts().pending_prompts.is_empty());
-    assert_eq!(state.prompts().acknowledged_prompts.len(), 1);
-}
-
-#[test]
-fn pending_steer_and_status_prompts_are_fitted_without_a_context_reminder() {
-    for role in [Role::User, Role::System] {
-        let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.prime_context(100);
-        let prompt = Message {
-            role,
-            contents: vec![Content::Text("pending prompt".into())],
-            provider_content: "{\"native\":true}".into(),
-            ..Message::default()
-        };
-        state.prompts().pending_prompts.push_back(prompt.clone());
-        state.request().estimate_script = [100, 150, 160, 160].into();
-
-        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert!(state.reminder_appends.is_empty());
-        assert_eq!(state.recorded_prompts, [prompt.clone()]);
-        assert_eq!(
-            state.prompts().acknowledged_prompts[0].estimated_tokens,
-            160
-        );
-        let request = state.request();
-        let estimates = &request.estimates;
-        assert_eq!(estimates[1].messages.last(), Some(&prompt));
-        assert_eq!(estimates[1].tokens, 150);
-        let requests = state.provider.requests.lock().unwrap();
-        assert_eq!(requests[0].messages.last(), Some(&prompt));
-        assert_eq!(requests[0].messages, estimates.last().unwrap().messages);
-        let trace = state.trace.values();
-        let fitted = trace
-            .iter()
-            .position(|step| step == "record_prompt")
-            .unwrap();
-        let acknowledged = trace
-            .iter()
-            .position(|step| step == "acknowledge_prompt")
-            .unwrap();
-        let published = trace
-            .iter()
-            .position(|step| step == "publish_prompt")
-            .unwrap();
-        let invoked = trace.iter().position(|step| step == "invoke").unwrap();
-        assert!(fitted < acknowledged && acknowledged < published && published < invoked);
-    }
-}
-
-#[test]
-fn pending_prompt_is_recorded_when_context_capacity_is_unknown() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    let prompt = Message {
-        role: Role::System,
-        contents: vec![Content::Text("pending status".into())],
-        ..Message::default()
-    };
-    state.prompts().pending_prompts.push_back(prompt.clone());
-
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.recorded_prompts, [prompt.clone()]);
-    assert!(!state.prompts().acknowledged_prompts[0].is_available());
-    assert_eq!(
-        state.provider.requests.lock().unwrap()[0].messages.last(),
-        Some(&prompt)
-    );
-    assert!(state.compacted_definitions.is_empty());
-}
-
-#[test]
-fn oversized_pending_status_prompt_compacts_without_recording_or_acknowledging_it() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.prime_context(100);
-    state.prompts().pending_prompts.push_back(Message {
-        role: Role::System,
-        contents: vec![Content::Text("oversized status".into())],
-        ..Message::default()
-    });
-    state.request().estimate_script = [100, 910, 100, 100].into();
-    let messages = vec![Message {
-        role: Role::System,
-        contents: vec![Content::Text("compacted status".into())],
-        ..Message::default()
-    }];
-    let context = state.request().context.clone();
-    state.compactions.push_back(CompactedContext {
-        instructions: "compacted instructions".into(),
-        messages: messages.clone(),
-        state: context,
-        reduced: true,
-    });
-
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.compacted_definitions.len(), 1);
-    assert!(state.recorded_prompts.is_empty());
-    assert!(state.prompts().acknowledged_prompts.is_empty());
-    assert_eq!(
-        state.provider.requests.lock().unwrap()[0].messages,
-        messages
-    );
-}
-
-#[test]
-fn pending_prompt_failures_stop_before_later_effects() {
-    for stage in [
-        "pending_prompt",
-        "record_prompt",
-        "acknowledge_prompt",
-        "publish_prompt",
-    ] {
-        let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-        state.prompts().pending_prompts.push_back(Message {
-            role: Role::System,
-            contents: vec![Content::Text("pending status".into())],
-            ..Message::default()
-        });
-        state.fail_at = Some(stage);
-
-        assert_eq!(state.run(), Err(Error::failed(stage)));
-        assert_eq!(state.trace.values().last().unwrap(), stage);
-        assert!(state.provider.requests.lock().unwrap().is_empty());
-    }
-}
-
-#[test]
 fn final_phase_sends_the_configured_steer() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.maximum = 1;
@@ -451,7 +290,7 @@ fn post_compaction_raw_input_failure_precedes_checkpoint_or_provider_effects() {
 fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.prime_context(490);
-    state.request().estimate_script = [550, 630, 630, 630].into();
+    state.request().estimate_script = [550, 630, 630].into();
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.reminder_appends.len(), 1);
     assert_eq!(state.reminder_appends[0].0.percentage, 50);
@@ -607,7 +446,7 @@ fn reminder_append_failure_does_not_suppress_a_retry() {
 }
 
 #[test]
-fn pending_context_reminders_use_configured_template_overrides() {
+fn context_reminders_use_configured_template_overrides() {
     for override_limit in [false, true] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
         state.prime_context(490);

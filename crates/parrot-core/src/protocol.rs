@@ -225,33 +225,27 @@ pub struct SkillCatalogEntry {
     pub prompt_visible: bool,
 }
 
-/// A prepared message with the information needed to record it.
+/// A prepared context reminder with the information needed to record it.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PendingPrompt {
-    Message(Message),
-    ContextReminder {
-        checkpoint: crate::ContextReminderCheckpoint,
-        content: String,
-        observed_percentage: i32,
-    },
+pub struct ContextReminder {
+    pub checkpoint: ContextReminderCheckpoint,
+    pub content: String,
+    pub observed_percentage: i32,
 }
 
-impl PendingPrompt {
+impl ContextReminder {
     pub fn render_message(&self) -> Message {
-        match self {
-            Self::Message(message) => message.clone(),
-            Self::ContextReminder { content, .. } => Message {
-                role: Role::System,
-                contents: vec![Content::Text(content.clone())],
-                ..Message::default()
-            },
+        Message {
+            role: Role::System,
+            contents: vec![Content::Text(self.content.clone())],
+            ..Message::default()
         }
     }
 }
 
-/// A recorded prompt notice awaiting publication after prompt acknowledgement.
+/// A recorded context reminder notice awaiting publication.
 #[derive(Debug, Eq, PartialEq)]
-pub struct PromptPublication {
+pub struct ContextReminderPublication {
     pub event_id: String,
     pub agent_session_id: String,
     pub kind: String,
@@ -287,18 +281,6 @@ pub trait States: Send + Sync {
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_last_context_reminder")) })
-    }
-    /// Reads an optional native prompt without choosing or rendering context reminders.
-    fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_pending_prompt")) })
-    }
-    /// Acknowledges a supplied native prompt without changing context reminders.
-    fn acknowledge_pending_prompt<'a>(
-        &'a mut self,
-        _prompt: &'a PendingPrompt,
-        _context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.acknowledge_pending_prompt")) })
     }
     /// Joins accepted mutations and reads ordered completion blockers.
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
@@ -432,22 +414,21 @@ pub trait States: Send + Sync {
     fn record_steer<'a>(&'a mut self, _content: &'a str) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.record_steer")) })
     }
-    /// Persists the supplied prompt after core checks the request's token limits.
+    /// Persists the supplied context reminder after core checks the request's token limits.
     /// Updates the conversation and returns a publication receipt only on insertion.
     /// Returns `None` for a duplicate. Does not publish the receipt.
-    fn record_pending_prompt<'a>(
+    fn record_context_reminder<'a>(
         &'a mut self,
-        _prompt: &'a PendingPrompt,
-    ) -> BoxFuture<'a, Result<Option<PromptPublication>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_pending_prompt")) })
+        _reminder: &'a ContextReminder,
+    ) -> BoxFuture<'a, Result<Option<ContextReminderPublication>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_context_reminder")) })
     }
-    /// Publishes the supplied receipt without cancellation.
-    /// Core calls this after acknowledging the recorded prompt.
-    fn publish_pending_prompt(
+    /// Publishes the recorded context reminder notice without cancellation.
+    fn publish_context_reminder(
         &mut self,
-        _receipt: PromptPublication,
+        _receipt: ContextReminderPublication,
     ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.publish_pending_prompt")) })
+        Box::pin(async { Err(Error::unsupported("States.publish_context_reminder")) })
     }
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
