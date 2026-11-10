@@ -53,7 +53,7 @@ impl States for State {
             )))
         })
     }
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: ConversationAddition,
     ) -> BoxFuture<'_, Result<ConversationReceipt, Error>> {
@@ -72,7 +72,10 @@ impl States for State {
     fn read_tool_recovery(&self) -> BoxFuture<'_, Result<ToolRecovery, Error>> {
         Box::pin(async move { Ok(self.recovery.clone()) })
     }
-    fn write_tool_watermark(&mut self, through: i64) -> BoxFuture<'_, Result<(), Error>> {
+    fn advance_tool_settlement_watermark(
+        &mut self,
+        through: i64,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.watermark = self.watermark.max(through);
             Ok(())

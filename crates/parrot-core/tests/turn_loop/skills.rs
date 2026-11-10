@@ -90,7 +90,7 @@ fn core_queries_text_mentions_and_reads_each_selected_record_once_in_text_order(
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "get_skills")
+            .filter(|step| *step == "resolve_skill_references")
             .count(),
         1
     );
@@ -168,7 +168,7 @@ fn separate_inputs_use_local_offsets_and_utf16_identity_tiebreak_before_body_rea
             .trace
             .values()
             .iter()
-            .filter(|step| *step == "get_skills")
+            .filter(|step| *step == "resolve_skill_references")
             .count(),
         2
     );

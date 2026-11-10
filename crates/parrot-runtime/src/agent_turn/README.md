@@ -240,10 +240,10 @@ status/recaptures selection if requested, begins skills/restores tools and then
 promotes input. Steers promote together; one queue input promotes only with no
 steer and a nonanswerable conversation. Promotion returns the original inputs
 without selecting or rendering skills. Core parses skill mentions, reads metadata
-through `States::get_skills`, and deduplicates stable identities before reading
+through `States::resolve_skill_references`, and deduplicates stable identities before reading
 bodies through `States::read_skill_content`. Native backing owns catalog lookup
 and authorized file reads. Core owns skill-context formatting, limits, and loaded
-paths. `States::read_system_prompts` supplies native system-prompt sections.
+paths. `States::capture_system_prompt_sections` supplies native system-prompt sections.
 The runtime model contributor composes alias descriptions, selected model-profile
 guidance, and selected alias augmentation into one opaque section. `States` also
 exposes template identities and arguments, AGENTS files, identity, standing
@@ -259,7 +259,7 @@ reminder rendering and cadence decisions, while State stores cadence and durable
 checkpoints. Turn and standalone compaction both use State, Provider, and EventPublisher rather than
 separate preparation, status, summary, or compaction-effect contracts.
 
-Core constructs conversation messages and explicitly calls `States::add_conversation`.
+Core constructs conversation messages and explicitly calls `States::apply_conversation_addition`.
 This includes promoted input, skill context, status, final-phase and restored-tool prompts,
 retries, assistant responses, completion feedback, tool results, synthetic image messages,
 and interruption responses. The generic addition carries complete messages and the storage

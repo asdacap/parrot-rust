@@ -144,7 +144,9 @@ impl ToolSettlement {
             )
             .await?;
         }
-        states.write_tool_watermark(recovery.through).await?;
+        states
+            .advance_tool_settlement_watermark(recovery.through)
+            .await?;
         Ok(())
     }
 
@@ -200,7 +202,9 @@ impl ToolSettlement {
             ));
         }
         Self::finish_batch(states, &batch).await?;
-        states.write_tool_watermark(batch.sequence).await?;
+        states
+            .advance_tool_settlement_watermark(batch.sequence)
+            .await?;
         Ok(())
     }
 
@@ -222,7 +226,7 @@ impl ToolSettlement {
             );
             message.tool_call_id = execution.result.call_id.clone();
             states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![message],
                     persistence: ConversationPersistence::ToolResult {
                         assistant_sequence: sequence,
@@ -246,7 +250,7 @@ impl ToolSettlement {
             .collect::<Vec<_>>();
         if !contents.is_empty() {
             states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![Message {
                         role: Role::User,
                         contents,

@@ -113,7 +113,7 @@ fn render_record(
     })
 }
 
-pub(super) async fn add_conversation<S, T>(
+pub(super) async fn apply_conversation_addition<S, T>(
     states: &mut RuntimeStates<'_, S, T>,
     addition: ConversationAddition,
 ) -> Result<ConversationReceipt, TurnError>
@@ -157,7 +157,7 @@ where
         persistence @ (ConversationPersistence::Phase { .. }
         | ConversationPersistence::Reminder { .. }
         | ConversationPersistence::Status { .. }) => {
-            return crate::compaction::add_conversation(
+            return crate::compaction::apply_conversation_addition(
                 &backend.history,
                 &mut state.conversation,
                 &mut state.context.initial_status_pending,
@@ -175,7 +175,7 @@ where
         | ConversationPersistence::ToolImages { .. }) => {
             return state
                 .tool_conversation
-                .add_conversation(
+                .apply_conversation_addition(
                     &mut state.conversation,
                     ConversationAddition {
                         messages: addition.messages,

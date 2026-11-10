@@ -20,7 +20,7 @@ pub async fn add_phase_prompt(
         )
     };
     states
-        .add_conversation(ConversationAddition {
+        .apply_conversation_addition(ConversationAddition {
             messages: vec![Message::text(Role::System, content)],
             persistence: ConversationPersistence::Phase {
                 final_phase,
@@ -38,7 +38,7 @@ pub async fn add_context_reminder(
     reminder: &ContextReminder,
 ) -> Result<ConversationReceipt, Error> {
     states
-        .add_conversation(ConversationAddition {
+        .apply_conversation_addition(ConversationAddition {
             messages: vec![reminder.render_message()],
             persistence: ConversationPersistence::Reminder {
                 checkpoint: reminder.checkpoint.clone(),

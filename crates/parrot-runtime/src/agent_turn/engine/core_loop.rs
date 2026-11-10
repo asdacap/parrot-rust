@@ -238,7 +238,7 @@ where
             }
             let turn = states.get_last_turn().await?;
             if !turn.as_ref().is_some_and(|turn| turn.needs_response())
-                && states.get_pending_message().await?.is_none()
+                && states.peek_pending_input_header().await?.is_none()
             {
                 return Ok(parrot_core::Outcome::Completed(answer));
             }
@@ -380,13 +380,13 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, CoreError>> {
-        adapt_operation(conversation::add_conversation(self, addition))
+        adapt_operation(conversation::apply_conversation_addition(self, addition))
     }
-    fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
+    fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
         adapt_operation(async move {
             self.backend
                 .history
@@ -462,7 +462,7 @@ where
         *self.budget = budget;
         Ok(())
     }
-    fn get_last_context_reminder(
+    fn read_last_context_reminder_checkpoint(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ContextReminderCheckpoint>, CoreError>> {
         adapt_operation(async move {
@@ -477,7 +477,7 @@ where
         })
     }
 
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
+    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
         adapt_operation(async move {
             let _guard = self.backend.state.lock().await;
             self.binding
@@ -596,7 +596,9 @@ where
         })
     }
 
-    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
+    fn capture_system_prompt_sections(
+        &mut self,
+    ) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
             let selection = self.binding.capture_selection()?;
@@ -687,7 +689,10 @@ where
                 .await
         })
     }
-    fn write_tool_watermark(&mut self, through: i64) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn advance_tool_settlement_watermark(
+        &mut self,
+        through: i64,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             self.backend
                 .state
@@ -719,7 +724,7 @@ where
             Ok(Some(parrot_core::ConversationTurn { messages, result }))
         })
     }
-    fn get_pending_message(
+    fn peek_pending_input_header(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::PendingMessage>, CoreError>> {
         adapt_operation(async move {
@@ -742,13 +747,13 @@ where
             }))
         })
     }
-    fn promote_input(
+    fn promote_pending_inputs(
         &mut self,
         admission: parrot_core::InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::PromotedInput>, CoreError>> {
         adapt_operation(async move { self.backend.promote(admission).await })
     }
-    fn get_skills<'a>(
+    fn resolve_skill_references<'a>(
         &'a self,
         references: &'a [parrot_core::SkillReference],
     ) -> BoxFuture<'a, Result<Vec<Option<parrot_core::Skill>>, CoreError>> {
@@ -778,7 +783,9 @@ where
             Ok(state.context.budget().capture_state())
         })
     }
-    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
+    fn read_provider_messages(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
         adapt_operation(async move {
             let state = self.backend.state.lock().await;
             Ok(state
@@ -802,7 +809,7 @@ where
                 .map_err(Into::into)
         })
     }
-    fn record_compaction<'a>(
+    fn finalize_compaction<'a>(
         &'a mut self,
         instructions: &'a str,
         definitions: &'a [ToolDefinition],

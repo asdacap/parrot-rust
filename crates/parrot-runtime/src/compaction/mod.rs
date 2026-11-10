@@ -9,7 +9,7 @@ pub use context::{
     ContextCompactionResult, ContextController, ContextError, ContextEvents, ContextResult,
     ContextStatus, EpochInput, EpochResult, StatusInjection, provider_message,
 };
-pub(crate) use conversation::{add_conversation, materialize_message};
+pub(crate) use conversation::{apply_conversation_addition, materialize_message};
 mod planning;
 
 pub use budget::ProviderTokenBudget;

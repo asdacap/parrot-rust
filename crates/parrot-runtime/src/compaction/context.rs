@@ -770,12 +770,12 @@ impl parrot_core::States for ContextAdditionStates<'_> {
         Box::pin(async { Err(parrot_core::Error::unsupported("States.get_config")) })
     }
 
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
         Box::pin(async move {
-            super::add_conversation(
+            super::apply_conversation_addition(
                 self.history,
                 self.conversation,
                 &mut false,
@@ -854,7 +854,7 @@ impl EpochStates<'_> {
 }
 
 impl parrot_core::States for EpochStates<'_> {
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
@@ -862,7 +862,7 @@ impl parrot_core::States for EpochStates<'_> {
             let result = {
                 let mut controller = self.controller.lock().await;
                 let history = controller.history.clone();
-                super::add_conversation(
+                super::apply_conversation_addition(
                     &history,
                     self.conversation,
                     &mut controller.initial_status_pending,
@@ -903,7 +903,7 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_pending_inputs(
+    fn read_next_input_messages(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {
         Box::pin(async move {
@@ -933,7 +933,7 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_messages(
+    fn read_provider_messages(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {
         Box::pin(async move {
@@ -953,7 +953,7 @@ impl parrot_core::States for EpochStates<'_> {
         Box::pin(async move { Ok(self.controller.lock().await.budget.capture_state()) })
     }
 
-    fn get_last_context_reminder(
+    fn read_last_context_reminder_checkpoint(
         &self,
     ) -> BoxFuture<'_, Result<Option<CoreContextReminderCheckpoint>, parrot_core::Error>> {
         Box::pin(async move {
@@ -966,7 +966,7 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn record_compaction<'a>(
+    fn finalize_compaction<'a>(
         &'a mut self,
         instructions: &'a str,
         definitions: &'a [parrot_core::ToolDefinition],
@@ -1108,7 +1108,7 @@ impl parrot_core::States for EpochStates<'_> {
                 .map_err(|error| self.capture_error(error))
         })
     }
-    fn read_system_prompts(
+    fn capture_system_prompt_sections(
         &mut self,
     ) -> BoxFuture<'_, Result<Vec<(String, String)>, parrot_core::Error>> {
         Box::pin(async move {

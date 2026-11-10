@@ -18,7 +18,7 @@ pub(crate) async fn render_template(
 }
 
 pub(crate) async fn render_instructions(states: &mut dyn States) -> Result<String, Error> {
-    let mut sections = states.read_system_prompts().await?;
+    let mut sections = states.capture_system_prompt_sections().await?;
     let bindings = states
         .get_config(ConfigKey::SystemPromptBindings)
         .await?

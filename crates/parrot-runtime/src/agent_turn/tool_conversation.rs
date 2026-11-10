@@ -160,7 +160,7 @@ impl ToolConversation {
         self.backing.read_recovery().await
     }
 
-    pub async fn add_conversation(
+    pub async fn apply_conversation_addition(
         &mut self,
         conversation: &mut AgentConversation,
         addition: ConversationAddition,
@@ -169,7 +169,7 @@ impl ToolConversation {
             backing: &mut self.backing,
             conversation,
         }
-        .add_conversation(addition)
+        .apply_conversation_addition(addition)
         .await
         .map_err(TurnError::Core)
     }
@@ -191,14 +191,17 @@ impl States for ToolState<'_> {
         Box::pin(async move { self.backing.read_recovery().await.map_err(Into::into) })
     }
 
-    fn write_tool_watermark(&mut self, through: i64) -> BoxFuture<'_, Result<(), Error>> {
+    fn advance_tool_settlement_watermark(
+        &mut self,
+        through: i64,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.backing.watermark = self.backing.watermark.max(through);
             Ok(())
         })
     }
 
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: ConversationAddition,
     ) -> BoxFuture<'_, Result<ConversationReceipt, Error>> {

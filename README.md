@@ -120,7 +120,7 @@ chooses whether admission allows only steers or also the next queued message;
 native promotion rechecks the queue and keeps all steers in one batch. Promotion
 returns the admitted inputs with their identities and content. It does not select
 or render skills. Core parses their skill mentions and resolves references in one
-batch per input through `States::get_skills`. That read returns metadata without
+batch per input through `States::resolve_skill_references`. That read returns metadata without
 loading instruction bodies and permits one fallback catalog refresh per batch.
 Core deduplicates records by stable identity before calling
 `States::read_skill_content`, then applies formatting and injection limits.
@@ -144,7 +144,7 @@ uncancelled post-commit notice publication.
 Calibration survives later stream/publication failures and resets only after
 successful compaction persistence.
 
-After a no-tool response, core calls `get_exit_blockers` for an ordered list of
+After a no-tool response, core calls `collect_completion_blockers` for an ordered list of
 message strings. An empty list permits completion; any nonempty list, including
 one containing empty strings, blocks it. Core retains the candidate once, adds
 all messages in state-provided order, forces continuation, and restarts the request

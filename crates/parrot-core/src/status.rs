@@ -52,8 +52,8 @@ pub async fn prepare_status(
             checkpoint
         };
         let instructions = render_instructions(states).await?;
-        let mut messages = states.read_messages().await?;
-        messages.extend(states.read_pending_inputs().await?);
+        let mut messages = states.read_provider_messages().await?;
+        messages.extend(states.read_next_input_messages().await?);
         let configuration = states
             .get_config(ConfigKey::Context)
             .await?
@@ -72,7 +72,7 @@ pub async fn prepare_status(
         )
         .await?;
         let receipt = states
-            .add_conversation(ConversationAddition {
+            .apply_conversation_addition(ConversationAddition {
                 messages: vec![Message::text(Role::System, content)],
                 persistence: ConversationPersistence::Status {
                     checkpoint,

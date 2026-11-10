@@ -81,7 +81,9 @@ impl States for Preparation {
         })
     }
 
-    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+    fn capture_system_prompt_sections(
+        &mut self,
+    ) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async move {
             if self.failure == Some("instructions") {
                 return Err(native_error("instructions"));

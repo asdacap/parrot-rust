@@ -15,7 +15,7 @@ use parrot_storage::{
     events::{MessageRole, NeverCancelled, ProviderContent, ToolCall},
 };
 
-pub(crate) async fn add_conversation(
+pub(crate) async fn apply_conversation_addition(
     history: &AgentHistoryView,
     conversation: &mut AgentConversation,
     initial_status_pending: &mut bool,

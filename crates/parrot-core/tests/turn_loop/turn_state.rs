@@ -91,11 +91,14 @@ fn pending_message_is_a_stable_peek_and_admits_input_after_a_completed_turn() {
         assistant_text: "old answer".into(),
         ..ProviderResponse::default()
     });
-    let pending = finish(state.get_pending_message()).unwrap().unwrap();
+    let pending = finish(state.peek_pending_input_header()).unwrap().unwrap();
     assert_eq!(pending.delivery, Delivery::Queue);
     assert!(!pending.input_id.is_empty());
     assert!(!pending.message_id.is_empty());
-    assert_eq!(finish(state.get_pending_message()).unwrap(), Some(pending));
+    assert_eq!(
+        finish(state.peek_pending_input_header()).unwrap(),
+        Some(pending)
+    );
     assert_eq!(state.pending_messages.len(), 1);
     assert!(state.trace.values().is_empty());
     assert_eq!(state.run(), Ok(Outcome::Completed("new answer".into())));
@@ -210,7 +213,7 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
         contents: vec![Content::Text("status added a new input".into())],
         ..Message::default()
     });
-    let pending = finish(state.get_pending_message()).unwrap();
+    let pending = finish(state.peek_pending_input_header()).unwrap();
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
@@ -226,7 +229,7 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
         Ok(Outcome::Completed("answer".into()))
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
-    assert_eq!(finish(state.get_pending_message()).unwrap(), pending);
+    assert_eq!(finish(state.peek_pending_input_header()).unwrap(), pending);
     assert_eq!(state.pending_messages.len(), 1);
 }
 
@@ -241,7 +244,7 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     });
     state.enqueue_message(Delivery::Steer, "first steer");
     state.enqueue_message(Delivery::Steer, "second steer");
-    let steer = finish(state.get_pending_message()).unwrap().unwrap();
+    let steer = finish(state.peek_pending_input_header()).unwrap().unwrap();
     assert_eq!(steer.delivery, Delivery::Steer);
     let tools = state.tools.clone();
     let provider = state.provider.clone();
@@ -302,7 +305,7 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
     ));
 
     assert_eq!(
-        finish(state.promote_input(InputAdmission::SteersOnly)),
+        finish(state.promote_pending_inputs(InputAdmission::SteersOnly)),
         Ok(vec![PromotedInput {
             input_id: "promoted-input".into(),
             message: message.clone(),
@@ -321,7 +324,7 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
 #[test]
 fn skill_read_and_recording_failures_preserve_promoted_inputs_without_invoking_provider() {
     for stage in [
-        "get_skills",
+        "resolve_skill_references",
         "read_skill_content",
         "render_template",
         "record_input_context",

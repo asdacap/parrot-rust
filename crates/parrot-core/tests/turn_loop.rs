@@ -737,10 +737,10 @@ impl MemoryState {
     }
 }
 impl States for MemoryState {
-    fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, Error>> {
+    fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async { Ok(false) })
     }
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: ConversationAddition,
     ) -> BoxFuture<'_, Result<ConversationReceipt, Error>> {
@@ -947,7 +947,7 @@ impl States for MemoryState {
         self.budget = budget;
         Ok(())
     }
-    fn get_last_context_reminder(
+    fn read_last_context_reminder_checkpoint(
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
         Box::pin(async move {
@@ -955,7 +955,7 @@ impl States for MemoryState {
             Ok(self.prompts().checkpoint.clone())
         })
     }
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async move {
             self.step("exit_blockers")?;
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
@@ -1016,7 +1016,9 @@ impl States for MemoryState {
         })
     }
 
-    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+    fn capture_system_prompt_sections(
+        &mut self,
+    ) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async move {
             self.step("instruction_state")?;
             let compacting = self.compacting.load(Ordering::SeqCst);
@@ -1070,7 +1072,10 @@ impl States for MemoryState {
     ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, Error>> {
         Box::pin(async { Ok(Vec::new()) })
     }
-    fn write_tool_watermark(&mut self, _through: i64) -> BoxFuture<'_, Result<(), Error>> {
+    fn advance_tool_settlement_watermark(
+        &mut self,
+        _through: i64,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             if let Some(steer) = self.steers_after_results.pop_front() {
                 self.enqueue_message(Delivery::Steer, &steer);
@@ -1087,7 +1092,7 @@ impl States for MemoryState {
             Ok(self.last_turn.clone())
         })
     }
-    fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
+    fn peek_pending_input_header(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
         Box::pin(async move {
             if self.fail_at == Some("pending_message") {
                 self.trace.step("pending_message", self.fail_at)?;
@@ -1100,7 +1105,7 @@ impl States for MemoryState {
                 .map(|(message, _)| message.clone()))
         })
     }
-    fn promote_input(
+    fn promote_pending_inputs(
         &mut self,
         admission: InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>> {
@@ -1128,12 +1133,12 @@ impl States for MemoryState {
                 .collect())
         })
     }
-    fn get_skills<'a>(
+    fn resolve_skill_references<'a>(
         &'a self,
         references: &'a [SkillReference],
     ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
         Box::pin(async move {
-            self.trace.step("get_skills", self.fail_at)?;
+            self.trace.step("resolve_skill_references", self.fail_at)?;
             self.skill_lookups
                 .lock()
                 .unwrap()
@@ -1180,7 +1185,7 @@ impl States for MemoryState {
             Ok(self.request().context.calibration.clone())
         })
     }
-    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async move {
             self.trace.step("messages", self.fail_at)?;
             Ok(self.request().messages.clone())
@@ -1227,7 +1232,7 @@ impl States for MemoryState {
             })
         })
     }
-    fn record_compaction<'a>(
+    fn finalize_compaction<'a>(
         &'a mut self,
         instructions: &'a str,
         definitions: &'a [ToolDefinition],
