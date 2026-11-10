@@ -1,4 +1,5 @@
 use super::{admission_publisher::AdmissionPublisher, fixture::*};
+use crate::tool_execution_support::tool_execution_config;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -33,8 +34,6 @@ use parrot_runtime::{
     event_broker::EventBroker,
     prompt_context::{PromptResult, SystemPrompt},
 };
-#[path = "../tool_execution_support.rs"]
-mod tool_execution_support;
 use parrot_storage::{
     artifacts::compaction::CompactionGroupBlobStore,
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
@@ -53,7 +52,6 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Semaphore;
-use tool_execution_support::tool_execution_config;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub fn id() -> String {

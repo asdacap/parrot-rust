@@ -2,9 +2,6 @@
 //! The synthetic process observer is a domain port, not production OS-adapter proof.
 use super::support;
 
-#[path = "../tool_execution_support.rs"]
-mod tool_execution_support;
-
 use parrot_core::ProviderResponse;
 use parrot_domain::{
     contracts::{
@@ -441,7 +438,11 @@ impl ScopeFactory<Security> for Factory {
                 })
                 .collect();
             let backend = RuntimeBackend::new(RuntimeConfig {
-                tool_execution: tool_execution_support::tool_execution_config(&history, templates(), publisher.clone()),
+                tool_execution: crate::tool_execution_support::tool_execution_config(
+                    &history,
+                    templates(),
+                    publisher.clone(),
+                ),
                 agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                     disable_max_turns: false,
                     ..Default::default()

@@ -1,5 +1,7 @@
 mod engine;
 mod lifecycle;
+#[path = "../tool_execution_support.rs"]
+mod tool_execution_support;
 mod usage;
 
 use parrot_runtime::agent_turn::budget::TurnBudget;

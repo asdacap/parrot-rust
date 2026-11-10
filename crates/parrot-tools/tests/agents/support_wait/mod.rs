@@ -53,8 +53,8 @@ use parrot_runtime::{
     event_broker::EventBroker,
     prompt_context::{PromptResult, SystemPrompt},
     tool_settlement::{
-        self, SharedSecurity, ToolDiagnostics, ToolFactory, ToolFailure, ToolHandle, ToolInventory,
-        ToolMetadata, ToolOutput, ToolExecutionConfig,
+        self, SharedSecurity, ToolDiagnostics, ToolExecutionConfig, ToolFactory, ToolFailure,
+        ToolHandle, ToolInventory, ToolMetadata, ToolOutput,
     },
 };
 use parrot_storage::{
@@ -663,24 +663,24 @@ impl Harness {
         let activity = Arc::new(AgentSessionActivity::new(Arc::new(TestClock)));
         let bridge = Arc::new(WaitBridge::default());
         let tool_execution = ToolExecutionConfig {
-                path_variables: Default::default(),
+            path_variables: Default::default(),
 
-                templates: templates.clone(),
-                output_blobs: Arc::new(
-                    ToolOutputBlobStore::for_session(&root, "scratch", Arc::new(Names)).unwrap(),
-                ),
-                publisher: broker.clone(),
-                activity: activity.clone(),
-                diagnostics: Arc::new(Diagnostics),
-                image_bytes_per_cycle: 0,
-            };
+            templates: templates.clone(),
+            output_blobs: Arc::new(
+                ToolOutputBlobStore::for_session(&root, "scratch", Arc::new(Names)).unwrap(),
+            ),
+            publisher: broker.clone(),
+            activity: activity.clone(),
+            diagnostics: Arc::new(Diagnostics),
+            image_bytes_per_cycle: 0,
+        };
         let tools = Arc::new(Factory(Arc::new(RetainedTool {
-                    metadata: ToolMetadata {
-                        name: "wait".into(),
-                        aliases: vec![],
-                    },
-                    tool: wait_tool(bridge.clone()),
-                })));
+            metadata: ToolMetadata {
+                name: "wait".into(),
+                aliases: vec![],
+            },
+            tool: wait_tool(bridge.clone()),
+        })));
         let provider = Scripted::default();
         let backend = RuntimeBackend::new(RuntimeConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
