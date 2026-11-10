@@ -187,6 +187,7 @@ impl ByteStream for Body {
 enum Mode {
     Unavailable,
     ModelsDevId,
+    AnthropicOverride,
     LiveModels,
     ExternalMembership,
     OpenRouter,
@@ -243,6 +244,8 @@ impl HttpTransport for Transport {
                 Mode::Unavailable => (503, "temporarily unavailable".into()),
                 Mode::ModelsDevId if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"opencode":{"id":"opencode","models":{"zen":{"id":"zen-only"}}}}"#.into()),
                 Mode::ModelsDevId => (503, "temporarily unavailable".into()),
+                Mode::AnthropicOverride if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"openai":{"id":"openai","models":{"gpt-9":{"id":"gpt-9","name":"GPT 9"},"gpt-4o":{"id":"gpt-4o","name":"GPT 4o"}}},"anthropic":{"id":"anthropic","models":{"claude-external":{"id":"claude-external","name":"Claude External"}}}}"#.into()),
+                Mode::AnthropicOverride => (503, "temporarily unavailable".into()),
                 Mode::LiveModels => (200, r#"{"data":[{"id":"live-model","context_window":321}]}"#.into()),
                 Mode::ExternalMembership if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"first":{"id":"first","models":{"external":{"id":"external-first"}}},"second":{"id":"second","models":{"external":{"id":"external-second"}}},"ghost":{"id":"ghost","models":{"external":{"id":"external-ghost"}}}}"#.into()),
                 Mode::ExternalMembership => match uri.host_str().unwrap_or_default() { "first.test" => (200, r#"{"data":[{"id":"live-first"}]}"#.into()), "second.test" => (200, r#"{"data":[{"id":"live-second"}]}"#.into()), _ => (503, String::new()) },
@@ -367,6 +370,34 @@ async fn build_reads_the_models_dev_catalogue_named_by_models_dev_id() {
             .iter()
             .any(|m| m.id == "zen-only")
     );
+}
+#[tokio::test]
+async fn build_selects_external_models_by_the_resolved_implementation() {
+    let transport = Transport::new(Mode::AnthropicOverride);
+    let (registry, _) = build(
+        "providers:\n  chatgpt:\n    base_url: https://configured.test/v1\n    type: anthropic\n",
+        Credentials::one("chatgpt", "placeholder"),
+        transport.clone(),
+    )
+    .await;
+    let models = registry.models("chatgpt");
+    assert!(
+        !models.iter().any(|m| m.id == "gpt-9"),
+        "chatgpt externals must not reach the anthropic override, got {:?}",
+        models.iter().map(|m| m.id.clone()).collect::<Vec<_>>()
+    );
+    assert!(!models.iter().any(|m| m.id == "gpt-4o"));
+    assert!(!models.iter().any(|m| m.id == "claude-external"));
+    let (registry, _) = build(
+        "providers:\n  chatgpt:\n    base_url: https://configured.test/v1\n",
+        Credentials::one("chatgpt", "placeholder"),
+        transport,
+    )
+    .await;
+    let models = registry.models("chatgpt");
+    assert!(models.iter().any(|m| m.id == "gpt-9"));
+    assert!(!models.iter().any(|m| m.id.starts_with("gpt-4")));
+    assert!(!models.iter().any(|m| m.id == "claude-external"));
 }
 #[tokio::test]
 async fn build_refreshes_catalogues_without_validating_the_configured_model() {

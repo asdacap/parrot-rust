@@ -4,17 +4,16 @@
 //! no lookup or fallback is attempted when that resource is absent.
 
 pub mod compaction;
-mod image_inspection;
 mod image_repository;
 mod image_store;
 
 pub mod agent_output_file;
 pub mod output_blobs;
 
-pub use image_inspection::ImageInspection;
 pub use image_repository::ImageArtifactRepository;
 pub use image_store::{ImageArtifactStore, ImageLimits};
 pub use parrot_domain::values::image_artifact::ImageArtifactMetadata;
+pub use parrot_media::ImageInspection;
 
 use std::fmt;
 use std::io;

@@ -1,5 +1,9 @@
 use super::transport::{ImageHttpRequest, ImageTransport};
-use crate::{http_stream::Endpoint, image_inspection, sessions::Error};
+use crate::{
+    http_stream::Endpoint,
+    image_inspection::{ImageInspection, image_reference},
+    sessions::Error,
+};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{fmt::Write, sync::Arc, time::Duration};
 
@@ -119,14 +123,14 @@ fn provider(message: impl Into<String>) -> Error {
 }
 
 pub fn validate_image(data: &[u8], require_png: bool) -> Result<&'static str, Error> {
-    let media_type = match image_inspection::detect_media_type(data) {
+    let media_type = match ImageInspection::detect_media_type(data) {
         Some("image/png") => "image/png",
         Some("image/jpeg") if !require_png => "image/jpeg",
         Some("image/webp") if !require_png => "image/webp",
         _ => return Err(provider("provider: unsupported image format")),
     };
     let image =
-        image_inspection::inspect(data).map_err(|_| provider("provider: invalid image content"))?;
+        ImageInspection::inspect(data).map_err(|_| provider("provider: invalid image content"))?;
     if image.width > 8192
         || image.height > 8192
         || i64::from(image.width) * i64::from(image.height) > 40_000_000
@@ -161,11 +165,9 @@ pub fn prepare(request: &ImageGenerationRequest) -> Result<Vec<u8>, Error> {
                 "provider: image reference media type does not match its content",
             ));
         }
-        references.push(image_inspection::image_reference::<Error>(
-            None,
-            media_type,
-            || Ok(reference.data.clone()),
-        )?);
+        references.push(image_reference::<Error>(None, media_type, || {
+            Ok(reference.data.clone())
+        })?);
     }
     let mut body = format!("{{\"prompt\":{}", quote(&request.prompt));
     if !references.is_empty() {

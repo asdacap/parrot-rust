@@ -222,7 +222,8 @@ impl ImageArtifactStore {
         if bytes.len() > self.limits.maximum_image_bytes {
             return Err(Error::invalid_data("An image cannot exceed 5 MiB."));
         }
-        let inspection = ImageInspection::inspect(bytes)?;
+        let inspection = ImageInspection::inspect(bytes)
+            .map_err(|error| Error::invalid_data(error.message()))?;
         let frame_pixels = (inspection.width as u64)
             .checked_mul(inspection.height as u64)
             .ok_or_else(|| {
