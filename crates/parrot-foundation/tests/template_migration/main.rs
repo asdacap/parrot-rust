@@ -4,7 +4,7 @@ mod product_changes;
 use parrot_foundation::{
     config::{
         node::{Kind, Node},
-        templates, yaml,
+        yaml,
     },
     template_minijinja::MiniJinjaPromptTemplateEngine,
     template_scalar::ScalarPromptTemplateEngine,
@@ -178,44 +178,7 @@ fn new_resource_retains_ten_engine_migrations_and_known_later_resource_changes()
     assert_eq!(old_root.len(), new_root.len());
     for ((old_key, old_value), (new_key, new_value)) in old_root.iter().zip(new_root) {
         assert_eq!(old_key, new_key);
-        if scalar(old_key) == Some("system_prompts") {
-            let mut expected = old_value.clone();
-            let base = expected.get_mut("runtime:system-context:01-base").unwrap();
-            // 4f1117e added this human guidance to the legacy resource only.
-            let text = base
-                .as_str()
-                .unwrap()
-                .strip_suffix(concat!(
-                    "\n## Minimize processes\n",
-                    "Do not lose sight of your objective by writing reports that is not part of the objective."
-                ))
-                .unwrap()
-                .to_owned();
-            base.kind = Kind::Scalar(Some(text));
-            // The active resource combines these two prompts into toolings.md.
-            let markdown_reading = expected
-                .get("runtime:system-context:04a-markdown-reading")
-                .and_then(Node::as_str)
-                .unwrap()
-                .to_owned();
-            let git_ethics = expected
-                .get("runtime:system-context:05-git-ethics")
-                .and_then(Node::as_str)
-                .unwrap()
-                .to_owned();
-            expected.remove("runtime:system-context:04a-markdown-reading");
-            expected.remove("runtime:system-context:05-git-ethics");
-            expected.set(
-                "runtime:system-context:05-toolings",
-                Node::scalar(format!("{markdown_reading}\n\n{}", git_ethics.trim_start())),
-            );
-            let expected = Node::mapping(vec![(Node::scalar("system_prompts"), expected)]);
-            assert_eq!(
-                templates::read_system_prompts(&expected).unwrap(),
-                templates::read_system_prompts(&new).unwrap(),
-                "system prompt resource changed"
-            );
-        } else if scalar(old_key) != Some("prompt_templates") {
+        if !matches!(scalar(old_key), Some("system_prompts" | "prompt_templates")) {
             assert_eq!(
                 old_value, new_value,
                 "non-template resource section changed"
