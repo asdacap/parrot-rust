@@ -658,17 +658,6 @@ impl ContextStatus for Status {
             Ok("actual status".into())
         })
     }
-    fn observe_fitted<'a>(
-        &'a self,
-        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            estimate("actual status")?;
-            self.0.push("status-fitted");
-            Ok("actual status".into())
-        })
-    }
 }
 impl TurnStatus<Security> for Status {
     fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
@@ -1004,8 +993,8 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
     let trace = trace.values();
     let position = |name: &str| trace.iter().position(|entry| entry == name).unwrap();
     assert!(position("epoch-start") < position("epoch-done"));
-    assert!(position("epoch-done") < position("status-fitted"));
-    assert!(position("status-fitted") < position("skills-begin"));
+    assert!(position("epoch-done") < position("status"));
+    assert!(position("status") < position("skills-begin"));
     assert!(position("skills-begin") < position("skills-get"));
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 1);

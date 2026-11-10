@@ -101,7 +101,7 @@ impl States for Status {
 }
 
 enum StatusEstimate {
-    Rebase,
+    Content,
     Increase,
     Failure(Error),
 }
@@ -129,49 +129,76 @@ impl parrot_core::Provider for Estimates {
         definitions: &[parrot_core::ToolDefinition],
         messages: &[Message],
     ) -> Result<i64, Error> {
-        self.effects
-            .estimate_context_tokens(instructions, definitions, messages)
-    }
-
-    fn estimate_status_context(&self, _: &str) -> Result<ContextSnapshot, Error> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         match &self.status {
-            StatusEstimate::Rebase => {
-                let mut snapshot = ContextSnapshot::estimate(10, &configuration(100).context);
-                if call > 1 {
-                    snapshot.input_limit = 50;
-                }
-                Ok(snapshot)
+            StatusEstimate::Content => {
+                self.effects
+                    .estimate_context_tokens(instructions, definitions, messages)
             }
-            StatusEstimate::Increase => Ok(ContextSnapshot::estimate(
-                call as i64,
-                &configuration(100).context,
-            )),
+            StatusEstimate::Increase => Ok(call as i64),
             StatusEstimate::Failure(error) => Err(error.clone()),
         }
     }
 }
 
 #[test]
-fn core_status_fitting_compares_the_complete_snapshot_and_caps_rerenders() {
-    let provider = Estimates::new(StatusEstimate::Rebase);
-    let status = Status::new("actual status");
+fn core_status_fitting_estimates_the_full_request_without_mutating_it() {
+    let provider = Estimates::new(StatusEstimate::Content);
+    let status = Status {
+        text: None,
+        contexts: Mutex::default(),
+    };
+    let request = ProviderRequest {
+        instructions: "sampled instructions".into(),
+        messages: vec![message("history"), message("pending input")],
+        tools: vec![parrot_core::ToolDefinition {
+            name: "test tool".into(),
+            description: "test definition".into(),
+            parameters_json: "{}".into(),
+        }],
+        ..ProviderRequest::default()
+    };
+    let original = request.clone();
+    let configuration = configuration(100).context;
     let fitted = finish(fit_status(
+        &request,
+        &configuration,
         &status,
         &provider,
         parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
-    assert_eq!(fitted, "actual status");
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
-    assert_eq!(status.contexts.lock().unwrap().len(), 2);
+    assert_eq!(fitted, "22");
+    assert_eq!(request, original);
+    let contexts = provider.effects.contexts.lock().unwrap();
+    assert!(contexts.len() > 1);
+    for estimate in contexts.iter() {
+        assert_eq!(estimate.instructions, request.instructions);
+        assert_eq!(estimate.tools, request.tools);
+        assert_eq!(&estimate.messages[..2], request.messages);
+        assert_eq!(estimate.messages.len(), 3);
+        assert_eq!(estimate.messages[2].role, Role::System);
+    }
+    assert_eq!(
+        contexts.last().unwrap().messages[2].contents,
+        [Content::Text(fitted)]
+    );
+    assert_eq!(
+        status.contexts.lock().unwrap().last(),
+        Some(&ContextSnapshot::estimate(22, &configuration))
+    );
+}
 
+#[test]
+fn core_status_fitting_caps_rerenders() {
     let provider = Estimates::new(StatusEstimate::Increase);
     let status = Status {
         text: None,
         contexts: Mutex::default(),
     };
     let fitted = finish(fit_status(
+        &ProviderRequest::default(),
+        &configuration(100).context,
         &status,
         &provider,
         parrot_core::CancellationToken::uncancelled(),
@@ -195,6 +222,8 @@ fn core_status_fitting_propagates_estimate_failure_before_rendering() {
     let provider = Estimates::new(StatusEstimate::Failure(error.clone()));
     let status = Status::new("must not render");
     let outcome = finish(fit_status(
+        &ProviderRequest::default(),
+        &configuration(100).context,
         &status,
         &provider,
         parrot_core::CancellationToken::uncancelled(),
@@ -205,7 +234,7 @@ fn core_status_fitting_propagates_estimate_failure_before_rendering() {
 
 #[test]
 fn core_fits_actual_status_and_validates_the_final_replacement() {
-    let provider = Estimates::new(StatusEstimate::Rebase);
+    let provider = Estimates::new(StatusEstimate::Content);
     let status = Status::new("actual status");
     let fitted = finish(fit_compaction(
         &input(),
@@ -250,7 +279,7 @@ fn core_fits_actual_status_and_validates_the_final_replacement() {
 
 #[test]
 fn core_no_progress_checks_current_messages_without_rendering_status() {
-    let provider = Estimates::new(StatusEstimate::Rebase);
+    let provider = Estimates::new(StatusEstimate::Content);
     let status = Status::new("must not render");
     let mut input = input();
     input.base_watermark = 42;

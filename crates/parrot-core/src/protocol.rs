@@ -108,10 +108,6 @@ pub trait Provider: Send + Sync {
     fn estimate_tokens(&self, _messages: &[Message]) -> Result<i64, Error> {
         Err(Error::unsupported("Provider.estimate_tokens"))
     }
-    /// Estimates the complete context after substituting the supplied status content.
-    fn estimate_status_context(&self, _content: &str) -> Result<ContextSnapshot, Error> {
-        Err(Error::unsupported("Provider.estimate_status_context"))
-    }
     /// Estimates preceding summary, accumulated chunk, and the next atomic group.
     fn estimate_summary_tokens(
         &self,

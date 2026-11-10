@@ -438,21 +438,12 @@ impl Default for Status {
 impl ContextStatus for Status {
     fn observe<'a>(
         &'a self,
-        _: &'a ContextSnapshot,
+        context: &'a ContextSnapshot,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<String>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| ContextError::Cancelled)?;
-            Ok(self.fitted.clone())
-        })
-    }
-    fn observe_fitted<'a>(
-        &'a self,
-        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            self.estimates.lock().unwrap().push(estimate(&self.fitted)?);
+            self.estimates.lock().unwrap().push(context.clone());
             Ok(self.fitted.clone())
         })
     }

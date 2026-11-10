@@ -3,18 +3,31 @@ use super::{
     FittedCompaction, compact,
 };
 use crate::{
-    CancellationToken, Content, ContextSnapshot, Error, Message, Provider, Role, States,
-    ToolDefinition,
+    CancellationToken, Content, ContextConfiguration, ContextSnapshot, Error, Message, Provider,
+    ProviderRequest, Role, States, ToolDefinition,
 };
 use std::future::Future;
 
+/// Fits a new system status message after the request's existing messages.
 pub async fn fit_status(
+    request: &ProviderRequest,
+    configuration: &ContextConfiguration,
     states: &dyn States,
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<String, Error> {
     fit_status_with(
-        |content| provider.estimate_status_context(content),
+        |content: &str| {
+            let mut messages = request.messages.clone();
+            messages.push(Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.into())],
+                ..Message::default()
+            });
+            let tokens =
+                provider.estimate_input_tokens(&request.instructions, &request.tools, &messages)?;
+            Ok(ContextSnapshot::estimate(tokens, configuration))
+        },
         |context| states.render_status(context, cancellation),
     )
     .await

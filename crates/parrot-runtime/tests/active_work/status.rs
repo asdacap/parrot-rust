@@ -944,78 +944,8 @@ async fn runtime_status_preserves_additional_context_order_exclusions_and_per_ca
     assert!(!statistics.contains("provider/model"));
 }
 #[tokio::test]
-async fn fitted_status_converges_with_full_snapshot_equality_and_caps_at_eight_rerenders() {
-    let observed = Scripted::new("runtime:value", "constant");
-    let runtime = RuntimeStatus::new(catalog(""), clock(), vec![observed.clone()]).unwrap();
-    let mut calls = Vec::new();
-    let result = runtime
-        .observe_fitted(
-            &query(),
-            "prompt",
-            |text| {
-                calls.push(text.to_owned());
-                Ok(ContextSnapshot::new(
-                    if text.is_empty() { 0 } else { 100 },
-                    1000,
-                    Some(10),
-                    90,
-                ))
-            },
-            &NeverCancelled,
-        )
-        .await
-        .unwrap();
-    assert_eq!(calls.len(), 3);
-    assert_eq!(calls[0], "");
-    assert!(result.contains("100 estimated tokens"));
-    assert_eq!(observed.calls.load(Ordering::SeqCst), 2);
-    let mut estimates = 0;
-    runtime
-        .observe_fitted(
-            &query(),
-            "prompt",
-            |_| {
-                estimates += 1;
-                Ok(ContextSnapshot::new(estimates, 1000, Some(10), 90))
-            },
-            &NeverCancelled,
-        )
-        .await
-        .unwrap();
-    assert_eq!(estimates, 9);
-    assert_eq!(observed.calls.load(Ordering::SeqCst), 11);
-    // Same visible metrics, different input limit: source record equality still rerenders.
-    let before = observed.calls.load(Ordering::SeqCst);
-    let mut estimates = 0;
-    runtime
-        .observe_fitted(
-            &query(),
-            "prompt",
-            |_| {
-                estimates += 1;
-                let mut context = ContextSnapshot::new(1, 1000, Some(10), 90);
-                context.input_limit = if estimates == 1 { 1000 } else { 500 };
-                Ok(context)
-            },
-            &NeverCancelled,
-        )
-        .await
-        .unwrap();
-    assert_eq!(estimates, 3);
-    assert_eq!(observed.calls.load(Ordering::SeqCst) - before, 2);
-}
-#[tokio::test]
-async fn fitted_status_propagates_estimation_and_render_failures() {
+async fn status_rejects_invalid_profile_keys() {
     let runtime = RuntimeStatus::new(catalog(""), clock(), vec![]).unwrap();
-    let result = runtime
-        .observe_fitted(
-            &query(),
-            "prompt",
-            |_| Err(StatusError::new("estimate failed")),
-            &NeverCancelled,
-        )
-        .await;
-    assert_eq!(result.unwrap_err().to_string(), "estimate failed");
     let mut bad = query();
     bad.profile = "bad profile".into();
     assert!(
@@ -1065,33 +995,6 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
     assert!(!first.contains("80% used"));
     assert!(second.contains("80% used"));
     assert!(!second.contains("10% used"));
-    let estimates = AtomicUsize::new(0);
-    let fitted = bound
-        .observe_fitted(
-            &|text| {
-                estimates.fetch_add(1, Ordering::SeqCst);
-                Ok(ContextSnapshot::new(
-                    if text.is_empty() { 0 } else { 100 },
-                    1000,
-                    Some(10),
-                    90,
-                ))
-            },
-            &NeverCancelled,
-        )
-        .await
-        .unwrap();
-    assert!(fitted.contains("100 estimated tokens"));
-    assert_eq!(estimates.load(Ordering::SeqCst), 3);
-    assert!(
-        matches!(bound.observe_fitted(&|_| Err(ContextError::Argument("original estimate".into())), &NeverCancelled).await, Err(ContextError::Argument(message)) if message == "original estimate")
-    );
-    assert!(matches!(
-        bound
-            .observe_fitted(&|_| Err(ContextError::Cancelled), &NeverCancelled)
-            .await,
-        Err(ContextError::Cancelled)
-    ));
     let cancelled = Signal::new();
     cancelled.cancel();
     assert!(matches!(
