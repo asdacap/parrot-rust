@@ -552,23 +552,39 @@ where
                 .map_err(Into::into)
         })
     }
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [parrot_core::Message],
+        contents: &'a [u8],
         cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::Message>, CoreError>>
+    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
-            let mut state = self.backend.state.lock().await;
-            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            crate::compaction::CompactionEstimates::new(&self.backend.compactor, &selection.model)
-                .spill_group(state.context.borrow_blobs(), messages, cancellation)
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .borrow_blobs()
+                .write_to_scratch(contents, &cancellation)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(crate::compaction::CompactionError::from)
                 .map_err(Into::into)
         })
     }
-
+    fn read_file<'a, 'c>(
+        &'a self,
+        path: &'a str,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(
+            async move { crate::compaction::read_file(path, &cancellation).map_err(Into::into) },
+        )
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: parrot_core::compaction::CompactionProgress,

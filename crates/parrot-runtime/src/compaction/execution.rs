@@ -13,7 +13,7 @@ use parrot_domain::{
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{
     routing::{aliases::ResolvedModelSelection, registry::ProviderModel},
-    sessions::{self, Content, Event, Message, ProviderSessions, Request, Role, Tool},
+    sessions::{self, Event, Message, ProviderSessions, Request, Tool},
 };
 use parrot_storage::artifacts::compaction::{self as artifact, CompactionGroupBlobStore};
 use std::{fmt, sync::Arc};
@@ -202,7 +202,7 @@ impl Compactor {
             &errors,
         );
         let mut states = CompactionStates {
-            estimates: &estimates,
+            templates: &self.templates,
             blobs: std::sync::Mutex::new(resources.blobs),
             observer: resources.observer,
             errors: &errors,
@@ -269,7 +269,6 @@ pub(crate) struct CompactionResources<'a> {
 pub(crate) struct CompactionEstimates {
     planner: Arc<CompactionPlanner>,
     selected: ProviderModel,
-    templates: Arc<PromptTemplateCatalog>,
 }
 
 impl CompactionEstimates {
@@ -277,7 +276,6 @@ impl CompactionEstimates {
         Self {
             planner: compactor.planner.clone(),
             selected: selected.canonical_model.clone(),
-            templates: compactor.templates.clone(),
         }
     }
 
@@ -316,32 +314,6 @@ impl CompactionEstimates {
         let tools: Vec<Tool> = definitions.iter().cloned().map(Into::into).collect();
         CompactionPlanner::estimate_input_tokens(&self.selected, instructions, &tools, &messages)
             .map_err(CompactionError::from)
-    }
-
-    pub(crate) fn spill_group(
-        &self,
-        blobs: &mut CompactionGroupBlobStore,
-        messages: &[parrot_core::Message],
-        cancellation: CancellationToken<'_>,
-    ) -> Result<Vec<parrot_core::Message>, CompactionError> {
-        let group = artifact::CompactionGroup {
-            messages: messages
-                .iter()
-                .cloned()
-                .map(Message::from)
-                .map(|message| artifact_message(&message))
-                .collect(),
-        };
-        let path = blobs.persist(&group, &cancellation)?;
-        let notice = self
-            .templates
-            .render(
-                "compaction.oversized-tool-group-notice",
-                &[("path".into(), path.to_string_lossy().as_ref().into())],
-                &Uncancelled,
-            )
-            .map_err(|error| CompactionError::Template(error.to_string()))?;
-        Ok(vec![Message::system(notice).into()])
     }
 }
 
@@ -405,7 +377,7 @@ impl From<parrot_core::Error> for CompactionError {
 }
 
 struct CompactionStates<'a> {
-    estimates: &'a CompactionEstimates,
+    templates: &'a PromptTemplateCatalog,
     blobs: std::sync::Mutex<&'a mut CompactionGroupBlobStore>,
     observer: &'a dyn CompactionObserver,
     errors: &'a NativeErrors<CompactionError>,
@@ -414,34 +386,53 @@ struct CompactionStates<'a> {
 impl parrot_core::States for CompactionStates<'_> {
     fn get_config(
         &self,
-        _: parrot_core::ConfigKey,
+        key: parrot_core::ConfigKey,
     ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, parrot_core::Error>> {
-        Box::pin(async {
-            Err(parrot_core::Error::failed(
-                "configuration is unavailable for a selected compaction plan",
-            ))
+        Box::pin(async move {
+            let id = crate::prompt_context::get_prompt_template_id(key)
+                .ok_or_else(|| parrot_core::Error::unsupported("configuration"))?;
+            self.templates
+                .get_template(id)
+                .map(parrot_core::ConfigValue::PromptTemplate)
+                .map_err(|error| parrot_core::Error::template(error.to_string()))
         })
     }
 
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [parrot_core::Message],
+        contents: &'a [u8],
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::Message>, parrot_core::Error>>
+    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
-            self.estimates
-                .spill_group(
-                    &mut self.blobs.lock().expect("compaction blobs poisoned"),
-                    messages,
-                    cancellation,
-                )
+            self.blobs
+                .lock()
+                .expect("compaction blobs poisoned")
+                .write_to_scratch(contents, &cancellation)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(CompactionError::from)
                 .map_err(|error| {
                     let diagnostic = describe_error(&error);
                     self.errors.capture(error, diagnostic)
                 })
+        })
+    }
+
+    fn read_file<'a, 'c>(
+        &'a self,
+        path: &'a str,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            read_file(path, &cancellation).map_err(|error| {
+                let diagnostic = describe_error(&error);
+                self.errors.capture(error, diagnostic)
+            })
         })
     }
 
@@ -657,44 +648,25 @@ impl CompactionObserver for BorrowedObserver<'_> {
     }
 }
 
-fn artifact_message(message: &Message) -> artifact::CompactionMessage {
-    artifact::CompactionMessage {
-        role: match message.role {
-            Role::System => "System",
-            Role::User => "User",
-            Role::Assistant => "Assistant",
-            Role::Tool => "Tool",
+pub(crate) fn read_file(
+    path: &str,
+    cancellation: &dyn Cancellation,
+) -> Result<Vec<u8>, CompactionError> {
+    cancellation
+        .check()
+        .map_err(|_| artifact::CompactionError {
+            kind: artifact::CompactionErrorKind::Cancelled,
+            message: "The operation was canceled.".into(),
+            native_error: None,
+            cleanup_failures: Vec::new(),
+        })?;
+    std::fs::read(path).map_err(|error| {
+        artifact::CompactionError {
+            kind: artifact::CompactionErrorKind::Io,
+            message: format!("Failed to read file: {error}"),
+            native_error: Some(error),
+            cleanup_failures: Vec::new(),
         }
-        .into(),
-        contents: message
-            .contents()
-            .iter()
-            .map(|content| match content {
-                Content::Text(text) => artifact::CompactionContent {
-                    kind: "Text".into(),
-                    text: text.clone(),
-                    image_path: None,
-                    media_type: String::new(),
-                },
-                Content::Image {
-                    path, media_type, ..
-                } => artifact::CompactionContent {
-                    kind: "Image".into(),
-                    text: String::new(),
-                    image_path: Some(path.into()),
-                    media_type: media_type.clone(),
-                },
-            })
-            .collect(),
-        tool_calls: message
-            .tool_calls
-            .iter()
-            .map(|call| artifact::CompactionToolCall {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                arguments_json: call.arguments_json.clone(),
-            })
-            .collect(),
-        tool_call_id: message.tool_call_id.clone(),
-    }
+        .into()
+    })
 }

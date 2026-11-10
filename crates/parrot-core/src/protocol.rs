@@ -298,16 +298,27 @@ pub trait States: Send + Sync {
     {
         Box::pin(async { Err(Error::unsupported("States.render_status")) })
     }
-    /// Persists an original atomic group and returns notices with its actual saved path.
-    fn spill_group<'a, 'c>(
+    /// Writes the supplied bytes to agent-local scratch storage and returns the saved path.
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        _messages: &'a [Message],
+        _contents: &'a [u8],
         _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {
-        Box::pin(async { Err(Error::unsupported("States.spill_group")) })
+        Box::pin(async { Err(Error::unsupported("States.write_to_scratch")) })
+    }
+    /// Reads the supplied file without interpreting its contents.
+    fn read_file<'a, 'c>(
+        &'a self,
+        _path: &'a str,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("States.read_file")) })
     }
     /// Publishes aggregate summary progress without disclosing generated content.
     fn report_compaction_progress<'a, 'c>(
@@ -931,6 +942,7 @@ pub enum ConfigKey {
     SkillTooLargeTemplate,
     ContextReminderTemplate,
     ContextLimitReminderTemplate,
+    OversizedToolGroupTemplate,
     FinalRequestTemplate,
     RestoredToolsTemplate,
     InterruptedTemplate,

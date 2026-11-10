@@ -301,7 +301,6 @@ impl ContextController {
             configuration,
             templates,
             cancellation,
-            estimates: &estimates,
             errors: &errors,
         };
         let provider = EpochProvider {
@@ -406,7 +405,6 @@ impl ContextController {
             configuration,
             templates,
             cancellation,
-            estimates: &estimates,
             errors: &errors,
         };
         let provider = EpochProvider {
@@ -492,7 +490,6 @@ impl ContextController {
                 configuration: configuration.clone(),
                 templates,
                 cancellation,
-                estimates: &estimates,
                 errors: &errors,
             };
             let provider = CompactionProvider::new(
@@ -804,7 +801,6 @@ struct EpochStates<'a> {
     configuration: parrot_core::CompactionConfiguration,
     templates: Arc<PromptTemplateCatalog>,
     cancellation: &'a dyn Cancellation,
-    estimates: &'a CompactionEstimates,
     errors: &'a NativeErrors<ContextError>,
 }
 
@@ -1074,21 +1070,35 @@ impl parrot_core::States for EpochStates<'_> {
                 .map_err(|error| self.capture_error(error))
         })
     }
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [parrot_core::Message],
+        contents: &'a [u8],
         cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::Message>, parrot_core::Error>>
+    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
-            self.estimates
-                .spill_group(
-                    self.controller.lock().await.borrow_blobs(),
-                    messages,
-                    cancellation,
-                )
+            self.controller
+                .lock()
+                .await
+                .borrow_blobs()
+                .write_to_scratch(contents, &cancellation)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(CompactionError::from)
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+    fn read_file<'a, 'c>(
+        &'a self,
+        path: &'a str,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            crate::compaction::read_file(path, &cancellation)
                 .map_err(|error| self.capture_error(error))
         })
     }
