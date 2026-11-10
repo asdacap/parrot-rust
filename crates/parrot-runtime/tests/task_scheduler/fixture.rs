@@ -303,6 +303,7 @@ pub struct RecordingSession {
     pub ack_failures: AtomicUsize,
     pub record_gate: Mutex<Option<Arc<Gate>>>,
     pub enqueue_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    pub enqueue_failures: Mutex<VecDeque<ChildError>>,
     pub changed: tokio::sync::Notify,
 }
 impl RecordingSession {
@@ -314,6 +315,7 @@ impl RecordingSession {
             ack_failures: AtomicUsize::new(0),
             record_gate: Mutex::new(None),
             enqueue_hook: Mutex::new(None),
+            enqueue_failures: Mutex::new(VecDeque::new()),
             changed: tokio::sync::Notify::new(),
         }
     }
@@ -377,6 +379,9 @@ impl TaskSession for RecordingSession {
             hook();
         }
         self.capture("enqueue", &id, &parts);
+        if let Some(error) = self.enqueue_failures.lock().unwrap().pop_front() {
+            return Err(error);
+        }
         self.actual.enqueue_claimed(parts, id, claim, cancellation)
     }
     fn capture_result<'a>(

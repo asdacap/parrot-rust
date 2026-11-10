@@ -781,17 +781,11 @@ async fn saved_cancel_before_worker_stop_never_restarts_the_old_provider() {
 }
 
 #[tokio::test]
-async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
+async fn task_failure_survives_ack_failure_and_newer_worker_execution() {
     for successor in [false, true] {
         let first = Harness::new();
         let held = Gate::new();
-        first.provider.script(
-            "a",
-            [
-                Reply::held("answer", &held),
-                Reply::text("successor output"),
-            ],
-        );
+        first.provider.script("a", [Reply::held("answer", &held)]);
         let root = first.root("owner").await;
         set(&root, vec![task("a")]).await;
         held.entered().await;
@@ -799,37 +793,17 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
         worker.task_session.ack_failures.store(1, Ordering::SeqCst);
         held.open();
         wait_saved(&root, |graph| {
-            graph.entries[0]
-                .runner
-                .as_ref()
-                .is_some_and(|runner| runner.response_reference.is_some())
+            graph.entries[0].task.state == Failed && graph.entries[0].pending_stop.is_none()
         })
         .await;
-        bounded(async {
-            loop {
-                if worker.scheduler.snapshot().await.is_empty()
-                    && worker.task_session.ack_failures.load(Ordering::SeqCst) == 0
-                {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await;
-        let saved = root.agent_state().load().await.unwrap().unwrap();
-        let runner = saved.tasks.entries[0].runner.as_ref().unwrap();
-        let reference = runner.response_reference.clone().unwrap();
-        let claim = parrot_domain::values::agent_state::TaskResultClaim {
-            owner_session_id: root.identity().session.session_id.clone(),
-            claim_id: runner.prompt_message_id.clone(),
-        };
+        assert_eq!(
+            snapshot(&root).await[0].failure.as_deref(),
+            Some("claim acknowledgement write failed")
+        );
         if successor {
-            worker
-                .adapter
-                .session()
-                .acknowledge_claimed_result(&reference, &claim)
-                .await
-                .unwrap();
+            first
+                .provider
+                .script("a", [Reply::text("successor output")]);
             let sent = worker
                 .adapter
                 .session()
@@ -839,37 +813,16 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
             sent.execution.join().await.unwrap();
         }
         let identity = root.identity().clone();
-        freeze_after_io_fault(&first, &root).await;
+        freeze(&first, &root).await;
         let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
         let restored = second.reopen_root(identity).await;
-        let checkpoint = restored
-            .agent_state()
-            .load()
-            .await
-            .unwrap()
-            .unwrap()
-            .tasks
-            .entries[0]
-            .runner
-            .clone();
-        let mut visible = state("a", Running);
-        visible.hidden = true;
-        set(&restored, vec![visible]).await;
-        assert_eq!(
-            restored
-                .agent_state()
-                .load()
-                .await
-                .unwrap()
-                .unwrap()
-                .tasks
-                .entries[0]
-                .runner,
-            checkpoint
-        );
         activate(&restored).await;
-        let done = complete(&restored).await;
-        assert_eq!(done[0].result.as_deref(), Some("answer"));
+        let failed = snapshot(&restored).await;
+        assert_eq!(failed[0].state, Failed);
+        assert_eq!(
+            failed[0].failure.as_deref(),
+            Some("claim acknowledgement write failed")
+        );
         assert_eq!(
             requests(&second.provider, "a").len(),
             if successor { 2 } else { 1 }
@@ -885,20 +838,13 @@ async fn saved_response_survives_ack_failure_and_newer_worker_execution() {
                 .iter()
                 .all(|call| call.kind != "enqueue")
         );
-        assert!(
-            restored
-                .agent_state()
-                .load()
-                .await
-                .unwrap()
-                .unwrap()
-                .tasks
-                .entries[0]
-                .runner
-                .as_ref()
-                .unwrap()
-                .outcome
-                .is_some()
+        second.provider.script("a", [Reply::text("answer")]);
+        set(&restored, vec![task("a")]).await;
+        let done = complete(&restored).await;
+        assert_eq!(done[0].result.as_deref(), Some("answer"));
+        assert_eq!(
+            requests(&second.provider, "a").len(),
+            if successor { 3 } else { 2 }
         );
         freeze(&second, &restored).await;
     }
