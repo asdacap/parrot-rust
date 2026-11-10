@@ -141,6 +141,15 @@ pub struct TaskNotificationSnapshot {
     pub text: String,
     pub wake: bool,
     pub ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_assignment: Option<TaskOwnerAssignmentReference>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskOwnerAssignmentReference {
+    pub task_name: String,
+    pub generation_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

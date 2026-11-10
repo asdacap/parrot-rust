@@ -10,7 +10,10 @@ use super::{
     status_name,
 };
 use crate::{
-    agent_turn::{lifecycle::Signal, services::TurnSelection},
+    agent_turn::{
+        lifecycle::{IncomingActivity, Signal},
+        services::TurnSelection,
+    },
     children::{
         ChildError, ChildResult, CompletionDelivery, HistorySource, LaunchRequest, Operation, Scope,
     },
@@ -24,14 +27,15 @@ use parrot_domain::{
     },
     protocol::messages::parrot::{
         AgentTaskProgressNode, AgentTaskProgressSnapshot, AgentTaskProgressStatus, Delivery, Event,
-        ToolSnapshot,
+        InputSource, ToolSnapshot,
     },
     values::{
         agent_state::{
             AcceptedTaskCall, AgentStateUpdate, DedicatedTaskExecutionSnapshot,
             ForkBoundarySnapshot, NotificationCheckpoint, SelectionSnapshot, TaskEntrySnapshot,
             TaskExecutionSnapshot, TaskForkModeSnapshot, TaskGraphSnapshot,
-            TaskNotificationSnapshot, TaskResultClaim, TaskRunnerCheckpoint, TaskStopCheckpoint,
+            TaskNotificationSnapshot, TaskOwnerAssignmentReference, TaskResultClaim,
+            TaskRunnerCheckpoint, TaskStopCheckpoint,
         },
         agent_tasks::{
             ExecutionStatus, Task, TaskAssignee, TaskCallIdentity, TaskPayload, TaskView,
@@ -1183,7 +1187,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 ("dependencies", &dependencies),
             ],
             true,
-        )?;
+        )?
+        .owner_assignment = Some(TaskOwnerAssignmentReference {
+            task_name: task.name.clone(),
+            generation_id: generation_id.clone(),
+        });
         let entry = &mut state.entries[index];
         entry.execution = TaskExecution::Owner { generation_id };
         entry.task.state = ExecutionStatus::Running;
@@ -1550,6 +1558,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             text,
             wake: false,
             ready: false,
+            owner_assignment: None,
         });
         // Cancellation is performed by the owned stop operation only after the graph is saved.
         if let Some(run) = run {
@@ -1557,13 +1566,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         }
         Ok(())
     }
-    fn enqueue(
+    fn enqueue<'a>(
         &self,
-        state: &mut State<S>,
+        state: &'a mut State<S>,
         template: &str,
         values: &[(&str, &str)],
         wake: bool,
-    ) -> ChildResult<()> {
+    ) -> ChildResult<&'a mut TaskNotificationSnapshot> {
         let text = render(&self.config.configuration, template, values)?;
         let text = if is_tool_output_oversized(&text) {
             self.config
@@ -1581,8 +1590,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             text,
             wake,
             ready: true,
+            owner_assignment: None,
         });
-        Ok(())
+        Ok(state.notifications.last_mut().expect("queued task notice"))
     }
     fn items(&self, state: &State<S>, indices: &[usize]) -> ChildResult<String> {
         let mut text = String::new();
@@ -2131,9 +2141,19 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             let scheduler = Arc::downgrade(self);
             let id = value.message_id.clone();
             let acknowledge_id = id.clone();
+            let admission_scheduler = scheduler.clone();
+            let admission_session = session.clone();
             let queued = self.notifier.enqueue(Notification {
                 value,
                 session,
+                admit: Box::new(move |value, wake| {
+                    let scheduler = admission_scheduler.clone();
+                    let session = admission_session.clone();
+                    Box::pin(async move {
+                        let scheduler = scheduler.upgrade().ok_or(ChildError::Cancelled)?;
+                        scheduler.admit_notification(value, session, wake).await
+                    })
+                }),
                 finish: Box::new(move |result| {
                     Box::pin(async move {
                         let scheduler = scheduler.upgrade().ok_or(ChildError::Cancelled)?;
@@ -2148,6 +2168,52 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             }
         }
         Ok(())
+    }
+    async fn admit_notification(
+        &self,
+        value: TaskNotificationSnapshot,
+        session: Arc<dyn TaskSession>,
+        wake: bool,
+    ) -> ChildResult<()> {
+        let state = if value.owner_assignment.is_some() {
+            Some(self.gate.lock().await)
+        } else {
+            None
+        };
+        if let (Some(state), Some(assignment)) = (&state, &value.owner_assignment) {
+            self.ensure_healthy(state)?;
+            if state.suspended {
+                return Err(ChildError::Cancelled);
+            }
+            let current = find(state, &assignment.task_name).is_some_and(|index| {
+                effective(state, index) == ExecutionStatus::Running
+                    && matches!(&state.entries[index].execution, TaskExecution::Owner { generation_id } if *generation_id == assignment.generation_id)
+            });
+            if !current {
+                return Ok(());
+            }
+        }
+        let parts = vec![ConversationPart::text(value.text)];
+        let delivered = if wake {
+            session
+                .send(
+                    parts,
+                    value.message_id,
+                    Delivery::DELIVERY_STEER,
+                    IncomingActivity {
+                        name: "agent-tasks".into(),
+                        cause: Some("AgentTask update".into()),
+                        source: InputSource::INPUT_SOURCE_NOTIFICATION,
+                    },
+                )
+                .await
+        } else {
+            session
+                .record(parts, value.message_id, Delivery::DELIVERY_STEER)
+                .await
+        };
+        drop(state);
+        delivered
     }
     async fn acknowledge_notification(
         self: &Arc<Self>,

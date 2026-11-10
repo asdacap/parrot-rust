@@ -1,14 +1,9 @@
 use super::{TaskDiagnostic, TaskDiagnostics, TaskSession};
-use crate::{
-    agent_turn::lifecycle::IncomingActivity,
-    children::{ChildError, ChildResult, Operation},
-};
+use crate::children::{ChildError, ChildResult, Operation};
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
-    protocol::messages::parrot::{Delivery, InputSource},
     values::agent_state::TaskNotificationSnapshot,
 };
-use parrot_storage::events::ConversationPart;
 use std::{
     sync::{
         Arc, Mutex,
@@ -21,6 +16,8 @@ use tokio::sync::mpsc;
 pub(crate) struct Notification {
     pub value: TaskNotificationSnapshot,
     pub session: Arc<dyn TaskSession>,
+    pub admit:
+        Box<dyn Fn(TaskNotificationSnapshot, bool) -> BoxFuture<'static, ChildResult<()>> + Send>,
     pub finish: Box<dyn FnOnce(ChildResult<()>) -> BoxFuture<'static, ChildResult<()>> + Send>,
 }
 struct State {
@@ -95,34 +92,10 @@ impl TaskNotifier {
                 if self.suspended.load(Ordering::Acquire) {
                     break;
                 }
-                let parts = vec![ConversationPart::text(notification.value.text.clone())];
-                delivered = if notification.value.wake
+                let wake = notification.value.wake
                     && !self.settling.load(Ordering::Acquire)
-                    && !self.lifetime.is_cancelled()
-                {
-                    notification
-                        .session
-                        .send(
-                            parts,
-                            notification.value.message_id.clone(),
-                            Delivery::DELIVERY_STEER,
-                            IncomingActivity {
-                                name: "agent-tasks".into(),
-                                cause: Some("AgentTask update".into()),
-                                source: InputSource::INPUT_SOURCE_NOTIFICATION,
-                            },
-                        )
-                        .await
-                } else {
-                    notification
-                        .session
-                        .record(
-                            parts,
-                            notification.value.message_id.clone(),
-                            Delivery::DELIVERY_STEER,
-                        )
-                        .await
-                };
+                    && !self.lifetime.is_cancelled();
+                delivered = (notification.admit)(notification.value.clone(), wake).await;
                 if delivered.is_ok() || self.suspended.load(Ordering::Acquire) {
                     break;
                 }

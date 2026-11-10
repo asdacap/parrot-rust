@@ -1208,6 +1208,7 @@ async fn nested_graph_outbox_stays_gated_until_parent_worker_reservation_is_read
             text: "nested saved notification".into(),
             wake: true,
             ready: true,
+            owner_assignment: None,
         },
     ];
     child_store

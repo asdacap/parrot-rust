@@ -517,3 +517,145 @@ async fn resetting_a_dedicated_leaf_can_handoff_to_self_after_its_old_stop() {
     complete(&root).await;
     h.close().await;
 }
+
+#[tokio::test]
+async fn self_assignment_retry_does_not_deliver_a_canceled_or_replaced_instruction() {
+    for replace in [false, true] {
+        let h = Harness::new();
+        let root = h.root("owner").await;
+        let owner = h.factory.get("owner");
+        owner
+            .task_session
+            .send_failures
+            .store(1, std::sync::atomic::Ordering::SeqCst);
+        set(&root, vec![task("work")]).await;
+        owner
+            .task_session
+            .wait_calls(|calls| {
+                calls
+                    .iter()
+                    .any(|call| call.kind == "send" && call.text.contains("Work on work"))
+            })
+            .await;
+        let mut update = task("work");
+        if replace {
+            update.payload = parrot_domain::values::agent_tasks::TaskPayload::Instruction(
+                "Replacement instruction".into(),
+            );
+        } else {
+            update.state = Canceled;
+        }
+        set(&root, vec![update]).await;
+        owner
+            .task_session
+            .wait_calls(|calls| {
+                calls.iter().any(|call| {
+                    call.kind == "send"
+                        && call.text.contains(if replace {
+                            "Replacement instruction"
+                        } else {
+                            "All AgentTasks are complete:"
+                        })
+                })
+            })
+            .await;
+        let events = h.histories.repository.events().replay().await.unwrap();
+        assert!(
+            !events.iter().any(|event| {
+                event.agent_session_id == root.identity().session.session_id
+                    && event.has_input_admitted()
+                    && event.input_admitted().content.contains("Work on work")
+            }),
+            "a stale executable assignment was admitted after invalidation"
+        );
+        h.close().await;
+    }
+}
+
+#[tokio::test]
+async fn recovered_self_notice_does_not_deliver_an_invalidated_assignment() {
+    let first = Harness::new();
+    let root = first.root("owner").await;
+    let owner = first.factory.get("owner");
+    owner
+        .task_session
+        .send_failures
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    set(&root, vec![task("work")]).await;
+    owner
+        .task_session
+        .wait_calls(|calls| {
+            calls
+                .iter()
+                .any(|call| call.kind == "send" && call.text.contains("Work on work"))
+        })
+        .await;
+    root.get_service::<Scheduler>()
+        .unwrap()
+        .suspend()
+        .join()
+        .await
+        .unwrap();
+    first.registry.shutdown().join().await.unwrap();
+    let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+    let restored = second.reopen_root(root.identity().clone()).await;
+    set(&restored, vec![state("work", Canceled)]).await;
+    let scheduler = restored.get_service::<Scheduler>().unwrap();
+    scheduler.activate_executions().join().await.unwrap();
+    scheduler.activate_notifications().join().await.unwrap();
+    let owner = second.factory.get("owner");
+    owner
+        .task_session
+        .wait_calls(|calls| {
+            calls.iter().any(|call| {
+                call.kind == "send" && call.text.contains("All AgentTasks are complete:")
+            })
+        })
+        .await;
+    let events = second.histories.repository.events().replay().await.unwrap();
+    assert!(!events.iter().any(|event| {
+        event.agent_session_id == restored.identity().session.session_id
+            && event.has_input_admitted()
+            && event.input_admitted().content.contains("Work on work")
+    }));
+    second.close().await;
+}
+
+#[tokio::test]
+async fn current_self_assignment_still_retries_with_the_same_message_identity() {
+    let h = Harness::new();
+    let root = h.root("owner").await;
+    let owner = h.factory.get("owner");
+    owner
+        .task_session
+        .send_failures
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    set(&root, vec![task("work")]).await;
+    owner
+        .task_session
+        .wait_calls(|calls| {
+            calls
+                .iter()
+                .filter(|call| call.kind == "send" && call.text.contains("Work on work"))
+                .count()
+                == 2
+        })
+        .await;
+    let calls = owner.task_session.calls.lock().unwrap().clone();
+    let attempts = calls
+        .iter()
+        .filter(|call| call.kind == "send" && call.text.contains("Work on work"))
+        .collect::<Vec<_>>();
+    assert_eq!(attempts[0].id, attempts[1].id);
+    assert_eq!(attempts[0].text, attempts[1].text);
+    let events = h.histories.repository.events().replay().await.unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_input_admitted()
+                && event.input_admitted().message_id == attempts[0].id)
+            .count(),
+        1
+    );
+    h.close().await;
+}
