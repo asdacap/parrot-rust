@@ -1,6 +1,7 @@
 //! Checkpoints and fork copies execute inside one selected-session transaction.
 use super::{ConversationRepository, EventError, compaction, reads, types::*};
 use crate::events::projection;
+use parrot_core::{HistoryGroupMember, assemble_history_groups};
 use rusqlite::{Transaction, params};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -224,43 +225,32 @@ pub fn read_effective_conversation_groups(
         owners.insert(child, owner);
     }
     let by_sequence: BTreeMap<_, _> = items.iter().map(|item| (item.sequence, item)).collect();
-    let mut owned_items: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-    for (&child, &owner) in &owners {
-        owned_items.entry(owner).or_default().push(child);
-    }
+    let members: Vec<HistoryGroupMember> = items
+        .iter()
+        .map(|item| store_group_member(item, owners.get(&item.sequence).copied()))
+        .collect();
+    let member_by_sequence: BTreeMap<i64, HistoryGroupMember> = members
+        .iter()
+        .map(|member| (member.sequence, member.clone()))
+        .collect();
     let mut groups = Vec::new();
-    for item in &items {
-        if owners.contains_key(&item.sequence) {
-            continue;
-        }
-        let mut members = vec![item.clone()];
-        members.extend(
-            owned_items
-                .get(&item.sequence)
-                .into_iter()
-                .flatten()
-                .filter_map(|sequence| by_sequence.get(sequence).map(|item| (*item).clone())),
-        );
-        members.sort_by_key(|member| member.sequence);
-        let assistant_sequence =
-            if item.message.role == MessageRole::Assistant && !item.message.tool_calls.is_empty() {
-                item.sequence
-            } else {
-                0
-            };
-        let is_complete = assistant_sequence == 0
-            || item.message.tool_calls.iter().all(|call| {
-                members.iter().any(|member| {
-                    member.message.role == MessageRole::Tool
-                        && member.message.tool_call_id == call.id
-                })
-            });
+    for group in assemble_history_groups(&members) {
+        let owner = &member_by_sequence[&group.owner_sequence];
+        let assistant_sequence = if owner.makes_tool_calls() {
+            group.owner_sequence
+        } else {
+            0
+        };
         groups.push(ConversationGroup {
-            start_watermark: members[0].sequence - 1,
-            end_watermark: members.last().expect("group has its owner").sequence,
-            items: members,
+            start_watermark: group.member_sequences[0] - 1,
+            end_watermark: *group.member_sequences.last().expect("group has its owner"),
+            items: group
+                .member_sequences
+                .iter()
+                .map(|sequence| by_sequence[sequence].clone())
+                .collect(),
             assistant_sequence,
-            is_complete,
+            is_complete: group.is_complete,
         });
     }
     Ok(EffectiveConversationHistory {
@@ -268,6 +258,26 @@ pub fn read_effective_conversation_groups(
         status,
         groups,
     })
+}
+
+fn store_group_member(
+    item: &ConversationItem,
+    tool_owner_sequence: Option<i64>,
+) -> HistoryGroupMember {
+    HistoryGroupMember {
+        sequence: item.sequence,
+        tool_owner_sequence,
+        is_compaction_status: false,
+        is_assistant: item.message.role == MessageRole::Assistant,
+        tool_call_ids: item
+            .message
+            .tool_calls
+            .iter()
+            .map(|call| call.id.clone())
+            .collect(),
+        tool_result_call_id: (item.message.role == MessageRole::Tool)
+            .then(|| item.message.tool_call_id.clone()),
+    }
 }
 
 pub fn select_safe_history_prefix(groups: &[ConversationGroup]) -> &[ConversationGroup] {
