@@ -54,18 +54,12 @@ impl std::error::Error for ForkError {
 }
 impl From<EventError> for ForkError {
     fn from(error: EventError) -> Self {
-        use crate::database::DatabaseError;
-        match error {
-            EventError::Database(DatabaseError::Sqlite(
-                rusqlite::Error::ToSqlConversionFailure(error),
-            )) => match error.downcast::<ForkError>() {
-                Ok(error) => *error,
-                Err(error) => Self::Repository(EventError::Database(DatabaseError::Sqlite(
-                    rusqlite::Error::ToSqlConversionFailure(error),
-                ))),
-            },
-            error => Self::Repository(error),
-        }
+        Self::Repository(error)
+    }
+}
+impl From<crate::database::DatabaseError> for ForkError {
+    fn from(error: crate::database::DatabaseError) -> Self {
+        EventError::from(error).into()
     }
 }
 impl From<rusqlite::Error> for ForkError {
@@ -73,15 +67,6 @@ impl From<rusqlite::Error> for ForkError {
         EventError::from(error).into()
     }
 }
-fn rollback_fork(error: ForkError) -> EventError {
-    match error {
-        ForkError::Repository(error) => error,
-        error => EventError::Database(crate::database::DatabaseError::Sqlite(
-            rusqlite::Error::ToSqlConversionFailure(Box::new(error)),
-        )),
-    }
-}
-
 impl ConversationRepository {
     pub async fn latest_usable_checkpoint(
         &self,
@@ -147,12 +132,10 @@ impl ConversationRepository {
         let clock = self.events.context().timestamp.clone();
         let target = destination.clone();
         self.events
-            .transaction(move |tx| {
+            .transact(move |tx| {
                 initialize_fork(tx, source, &target, boundary, &selection, fallback, &*clock)
-                    .map_err(rollback_fork)
             })
-            .await
-            .map_err(ForkError::from)?;
+            .await?;
         self.rebuild_agent_history(&destination)
             .await
             .map_err(ForkError::from)
