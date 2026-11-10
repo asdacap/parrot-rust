@@ -120,6 +120,26 @@ fn pending_prompt_failures_stop_before_later_effects() {
 }
 
 #[test]
+fn final_phase_sends_the_steer_rendered_by_preparation() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.maximum = 1;
+    state.skill_templates.lock().unwrap().insert(
+        "agent-session.final-request".into(),
+        "Finish using the available information.".into(),
+    );
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    let requests = state.provider.requests.lock().unwrap();
+    assert!(requests[0].messages.iter().any(|message| {
+        message.role == Role::System
+            && message.contents
+                == [Content::Text(
+                    "Finish using the available information.".into(),
+                )]
+    }));
+}
+
+#[test]
 fn core_records_each_final_request_before_rendering_and_retains_final_catalogs() {
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     state.maximum = 1;

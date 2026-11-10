@@ -150,7 +150,6 @@ struct Notices {
     runaway: String,
     truncated: String,
     invalid: String,
-    final_request: String,
     restored: String,
     interrupted: String,
 }
@@ -201,7 +200,6 @@ where
             runaway: render("agent-session.runaway")?,
             truncated: render("agent-session.truncated-tool-call")?,
             invalid: render("agent-session.invalid-tool-call")?,
-            final_request: render("agent-session.final-request")?,
             restored: render("agent-session.tools-restored")?,
             interrupted: render("agent-session.interrupted-note")?,
         };

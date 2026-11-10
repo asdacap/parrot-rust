@@ -818,7 +818,7 @@ where
             Ok(state.context.budget().capture_state())
         })
     }
-    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
             let mut guard = backend.state.lock().await;
@@ -828,7 +828,7 @@ where
                 .context
                 .inject_final_provider_request_prompt(
                     &mut state.conversation,
-                    &backend.notices.final_request,
+                    content,
                     &events,
                     self.cancellation,
                 )

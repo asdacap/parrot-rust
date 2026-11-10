@@ -166,9 +166,9 @@ pub trait States: Send {
     fn read_context_configuration(&self) -> BoxFuture<'_, Result<ContextConfiguration, Error>>;
     /// Reads the current token calibration without choosing context or output limits.
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>>;
-    /// Ensures the configured final-request context is recorded before preparation.
-    /// Repeated calls do not append or publish duplicate notices.
-    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Persists supplied steer content and applies it to the conversation.
+    /// Repeated calls in the same final phase do not append or publish duplicate notices.
+    fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), Error>>;
     /// Observes readiness and retains an optional steer or status prompt for fitting,
     /// without appending or publishing it. Source-specific cadence and rendering stay native.
     fn get_pending_prompt<'a>(

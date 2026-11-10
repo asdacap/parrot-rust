@@ -361,6 +361,10 @@ impl MemoryState {
             request,
             skill_templates: Arc::new(Mutex::new([
                 (
+                    "agent-session.final-request".into(),
+                    "Finish the current turn.".into(),
+                ),
+                (
                     "context.skill-selected".into(),
                     "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
                 ),
@@ -795,11 +799,17 @@ impl States for MemoryState {
             Ok(self.request().context.calibration.clone())
         })
     }
-    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+    fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             self.step("final_request")?;
             let request_count = self.request().rendered_instructions.len();
             self.final_requests.push(request_count);
+            let message = Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.into())],
+                ..Message::default()
+            };
+            self.request().messages.push(message);
             Ok(())
         })
     }

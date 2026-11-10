@@ -49,7 +49,10 @@ pub(crate) async fn prepare_request(
     cancellation: CancellationToken<'_>,
 ) -> Result<ProviderRequest, Error> {
     if flags.final_phase {
-        states.record_final_request().await?;
+        let content = preparation
+            .request
+            .render_template("agent-session.final-request", &[])?;
+        states.record_steer(&content).await?;
     }
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
