@@ -108,7 +108,8 @@ fn git_prompt_uses_real_workspace_repository_state_without_launching_git() {
         let catalog = templates(
             "prompt_templates:\n  context.git-repository:\n    engine: scalar\n    template: '{is_repository}'\n",
         );
-        let mut prompt = git_repository_prompt(workspace, &catalog).unwrap();
+        let mut prompt: Box<dyn SystemPrompt> =
+            Box::new(git_repository_prompt(workspace, &catalog).unwrap());
         assert_eq!(prompt.build(&selection).unwrap(), expected);
     }
 }

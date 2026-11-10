@@ -1,37 +1,38 @@
 use crate::{
-    CancellationToken, ContextCompaction, ContextSnapshot, Error, PreparationDependencies,
+    CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration,
+    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, PendingPrompt, Provider,
     ProviderRequest, States, ToolDefinition, TurnOptions,
     budget::TurnFlags,
-    compaction::{CompactionDependencies, compact_conversation, prepare_compaction},
+    compaction::{compact_conversation, prepare_compaction},
+    rendering::{render_instructions, render_template},
 };
 
 pub(crate) async fn compact_context(
     states: &mut dyn States,
-    compaction: &mut CompactionDependencies<'_>,
+    provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
+    let configuration = states
+        .get_config(ConfigKey::Compaction)
+        .await?
+        .into_compaction()?;
     let input = prepare_compaction(
-        states.read_conversation_state(),
+        states,
+        provider,
+        publisher,
         definitions,
-        compaction.configuration,
-        compaction.preparation,
-        compaction.status,
-        |instructions, tools, messages| {
-            compaction
-                .effects
-                .estimate_context_tokens(instructions, tools, messages)
-        },
+        &configuration,
         cancellation,
     )
     .await?;
     let compacted = compact_conversation(
         &input,
         definitions,
-        compaction.configuration,
-        compaction.effects,
-        compaction.provider,
-        compaction.status,
+        &configuration,
+        states,
+        provider,
         cancellation,
     )
     .await;
@@ -40,83 +41,142 @@ pub(crate) async fn compact_context(
         .await
 }
 
+async fn prepare_pending_prompt(
+    states: &mut dyn States,
+    context: &ContextSnapshot,
+    configuration: &ContextConfiguration,
+) -> Result<Option<PendingPrompt>, Error> {
+    if let Some(prompt) = states.read_pending_prompt().await? {
+        return Ok(Some(PendingPrompt::Message(prompt)));
+    }
+    let last_reminder = states.get_last_context_reminder().await?;
+    let canonical_model = &configuration.model.canonical_model;
+    let Some(percentage) =
+        context.select_reminder_percentage(canonical_model, last_reminder.as_ref())
+    else {
+        return Ok(None);
+    };
+    let mut arguments = vec![
+        ("percentage".into(), percentage.to_string().into()),
+        (
+            "estimated_tokens".into(),
+            context.estimated_tokens.to_string().into(),
+        ),
+        (
+            "context_limit".into(),
+            context.context_limit.to_string().into(),
+        ),
+        (
+            "notification_interval".into(),
+            ContextReminderCheckpoint::NOTIFICATION_INTERVAL
+                .to_string()
+                .into(),
+        ),
+        ("trigger".into(), context.trigger_percent.to_string().into()),
+    ];
+    let key = if context.has_context_limit_override {
+        arguments.push((
+            "trigger_tokens".into(),
+            context
+                .trigger_tokens
+                .map_or_else(|| "unavailable".into(), |value| value.to_string())
+                .into(),
+        ));
+        ConfigKey::ContextLimitReminderTemplate
+    } else {
+        ConfigKey::ContextReminderTemplate
+    };
+    let content = render_template(states, key, &arguments).await?;
+    Ok(Some(PendingPrompt::ContextReminder {
+        checkpoint: ContextReminderCheckpoint {
+            canonical_model: canonical_model.clone(),
+            context_limit: context.context_limit,
+            percentage,
+        },
+        content,
+        observed_percentage: context.usage_percent.unwrap_or_default(),
+    }))
+}
+
 pub(crate) async fn prepare_request(
     states: &mut dyn States,
-    preparation: &mut PreparationDependencies<'_, '_>,
+    provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     flags: TurnFlags,
     options: &TurnOptions,
     cancellation: CancellationToken<'_>,
 ) -> Result<ProviderRequest, Error> {
     if flags.final_phase {
-        states.record_final_request().await?;
+        let content = render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
+        states.record_steer(&content).await?;
     }
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let mut instructions = preparation.request.render_instructions().await?;
+    let mut instructions = render_instructions(states).await?;
     let mut messages = states.read_messages().await?;
-    let mut configuration = states.read_context_configuration().await?;
+    let mut configuration = states
+        .get_config(ConfigKey::Context)
+        .await?
+        .into_context()?;
     let calibration = states.read_token_calibration().await?;
-    let estimate = preparation
-        .request
-        .estimate_input_tokens(&instructions, definitions, &messages)
-        .await?;
+    let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        instructions = compact_context(states, preparation.compaction, definitions, cancellation)
+        instructions = compact_context(states, provider, publisher, definitions, cancellation)
             .await?
             .instructions;
         messages = states.read_messages().await?;
-        configuration = states.read_context_configuration().await?;
-        let estimate = preparation
-            .request
-            .estimate_input_tokens(&instructions, definitions, &messages)
-            .await?;
+        configuration = states
+            .get_config(ConfigKey::Context)
+            .await?
+            .into_context()?;
+        let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
         context = ContextSnapshot::estimate(estimate, &configuration);
         context.ensure_input_fits()?;
     }
-    if let Some(prompt) = states.get_pending_prompt(&context).await? {
+    if let Some(prompt) = prepare_pending_prompt(states, &context, &configuration).await? {
         let mut candidate = messages.clone();
-        candidate.push(prompt);
-        let estimate = preparation
-            .request
-            .estimate_input_tokens(&instructions, definitions, &candidate)
-            .await?;
+        candidate.push(prompt.render_message());
+        let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
         if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            instructions =
-                compact_context(states, preparation.compaction, definitions, cancellation)
-                    .await?
-                    .instructions;
+            instructions = compact_context(states, provider, publisher, definitions, cancellation)
+                .await?
+                .instructions;
             messages = states.read_messages().await?;
-            configuration = states.read_context_configuration().await?;
-            let estimate = preparation
-                .request
-                .estimate_input_tokens(&instructions, definitions, &messages)
-                .await?;
+            configuration = states
+                .get_config(ConfigKey::Context)
+                .await?
+                .into_context()?;
+            let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
             ContextSnapshot::estimate(estimate, &configuration).ensure_input_fits()?;
         } else {
-            let acknowledged = if states.record_pending_prompt().await? {
+            let receipt = states.record_pending_prompt(&prompt).await?;
+            let acknowledged = if receipt.is_some() {
                 messages = states.read_messages().await?;
-                let estimate = preparation
-                    .request
-                    .estimate_input_tokens(&instructions, definitions, &messages)
-                    .await?;
+                let estimate =
+                    provider.estimate_input_tokens(&instructions, definitions, &messages)?;
                 ContextSnapshot::estimate(estimate, &configuration)
             } else {
                 inserted
             };
-            states.acknowledge_prompt(&acknowledged).await?;
+            states
+                .acknowledge_pending_prompt(&prompt, &acknowledged)
+                .await?;
+            if let Some(receipt) = receipt {
+                states.publish_pending_prompt(receipt).await?;
+            }
         }
     }
     let messages = states.read_messages().await?;
-    let configuration = states.read_context_configuration().await?;
+    let configuration = states
+        .get_config(ConfigKey::Context)
+        .await?
+        .into_context()?;
     let calibration = states.read_token_calibration().await?;
-    let estimate = preparation
-        .request
-        .estimate_input_tokens(&instructions, definitions, &messages)
-        .await?;
+    let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let max_output_tokens =
         calibration.calculate_maximum_output_tokens(&configuration.model, estimate)?;
     Ok(ProviderRequest {

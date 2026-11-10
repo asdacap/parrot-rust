@@ -1,6 +1,95 @@
 use super::*;
 
 #[test]
+fn template_source_materialization_does_not_render() {
+    let provider = TemplateSystemPromptProvider::new(
+        "test:broken-template",
+        "context.agent-scratch",
+        vec![("path".into(), "literal {path}".into())],
+        templates(
+            "prompt_templates:\n  context.agent-scratch:\n    engine: minijinja\n    template: '{{ 1 / 0 }}'\n",
+        ),
+    );
+    let mut prompt = provider.materialize(&identity()).unwrap();
+
+    assert!(matches!(
+        prompt.build(&selection()),
+        Err(PromptError::Template(_))
+    ));
+}
+
+#[tokio::test]
+async fn raw_template_getters_return_literal_state_with_a_broken_template() {
+    let provider = TemplateSystemPromptProvider::new(
+        "test:broken-template",
+        "context.agent-scratch",
+        vec![("path".into(), "literal {path}".into())],
+        templates(
+            "prompt_templates:\n  context.agent-scratch:\n    engine: minijinja\n    template: '{{ 1 / 0 }}'\n",
+        ),
+    );
+    let prompt = SessionPrompt::new(provider.materialize(&identity()).unwrap());
+    let cancellation = parrot_storage::events::NeverCancelled;
+
+    assert!(
+        prompt
+            .read_system_prompts(&selection(), &cancellation)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        prompt.read_prompt_templates(&cancellation).await.unwrap(),
+        [(
+            "test:broken-template".into(),
+            "context.agent-scratch".into()
+        )]
+    );
+    assert_eq!(
+        prompt
+            .read_template_arguments("test:broken-template", &cancellation)
+            .await
+            .unwrap(),
+        [(
+            "path".into(),
+            serde_json::Value::String("literal {path}".into())
+        )]
+    );
+    prompt
+        .read_core_prompt_bindings(&cancellation)
+        .await
+        .unwrap();
+    assert!(matches!(
+        prompt.build(&selection(), &cancellation).await,
+        Err(PromptError::Template(_))
+    ));
+}
+
+#[tokio::test]
+async fn core_bindings_reject_configured_templates_without_an_explicit_key() {
+    let provider = TemplateSystemPromptProvider::new(
+        "test:custom-template",
+        "custom.section",
+        Vec::new(),
+        templates(
+            "prompt_templates:\n  custom.section:\n    template: 'custom section'\n    allowed_arguments: []\n    required_arguments: []\n",
+        ),
+    );
+    let prompt = SessionPrompt::new(provider.materialize(&identity()).unwrap());
+    let cancellation = parrot_storage::events::NeverCancelled;
+
+    assert_eq!(
+        prompt.build(&selection(), &cancellation).await.unwrap(),
+        "custom section"
+    );
+    let error = prompt
+        .read_core_prompt_bindings(&cancellation)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, PromptError::Template(message) if message.contains("custom.section")));
+}
+
+#[test]
 fn security_description_template_is_lazy_and_retains_its_first_error_across_epochs() {
     let catalog =
         templates("prompt_templates:\n  context.security-profile:\n    template: '{{ 1 / 0 }}'\n");

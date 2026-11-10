@@ -10,6 +10,7 @@ mod harness;
 use harness::*;
 #[path = "../../../parrot-runtime/tests/tool_settlement/runtime.rs"]
 mod runtime;
+use parrot_core::ContextReminderCheckpoint;
 use parrot_domain::contracts::runtime::SessionControl;
 use parrot_host::composition::context::{
     CompactRequest, ContextControl, ContextSelection, ContextServices, RetainedCompactTool,
@@ -436,7 +437,9 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
         ),
         (
             "notification_interval".into(),
-            ContextCadence::NOTIFICATION_INTERVAL.to_string().into(),
+            ContextReminderCheckpoint::NOTIFICATION_INTERVAL
+                .to_string()
+                .into(),
         ),
         (
             "trigger".into(),
@@ -709,16 +712,19 @@ impl SystemPrompt for CountingPrompt {
     fn renew_epoch(&mut self) {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
-    fn build(
+    fn read_system_prompts(
         &mut self,
         _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<String> {
+    ) -> PromptResult<Vec<(String, String)>> {
         assert_eq!(
             self.0.load(Ordering::SeqCst),
             1,
             "status must observe the current sampled epoch"
         );
-        Ok("actual status epoch instructions".into())
+        Ok(vec![(
+            "test:instructions".into(),
+            "actual status epoch instructions".into(),
+        )])
     }
 }
 
@@ -837,24 +843,27 @@ struct CancelAfterCompactionPrompt {
 }
 impl SystemPrompt for CancelAfterCompactionPrompt {
     fn renew_epoch(&mut self) {}
-    fn build(
+    fn read_system_prompts(
         &mut self,
         _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<String> {
-        Ok("actual post-compaction cancellation instructions".into())
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![(
+            "test:instructions".into(),
+            "actual post-compaction cancellation instructions".into(),
+        )])
     }
-    fn build_live<'a>(
+    fn read_system_prompts_live<'a>(
         &'a mut self,
         selection: &'a parrot_provider::routing::aliases::ResolvedModelSelection,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<String>> {
+    ) -> BoxFuture<'a, PromptResult<Vec<(String, String)>>> {
         Box::pin(async move {
             let events = self.history.repository().events().replay().await.unwrap();
             if events.iter().any(|event| event.has_compaction_finished()) {
                 self.cancelled_builds.fetch_add(1, Ordering::SeqCst);
                 return Err(parrot_runtime::prompt_context::PromptError::Cancelled);
             }
-            self.build(selection)
+            self.read_system_prompts(selection)
         })
     }
 }

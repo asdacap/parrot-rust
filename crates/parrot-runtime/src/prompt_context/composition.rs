@@ -1,6 +1,13 @@
-use super::AgentIdentityDescription;
+use super::{
+    AgentIdentityDescription, render, render_agent_identity, render_agents_files,
+    render_model_prompt, render_skill_catalog_entries, render_standing_instruction,
+    render_system_prompt_sections,
+};
+use parrot_core::{ModelAliasDescription, SkillCatalogEntry};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
+use serde_json::Value;
 use std::{collections::HashSet, fmt, sync::Arc};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,9 +38,21 @@ impl fmt::Display for PromptError {
     }
 }
 impl std::error::Error for PromptError {}
+impl From<parrot_core::Error> for PromptError {
+    fn from(error: parrot_core::Error) -> Self {
+        if error.kind == parrot_core::ErrorKind::Cancelled {
+            Self::Cancelled
+        } else if error.detail == Some(parrot_core::ErrorDetail::PromptContext) {
+            Self::Context(error.message)
+        } else {
+            Self::Template(error.message)
+        }
+    }
+}
 pub type PromptResult<T> = Result<T, PromptError>;
 
-/// Source-local ISystemPrompt product. Every materialization owns its epoch state.
+/// Owns raw contributor state. Empty defaults mean this source does not own that contribution.
+/// Template expansion is performed only by the shared rendering conveniences.
 pub trait SystemPrompt: Send {
     fn renew_epoch(&mut self);
     fn sample_epoch<'a>(
@@ -46,16 +65,144 @@ pub trait SystemPrompt: Send {
             Ok(())
         })
     }
-    fn build(&mut self, selection: &ResolvedModelSelection) -> PromptResult<String>;
-    /// Builds live contributors without renewing the prompt epoch.
-    fn build_live<'a>(
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
+    fn read_system_prompts_live<'a>(
+        &'a mut self,
+        selection: &'a ResolvedModelSelection,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, PromptResult<Vec<(String, String)>>> {
+        Box::pin(async move {
+            cancellation.check().map_err(|_| PromptError::Cancelled)?;
+            self.read_system_prompts(selection)
+        })
+    }
+    fn read_prompt_templates(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
+    fn read_template_arguments(&self, _source_key: &str) -> Vec<(String, Value)> {
+        Vec::new()
+    }
+    fn get_template_catalog(&self, _source_key: &str) -> Option<&PromptTemplateCatalog> {
+        None
+    }
+    fn read_agents_files(&self) -> PromptResult<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
+    fn read_model_aliases(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<ModelAliasDescription>> {
+        Ok(Vec::new())
+    }
+    fn read_model_guidance(
+        &self,
+        _selection: &ResolvedModelSelection,
+    ) -> (Option<String>, Option<String>) {
+        (None, None)
+    }
+    fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
+        None
+    }
+    fn read_standing_instruction(&self) -> String {
+        String::new()
+    }
+    fn read_skill_catalog(&self) -> PromptResult<Vec<SkillCatalogEntry>> {
+        Ok(Vec::new())
+    }
+    fn read_skill_catalog_live<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, PromptResult<Vec<SkillCatalogEntry>>> {
+        Box::pin(async move {
+            cancellation.check().map_err(|_| PromptError::Cancelled)?;
+            self.read_skill_catalog()
+        })
+    }
+}
+
+impl dyn SystemPrompt + '_ {
+    pub fn build(&mut self, selection: &ResolvedModelSelection) -> PromptResult<String> {
+        let sections = self.read_system_prompts(selection)?;
+        let skills = self.read_skill_catalog()?;
+        self.render_sections(selection, sections, skills)
+    }
+
+    fn render_sections(
+        &mut self,
+        selection: &ResolvedModelSelection,
+        mut sections: Vec<(String, String)>,
+        skills: Vec<SkillCatalogEntry>,
+    ) -> PromptResult<String> {
+        for (key, template) in self.read_prompt_templates() {
+            let arguments = self.read_template_arguments(&key);
+            sections.push((
+                key.clone(),
+                render(self.require_template_catalog(&key)?, &template, &arguments)?,
+            ));
+        }
+        let files = self.read_agents_files()?;
+        if !files.is_empty() {
+            sections.push(render_agents_files(
+                &files,
+                self.require_template_catalog("runtime:system-context:07a-agents")?,
+            )?);
+        }
+        let aliases = self.read_model_aliases(selection)?;
+        let guidance = self.read_model_guidance(selection);
+        if !aliases.is_empty() || guidance.0.is_some() || guidance.1.is_some() {
+            sections.push(render_model_prompt(
+                &aliases,
+                &guidance,
+                self.require_template_catalog("runtime:system-context:10-model-prompt")?,
+            )?);
+        }
+        if let Some(identity) = self.read_agent_identity() {
+            sections.push(render_agent_identity(
+                &identity,
+                self.require_template_catalog("runtime:system-context:14-session-identity")?,
+            )?);
+        }
+        let instruction = self.read_standing_instruction();
+        if !instruction.is_empty() {
+            sections.push(render_standing_instruction(
+                &instruction,
+                self.require_template_catalog("runtime:system-context:94-standing-instruction")?,
+            )?);
+        }
+        if !skills.is_empty() {
+            sections.push(render_skill_catalog_entries(
+                &skills,
+                self.require_template_catalog("runtime:system-context:09b-skills")?,
+            )?);
+        }
+        Ok(render_system_prompt_sections(sections))
+    }
+
+    pub fn build_live<'a>(
         &'a mut self,
         selection: &'a ResolvedModelSelection,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, PromptResult<String>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| PromptError::Cancelled)?;
-            self.build(selection)
+            let sections = self
+                .read_system_prompts_live(selection, cancellation)
+                .await?;
+            let skills = self.read_skill_catalog_live(cancellation).await?;
+            self.render_sections(selection, sections, skills)
+        })
+    }
+
+    fn require_template_catalog(&self, source_key: &str) -> PromptResult<&PromptTemplateCatalog> {
+        self.get_template_catalog(source_key).ok_or_else(|| {
+            PromptError::Context(format!(
+                "The prompt source '{source_key}' has no template catalog."
+            ))
         })
     }
 }
@@ -143,30 +290,106 @@ impl SystemPrompt for CompositeSystemPrompt {
             Ok(())
         })
     }
-    fn build(&mut self, selection: &ResolvedModelSelection) -> PromptResult<String> {
-        let mut sections = Vec::with_capacity(self.prompts.len());
+    fn read_system_prompts(
+        &mut self,
+        selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        let mut values = Vec::new();
         for prompt in &mut self.prompts {
-            let section = prompt.build(selection)?;
-            if !section.chars().all(char::is_whitespace) {
-                sections.push(section);
-            }
+            values.extend(prompt.read_system_prompts(selection)?);
         }
-        Ok(sections.join("\n\n"))
+        Ok(values)
     }
-    fn build_live<'a>(
+    fn read_system_prompts_live<'a>(
         &'a mut self,
         selection: &'a ResolvedModelSelection,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<String>> {
+    ) -> BoxFuture<'a, PromptResult<Vec<(String, String)>>> {
         Box::pin(async move {
-            let mut sections = Vec::with_capacity(self.prompts.len());
+            let mut values = Vec::new();
             for prompt in &mut self.prompts {
-                let section = prompt.build_live(selection, cancellation).await?;
-                if !section.chars().all(char::is_whitespace) {
-                    sections.push(section);
-                }
+                values.extend(
+                    prompt
+                        .read_system_prompts_live(selection, cancellation)
+                        .await?,
+                );
             }
-            Ok(sections.join("\n\n"))
+            Ok(values)
+        })
+    }
+    fn read_prompt_templates(&self) -> Vec<(String, String)> {
+        self.prompts
+            .iter()
+            .flat_map(|prompt| prompt.read_prompt_templates())
+            .collect()
+    }
+    fn read_template_arguments(&self, source_key: &str) -> Vec<(String, Value)> {
+        self.prompts
+            .iter()
+            .flat_map(|prompt| prompt.read_template_arguments(source_key))
+            .collect()
+    }
+    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
+        self.prompts
+            .iter()
+            .find_map(|prompt| prompt.get_template_catalog(source_key))
+    }
+    fn read_agents_files(&self) -> PromptResult<Vec<(String, String)>> {
+        let mut values = Vec::new();
+        for prompt in &self.prompts {
+            values.extend(prompt.read_agents_files()?);
+        }
+        Ok(values)
+    }
+    fn read_model_aliases(
+        &mut self,
+        selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<ModelAliasDescription>> {
+        let mut values = Vec::new();
+        for prompt in &mut self.prompts {
+            values.extend(prompt.read_model_aliases(selection)?);
+        }
+        Ok(values)
+    }
+    fn read_model_guidance(
+        &self,
+        selection: &ResolvedModelSelection,
+    ) -> (Option<String>, Option<String>) {
+        self.prompts
+            .iter()
+            .map(|prompt| prompt.read_model_guidance(selection))
+            .find(|guidance| guidance.0.is_some() || guidance.1.is_some())
+            .unwrap_or((None, None))
+    }
+    fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
+        self.prompts
+            .iter()
+            .find_map(|prompt| prompt.read_agent_identity())
+    }
+    fn read_standing_instruction(&self) -> String {
+        self.prompts
+            .iter()
+            .map(|prompt| prompt.read_standing_instruction())
+            .find(|value| !value.is_empty())
+            .unwrap_or_default()
+    }
+    fn read_skill_catalog(&self) -> PromptResult<Vec<SkillCatalogEntry>> {
+        let mut values = Vec::new();
+        for prompt in &self.prompts {
+            values.extend(prompt.read_skill_catalog()?);
+        }
+        Ok(values)
+    }
+    fn read_skill_catalog_live<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, PromptResult<Vec<SkillCatalogEntry>>> {
+        Box::pin(async move {
+            let mut values = Vec::new();
+            for prompt in &mut self.prompts {
+                values.extend(prompt.read_skill_catalog_live(cancellation).await?);
+            }
+            Ok(values)
         })
     }
 }
@@ -174,8 +397,14 @@ impl SystemPrompt for CompositeSystemPrompt {
 pub struct StaticSystemPrompt(pub String);
 impl SystemPrompt for StaticSystemPrompt {
     fn renew_epoch(&mut self) {}
-    fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
-        Ok(self.0.clone())
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![(
+            "runtime:system-context:literal".into(),
+            self.0.clone(),
+        )])
     }
 }
 
@@ -196,6 +425,23 @@ impl SystemPromptProvider for StaticSystemPromptProvider {
         &self.key
     }
     fn materialize(&self, _: &AgentIdentityDescription) -> PromptResult<Box<dyn SystemPrompt>> {
-        Ok(Box::new(StaticSystemPrompt(self.content.clone())))
+        Ok(Box::new(ConfiguredSystemPrompt {
+            key: self.key.clone(),
+            content: self.content.clone(),
+        }))
+    }
+}
+
+struct ConfiguredSystemPrompt {
+    key: String,
+    content: String,
+}
+impl SystemPrompt for ConfiguredSystemPrompt {
+    fn renew_epoch(&mut self) {}
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![(self.key.clone(), self.content.clone())])
     }
 }

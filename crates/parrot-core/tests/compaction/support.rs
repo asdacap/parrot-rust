@@ -1,9 +1,6 @@
 use parrot_core::{
     BoxFuture, CancellationToken, Content, Error, Message, ProviderRequest, Reasoning, Role,
-    compaction::{
-        CompactionEffects, CompactionGroup, CompactionPlan, CompactionProgress, SummaryProvider,
-        SummaryResponse,
-    },
+    compaction::{CompactionGroup, CompactionPlan, CompactionProgress, SummaryResponse},
 };
 use std::{
     collections::VecDeque,
@@ -48,15 +45,13 @@ pub fn plan(groups: &[&str]) -> CompactionPlan {
 #[derive(Default)]
 pub struct Effects {
     pub progress: Mutex<Vec<CompactionProgress>>,
-    pub spills: Vec<Vec<Message>>,
-    pub contexts: Mutex<Vec<ProviderRequest>>,
+    pub spills: Mutex<Vec<Vec<Message>>>,
+    pub contexts: Arc<Mutex<Vec<ProviderRequest>>>,
     pub context_failure: Option<(usize, Error)>,
 }
 
-impl CompactionEffects for Effects {
-    type Error = Error;
-
-    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
+impl Effects {
+    pub fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
         Ok(messages
             .iter()
             .map(|message| {
@@ -72,7 +67,7 @@ impl CompactionEffects for Effects {
             .sum())
     }
 
-    fn estimate_summary_tokens(
+    pub fn estimate_summary_tokens(
         &self,
         preceding_summary: &str,
         chunk_tokens: i64,
@@ -86,7 +81,7 @@ impl CompactionEffects for Effects {
             + self.estimate_tokens(next_group)?)
     }
 
-    fn estimate_context_tokens(
+    pub fn estimate_context_tokens(
         &self,
         instructions: &str,
         definitions: &[parrot_core::ToolDefinition],
@@ -107,8 +102,8 @@ impl CompactionEffects for Effects {
         self.estimate_tokens(messages)
     }
 
-    fn spill_group<'a, 'c>(
-        &'a mut self,
+    pub fn spill_group<'a, 'c>(
+        &'a self,
         messages: &'a [Message],
         _: CancellationToken<'c>,
     ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
@@ -116,12 +111,12 @@ impl CompactionEffects for Effects {
         'c: 'a,
     {
         Box::pin(async move {
-            self.spills.push(messages.to_vec());
+            self.spills.lock().unwrap().push(messages.to_vec());
             Ok(vec![message("blob")])
         })
     }
 
-    fn report_progress<'a, 'c>(
+    pub fn report_progress<'a, 'c>(
         &'a self,
         progress: CompactionProgress,
         _: CancellationToken<'c>,
@@ -140,9 +135,21 @@ impl CompactionEffects for Effects {
 pub struct Provider {
     pub replies: Arc<Mutex<VecDeque<Result<SummaryResponse, Error>>>>,
     pub requests: Arc<Mutex<Vec<ProviderRequest>>>,
+    estimates: Arc<Effects>,
 }
 
 impl Provider {
+    pub fn with_estimates(&self, effects: &Effects) -> Self {
+        Self {
+            estimates: Arc::new(Effects {
+                contexts: effects.contexts.clone(),
+                context_failure: effects.context_failure.clone(),
+                ..Effects::default()
+            }),
+            ..self.clone()
+        }
+    }
+
     pub fn new(replies: impl IntoIterator<Item = SummaryResponse>) -> Self {
         Self {
             replies: Arc::new(Mutex::new(replies.into_iter().map(Ok).collect())),
@@ -151,8 +158,28 @@ impl Provider {
     }
 }
 
-impl SummaryProvider for Provider {
-    type Error = Error;
+impl parrot_core::Provider for Provider {
+    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
+        self.estimates.estimate_tokens(messages)
+    }
+    fn estimate_summary_tokens(
+        &self,
+        preceding_summary: &str,
+        chunk_tokens: i64,
+        next_group: &[Message],
+    ) -> Result<i64, Error> {
+        self.estimates
+            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
+    }
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
+        messages: &[Message],
+    ) -> Result<i64, Error> {
+        self.estimates
+            .estimate_context_tokens(instructions, definitions, messages)
+    }
 
     fn summarize<'a, 'c>(
         &'a self,
@@ -170,5 +197,34 @@ impl SummaryProvider for Provider {
                 .pop_front()
                 .expect("unexpected summary request")
         })
+    }
+}
+
+impl parrot_core::States for Effects {
+    fn get_config(
+        &self,
+        _: parrot_core::ConfigKey,
+    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, Error>> {
+        Box::pin(async { Err(Error::unsupported("test compaction configuration")) })
+    }
+    fn spill_group<'a, 'c>(
+        &'a self,
+        messages: &'a [Message],
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    where
+        'c: 'a,
+    {
+        self.spill_group(messages, cancellation)
+    }
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        progress: CompactionProgress,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'c: 'a,
+    {
+        self.report_progress(progress, cancellation)
     }
 }

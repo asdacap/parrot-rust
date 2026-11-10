@@ -1,7 +1,6 @@
 use parrot_core::{
-    ContextCadence, ContextCadenceError, ContextConfiguration, ContextLimit, ContextModel,
-    ContextReminderCheckpoint, ContextSnapshot, Error, ErrorCode, ErrorKind, OutputTokenError,
-    TokenCalibration,
+    ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
+    Error, ErrorCode, ErrorKind, OutputTokenError, TokenCalibration,
 };
 
 struct Fixture {
@@ -323,265 +322,64 @@ fn post_compaction_fit_check_is_raw_strict_and_preserves_its_special_error() {
 }
 
 #[test]
-fn cadence_emits_ten_percent_bands_from_fifty_and_rebases_after_history_shrink() {
+fn reminders_compare_current_usage_with_the_last_stored_band() {
     let fixture = Fixture::new(100);
-    let mut cadence = ContextCadence::new();
-    for (percentage, history, expected) in [
-        (4, 10, None),
-        (24, 11, None),
-        (49, 12, None),
-        (50, 13, Some(50)),
-        (55, 14, None),
-        (59, 15, None),
-        (60, 16, Some(60)),
-        (83, 17, Some(80)),
-        (9, 5, None),
-        (12, 6, None),
-        (49, 7, None),
-        (50, 8, Some(50)),
+    for (usage, last_percentage, expected) in [
+        (49, None, None),
+        (50, None, Some(50)),
+        (59, Some(50), None),
+        (60, Some(55), Some(60)),
+        (83, Some(60), Some(80)),
+        (50, Some(80), None),
     ] {
-        let snapshot = ContextSnapshot::estimate(i64::from(percentage), &fixture.configuration);
+        let last = last_percentage.map(|percentage| ContextReminderCheckpoint {
+            canonical_model: "provider/model".into(),
+            context_limit: 100,
+            percentage,
+        });
+        let snapshot = ContextSnapshot::estimate(usage, &fixture.configuration);
         assert_eq!(
-            cadence
-                .observe(&snapshot, "provider/model", history)
-                .unwrap(),
-            expected
+            snapshot.select_reminder_percentage("provider/model", last.as_ref()),
+            expected,
         );
     }
 }
 
 #[test]
-fn cadence_model_window_and_acknowledgement_rebase_without_duplicate_reports() {
-    let mut fixture = Fixture::new(100);
-    let mut cadence = ContextCadence::new();
-    cadence
-        .observe(
-            &ContextSnapshot::estimate(49, &fixture.configuration),
-            "provider/model",
-            1,
-        )
-        .unwrap();
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::estimate(59, &fixture.configuration),
-                "provider/model",
-                2,
-            )
-            .unwrap(),
-        Some(50)
-    );
-    cadence
-        .acknowledge(
-            &ContextSnapshot::estimate(64, &fixture.configuration),
-            "provider/model",
-            2,
-        )
-        .unwrap();
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::estimate(69, &fixture.configuration),
-                "provider/model",
-                3,
-            )
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::estimate(70, &fixture.configuration),
-                "provider/model",
-                4,
-            )
-            .unwrap(),
-        Some(70)
-    );
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::estimate(51, &fixture.configuration),
-                "other/model",
-                5,
-            )
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::estimate(60, &fixture.configuration),
-                "other/model",
-                6,
-            )
-            .unwrap(),
-        Some(60)
-    );
-    fixture.configuration.model.context_window = 0;
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::estimate(1, &fixture.configuration),
-                "other/model",
-                7,
-            )
-            .unwrap(),
-        None
-    );
-}
-
-#[test]
-fn durable_cadence_checkpoint_suppresses_restart_duplicates_and_allows_new_bands() {
+fn reminders_ignore_checkpoints_from_another_model_or_context_limit() {
     let fixture = Fixture::new(100);
-    for checkpoint_percentage in [50, 55] {
-        let mut cadence = ContextCadence::new();
-        cadence.restore(Some(ContextReminderCheckpoint {
-            canonical_model: "provider/model".into(),
-            context_limit: 100,
-            percentage: checkpoint_percentage,
-        }));
-        assert!(cadence.is_restored());
-        for (percentage, history, expected) in [
-            (49, 10, None),
-            (59, 11, None),
-            (66, 12, Some(60)),
-            (71, 13, Some(70)),
-        ] {
-            let snapshot = ContextSnapshot::estimate(i64::from(percentage), &fixture.configuration);
-            assert_eq!(
-                cadence
-                    .observe(&snapshot, "provider/model", history)
-                    .unwrap(),
-                expected
-            );
-        }
-    }
-}
-
-#[test]
-fn restoration_is_explicit_and_acknowledgement_does_not_mark_it_restored() {
-    let fixture = Fixture::new(100);
-    let snapshot = ContextSnapshot::estimate(50, &fixture.configuration);
-    let mut cadence = ContextCadence::new();
-    assert!(!cadence.is_restored());
-    cadence.acknowledge(&snapshot, "provider/model", 1).unwrap();
-    assert!(!cadence.is_restored());
-    cadence.restore(None);
-    assert!(cadence.is_restored());
-    assert_eq!(cadence.observe(&snapshot, "provider/model", 2), Ok(None));
-}
-
-#[test]
-fn a_checkpoint_for_another_model_or_window_does_not_suppress_a_new_band() {
-    let fixture = Fixture::new(100);
+    let snapshot = ContextSnapshot::estimate(55, &fixture.configuration);
     for (canonical_model, context_limit) in [("other/model", 100), ("provider/model", 200)] {
-        let mut cadence = ContextCadence::new();
-        cadence.restore(Some(ContextReminderCheckpoint {
+        let last = ContextReminderCheckpoint {
             canonical_model: canonical_model.into(),
             context_limit,
             percentage: 90,
-        }));
-        cadence
-            .observe(
-                &ContextSnapshot::estimate(49, &fixture.configuration),
-                "provider/model",
-                1,
-            )
-            .unwrap();
+        };
         assert_eq!(
-            cadence
-                .observe(
-                    &ContextSnapshot::estimate(59, &fixture.configuration),
-                    "provider/model",
-                    2,
-                )
-                .unwrap(),
-            Some(50)
+            snapshot.select_reminder_percentage("provider/model", Some(&last)),
+            Some(50),
         );
     }
 }
 
 #[test]
-fn calibration_and_cadence_clones_keep_mutations_session_local() {
-    let fixture = Fixture::new(100);
-    let mut cadence = ContextCadence::new();
-    cadence.restore(None);
-    cadence
-        .observe(
-            &ContextSnapshot::estimate(4, &fixture.configuration),
-            "provider/model",
-            1,
-        )
-        .unwrap();
+fn calibration_clones_keep_mutations_session_local() {
     let mut calibration = TokenCalibration::default();
     calibration.observe_usage("provider/model", 10, 20);
-    let child_calibration = calibration.clone();
-    let mut child_cadence = cadence.clone();
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(64, &fixture.configuration),
-            "provider/model",
-            2,
-        ),
-        Ok(Some(60))
-    );
-    assert_eq!(
-        child_cadence.observe(
-            &ContextSnapshot::estimate(59, &fixture.configuration),
-            "provider/model",
-            2,
-        ),
-        Ok(Some(50))
-    );
+    let child = calibration.clone();
+
     calibration.reset();
+
     assert_eq!(calibration.estimate_input_tokens("provider/model", 5), 5);
-    assert_eq!(
-        child_calibration.estimate_input_tokens("provider/model", 5),
-        15
-    );
-    assert!(cadence.is_restored());
-    assert!(child_cadence.is_restored());
+    assert_eq!(child.estimate_input_tokens("provider/model", 5), 15);
 }
 
 #[test]
-fn cadence_validation_preserves_typed_errors_messages_and_unexpected_classification() {
-    let fixture = Fixture::new(100);
-    let snapshot = ContextSnapshot::estimate(50, &fixture.configuration);
-    let mut cadence = ContextCadence::new();
-    for model in ["", " \t\n"] {
-        assert_eq!(
-            cadence.observe(&snapshot, model, 0),
-            Err(ContextCadenceError::EmptyCanonicalModel)
-        );
-        assert_eq!(
-            cadence.acknowledge(&snapshot, model, 0),
-            Err(ContextCadenceError::EmptyCanonicalModel)
-        );
-    }
+fn unavailable_context_does_not_select_a_reminder() {
+    let fixture = Fixture::new(0);
+    let snapshot = ContextSnapshot::estimate(100, &fixture.configuration);
     assert_eq!(
-        cadence.observe(&snapshot, "provider/model", -1),
-        Err(ContextCadenceError::NegativeEffectiveHistorySize)
+        snapshot.select_reminder_percentage("provider/model", None),
+        None
     );
-    assert_eq!(
-        cadence.acknowledge(&snapshot, "provider/model", -1),
-        Err(ContextCadenceError::NegativeEffectiveHistorySize)
-    );
-    for (value, message) in [
-        (
-            ContextCadenceError::EmptyCanonicalModel,
-            "canonical model must not be empty or whitespace",
-        ),
-        (
-            ContextCadenceError::NegativeEffectiveHistorySize,
-            "effective history size must not be negative",
-        ),
-    ] {
-        assert_eq!(value.to_string(), message);
-        let error = Error::from(value);
-        assert_eq!(error.kind, ErrorKind::Failed);
-        assert_eq!(error.code, ErrorCode::Unexpected);
-        assert_eq!(error.message, message);
-        assert!(error.response_body.is_empty());
-    }
 }

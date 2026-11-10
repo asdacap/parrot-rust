@@ -1,8 +1,11 @@
 use crate::{
-    CancellationToken, Content, DerivedContext, Error, Preparation, PromotedInput, Skill,
-    SkillContent, SkillReference, States,
+    CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
+    Skill, SkillContent, SkillReference, States,
 };
-use std::collections::HashSet;
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 const MAXIMUM_SKILL_BYTES: usize = 8 * 1024;
 const MAXIMUM_TURN_BYTES: usize = 1024 * 1024;
@@ -24,7 +27,6 @@ impl SkillPreparation {
     pub async fn prepare(
         &mut self,
         states: &mut dyn States,
-        preparation: &mut dyn Preparation,
         inputs: &[PromotedInput],
         cancellation: CancellationToken<'_>,
     ) -> Result<DerivedContext, Error> {
@@ -74,6 +76,16 @@ impl SkillPreparation {
             lp.cmp(rp)
                 .then_with(|| left.id.encode_utf16().cmp(right.id.encode_utf16()))
         });
+        let mut templates = BTreeMap::new();
+        for key in [
+            ConfigKey::SkillUnavailableTemplate,
+            ConfigKey::SkillSelectedTemplate,
+            ConfigKey::SkillTooLargeTemplate,
+        ] {
+            templates.insert(key, states.get_config(key).await?.into_prompt_template()?);
+        }
+        let preparation = SkillTemplates(templates);
+        let preparation = &preparation;
         let mut rendering = SkillRendering::new(preparation)?;
         for (skill, _) in selected {
             if cancellation.is_cancelled() {
@@ -93,6 +105,26 @@ impl SkillPreparation {
     }
 }
 
+struct SkillTemplates(BTreeMap<ConfigKey, Arc<PromptTemplate>>);
+
+impl SkillTemplates {
+    fn render_template(
+        &self,
+        key: ConfigKey,
+        arguments: &[(String, String)],
+    ) -> Result<String, Error> {
+        let template = self
+            .0
+            .get(&key)
+            .ok_or_else(|| Error::failed("unknown skill template"))?;
+        let arguments = arguments
+            .iter()
+            .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+            .collect::<Vec<_>>();
+        template.render(&arguments, CancellationToken::uncancelled())
+    }
+}
+
 fn escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -100,7 +132,7 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn unavailable(preparation: &dyn Preparation, name: &str, message: &str) -> Result<String, Error> {
+fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Result<String, Error> {
     let normalized = message.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut message = String::new();
     let mut units = 0;
@@ -112,7 +144,7 @@ fn unavailable(preparation: &dyn Preparation, name: &str, message: &str) -> Resu
         units += character.len_utf16();
     }
     preparation.render_template(
-        "context.skill-unavailable",
+        ConfigKey::SkillUnavailableTemplate,
         &[
             ("name".into(), escape(name)),
             ("message".into(), escape(&message)),
@@ -127,7 +159,7 @@ struct SkillRendering {
 }
 
 impl SkillRendering {
-    fn new(preparation: &dyn Preparation) -> Result<Self, Error> {
+    fn new(preparation: &SkillTemplates) -> Result<Self, Error> {
         let summary = unavailable(
             preparation,
             "selected skills",
@@ -179,7 +211,7 @@ impl SkillRendering {
 
     fn diagnostic(
         &mut self,
-        preparation: &dyn Preparation,
+        preparation: &SkillTemplates,
         name: &str,
         message: &str,
     ) -> Result<(), Error> {
@@ -190,13 +222,13 @@ impl SkillRendering {
 
     fn selected(
         &mut self,
-        preparation: &dyn Preparation,
+        preparation: &SkillTemplates,
         skill: &Skill,
         content: &str,
     ) -> Result<(), Error> {
         if content.len() > MAXIMUM_SKILL_BYTES {
             let value = preparation.render_template(
-                "context.skill-too-large",
+                ConfigKey::SkillTooLargeTemplate,
                 &[
                     ("name".into(), escape(&skill.name)),
                     ("path".into(), escape(&skill.path)),
@@ -207,7 +239,7 @@ impl SkillRendering {
             return Ok(());
         }
         let value = preparation.render_template(
-            "context.skill-selected",
+            ConfigKey::SkillSelectedTemplate,
             &[
                 ("name".into(), escape(&skill.name)),
                 ("path".into(), escape(&skill.path)),
@@ -227,7 +259,7 @@ impl SkillRendering {
         Ok(())
     }
 
-    fn finish(mut self, preparation: &dyn Preparation) -> Result<DerivedContext, Error> {
+    fn finish(mut self, preparation: &SkillTemplates) -> Result<DerivedContext, Error> {
         if self.omitted > 0 {
             let summary = unavailable(
                 preparation,

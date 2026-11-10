@@ -359,8 +359,14 @@ impl SystemPrompt for Prompt {
     fn sample_epoch<'a>(&'a mut self, _: &'a dyn Cancellation) -> BoxFuture<'a, PromptResult<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
-        Ok("offline child fixture".into())
+    fn read_system_prompts(
+        &mut self,
+        _: &parrot_provider::routing::aliases::ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![(
+            "test:instructions".into(),
+            "offline child fixture".into(),
+        )])
     }
 }
 struct Skills;

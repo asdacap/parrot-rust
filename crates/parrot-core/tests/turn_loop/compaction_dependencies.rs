@@ -1,8 +1,5 @@
 use super::*;
-use parrot_core::compaction::{
-    CompactionConfiguration, CompactionDependencies, CompactionPlan, CompactionPreparationEffects,
-    StatusRenderer,
-};
+use parrot_core::compaction::{CompactionConfiguration, CompactionPlan};
 
 #[test]
 fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() {
@@ -27,46 +24,13 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
-struct MemoryCompactionPreparation;
-
-impl CompactionPreparationEffects for MemoryCompactionPreparation {
-    type Error = Error;
-
-    fn report_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn sample_epoch<'a, 'c>(&'a self, _: CancellationToken<'c>) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn render_instructions<'a, 'c>(
-        &'a self,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async { Ok("core request".into()) })
-    }
-
-    fn report_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
-    }
+pub(super) struct MemoryStatus {
+    pub(super) contexts: Mutex<Vec<ContextSnapshot>>,
+    pub(super) failure: Option<(usize, Error)>,
 }
 
-struct MemoryStatus {
-    contexts: Mutex<Vec<ContextSnapshot>>,
-    failure: Option<(usize, Error)>,
-}
-
-impl StatusRenderer for MemoryStatus {
-    type Error = Error;
-
-    fn render<'a, 'c>(
+impl MemoryStatus {
+    pub(super) fn render<'a, 'c>(
         &'a self,
         context: ContextSnapshot,
         _: CancellationToken<'c>,
@@ -87,10 +51,10 @@ impl StatusRenderer for MemoryStatus {
 }
 
 pub(super) struct MemoryCompaction {
-    configuration: CompactionConfiguration,
-    effects: compaction_support::Effects,
-    provider: compaction_support::Provider,
-    status: MemoryStatus,
+    pub(super) configuration: CompactionConfiguration,
+    pub(super) effects: compaction_support::Effects,
+    pub(super) provider: compaction_support::Provider,
+    pub(super) status: MemoryStatus,
 }
 
 impl Default for MemoryCompaction {
@@ -136,24 +100,16 @@ impl MemoryCompaction {
                 .as_ref()
                 .map_or_else(|| "prefix:".into(), |plan| plan.summary_prefix.clone()),
         };
+        let effects = compaction_support::Effects::default();
+        let provider = provider.with_estimates(&effects);
         Self {
             configuration,
-            effects: compaction_support::Effects::default(),
+            effects,
             provider,
             status: MemoryStatus {
                 contexts: Mutex::default(),
                 failure: None,
             },
-        }
-    }
-
-    pub(super) fn dependencies(&mut self) -> CompactionDependencies<'_> {
-        CompactionDependencies {
-            configuration: &self.configuration,
-            preparation: &MemoryCompactionPreparation,
-            effects: &mut self.effects,
-            provider: &self.provider,
-            status: &self.status,
         }
     }
 }
@@ -171,7 +127,7 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
         )]);
     let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
     assert_eq!(
-        state.run_with_compaction(&mut compaction.dependencies()),
+        state.run_with_compaction(&mut compaction),
         Ok(Outcome::Completed("answer".into()))
     );
 
@@ -230,10 +186,7 @@ fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
             "status" => compaction.status.failure = Some((1, error.clone())),
             _ => unreachable!(),
         }
-        assert_eq!(
-            state.run_with_compaction(&mut compaction.dependencies()),
-            Err(error)
-        );
+        assert_eq!(state.run_with_compaction(&mut compaction), Err(error));
         assert!(state.recorded_compactions.is_empty());
         assert!(provider.requests.lock().unwrap().is_empty());
         assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
@@ -257,7 +210,7 @@ fn planning_and_fitting_failures_are_recorded_before_propagation() {
             compaction.status.failure = Some((2, error.clone()));
         }
         assert_eq!(
-            state.run_with_compaction(&mut compaction.dependencies()),
+            state.run_with_compaction(&mut compaction),
             Err(error.clone())
         );
         assert_eq!(state.recorded_compactions, [Err(error)]);

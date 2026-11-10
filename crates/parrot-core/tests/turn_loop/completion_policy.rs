@@ -7,7 +7,7 @@ fn ordered_blocker_messages_are_recorded_together_and_retain_the_candidate_once(
         Reply::Failed("stop after feedback"),
     ]);
     let messages = vec!["zeta".into(), "alpha".into(), "zeta".into()];
-    state.exit_blockers.push_back(messages.clone());
+    state.prompts().exit_blockers.push_back(messages.clone());
     assert_eq!(state.run(), Err(Error::failed("stop after feedback")));
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert_eq!(state.completion_feedback.len(), 1);
@@ -54,15 +54,18 @@ fn ordered_blocker_messages_are_recorded_together_and_retain_the_candidate_once(
 #[test]
 fn an_empty_blocker_list_closes_the_candidate_without_reading_another_snapshot() {
     let mut state = MemoryState::new([Reply::final_response("accepted answer")]);
-    state.exit_blockers.push_back(Vec::new());
-    state.exit_blockers.push_back(vec!["not observed".into()]);
+    state.prompts().exit_blockers.push_back(Vec::new());
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["not observed".into()]);
     assert_eq!(
         state.run(),
         Ok(Outcome::Completed("accepted answer".into()))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
     assert!(state.completion_feedback.is_empty());
-    assert_eq!(state.exit_blockers.len(), 1);
+    assert_eq!(state.prompts().exit_blockers.len(), 1);
     assert_eq!(
         state
             .trace
@@ -95,7 +98,7 @@ fn nonempty_lists_with_empty_messages_still_require_a_retry() {
             Reply::final_response("candidate"),
             Reply::final_response("answer"),
         ]);
-        state.exit_blockers.push_back(messages.clone());
+        state.prompts().exit_blockers.push_back(messages.clone());
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert_eq!(state.request().rendered_instructions.len(), 2);
         assert_eq!(state.completion_feedback.len(), 1);
@@ -124,7 +127,7 @@ fn every_blocker_list_retains_the_exact_candidate_and_forces_continuation() {
             Reply::Response(candidate.clone()),
             Reply::Failed("forced request"),
         ]);
-        state.exit_blockers.push_back(messages.clone());
+        state.prompts().exit_blockers.push_back(messages.clone());
         assert_eq!(state.run(), Err(Error::failed("forced request")));
         assert_eq!(state.request().rendered_instructions.len(), 2);
         assert!(state.pending_messages.is_empty());
@@ -164,7 +167,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
         vec![String::new()],
         vec!["last blocker".into()],
     ];
-    state.exit_blockers.extend(snapshots.clone());
+    state.prompts().exit_blockers.extend(snapshots.clone());
     assert_eq!(
         state.run(),
         Ok(Outcome::Completed("accepted answer".into()))
@@ -227,29 +230,23 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
 #[test]
 fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget() {
     let mut state = MemoryState::new([Reply::final_response("candidate")]);
-    state.exit_blockers.push_back(vec!["unfinished".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["unfinished".into()]);
     state.maximum = 1;
     state.fail_at = Some("completion_feedback");
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(false);
-    let mut preparation = state.preparation();
+
+    state.budget = TurnBudget::new(false);
+
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
             &tools,
             &provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
+            CancellationToken::new(provider.cancellation.as_ref())
         )),
         Err(Error::failed("completion_feedback"))
     );
@@ -270,41 +267,35 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     );
     assert!(!state.trace.values().iter().any(|step| step == "complete"));
     assert_eq!(state.trace.values().last().unwrap(), "completion_feedback");
-    assert!(budget.admit(1).is_none());
+    assert!(state.budget.admit(1).is_none());
 }
 
 #[test]
 fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     let mut state = MemoryState::new([Reply::final_response("candidate")]);
-    state.exit_blockers.push_back(vec!["not read".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["not read".into()]);
     state.maximum = 1;
     state.fail_at = Some("exit_blockers");
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(false);
-    let mut preparation = state.preparation();
+
+    state.budget = TurnBudget::new(false);
+
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
             &tools,
             &provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
+            CancellationToken::new(provider.cancellation.as_ref())
         )),
         Err(Error::failed("exit_blockers"))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
     assert!(state.completion_feedback.is_empty());
-    assert_eq!(state.exit_blockers.len(), 1);
+    assert_eq!(state.prompts().exit_blockers.len(), 1);
     assert_eq!(state.last_turn.as_ref().unwrap().messages.len(), 1);
     assert_eq!(
         state
@@ -317,5 +308,5 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     );
     assert!(!state.trace.values().iter().any(|step| step == "complete"));
     assert_eq!(state.trace.values().last().unwrap(), "exit_blockers");
-    assert!(budget.admit(1).is_none());
+    assert!(state.budget.admit(1).is_none());
 }

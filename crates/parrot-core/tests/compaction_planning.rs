@@ -1,5 +1,6 @@
 use parrot_core::{
-    Content, ContextConfiguration, ContextLimit, ContextModel, Message, Role, ToolCall,
+    Content, ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail,
+    ErrorKind, Message, Provider, Role, ToolCall, ToolDefinition,
     compaction::{
         CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan,
         CompactionPolicy, PlanningError, group_messages, is_complete,
@@ -50,7 +51,7 @@ fn configuration() -> CompactionConfiguration {
     }
 }
 
-fn estimate(messages: &[Message]) -> Result<i64, PlanningError> {
+fn estimate(messages: &[Message]) -> Result<i64, Error> {
     messages
         .iter()
         .flat_map(|message| &message.contents)
@@ -60,21 +61,70 @@ fn estimate(messages: &[Message]) -> Result<i64, PlanningError> {
             };
             total
                 .checked_add(text.parse::<i64>().unwrap())
-                .ok_or(PlanningError::TokenOverflow)
+                .ok_or_else(|| planning_error(PlanningError::TokenOverflow))
         })
 }
 
-fn select(
-    input: &CompactionInput,
-    target: Option<i64>,
-) -> Result<Option<CompactionPlan>, PlanningError> {
+#[derive(Default)]
+struct PlanningProvider {
+    reject_estimates: bool,
+    failure: Option<Error>,
+}
+
+impl Provider for PlanningProvider {
+    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
+        assert!(
+            !self.reject_estimates,
+            "an unavailable cut must not estimate groups"
+        );
+        match &self.failure {
+            Some(error) => Err(error.clone()),
+            None => estimate(messages),
+        }
+    }
+    fn estimate_summary_tokens(
+        &self,
+        _: &str,
+        _: i64,
+        next_group: &[Message],
+    ) -> Result<i64, Error> {
+        self.estimate_tokens(next_group)
+    }
+    fn estimate_input_tokens(
+        &self,
+        _: &str,
+        _: &[ToolDefinition],
+        messages: &[Message],
+    ) -> Result<i64, Error> {
+        assert!(
+            !self.reject_estimates,
+            "an unavailable cut must not estimate context"
+        );
+        estimate(messages)
+    }
+}
+
+fn planning_error(failure: PlanningError) -> Error {
+    Error {
+        kind: ErrorKind::Failed,
+        code: if failure == PlanningError::TokenOverflow {
+            ErrorCode::Unexpected
+        } else {
+            ErrorCode::InvalidOperation
+        },
+        message: failure.to_string(),
+        response_body: String::new(),
+        detail: Some(ErrorDetail::Planning(failure)),
+    }
+}
+
+fn select(input: &CompactionInput, target: Option<i64>) -> Result<Option<CompactionPlan>, Error> {
     CompactionPlan::select_for_target(
         input,
         &[],
         &configuration(),
         target,
-        estimate,
-        |_, _, messages| estimate(messages),
+        &PlanningProvider::default(),
     )
 }
 
@@ -175,18 +225,14 @@ fn selection_uses_core_configuration_without_a_native_planning_hook() {
     input.groups[1].has_checkpoint_before = true;
     let mut configuration = configuration();
     configuration.target = Some(ContextLimit::Tokens(100));
-    let plan = CompactionPlan::select(&input, &[], &configuration, estimate, |_, _, messages| {
-        estimate(messages)
-    })
-    .unwrap()
-    .unwrap();
+    let plan = CompactionPlan::select(&input, &[], &configuration, &PlanningProvider::default())
+        .unwrap()
+        .unwrap();
     assert_eq!(plan.keep_group_from, 3);
     configuration.target = Some(ContextLimit::Percentage(12));
-    let plan = CompactionPlan::select(&input, &[], &configuration, estimate, |_, _, messages| {
-        estimate(messages)
-    })
-    .unwrap()
-    .unwrap();
+    let plan = CompactionPlan::select(&input, &[], &configuration, &PlanningProvider::default())
+        .unwrap()
+        .unwrap();
     assert_eq!(plan.keep_group_from, 1);
     assert_eq!(plan.watermark, 1);
 }
@@ -225,13 +271,15 @@ fn unavailable_targets_and_single_groups_do_not_estimate_or_validate_summary_cap
     let mut configuration = configuration();
     configuration.maximum_input_tokens = 0;
     for (input, target) in [(input(&[1, 1]), None), (input(&[1]), Some(100))] {
-        let result = CompactionPlan::select_for_target::<PlanningError>(
+        let result = CompactionPlan::select_for_target(
             &input,
             &[],
             &configuration,
             target,
-            |_| panic!("an unavailable cut must not estimate groups"),
-            |_, _, _| panic!("an unavailable cut must not estimate context"),
+            &PlanningProvider {
+                reject_estimates: true,
+                failure: None,
+            },
         );
         assert!(result.unwrap().is_none());
     }
@@ -243,8 +291,7 @@ fn unavailable_targets_and_single_groups_do_not_estimate_or_validate_summary_cap
             &[],
             &configuration,
             Some(100),
-            estimate,
-            |_, _, messages| estimate(messages)
+            &PlanningProvider::default()
         )
         .unwrap()
         .is_none()
@@ -256,10 +303,9 @@ fn unavailable_targets_and_single_groups_do_not_estimate_or_validate_summary_cap
             &[],
             &configuration,
             Some(100),
-            estimate,
-            |_, _, messages| estimate(messages)
+            &PlanningProvider::default()
         ),
-        Err(PlanningError::NoCompactionCapacity)
+        Err(planning_error(PlanningError::NoCompactionCapacity))
     );
 }
 
@@ -270,7 +316,7 @@ fn selection_preserves_plan_boundaries_and_checked_suffix_overflow() {
     assert_eq!(plan.watermark, 2);
     assert_eq!(
         select(&input(&[1, i64::MAX]), Some(100)),
-        Err(PlanningError::TokenOverflow)
+        Err(planning_error(PlanningError::TokenOverflow))
     );
 }
 
@@ -300,27 +346,26 @@ fn pure_spill_selection_uses_profile_capacity_and_requires_complete_tool_groups(
         &[],
         &configuration,
         Some(100),
-        estimate,
-        |_, _, messages| estimate(messages),
+        &PlanningProvider::default(),
     )
     .unwrap()
     .unwrap();
     assert_eq!(
-        plan.select_spill_groups(|_, _, messages| estimate(messages))
+        plan.select_spill_groups(&PlanningProvider::default())
             .unwrap(),
         [0]
     );
     assert_eq!(plan.groups[0].messages, input.groups[0].messages);
     plan.groups[0].is_complete = false;
     assert_eq!(
-        plan.select_spill_groups(|_, _, messages| estimate(messages)),
-        Err(PlanningError::GroupExceedsBudget)
+        plan.select_spill_groups(&PlanningProvider::default()),
+        Err(planning_error(PlanningError::GroupExceedsBudget))
     );
     plan.groups[0].is_complete = true;
     plan.groups[0].messages[0].role = Role::User;
     assert_eq!(
-        plan.select_spill_groups(|_, _, messages| estimate(messages)),
-        Err(PlanningError::GroupExceedsBudget)
+        plan.select_spill_groups(&PlanningProvider::default()),
+        Err(planning_error(PlanningError::GroupExceedsBudget))
     );
 }
 
@@ -369,30 +414,26 @@ fn grouping_preserves_contiguous_tool_results_and_exact_call_identity() {
     );
 }
 
-#[derive(Debug, Eq, PartialEq)]
-enum EstimateFailure {
-    Planning(PlanningError),
-    Native(&'static str),
-}
-
-impl From<PlanningError> for EstimateFailure {
-    fn from(error: PlanningError) -> Self {
-        Self::Planning(error)
-    }
-}
-
 #[test]
 fn native_estimation_failure_is_not_replaced_by_later_capacity_validation() {
     let mut configuration = configuration();
     configuration.maximum_input_tokens = 0;
+    let native = Error {
+        code: ErrorCode::Io,
+        response_body: "native estimation response body".into(),
+        detail: Some(ErrorDetail::Planning(PlanningError::NoOutputCapacity)),
+        ..Error::failed("exact native failure")
+    };
     let error = CompactionPlan::select_for_target(
         &input(&[1, 1]),
         &[],
         &configuration,
         Some(100),
-        |_| Err(EstimateFailure::Native("exact native failure")),
-        |_, _, _| Ok(0),
+        &PlanningProvider {
+            reject_estimates: false,
+            failure: Some(native.clone()),
+        },
     )
     .unwrap_err();
-    assert_eq!(error, EstimateFailure::Native("exact native failure"));
+    assert_eq!(error, native);
 }

@@ -1,10 +1,15 @@
 use super::*;
 use parrot_core::compaction::{
-    CompactionConfiguration, CompactionInput, CompactionResult, StatusRenderer, fit_compaction,
-    fit_status,
+    CompactionConfiguration, CompactionInput, CompactionResult, fit_compaction, fit_status,
 };
-use parrot_core::{ContextConfiguration, ContextModel, ContextSnapshot, Message};
-use std::sync::Mutex;
+use parrot_core::{
+    ConfigKey, ConfigValue, ContextConfiguration, ContextModel, ContextSnapshot, ErrorCode,
+    Message, States,
+};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
 fn configuration(input_limit: i32) -> CompactionConfiguration {
     CompactionConfiguration {
@@ -58,14 +63,25 @@ fn result() -> CompactionResult {
 }
 
 struct Status {
-    text: String,
+    text: Option<String>,
     contexts: Mutex<Vec<ContextSnapshot>>,
 }
 
-impl StatusRenderer for Status {
-    type Error = Error;
+impl Status {
+    fn new(text: &str) -> Self {
+        Self {
+            text: Some(text.into()),
+            contexts: Mutex::default(),
+        }
+    }
+}
 
-    fn render<'a, 'c>(
+impl States for Status {
+    fn get_config(&self, _: ConfigKey) -> parrot_core::BoxFuture<'_, Result<ConfigValue, Error>> {
+        Box::pin(async { Err(Error::failed("status configuration is unavailable")) })
+    }
+
+    fn render_status<'a, 'c>(
         &'a self,
         context: ContextSnapshot,
         _: CancellationToken<'c>,
@@ -74,94 +90,138 @@ impl StatusRenderer for Status {
         'c: 'a,
     {
         Box::pin(async move {
+            let content = self
+                .text
+                .clone()
+                .unwrap_or_else(|| context.estimated_tokens.to_string());
             self.contexts.lock().unwrap().push(context);
-            Ok(self.text.clone())
+            Ok(content)
         })
+    }
+}
+
+enum StatusEstimate {
+    Rebase,
+    Increase,
+    Failure(Error),
+}
+
+struct Estimates {
+    effects: Effects,
+    calls: AtomicUsize,
+    status: StatusEstimate,
+}
+
+impl Estimates {
+    fn new(status: StatusEstimate) -> Self {
+        Self {
+            effects: Effects::default(),
+            calls: AtomicUsize::new(0),
+            status,
+        }
+    }
+}
+
+impl parrot_core::Provider for Estimates {
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
+        messages: &[Message],
+    ) -> Result<i64, Error> {
+        self.effects
+            .estimate_context_tokens(instructions, definitions, messages)
+    }
+
+    fn estimate_status_context(&self, _: &str) -> Result<ContextSnapshot, Error> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        match &self.status {
+            StatusEstimate::Rebase => {
+                let mut snapshot = ContextSnapshot::estimate(10, &configuration(100).context);
+                if call > 1 {
+                    snapshot.input_limit = 50;
+                }
+                Ok(snapshot)
+            }
+            StatusEstimate::Increase => Ok(ContextSnapshot::estimate(
+                call as i64,
+                &configuration(100).context,
+            )),
+            StatusEstimate::Failure(error) => Err(error.clone()),
+        }
     }
 }
 
 #[test]
 fn core_status_fitting_compares_the_complete_snapshot_and_caps_rerenders() {
-    let config = configuration(100);
-    let mut estimates = 0;
-    let renders = Mutex::new(Vec::new());
+    let provider = Estimates::new(StatusEstimate::Rebase);
+    let status = Status::new("actual status");
     let fitted = finish(fit_status(
-        |_| {
-            estimates += 1;
-            let mut snapshot = ContextSnapshot::estimate(10, &config.context);
-            if estimates > 1 {
-                snapshot.input_limit = 50;
-            }
-            Ok::<_, Error>(snapshot)
-        },
-        |snapshot| {
-            renders.lock().unwrap().push(snapshot);
-            std::future::ready(Ok("actual status".to_owned()))
-        },
+        &status,
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
     assert_eq!(fitted, "actual status");
-    assert_eq!(estimates, 3);
-    assert_eq!(renders.lock().unwrap().len(), 2);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(status.contexts.lock().unwrap().len(), 2);
 
-    let mut estimates = 0;
-    let renders = Mutex::new(Vec::new());
+    let provider = Estimates::new(StatusEstimate::Increase);
+    let status = Status {
+        text: None,
+        contexts: Mutex::default(),
+    };
     let fitted = finish(fit_status(
-        |_| {
-            estimates += 1;
-            Ok::<_, Error>(ContextSnapshot::estimate(estimates, &config.context))
-        },
-        |snapshot| {
-            let text = snapshot.estimated_tokens.to_string();
-            renders.lock().unwrap().push(snapshot);
-            std::future::ready(Ok(text))
-        },
+        &status,
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
-    assert_eq!(estimates, 9);
-    assert_eq!(renders.lock().unwrap().len(), 9);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 9);
+    assert_eq!(status.contexts.lock().unwrap().len(), 9);
     assert_eq!(fitted, "9");
 }
 
 #[test]
 fn core_status_fitting_propagates_estimate_failure_before_rendering() {
-    let renders = Mutex::new(0);
-    let error = Error::failed("native estimate failed");
+    let error = Error {
+        code: ErrorCode::Timeout,
+        response_body: "native estimate diagnostic".into(),
+        detail: Some(parrot_core::ErrorDetail::Compaction(
+            CompactionFailure::NoSummary("native detail".into()),
+        )),
+        ..Error::failed("native estimate failed")
+    };
+    let provider = Estimates::new(StatusEstimate::Failure(error.clone()));
+    let status = Status::new("must not render");
     let outcome = finish(fit_status(
-        |_| Err::<ContextSnapshot, _>(error.clone()),
-        |_| {
-            *renders.lock().unwrap() += 1;
-            std::future::ready(Ok("must not render".to_owned()))
-        },
+        &status,
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
     ));
     assert_eq!(outcome, Err(error));
-    assert_eq!(*renders.lock().unwrap(), 0);
+    assert!(status.contexts.lock().unwrap().is_empty());
 }
 
 #[test]
 fn core_fits_actual_status_and_validates_the_final_replacement() {
-    let effects = Effects::default();
-    let status = Status {
-        text: "actual status".into(),
-        contexts: Mutex::default(),
-    };
-    let is_cancelled = || false;
-    let cancelled = || Box::pin(std::future::pending()) as parrot_core::BoxFuture<'_, ()>;
+    let provider = Estimates::new(StatusEstimate::Rebase);
+    let status = Status::new("actual status");
     let fitted = finish(fit_compaction(
         &input(),
         &[],
         &configuration(100),
         Some(result()),
-        &effects,
         &status,
-        CancellationToken::new(&is_cancelled, &cancelled),
+        &provider,
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap()
     .unwrap();
     assert_eq!(fitted.status, "actual status");
     assert_eq!(fitted.result.watermark, 42);
     {
-        let contexts = effects.contexts.lock().unwrap();
+        let contexts = provider.effects.contexts.lock().unwrap();
         assert_eq!(
             contexts.last().unwrap().instructions,
             "sampled instructions"
@@ -173,19 +233,16 @@ fn core_fits_actual_status_and_validates_the_final_replacement() {
         assert_eq!(contexts.last().unwrap().messages[2], message("retained"));
     }
 
-    let status = Status {
-        text: "x".repeat(200),
-        contexts: Mutex::default(),
-    };
+    let status = Status::new(&"x".repeat(200));
     assert_eq!(
         finish(fit_compaction(
             &input(),
             &[],
             &configuration(100),
             Some(result()),
-            &effects,
             &status,
-            CancellationToken::new(&is_cancelled, &cancelled),
+            &provider,
+            parrot_core::CancellationToken::uncancelled()
         )),
         Err(CompactionFailure::FittedInputLimitExceeded.into())
     );
@@ -193,13 +250,8 @@ fn core_fits_actual_status_and_validates_the_final_replacement() {
 
 #[test]
 fn core_no_progress_checks_current_messages_without_rendering_status() {
-    let effects = Effects::default();
-    let status = Status {
-        text: "must not render".into(),
-        contexts: Mutex::default(),
-    };
-    let is_cancelled = || false;
-    let cancelled = || Box::pin(std::future::pending()) as parrot_core::BoxFuture<'_, ()>;
+    let provider = Estimates::new(StatusEstimate::Rebase);
+    let status = Status::new("must not render");
     let mut input = input();
     input.base_watermark = 42;
     assert_eq!(
@@ -208,14 +260,21 @@ fn core_no_progress_checks_current_messages_without_rendering_status() {
             &[],
             &configuration(100),
             Some(result()),
-            &effects,
             &status,
-            CancellationToken::new(&is_cancelled, &cancelled),
+            &provider,
+            parrot_core::CancellationToken::uncancelled()
         )),
         Ok(None)
     );
     assert_eq!(
-        effects.contexts.lock().unwrap().last().unwrap().messages,
+        provider
+            .effects
+            .contexts
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .messages,
         input.messages
     );
     assert!(status.contexts.lock().unwrap().is_empty());
@@ -226,9 +285,9 @@ fn core_no_progress_checks_current_messages_without_rendering_status() {
                 &[],
                 &configuration(limit),
                 None,
-                &effects,
                 &status,
-                CancellationToken::new(&is_cancelled, &cancelled),
+                &provider,
+                parrot_core::CancellationToken::uncancelled()
             )),
             Err(CompactionFailure::NoSafeBoundary.into())
         );

@@ -1,16 +1,6 @@
 //! Source turn-request and bounded settlement budget, distinct from token limits.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TurnFlags {
-    pub final_phase: bool,
-}
-
-#[derive(Debug)]
-pub struct TurnBudget {
-    disable_max_turns: bool,
-    provider_requests: i32,
-    settlement_extensions: i32,
-}
+pub use crate::{TurnBudget, TurnFlags};
 
 impl TurnBudget {
     pub fn new(disable_max_turns: bool) -> Self {

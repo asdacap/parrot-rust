@@ -1,12 +1,13 @@
 //! Source-ordered, independently sampled runtime status sections.
 
+use parrot_core::ContextReminderCheckpoint;
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError},
     values::{
         accounting::{
             AgentSessionStatisticsSnapshot, AgentUsageKey, AgentUsageSnapshot, AgentUsageTotals,
         },
-        context::{ContextCadence, ContextSnapshot},
+        context::ContextSnapshot,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -350,7 +351,7 @@ impl StatusProvider for ContextStatusProvider {
             let mut model = json!({
                 "available": snapshot.is_available(), "estimated_tokens": format_tokens(snapshot.estimated_tokens),
                 "context_limit": format_tokens(i64::from(snapshot.context_limit)),
-                "cadence": ContextCadence::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
+                "cadence": ContextReminderCheckpoint::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
             }).as_object().unwrap().clone();
             if let Some(usage) = snapshot.usage_percent {
                 model.insert("usage".into(), usage.to_string().into());
@@ -545,12 +546,22 @@ impl RuntimeStatus {
         &self,
         query: &StatusQuery,
         profile_prompt: &str,
-        mut estimate: impl FnMut(&str) -> Result<ContextSnapshot, StatusError>,
+        mut estimate: impl FnMut(&str) -> Result<ContextSnapshot, StatusError> + Send,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
-        parrot_core::compaction::fit_status(
+        fit_native_status(
             |content| estimate(content).map_err(OperationError::Failed),
-            |context| self.observe_with_context(query, profile_prompt, context, cancellation),
+            |context| {
+                Box::pin(self.observe_with_context(query, profile_prompt, context, cancellation))
+            },
+            cancellation,
+            |error| {
+                if error.kind == parrot_core::ErrorKind::Cancelled {
+                    OperationError::Cancelled
+                } else {
+                    OperationError::Failed(StatusError::new(error.message))
+                }
+            },
         )
         .await
     }
@@ -586,12 +597,7 @@ impl crate::compaction::ContextStatus for BoundContextStatus {
             ),
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, crate::compaction::ContextResult<String>> {
-        Box::pin(async move {
-            parrot_core::compaction::fit_status(estimate, |context| async move {
-                self.observe(&context, cancellation).await
-            })
-            .await
-        })
+        Box::pin(fit_context_status(self, estimate, cancellation))
     }
 }
 fn context_error(error: OperationError<StatusError>) -> crate::compaction::ContextError {
@@ -599,5 +605,148 @@ fn context_error(error: OperationError<StatusError>) -> crate::compaction::Conte
     match error {
         OperationError::Cancelled => ContextError::Cancelled,
         OperationError::Failed(error) => ContextError::Operation(error.to_string()),
+    }
+}
+
+struct StatusFittingErrors<E>(std::sync::Mutex<Option<E>>);
+
+impl<E: fmt::Display> StatusFittingErrors<E> {
+    fn capture(&self, error: E) -> parrot_core::Error {
+        let diagnostic = parrot_core::Error::failed(error.to_string());
+        *self.0.lock().expect("status fitting errors poisoned") = Some(error);
+        diagnostic
+    }
+}
+
+struct StatusFittingProvider<'a, F, E> {
+    estimate: std::sync::Mutex<F>,
+    errors: &'a StatusFittingErrors<E>,
+}
+
+impl<F, E> parrot_core::Provider for StatusFittingProvider<'_, F, E>
+where
+    F: FnMut(&str) -> Result<ContextSnapshot, E> + Send,
+    E: fmt::Display + Send,
+{
+    fn estimate_status_context(
+        &self,
+        content: &str,
+    ) -> Result<parrot_core::ContextSnapshot, parrot_core::Error> {
+        self.estimate.lock().expect("status estimator poisoned")(content)
+            .map(into_core_context)
+            .map_err(|error| self.errors.capture(error))
+    }
+}
+
+struct StatusFittingStates<'a, 'f, E> {
+    render: &'a (dyn Fn(ContextSnapshot) -> BoxFuture<'f, Result<String, E>> + Send + Sync),
+    errors: &'a StatusFittingErrors<E>,
+}
+
+impl<E: fmt::Display + Send> parrot_core::States for StatusFittingStates<'_, '_, E> {
+    fn get_config(
+        &self,
+        _: parrot_core::ConfigKey,
+    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, parrot_core::Error>> {
+        Box::pin(async {
+            Err(parrot_core::Error::failed(
+                "configuration is unavailable during status fitting",
+            ))
+        })
+    }
+
+    fn render_status<'a, 'c>(
+        &'a self,
+        context: parrot_core::ContextSnapshot,
+        _: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            (self.render)(into_native_context(context))
+                .await
+                .map_err(|error| self.errors.capture(error))
+        })
+    }
+}
+
+async fn fit_native_status<'a, E, F, R>(
+    estimate: F,
+    render: R,
+    cancellation: &dyn Cancellation,
+    fallback: impl FnOnce(parrot_core::Error) -> E,
+) -> Result<String, E>
+where
+    E: fmt::Display + Send + 'a,
+    F: FnMut(&str) -> Result<ContextSnapshot, E> + Send,
+    R: Fn(ContextSnapshot) -> BoxFuture<'a, Result<String, E>> + Send + Sync,
+{
+    let errors = StatusFittingErrors(std::sync::Mutex::new(None));
+    let provider = StatusFittingProvider {
+        estimate: std::sync::Mutex::new(estimate),
+        errors: &errors,
+    };
+    let states = StatusFittingStates {
+        render: &render,
+        errors: &errors,
+    };
+    parrot_core::compaction::fit_status(
+        &states,
+        &provider,
+        parrot_core::CancellationToken::new(cancellation),
+    )
+    .await
+    .map_err(|error| {
+        errors
+            .0
+            .lock()
+            .expect("status fitting errors poisoned")
+            .take()
+            .unwrap_or_else(|| fallback(error))
+    })
+}
+
+pub(crate) async fn fit_context_status<S: crate::compaction::ContextStatus + ?Sized>(
+    status: &S,
+    estimate: &(dyn Fn(&str) -> crate::compaction::ContextResult<ContextSnapshot> + Send + Sync),
+    cancellation: &dyn Cancellation,
+) -> crate::compaction::ContextResult<String> {
+    fit_native_status(
+        estimate,
+        |context| Box::pin(async move { status.observe(&context, cancellation).await }),
+        cancellation,
+        |error| {
+            if error.kind == parrot_core::ErrorKind::Cancelled {
+                crate::compaction::ContextError::Cancelled
+            } else {
+                crate::compaction::ContextError::Operation(error.message)
+            }
+        },
+    )
+    .await
+}
+
+fn into_core_context(context: ContextSnapshot) -> parrot_core::ContextSnapshot {
+    parrot_core::ContextSnapshot {
+        estimated_tokens: context.estimated_tokens,
+        context_limit: context.context_limit,
+        usage_percent: context.usage_percent,
+        trigger_percent: context.trigger_percent,
+        input_limit: context.input_limit,
+        trigger_tokens: context.trigger_tokens,
+        has_context_limit_override: context.has_context_limit_override,
+    }
+}
+
+fn into_native_context(context: parrot_core::ContextSnapshot) -> ContextSnapshot {
+    ContextSnapshot {
+        estimated_tokens: context.estimated_tokens,
+        context_limit: context.context_limit,
+        usage_percent: context.usage_percent,
+        trigger_percent: context.trigger_percent,
+        input_limit: context.input_limit,
+        trigger_tokens: context.trigger_tokens,
+        has_context_limit_override: context.has_context_limit_override,
     }
 }

@@ -1,7 +1,46 @@
 use super::*;
-use parrot_core::{Skill, SkillContent, SkillReference};
+use parrot_core::{Skill, SkillCatalogEntry, SkillContent, SkillReference};
 use parrot_domain::contracts::security::SecurityProvider;
 use std::sync::atomic::AtomicUsize;
+
+struct ClearedSkillViewPrompt {
+    templates: Arc<PromptTemplateCatalog>,
+}
+impl SystemPrompt for ClearedSkillViewPrompt {
+    fn renew_epoch(&mut self) {}
+    fn read_skill_catalog(&self) -> PromptResult<Vec<SkillCatalogEntry>> {
+        Err(PromptError::Context(
+            "The skill catalogue has not been sampled for this epoch.".into(),
+        ))
+    }
+    fn read_skill_catalog_live<'a>(
+        &'a mut self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, PromptResult<Vec<SkillCatalogEntry>>> {
+        Box::pin(async {
+            Ok(vec![SkillCatalogEntry {
+                name: "retained".into(),
+                description: "acquired skill".into(),
+                discovery_path: "/skills/retained/SKILL.md".into(),
+                enabled: true,
+                prompt_visible: true,
+            }])
+        })
+    }
+    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
+        (source_key == "runtime:system-context:09b-skills").then_some(self.templates.as_ref())
+    }
+}
+
+#[tokio::test]
+async fn live_prompt_renders_acquired_skills_after_the_shared_view_is_cleared() {
+    let prompt = SessionPrompt::new(Box::new(ClearedSkillViewPrompt {
+        templates: templates(""),
+    }));
+    let rendered = prompt.build(&selection(), &Cancel::no()).await.unwrap();
+
+    assert!(rendered.contains("- $retained: acquired skill (/skills/retained/SKILL.md)"));
+}
 
 struct Captures(AtomicUsize);
 impl SecurityProvider for Captures {
@@ -344,13 +383,10 @@ async fn catalog_template_failure_is_reported_by_build_not_lookup_or_begin_turn(
         .unwrap();
     let (_, router) = crate::route(Vec::new());
     let selection = router.resolve("unused/vendor/model").unwrap();
-    assert!(
-        prompt
-            .build(&selection)
-            .unwrap_err()
-            .to_string()
-            .contains("64 KiB")
-    );
+    assert!(matches!(
+        prompt.build(&selection),
+        Err(PromptError::Context(message)) if message.contains("64 KiB")
+    ));
 }
 
 #[tokio::test]

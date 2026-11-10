@@ -243,9 +243,21 @@ without selecting or rendering skills. Core parses skill mentions, reads metadat
 through `States::get_skills`, and deduplicates stable identities before reading
 bodies through `States::read_skill_content`. Native backing owns catalog lookup
 and authorized file reads. Core owns skill-context formatting, limits, and loaded
-paths. `Preparation` supplies instruction construction, token estimates, and
-primitive configured-template expansion. Core records the derived skill context
-through `States::record_input_context` before request-budget admission. Nonempty
+paths. `States` exposes raw system-prompt text, template identities and arguments,
+AGENTS files, model guidance, identity, standing instructions, and catalog metadata.
+These getters do not expand templates. Core reads that state and renders the ordered
+instruction sections using concrete templates from `States::get_config`. `ConfigKey`
+selects turn, context, compaction, or prompt-template configuration. The turn entry
+points accept `States`, `Tools`, `Provider`, `EventPublisher`, and the runtime's cancellation token.
+The publisher reports compaction start and preparation failure independently of request cancellation.
+Core passes that token to provider calls, tools, and compaction. State retains request
+status bindings, sampled epoch inputs, and the drain's request budget. Provider supplies
+model-specific token estimates, model invocation, and private summary calls. Core owns
+reminder rendering and cadence decisions, while State stores cadence and durable
+checkpoints. Turn and standalone compaction both use State, Provider, and EventPublisher rather than
+separate preparation, status, summary, or compaction-effect contracts. Core records
+the derived skill context through `States::record_input_context` before request-budget
+admission. Nonempty
 selected skill context follows its input. The placement fixture supplies raw
 records and proves core preparation, per-turn body-read deduplication, exact
 body/steer/new-turn history, and content-free event/path ordering.

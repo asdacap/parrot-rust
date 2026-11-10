@@ -1,32 +1,75 @@
-use crate::{ContextCompaction, ContextConfiguration, ContextSnapshot, TokenCalibration, budget};
+use crate::budget;
+use std::sync::Arc;
 use std::{fmt, future::Future, pin::Pin};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// The caller cancelled an operation before its cancellation boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Cancelled;
+
+impl fmt::Display for Cancelled {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("operation cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
+/// Read-only cancellation observation; only the scope owner may cancel.
+pub trait Cancellation: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+
+    /// Resolves when cancellation is observed, including prior cancellation.
+    fn cancelled(&self) -> BoxFuture<'_, ()>;
+
+    /// Checks the actual current state, rather than assuming success.
+    fn check(&self) -> Result<(), Cancelled> {
+        if self.is_cancelled() {
+            Err(Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Borrows live cancellation observation without owning a signal or background work.
 #[derive(Clone, Copy)]
 pub struct CancellationToken<'a> {
-    is_cancelled: &'a (dyn Fn() -> bool + Send + Sync),
-    cancelled: &'a (dyn Fn() -> BoxFuture<'a, ()> + Send + Sync),
+    cancellation: Option<&'a dyn Cancellation>,
 }
 
 impl<'a> CancellationToken<'a> {
-    pub fn new(
-        is_cancelled: &'a (dyn Fn() -> bool + Send + Sync),
-        cancelled: &'a (dyn Fn() -> BoxFuture<'a, ()> + Send + Sync),
-    ) -> Self {
+    pub fn new(cancellation: &'a dyn Cancellation) -> Self {
         Self {
-            is_cancelled,
-            cancelled,
+            cancellation: Some(cancellation),
         }
     }
 
+    pub fn uncancelled() -> CancellationToken<'static> {
+        CancellationToken { cancellation: None }
+    }
+
     pub fn is_cancelled(&self) -> bool {
-        (self.is_cancelled)()
+        self.cancellation
+            .is_some_and(|cancellation| cancellation.is_cancelled())
     }
 
     pub fn cancelled(&self) -> BoxFuture<'a, ()> {
-        (self.cancelled)()
+        match self.cancellation {
+            Some(cancellation) => cancellation.cancelled(),
+            None => Box::pin(std::future::pending()),
+        }
+    }
+}
+
+impl Cancellation for CancellationToken<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.is_cancelled()
+    }
+
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        self.cancelled()
     }
 }
 
@@ -36,12 +79,6 @@ pub enum Outcome {
     BudgetExhausted,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RetryReason {
-    TruncatedToolCalls,
-    InvalidToolCalls,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionFeedback {
     pub messages: Vec<String>,
@@ -49,10 +86,57 @@ pub struct CompletionFeedback {
 }
 
 /// Invokes models using the core protocol while owning transport and stream cleanup.
+/// Unsupported invocation and estimation capabilities return explicit errors.
 pub trait Provider: Send + Sync {
+    /// Estimates exactly the supplied request using model-specific token costs.
+    fn estimate_input_tokens(
+        &self,
+        _instructions: &str,
+        _definitions: &[ToolDefinition],
+        _messages: &[Message],
+    ) -> Result<i64, Error> {
+        Err(Error::unsupported("Provider.estimate_input_tokens"))
+    }
+    fn estimate_tokens(&self, _messages: &[Message]) -> Result<i64, Error> {
+        Err(Error::unsupported("Provider.estimate_tokens"))
+    }
+    /// Estimates the complete context after substituting the supplied status content.
+    fn estimate_status_context(&self, _content: &str) -> Result<ContextSnapshot, Error> {
+        Err(Error::unsupported("Provider.estimate_status_context"))
+    }
+    /// Estimates preceding summary, accumulated chunk, and the next atomic group.
+    fn estimate_summary_tokens(
+        &self,
+        _preceding_summary: &str,
+        _chunk_tokens: i64,
+        _next_group: &[Message],
+    ) -> Result<i64, Error> {
+        Err(Error::unsupported("Provider.estimate_summary_tokens"))
+    }
+    /// Collects a private summary stream without publishing its generated content.
+    fn summarize<'a, 'c>(
+        &'a self,
+        _request: ProviderRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<SummaryResponse, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("Provider.summarize")) })
+    }
+
     /// Invokes the request and joins stream cleanup before returning, including
     /// after errors or cancellation.
-    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>>;
+    fn invoke<'a, 'c>(
+        &'a self,
+        _request: ProviderRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("Provider.invoke")) })
+    }
 }
 
 /// Retains executable tools and executes explicitly supplied calls.
@@ -107,125 +191,321 @@ pub struct DerivedContext {
     pub loaded_paths: Vec<String>,
 }
 
-/// Prepares request content without recording conversation effects or invoking a model.
-pub trait Preparation: Send {
-    /// Expands one configured prompt template from supplied string arguments.
-    /// Does not look up or select skills, read their content, or persist context.
-    fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error>;
-    /// Renders current instructions while retaining native request-scoped bindings.
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
-    /// Estimates exactly the supplied request content using native tokenizer and
-    /// provider-specific costs, without choosing context or output limits.
-    fn estimate_input_tokens<'a>(
-        &'a self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
-        messages: &'a [Message],
-    ) -> BoxFuture<'a, Result<i64, Error>>;
+#[derive(Clone, Debug, Default)]
+pub struct AgentIdentityDescription {
+    pub session_id: String,
+    pub parent_session_id: String,
+    pub parent_session_name: String,
+    pub agent_name: String,
+    pub depth: i32,
+    pub scope_text: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModelAliasDescription {
+    pub name: String,
+    pub model: String,
+    pub usage: String,
+    pub model_usage: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkillCatalogEntry {
+    pub name: String,
+    pub description: String,
+    pub discovery_path: String,
+    pub enabled: bool,
+    pub prompt_visible: bool,
+}
+
+/// A prepared message with the information needed to record it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PendingPrompt {
+    Message(Message),
+    ContextReminder {
+        checkpoint: crate::ContextReminderCheckpoint,
+        content: String,
+        observed_percentage: i32,
+    },
+}
+
+impl PendingPrompt {
+    pub fn render_message(&self) -> Message {
+        match self {
+            Self::Message(message) => message.clone(),
+            Self::ContextReminder { content, .. } => Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.clone())],
+                ..Message::default()
+            },
+        }
+    }
+}
+
+/// A recorded prompt notice awaiting publication after prompt acknowledgement.
+#[derive(Debug, Eq, PartialEq)]
+pub struct PromptPublication {
+    pub event_id: String,
+    pub agent_session_id: String,
+    pub kind: String,
+    pub notice: String,
+}
+
+/// Publishes compaction lifecycle notifications independently of conversation state.
+pub trait EventPublisher: Send + Sync {
+    /// Publishes compaction start without request cancellation.
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Publishes compaction failure without request cancellation.
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>>;
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
-pub trait States: Send {
+/// Mutations receive their input from the caller rather than retrieving staged input.
+/// Unsupported capabilities return explicit errors rather than inventing state.
+pub trait States: Send + Sync {
+    /// Reads typed configuration without rendering prompts or deciding request policy.
+    fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
+    /// Loads the provider-request budget that core updates during one turn, not a token budget.
+    /// Core resets the request count at turn start but retains settlement extensions from earlier turns.
+    fn read_turn_budget(&self) -> Result<TurnBudget, Error> {
+        Err(Error::unsupported("States.read_turn_budget"))
+    }
+    /// Saves the updated provider-request budget after the turn returns, even on error.
+    /// Retains settlement extensions for subsequent turns in the same invocation.
+    fn write_turn_budget(&mut self, _budget: TurnBudget) -> Result<(), Error> {
+        Err(Error::unsupported("States.write_turn_budget"))
+    }
+    /// Reads the last stored context reminder in the current compaction epoch.
+    fn get_last_context_reminder(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.get_last_context_reminder")) })
+    }
+    /// Reads an optional native prompt without choosing or rendering context reminders.
+    fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_pending_prompt")) })
+    }
+    /// Acknowledges a supplied native prompt without changing context reminders.
+    fn acknowledge_pending_prompt<'a>(
+        &'a mut self,
+        _prompt: &'a PendingPrompt,
+        _context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.acknowledge_pending_prompt")) })
+    }
+    /// Joins accepted mutations and reads ordered completion blockers.
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.get_exit_blockers")) })
+    }
+    /// Refreshes raw epoch observations without rendering instructions.
+    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.sample_epoch")) })
+    }
+    /// Observes native status for the exact context selected by core.
+    fn render_status<'a, 'c>(
+        &'a self,
+        _context: ContextSnapshot,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("States.render_status")) })
+    }
+    /// Persists an original atomic group and returns notices with its actual saved path.
+    fn spill_group<'a, 'c>(
+        &'a self,
+        _messages: &'a [Message],
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("States.spill_group")) })
+    }
+    /// Publishes aggregate summary progress without disclosing generated content.
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        _progress: CompactionProgress,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("States.report_compaction_progress")) })
+    }
+
+    /// Reads configured literal prompts and their namespace keys, retaining native
+    /// request bindings and sampling raw epoch inputs without rendering templates.
+    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_system_prompts")) })
+    }
+    /// Reads literal template arguments for the supplied registered source.
+    fn read_template_arguments<'a>(
+        &'a self,
+        _source_key: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_template_arguments")) })
+    }
+    /// Reads sampled AGENTS paths and unwrapped file contents.
+    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_agents_files")) })
+    }
+    /// Reads alias definitions and resolved usage without formatting their descriptions.
+    fn read_model_aliases(&self) -> BoxFuture<'_, Result<Vec<ModelAliasDescription>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_model_aliases")) })
+    }
+    /// Reads the selected model profile's literal system prompt.
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_model_system_prompt")) })
+    }
+    /// Reads the selected alias's literal system-prompt augmentation.
+    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_alias_system_prompt")) })
+    }
+    /// Reads the supplied agent identity and scope without formatting either value.
+    fn read_agent_identity(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<AgentIdentityDescription>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_agent_identity")) })
+    }
+    /// Reads the current unwrapped standing instruction.
+    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_standing_instruction")) })
+    }
+    /// Reads current catalog metadata without rendering entries or applying prompt budgets.
+    fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_skill_catalog")) })
+    }
     /// Durably records and applies the complete returned batch before continuing.
     fn record_tool_results<'a>(
         &'a mut self,
-        results: &'a [ToolResult],
-    ) -> BoxFuture<'a, Result<(), Error>>;
+        _results: &'a [ToolResult],
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_tool_results")) })
+    }
     /// Reads the latest visible logical turn, including retained completion candidates.
-    fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>>;
+    fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.get_last_turn")) })
+    }
     /// Peeks at the next durable pending input header without reserving, promoting,
     /// or materializing its content.
-    fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>>;
+    fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.get_pending_message")) })
+    }
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and returning the promoted content explicitly.
     /// Does not discover skills or prepare prompts.
     fn promote_input(
         &mut self,
-        admission: InputAdmission,
-    ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>>;
+        _admission: InputAdmission,
+    ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.promote_input")) })
+    }
     /// Retrieves skill metadata in one batch without reading instruction bodies.
     /// Returns one result per reference in the supplied order, preserving backing-store
     /// precedence and name/path matching semantics.
     fn get_skills<'a>(
         &'a self,
-        references: &'a [SkillReference],
-    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>>;
+        _references: &'a [SkillReference],
+    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.get_skills")) })
+    }
     /// Reads the selected record's complete instruction body or unavailable diagnostic.
     /// Does not format prompt text, update turn deduplication, or record context.
     fn read_skill_content<'a>(
         &'a self,
-        skill: &'a Skill,
-    ) -> BoxFuture<'a, Result<SkillContent, Error>>;
+        _skill: &'a Skill,
+    ) -> BoxFuture<'a, Result<SkillContent, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_skill_content")) })
+    }
     /// Records supplied derived content and loaded-path facts after preparation.
     /// Empty content records and publishes nothing.
     fn record_input_context<'a>(
         &'a mut self,
-        context: &'a DerivedContext,
-    ) -> BoxFuture<'a, Result<(), Error>>;
-    /// Reads raw model limits and context overrides without deciding whether to compact.
-    fn read_context_configuration(&self) -> BoxFuture<'_, Result<ContextConfiguration, Error>>;
+        _context: &'a DerivedContext,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_input_context")) })
+    }
     /// Reads the current token calibration without choosing context or output limits.
-    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>>;
-    /// Ensures the configured final-request context is recorded before preparation.
-    /// Repeated calls do not append or publish duplicate notices.
-    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>>;
-    /// Observes readiness and retains an optional steer or status prompt for fitting,
-    /// without appending or publishing it. Source-specific cadence and rendering stay native.
-    fn get_pending_prompt<'a>(
+    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_token_calibration")) })
+    }
+    /// Persists supplied steer content and applies it to the conversation.
+    /// Repeated calls in the same final phase do not append or publish duplicate notices.
+    fn record_steer<'a>(&'a mut self, _content: &'a str) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_steer")) })
+    }
+    /// Persists the supplied prompt after core checks the request's token limits.
+    /// Updates the conversation and returns a publication receipt only on insertion.
+    /// Returns `None` for a duplicate. Does not publish the receipt.
+    fn record_pending_prompt<'a>(
         &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<Message>, Error>>;
-    /// Durably appends the retained prompt idempotently, updating conversation only
-    /// when inserted and retaining its native receipt without publishing it yet.
-    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>>;
-    /// Acknowledges the retained prompt using the fitted or persisted context before
-    /// uncancelled publication, publishing nothing when insertion was a duplicate.
-    fn acknowledge_prompt<'a>(
-        &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), Error>>;
+        _prompt: &'a PendingPrompt,
+    ) -> BoxFuture<'a, Result<Option<PromptPublication>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_pending_prompt")) })
+    }
+    /// Publishes the supplied receipt without cancellation.
+    /// Core calls this after acknowledging the recorded prompt.
+    fn publish_pending_prompt(
+        &mut self,
+        _receipt: PromptPublication,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.publish_pending_prompt")) })
+    }
     /// Reads the current provider-visible conversation after context preparation.
-    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
+    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_messages")) })
+    }
     /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot,
     /// plus current messages, without sampling prompts or preparing compaction input.
     fn read_conversation_state(
         &self,
-    ) -> BoxFuture<'_, Result<crate::compaction::ConversationState, Error>>;
+    ) -> BoxFuture<'_, Result<crate::compaction::ConversationState, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
+    }
     /// Persists the fitted compaction with the supplied sampled instructions and tools,
     /// awaiting terminal lifecycle effects on success or failure.
     fn record_compaction<'a>(
         &'a mut self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
-        result: Result<Option<crate::compaction::FittedCompaction>, Error>,
-    ) -> BoxFuture<'a, Result<ContextCompaction, Error>>;
-    /// Records why a malformed or truncated tool response must be retried.
-    fn record_retry(
-        &mut self,
-        reason: RetryReason,
-        attempt: i32,
-    ) -> BoxFuture<'_, Result<(), Error>>;
+        _instructions: &'a str,
+        _definitions: &'a [ToolDefinition],
+        _result: Result<Option<crate::compaction::FittedCompaction>, Error>,
+    ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_compaction")) })
+    }
+    /// Records supplied retry content after a malformed or truncated tool response.
+    fn record_retry<'a>(
+        &'a mut self,
+        _content: &'a str,
+        _attempt: i32,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_retry")) })
+    }
     /// Durably records the assistant's tool calls and returns their correlation
     /// for execution without preparing executable bindings or a live batch.
     fn record_tool_calls<'a>(
         &'a mut self,
-        response: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>>;
-    /// Reads ordered exit-blocker messages after accepted mutations have settled.
-    /// Any nonempty list blocks completion, even when its messages are empty strings.
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>>;
+        _response: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_tool_calls")) })
+    }
     /// Records the retained candidate once and all blocker messages in supplied order
     /// before applying them to the conversation. Returns no completion decision.
     fn record_completion_feedback(
         &mut self,
-        feedback: CompletionFeedback,
-    ) -> BoxFuture<'_, Result<(), Error>>;
+        _feedback: CompletionFeedback,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_completion_feedback")) })
+    }
     /// Settles the accepted response and durably closes its turn before publication
     /// completes, returning its answer only after the operation has finished.
     fn complete_turn<'a>(
         &'a mut self,
-        response: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<String, Error>>;
+        _response: &'a ProviderResponse,
+    ) -> BoxFuture<'a, Result<String, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.complete_turn")) })
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -475,15 +755,38 @@ pub struct Error {
     pub code: ErrorCode,
     pub message: String,
     pub response_body: String,
+    pub detail: Option<ErrorDetail>,
 }
 
 impl Error {
+    pub fn template(message: impl Into<String>) -> Self {
+        Self {
+            detail: Some(ErrorDetail::Template),
+            ..Self::failed(message)
+        }
+    }
+
+    pub fn prompt_context(message: impl Into<String>) -> Self {
+        Self {
+            detail: Some(ErrorDetail::PromptContext),
+            ..Self::failed(message)
+        }
+    }
+
+    pub fn unsupported(operation: &str) -> Self {
+        Self {
+            code: ErrorCode::InvalidOperation,
+            ..Self::failed(format!("{operation} is not supported"))
+        }
+    }
+
     pub fn failed(message: impl Into<String>) -> Self {
         Self {
             kind: ErrorKind::Failed,
             code: ErrorCode::Unexpected,
             message: message.into(),
             response_body: String::new(),
+            detail: None,
         }
     }
 
@@ -493,6 +796,7 @@ impl Error {
             code: ErrorCode::RequestTooLarge,
             message: message.into(),
             response_body: String::new(),
+            detail: None,
         }
     }
 
@@ -502,6 +806,7 @@ impl Error {
             code: ErrorCode::Cancelled,
             message: "The operation was canceled.".into(),
             response_body: String::new(),
+            detail: None,
         }
     }
 }
@@ -513,3 +818,359 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ContextLimit {
+    Tokens(i64),
+    Percentage(i64),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextModel {
+    pub canonical_model: String,
+    pub context_window: i32,
+    pub maximum_input_tokens: i32,
+    pub maximum_output_tokens: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextConfiguration {
+    pub model: ContextModel,
+    pub trigger_percent: i32,
+    pub context_limit: Option<ContextLimit>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextSnapshot {
+    pub estimated_tokens: i64,
+    pub context_limit: i32,
+    pub usage_percent: Option<i32>,
+    pub trigger_percent: i32,
+    pub input_limit: i32,
+    pub trigger_tokens: Option<i64>,
+    pub has_context_limit_override: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextReminderCheckpoint {
+    pub canonical_model: String,
+    pub context_limit: i32,
+    pub percentage: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextCompaction {
+    pub instructions: String,
+    pub reduced: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TokenCalibration {
+    pub(crate) selector: Option<String>,
+    pub(crate) estimated_input_tokens: i64,
+    pub(crate) actual_input_tokens: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TurnFlags {
+    pub final_phase: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct TurnBudget {
+    pub(crate) disable_max_turns: bool,
+    pub(crate) provider_requests: i32,
+    pub(crate) settlement_extensions: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionGroup {
+    pub messages: Vec<Message>,
+    pub is_complete: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionHistoryGroup {
+    pub messages: Vec<Message>,
+    pub end_watermark: i64,
+    pub has_checkpoint_before: bool,
+    pub is_complete: bool,
+}
+
+/// Captures durable history facts and the independent current provider-visible view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ConversationState {
+    pub summary: Option<ConversationSummary>,
+    /// Contains the chronological durable tail after the captured summary watermark.
+    pub history: Vec<ConversationHistoryItem>,
+    pub checkpoint_sequences: Vec<i64>,
+    pub messages: Vec<Message>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationSummary {
+    pub content: String,
+    pub watermark: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationHistoryItem {
+    pub sequence: i64,
+    pub tool_owner_sequence: Option<i64>,
+    pub is_compaction_status: bool,
+    pub message: Message,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionInput {
+    pub groups: Vec<CompactionHistoryGroup>,
+    pub base_watermark: i64,
+    pub instructions: String,
+    pub messages: Vec<Message>,
+    pub fixed_message: Message,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionPlan {
+    pub groups: Vec<CompactionGroup>,
+    pub keep_group_from: usize,
+    pub watermark: i64,
+    pub input_budget: i64,
+    pub summary_output_tokens: i32,
+    pub input_token_limit: i32,
+    pub instructions: String,
+    pub tools: Vec<ToolDefinition>,
+    pub fixed_message: Message,
+    pub summary_instructions: String,
+    pub summary_prefix: String,
+    pub model: String,
+    pub reasoning: Option<Reasoning>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionResult {
+    pub history: Vec<Message>,
+    pub summary: Message,
+    pub retained_messages: usize,
+    pub watermark: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FittedCompaction {
+    pub result: CompactionResult,
+    pub status: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CompactionProgress {
+    pub completed_groups: usize,
+    pub total_groups: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SummaryResponse {
+    Summary(String),
+    NoSummary(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionConfiguration {
+    pub context: ContextConfiguration,
+    pub target: Option<ContextLimit>,
+    pub target_percent: i32,
+    pub maximum_input_tokens: i32,
+    pub summary_output_tokens: i32,
+    pub profile_maximum_input_tokens: Option<i32>,
+    pub profile_summary_output_tokens: Option<i32>,
+    pub model: String,
+    pub reasoning: Option<Reasoning>,
+    pub summary_instructions: String,
+    pub summary_prefix: String,
+}
+
+/// Selects a typed runtime configuration value without an additional service contract.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ConfigKey {
+    Turn,
+    Context,
+    Compaction,
+    SystemPromptBindings,
+    AgentsFileTemplate,
+    ModelAliasesTemplate,
+    AgentIdentityTemplate,
+    StandingInstructionTemplate,
+    SkillCatalogTemplate,
+    SkillUnavailableTemplate,
+    SkillSelectedTemplate,
+    SkillTooLargeTemplate,
+    ContextReminderTemplate,
+    ContextLimitReminderTemplate,
+    FinalRequestTemplate,
+    TruncatedToolCallTemplate,
+    InvalidToolCallTemplate,
+    OptionalCliUtilitiesTemplate,
+    ExpectedCliUtilitiesTemplate,
+    PlatformTemplate,
+    WorkingDirectoryTemplate,
+    GitRepositoryTemplate,
+    SubagentsTemplate,
+    AgentPathEnvironmentTemplate,
+    AgentScratchTemplate,
+    AgentHistoryTemplate,
+}
+
+const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
+    (ConfigKey::AgentsFileTemplate, "context.agents-file"),
+    (ConfigKey::ModelAliasesTemplate, "context.model-aliases"),
+    (ConfigKey::AgentIdentityTemplate, "system.agent-identity"),
+    (
+        ConfigKey::StandingInstructionTemplate,
+        "context.standing-instruction",
+    ),
+    (ConfigKey::SkillCatalogTemplate, "context.skills"),
+    (
+        ConfigKey::SkillUnavailableTemplate,
+        "context.skill-unavailable",
+    ),
+    (ConfigKey::SkillSelectedTemplate, "context.skill-selected"),
+    (ConfigKey::SkillTooLargeTemplate, "context.skill-too-large"),
+    (
+        ConfigKey::ContextReminderTemplate,
+        "agent-session.context-reminder",
+    ),
+    (
+        ConfigKey::ContextLimitReminderTemplate,
+        "agent-session.context-limit-reminder",
+    ),
+    (
+        ConfigKey::FinalRequestTemplate,
+        "agent-session.final-request",
+    ),
+    (
+        ConfigKey::TruncatedToolCallTemplate,
+        "agent-session.truncated-tool-call",
+    ),
+    (
+        ConfigKey::InvalidToolCallTemplate,
+        "agent-session.invalid-tool-call",
+    ),
+    (
+        ConfigKey::OptionalCliUtilitiesTemplate,
+        "context.optional-cli-utilities",
+    ),
+    (
+        ConfigKey::ExpectedCliUtilitiesTemplate,
+        "context.expected-cli-utilities",
+    ),
+    (ConfigKey::PlatformTemplate, "context.platform"),
+    (
+        ConfigKey::WorkingDirectoryTemplate,
+        "system.working-directory",
+    ),
+    (ConfigKey::GitRepositoryTemplate, "context.git-repository"),
+    (ConfigKey::SubagentsTemplate, "context.subagents"),
+    (
+        ConfigKey::AgentPathEnvironmentTemplate,
+        "context.agent-path-environment",
+    ),
+    (ConfigKey::AgentScratchTemplate, "context.agent-scratch"),
+    (ConfigKey::AgentHistoryTemplate, "context.agent-history"),
+];
+
+impl ConfigKey {
+    pub fn get_prompt_template_id(self) -> Option<&'static str> {
+        PROMPT_TEMPLATE_CONFIG_KEYS
+            .iter()
+            .find_map(|(key, id)| (*key == self).then_some(*id))
+    }
+    pub fn from_prompt_template_id(id: &str) -> Result<Self, Error> {
+        PROMPT_TEMPLATE_CONFIG_KEYS
+            .iter()
+            .find_map(|(key, candidate)| (*candidate == id).then_some(*key))
+            .ok_or_else(|| {
+                Error::template(format!(
+                    "prompt_templates.{id} is not an enumerated core prompt template"
+                ))
+            })
+    }
+}
+
+pub enum ConfigValue {
+    Turn(TurnOptions),
+    Context(ContextConfiguration),
+    Compaction(CompactionConfiguration),
+    /// Ordered namespace keys and their explicitly enumerated template configuration keys.
+    SystemPromptBindings(Vec<(String, ConfigKey)>),
+    PromptTemplate(Arc<PromptTemplate>),
+}
+
+impl ConfigValue {
+    pub fn into_turn(self) -> Result<TurnOptions, Error> {
+        match self {
+            Self::Turn(value) => Ok(value),
+            _ => Err(Error::failed("expected turn configuration")),
+        }
+    }
+    pub fn into_context(self) -> Result<ContextConfiguration, Error> {
+        match self {
+            Self::Context(value) => Ok(value),
+            _ => Err(Error::failed("expected context configuration")),
+        }
+    }
+    pub fn into_compaction(self) -> Result<CompactionConfiguration, Error> {
+        match self {
+            Self::Compaction(value) => Ok(value),
+            _ => Err(Error::failed("expected compaction configuration")),
+        }
+    }
+    pub fn into_system_prompt_bindings(self) -> Result<Vec<(String, ConfigKey)>, Error> {
+        match self {
+            Self::SystemPromptBindings(value) => Ok(value),
+            _ => Err(Error::failed(
+                "expected system prompt bindings configuration",
+            )),
+        }
+    }
+    pub fn into_prompt_template(self) -> Result<Arc<PromptTemplate>, Error> {
+        match self {
+            Self::PromptTemplate(value) => Ok(value),
+            _ => Err(Error::failed("expected prompt template configuration")),
+        }
+    }
+}
+
+/// A compiled prompt template shared by core and native configuration catalogs.
+pub struct PromptTemplate {
+    pub(crate) path: String,
+    pub(crate) allowed: std::collections::BTreeSet<String>,
+    pub(crate) required: Vec<String>,
+    pub(crate) engine: crate::template::Engine,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CompactionFailure {
+    Cancelled,
+    GroupExceedsBudget,
+    TokenOverflow,
+    InputLimitExceeded,
+    FittedInputLimitExceeded,
+    NoSafeBoundary,
+    NoSummary(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlanningError {
+    InputLimitExceeded,
+    NoOutputCapacity,
+    NoCompactionCapacity,
+    GroupExceedsBudget,
+    TokenOverflow,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ErrorDetail {
+    Template,
+    PromptContext,
+    Planning(PlanningError),
+    Compaction(CompactionFailure),
+}

@@ -1,12 +1,12 @@
 use super::{
-    AgentIdentityDescription, PromptError, PromptResult, SystemPrompt, SystemPromptProvider, render,
+    AgentIdentityDescription, PromptError, PromptResult, SystemPrompt, SystemPromptProvider,
 };
+use parrot_core::ModelAliasDescription;
 use parrot_domain::values::config::ModelProfiles;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::routing::aliases::{
     ModelRouter, ModelRoutingSnapshot, ResolvedModelSelection,
 };
-use serde_json::json;
 use std::sync::Arc;
 
 pub struct ModelPromptProvider {
@@ -45,10 +45,13 @@ struct ModelPrompt {
     profiles: ModelProfiles,
     router: Arc<ModelRouter>,
     templates: Arc<PromptTemplateCatalog>,
-    alias_section: Option<(Arc<ModelRoutingSnapshot>, String)>,
+    alias_section: Option<(Arc<ModelRoutingSnapshot>, Vec<ModelAliasDescription>)>,
 }
 impl ModelPrompt {
-    fn render_aliases(&self, snapshot: &Arc<ModelRoutingSnapshot>) -> PromptResult<String> {
+    fn read_aliases(
+        &self,
+        snapshot: &Arc<ModelRoutingSnapshot>,
+    ) -> PromptResult<Vec<ModelAliasDescription>> {
         let mut aliases = Vec::new();
         // The actual ModelAliasSnapshot has source ordinal ordering already.
         for alias in snapshot
@@ -68,52 +71,51 @@ impl ModelPrompt {
                 Err(error) => return Err(PromptError::Model(error.to_string())),
             }
             .filter(|usage| !usage.is_empty());
-            let usage = match model_usage {
-                None => alias.usage.clone(),
-                Some(usage) if alias.usage.is_empty() => usage,
-                Some(usage) => format!("{}\n{usage}", alias.usage),
-            };
-            aliases.push(json!({"name": alias.name, "model": alias.model_string, "usage": usage}));
+            aliases.push(ModelAliasDescription {
+                name: alias.name.clone(),
+                model: alias.model_string.clone(),
+                usage: alias.usage.clone(),
+                model_usage,
+            });
         }
-        if aliases.is_empty() {
-            Ok(String::new())
-        } else {
-            render(
-                &self.templates,
-                "context.model-aliases",
-                &[("aliases".into(), aliases.into())],
-            )
-        }
+        Ok(aliases)
     }
 }
 impl SystemPrompt for ModelPrompt {
     fn renew_epoch(&mut self) {}
-    fn build(&mut self, selection: &ResolvedModelSelection) -> PromptResult<String> {
+    fn read_model_aliases(
+        &mut self,
+        selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<ModelAliasDescription>> {
         let snapshot = &selection.routing_snapshot;
         if !self
             .alias_section
             .as_ref()
             .is_some_and(|(previous, _)| Arc::ptr_eq(previous, snapshot))
         {
-            let text = self.render_aliases(snapshot)?;
+            let text = self.read_aliases(snapshot)?;
             self.alias_section = Some((snapshot.clone(), text));
         }
+        Ok(self
+            .alias_section
+            .as_ref()
+            .map(|(_, aliases)| aliases.clone())
+            .unwrap_or_default())
+    }
+    fn read_model_guidance(
+        &self,
+        selection: &ResolvedModelSelection,
+    ) -> (Option<String>, Option<String>) {
         let profile = self.profiles.resolve(&selection.canonical_model.selector());
-        let sections = [
-            self.alias_section.as_ref().map(|(_, text)| text.as_str()),
-            profile.system_prompt.as_deref(),
+        (
+            profile.system_prompt,
             selection
                 .alias
                 .as_ref()
-                .and_then(|alias| alias.augment_system_prompt.as_deref()),
-        ];
-        // ModelPrompt excludes only null/empty strings; unlike CompositeSystemPrompt,
-        // whitespace guidance is retained. The selected agent-profile prompt is not an input.
-        Ok(sections
-            .into_iter()
-            .flatten()
-            .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n"))
+                .and_then(|alias| alias.augment_system_prompt.clone()),
+        )
+    }
+    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
+        (source_key == "runtime:system-context:10-model-prompt").then_some(self.templates.as_ref())
     }
 }

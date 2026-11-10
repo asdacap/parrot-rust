@@ -1,39 +1,33 @@
 use super::{
-    CompactionConfiguration, CompactionHistoryGroup, CompactionInput, CompactionPreparationEffects,
-    ConversationHistoryItem, ConversationState, StatusRenderer,
+    CompactionConfiguration, CompactionHistoryGroup, CompactionInput, ConversationHistoryItem,
+    ConversationState,
 };
-use crate::{CancellationToken, Content, ContextSnapshot, Message, Role, ToolDefinition};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-    future::Future,
+use crate::{
+    CancellationToken, Content, ContextSnapshot, Error, EventPublisher, Message, Provider, Role,
+    States, ToolDefinition,
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Samples instructions and assembles compaction input from one raw conversation snapshot.
 /// Preparation errors publish failure after a successful start, before returning.
-pub async fn prepare_compaction<E, R>(
-    raw: R,
+pub async fn prepare_compaction(
+    states: &mut dyn States,
+    provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     configuration: &CompactionConfiguration,
-    preparation: &dyn CompactionPreparationEffects<Error = E>,
-    status: &dyn StatusRenderer<Error = E>,
-    estimate_context: impl Fn(&str, &[ToolDefinition], &[Message]) -> Result<i64, E>,
     cancellation: CancellationToken<'_>,
-) -> Result<CompactionInput, E>
-where
-    E: fmt::Display + Send,
-    R: Future<Output = Result<ConversationState, E>>,
-{
-    preparation.report_started().await?;
-    let outcome: Result<CompactionInput, E> = async {
-        preparation.sample_epoch(cancellation).await?;
-        let instructions = preparation.render_instructions(cancellation).await?;
-        let raw = raw.await?;
+) -> Result<CompactionInput, Error> {
+    publisher.report_compaction_started().await?;
+    let outcome: Result<CompactionInput, Error> = async {
+        states.sample_epoch().await?;
+        let instructions = crate::rendering::render_instructions(states).await?;
+        let raw = states.read_conversation_state().await?;
         let base_watermark = raw.summary.as_ref().map_or(0, |summary| summary.watermark);
         let groups = assemble_groups(&raw);
-        let estimate = estimate_context(&instructions, definitions, &raw.messages)?;
+        let estimate = provider.estimate_input_tokens(&instructions, definitions, &raw.messages)?;
         let context = ContextSnapshot::estimate(estimate, &configuration.context);
-        let status = status.render(context, cancellation).await?;
+        let status = states.render_status(context, cancellation).await?;
         Ok(CompactionInput {
             groups,
             base_watermark,
@@ -50,13 +44,15 @@ where
     match outcome {
         Ok(input) => Ok(input),
         Err(error) => {
-            preparation.report_failed(error.to_string()).await?;
+            publisher
+                .report_compaction_failed(error.to_string())
+                .await?;
             Err(error)
         }
     }
 }
 
-fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryGroup> {
+pub(crate) fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryGroup> {
     let checkpoints: BTreeSet<_> = raw.checkpoint_sequences.iter().copied().collect();
     let mut children: BTreeMap<i64, Vec<&ConversationHistoryItem>> = BTreeMap::new();
     for item in &raw.history {

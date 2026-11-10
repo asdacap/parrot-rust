@@ -1,9 +1,9 @@
 use super::*;
-use parrot_domain::contracts::async_ops::BoxFuture;
+use crate::BoxFuture;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 struct Flag(AtomicBool);
-impl Cancellation for Flag {
+impl crate::Cancellation for Flag {
     fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
@@ -37,9 +37,10 @@ fn owned_json_numbers_remain_native_numbers_in_nested_sequences_and_maps() {
         "{{ values|join(',') }}|{{ nested.cost + 0.125 }}|{{ count + 1 }}|{{ nothing is none }}|{{ flag }}|{{ label }}",
     )
     .unwrap();
+    let flag = Flag(AtomicBool::new(false));
     assert_eq!(
         engine
-            .render(&arguments, &Flag(AtomicBool::new(false)))
+            .render(&arguments, CancellationToken::new(&flag))
             .unwrap(),
         "-9223372036854775808,18446744073709551615,1.5|0.25|124|True|True|text"
     );
@@ -49,7 +50,7 @@ fn owned_json_numbers_remain_native_numbers_in_nested_sequences_and_maps() {
 fn writer_keeps_prior_bytes_private_and_uses_a_nonretryable_cancel_error() {
     let flag = Flag(AtomicBool::new(false));
     let mut writer = CancellationWriter {
-        cancellation: &flag,
+        cancellation: CancellationToken::new(&flag),
         output: Vec::new(),
         cancelled: false,
     };

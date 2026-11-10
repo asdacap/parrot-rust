@@ -33,6 +33,15 @@ impl CancellationSource {
     }
 }
 
+impl parrot_core::Cancellation for CancellationSource {
+    fn is_cancelled(&self) -> bool {
+        self.is_cancelled()
+    }
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        self.cancelled()
+    }
+}
+
 #[derive(Default)]
 struct WakeCounter(AtomicUsize);
 
@@ -45,9 +54,7 @@ impl Wake for WakeCounter {
 #[test]
 fn copied_tokens_observe_live_and_prior_cancellation() {
     let source = CancellationSource::default();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let token = CancellationToken::new(&is_cancelled, &cancelled);
+    let token = CancellationToken::new(&source);
     let copied = token;
     assert!(!token.is_cancelled());
     assert!(!copied.is_cancelled());
@@ -61,9 +68,7 @@ fn copied_tokens_observe_live_and_prior_cancellation() {
 #[test]
 fn token_notification_wakes_pending_work() {
     let source = CancellationSource::default();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let token = CancellationToken::new(&is_cancelled, &cancelled);
+    let token = CancellationToken::new(&source);
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
     let mut context = Context::from_waker(&waker);
@@ -159,9 +164,6 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     let mut state = MemoryState::new([Reply::tools("call")]);
     let provider = state.provider.clone();
     let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let token = CancellationToken::new(&is_cancelled, &cancelled);
     let joined = Arc::new(AtomicBool::new(false));
     let tools = JoiningTools {
         admitted: AtomicBool::new(false),
@@ -170,24 +172,14 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
     let mut context = Context::from_waker(&waker);
-    let options = state.capture_options();
-    let mut budget = TurnBudget::new(state.unlimited);
-    let mut compaction = MemoryCompaction::default();
-    let mut dependencies = compaction.dependencies();
+
+    state.budget = TurnBudget::new(state.unlimited);
     let result = {
-        let mut preparation = state.preparation();
-        let mut preparation_dependencies = parrot_core::PreparationDependencies {
-            request: &mut preparation,
-            compaction: &mut dependencies,
-        };
         let mut running = std::pin::pin!(run(
             &mut state,
-            &mut preparation_dependencies,
             &tools,
             &provider,
-            &options,
-            &mut budget,
-            token,
+            CancellationToken::new(provider.cancellation.as_ref())
         ));
         assert!(running.as_mut().poll(&mut context).is_pending());
         assert!(tools.admitted.load(Ordering::SeqCst));

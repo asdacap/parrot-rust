@@ -1,14 +1,12 @@
+use crate::{
+    ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
+    TokenCalibration,
+};
 mod preparation;
 pub(crate) use preparation::{compact_context, prepare_request};
 
 use crate::{Error, ErrorCode, ErrorKind};
 use std::fmt;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ContextLimit {
-    Tokens(i64),
-    Percentage(i64),
-}
 
 impl ContextLimit {
     pub fn resolve_tokens(&self, context_window: i32) -> Option<i64> {
@@ -19,14 +17,6 @@ impl ContextLimit {
             }
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextModel {
-    pub canonical_model: String,
-    pub context_window: i32,
-    pub maximum_input_tokens: i32,
-    pub maximum_output_tokens: i32,
 }
 
 impl ContextModel {
@@ -56,24 +46,6 @@ impl ContextModel {
                 .max(0)
         })
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextConfiguration {
-    pub model: ContextModel,
-    pub trigger_percent: i32,
-    pub context_limit: Option<ContextLimit>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextSnapshot {
-    pub estimated_tokens: i64,
-    pub context_limit: i32,
-    pub usage_percent: Option<i32>,
-    pub trigger_percent: i32,
-    pub input_limit: i32,
-    pub trigger_tokens: Option<i64>,
-    pub has_context_limit_override: bool,
 }
 
 impl ContextSnapshot {
@@ -128,6 +100,25 @@ impl ContextSnapshot {
         }
     }
 
+    pub fn select_reminder_percentage(
+        &self,
+        canonical_model: &str,
+        last_reminder: Option<&ContextReminderCheckpoint>,
+    ) -> Option<i32> {
+        let interval = ContextReminderCheckpoint::NOTIFICATION_INTERVAL;
+        let percentage = self.usage_percent? / interval * interval;
+        if percentage < 50
+            || last_reminder.is_some_and(|last| {
+                last.canonical_model == canonical_model
+                    && last.context_limit == self.context_limit
+                    && last.percentage >= percentage
+            })
+        {
+            return None;
+        }
+        Some(percentage)
+    }
+
     pub fn is_available(&self) -> bool {
         self.context_limit > 0
     }
@@ -161,30 +152,11 @@ impl ContextSnapshot {
                 message: "The compacted conversation exceeds the selected model input limit."
                     .into(),
                 response_body: String::new(),
+                detail: None,
             });
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextReminderCheckpoint {
-    pub canonical_model: String,
-    pub context_limit: i32,
-    pub percentage: i32,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextCompaction {
-    pub instructions: String,
-    pub reduced: bool,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TokenCalibration {
-    selector: Option<String>,
-    estimated_input_tokens: i64,
-    actual_input_tokens: i32,
 }
 
 impl TokenCalibration {
@@ -259,182 +231,11 @@ impl From<OutputTokenError> for Error {
             code: ErrorCode::InvalidOperation,
             message: value.to_string(),
             response_body: String::new(),
+            detail: None,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ContextCadenceError {
-    EmptyCanonicalModel,
-    NegativeEffectiveHistorySize,
-}
-
-impl fmt::Display for ContextCadenceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::EmptyCanonicalModel => "canonical model must not be empty or whitespace",
-            Self::NegativeEffectiveHistorySize => "effective history size must not be negative",
-        })
-    }
-}
-
-impl std::error::Error for ContextCadenceError {}
-
-impl From<ContextCadenceError> for Error {
-    fn from(value: ContextCadenceError) -> Self {
-        Self {
-            kind: ErrorKind::Failed,
-            code: ErrorCode::Unexpected,
-            message: value.to_string(),
-            response_body: String::new(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ContextCadence {
-    canonical_model: Option<String>,
-    context_window: Option<i32>,
-    effective_history_size: i64,
-    observed_band: i32,
-    reported_band: i32,
-    suppress_next_increase: bool,
-    initialized: bool,
-    checkpoint: Option<ContextReminderCheckpoint>,
-    restored: bool,
-}
-
-impl ContextCadence {
+impl ContextReminderCheckpoint {
     pub const NOTIFICATION_INTERVAL: i32 = 10;
-
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn band(snapshot: &ContextSnapshot) -> Option<i32> {
-        snapshot
-            .usage_percent
-            .filter(|percentage| *percentage > 0)
-            .map(|percentage| percentage / Self::NOTIFICATION_INTERVAL)
-    }
-
-    pub fn restore(&mut self, checkpoint: Option<ContextReminderCheckpoint>) {
-        self.checkpoint = checkpoint;
-        self.restored = true;
-    }
-
-    pub fn is_restored(&self) -> bool {
-        self.restored
-    }
-
-    pub fn observe(
-        &mut self,
-        snapshot: &ContextSnapshot,
-        canonical_model: &str,
-        effective_history_size: i64,
-    ) -> Result<Option<i32>, ContextCadenceError> {
-        Self::validate_observation(canonical_model, effective_history_size)?;
-        let band = Self::band(snapshot).unwrap_or(0);
-        if !self.initialized {
-            let reported_band = self
-                .checkpoint
-                .as_ref()
-                .filter(|checkpoint| {
-                    checkpoint.canonical_model == canonical_model
-                        && checkpoint.context_limit == snapshot.context_limit
-                })
-                .map_or(0, |checkpoint| {
-                    checkpoint.percentage / Self::NOTIFICATION_INTERVAL
-                });
-            self.set_state(
-                snapshot,
-                canonical_model,
-                effective_history_size,
-                band,
-                reported_band,
-            );
-            self.checkpoint = None;
-            return Ok(None);
-        }
-        if self.canonical_model.as_deref() != Some(canonical_model)
-            || self.context_window != Some(snapshot.context_limit)
-        {
-            self.set_state(snapshot, canonical_model, effective_history_size, band, 0);
-            return Ok(None);
-        }
-        if effective_history_size < self.effective_history_size {
-            self.set_state(
-                snapshot,
-                canonical_model,
-                effective_history_size,
-                band,
-                band,
-            );
-            self.suppress_next_increase = true;
-            return Ok(None);
-        }
-        self.effective_history_size = effective_history_size;
-        if band <= self.observed_band {
-            return Ok(None);
-        }
-        if self.suppress_next_increase {
-            self.suppress_next_increase = false;
-            self.observed_band = band;
-            return Ok(None);
-        }
-        self.observed_band = band;
-        if band * Self::NOTIFICATION_INTERVAL < 50 || band <= self.reported_band {
-            return Ok(None);
-        }
-        self.reported_band = band;
-        Ok(Some(band * Self::NOTIFICATION_INTERVAL))
-    }
-
-    pub fn acknowledge(
-        &mut self,
-        snapshot: &ContextSnapshot,
-        canonical_model: &str,
-        effective_history_size: i64,
-    ) -> Result<(), ContextCadenceError> {
-        Self::validate_observation(canonical_model, effective_history_size)?;
-        let band = Self::band(snapshot).unwrap_or(0);
-        self.set_state(
-            snapshot,
-            canonical_model,
-            effective_history_size,
-            band,
-            band,
-        );
-        Ok(())
-    }
-
-    fn set_state(
-        &mut self,
-        snapshot: &ContextSnapshot,
-        canonical_model: &str,
-        effective_history_size: i64,
-        observed_band: i32,
-        reported_band: i32,
-    ) {
-        self.canonical_model = Some(canonical_model.to_owned());
-        self.context_window = Some(snapshot.context_limit);
-        self.effective_history_size = effective_history_size;
-        self.observed_band = observed_band;
-        self.reported_band = reported_band;
-        self.suppress_next_increase = false;
-        self.initialized = true;
-    }
-
-    fn validate_observation(
-        canonical_model: &str,
-        effective_history_size: i64,
-    ) -> Result<(), ContextCadenceError> {
-        if canonical_model.trim().is_empty() {
-            return Err(ContextCadenceError::EmptyCanonicalModel);
-        }
-        if effective_history_size < 0 {
-            return Err(ContextCadenceError::NegativeEffectiveHistorySize);
-        }
-        Ok(())
-    }
 }

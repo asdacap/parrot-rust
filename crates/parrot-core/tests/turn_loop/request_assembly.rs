@@ -1,6 +1,45 @@
 use super::*;
 
 #[test]
+fn state_supplies_fresh_raw_instructions_on_each_request() {
+    let mut state = MemoryState::new([
+        Reply::final_response("candidate"),
+        Reply::final_response("answer"),
+    ]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["retry".into()]);
+    state.request().renderings = ["first state instructions", "updated state instructions"]
+        .into_iter()
+        .map(|instructions| RenderedContext {
+            instructions: instructions.into(),
+            maximum_output_tokens: 100,
+            messages: Vec::new(),
+        })
+        .collect();
+
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+
+    state.budget = TurnBudget::new(state.unlimited);
+
+    assert_eq!(
+        finish(run(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
+        Ok(Outcome::Completed("answer".into()))
+    );
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].instructions, "first state instructions");
+    assert_eq!(requests[1].instructions, "updated state instructions");
+}
+
+#[test]
 fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparation() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.model = "provider/model-with-options".into();
@@ -189,7 +228,7 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
 
 #[test]
 fn context_preparation_and_message_read_errors_stop_before_provider_invocation() {
-    for stage in ["render", "messages"] {
+    for stage in ["instruction_state", "render", "messages"] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
         state.fail_at = Some(stage);
         assert_eq!(state.run(), Err(Error::failed(stage)));
@@ -202,4 +241,71 @@ fn context_preparation_and_message_read_errors_stop_before_provider_invocation()
             stage == "messages"
         );
     }
+}
+
+#[test]
+fn prompt_template_configuration_errors_stop_before_provider_invocation() {
+    let mut state = MemoryState::new([Reply::final_response("not invoked")]);
+    state.fail_at = Some("prompt_templates");
+
+    assert_eq!(state.run(), Err(Error::failed("prompt_templates")));
+    assert!(state.provider.requests.lock().unwrap().is_empty());
+    assert!(state.tools.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_templates() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.request().instructions = "raw system instructions".into();
+    state.prompt_templates = vec![
+        ("memory:00-list".into(), ConfigKey::AgentScratchTemplate),
+        ("memory:10-scalar".into(), ConfigKey::AgentHistoryTemplate),
+    ];
+    state.template_arguments.insert(
+        "memory:00-list".into(),
+        vec![
+            ("title".into(), serde_json::json!("literal {{ untouched }}")),
+            ("items".into(), serde_json::json!(["alpha", "beta"])),
+        ],
+    );
+    state.template_arguments.insert(
+        "memory:10-scalar".into(),
+        vec![("content".into(), serde_json::json!("opaque {title}"))],
+    );
+    state
+        .template_engines
+        .insert("context.agent-scratch".into(), "minijinja".into());
+    state.skill_templates.lock().unwrap().extend([
+        (
+            "context.agent-scratch".into(),
+            "{{ title }}{% for item in items %}[{{ item }}]{% endfor %}".into(),
+        ),
+        (
+            "context.agent-history".into(),
+            "configured {content}".into(),
+        ),
+    ]);
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+
+    assert_eq!(
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
+        Ok(Outcome::Completed("answer".into()))
+    );
+
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].instructions,
+        "literal {{ untouched }}[alpha][beta]\n\nconfigured opaque {title}\n\nraw system instructions"
+    );
+    assert_eq!(
+        state.capture_request_estimates()[0].instructions,
+        requests[0].instructions
+    );
 }

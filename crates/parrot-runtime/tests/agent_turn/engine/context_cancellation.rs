@@ -71,10 +71,10 @@ impl SystemPrompt for FailingEpochPrompt {
         })
     }
 
-    fn build(
+    fn read_system_prompts(
         &mut self,
         _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<String> {
+    ) -> PromptResult<Vec<(String, String)>> {
         panic!("failed epoch must not be built")
     }
 }

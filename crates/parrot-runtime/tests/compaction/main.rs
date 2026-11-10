@@ -1,4 +1,3 @@
-mod cadence;
 mod context;
 mod execution;
 
@@ -497,38 +496,7 @@ fn spill_plans_only_complete_assistant_tool_groups_and_preserves_watermark() {
     );
 }
 #[test]
-fn cadence_and_retained_budget_are_the_existing_domain_values() {
-    let mut cadence = ContextCadence::new();
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::new(40, 100, Some(40), 90),
-                "provider/model",
-                1
-            )
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::new(51, 100, Some(51), 90),
-                "provider/model",
-                2
-            )
-            .unwrap(),
-        Some(50)
-    );
-    assert_eq!(
-        cadence
-            .observe(
-                &ContextSnapshot::new(59, 100, Some(59), 90),
-                "provider/model",
-                3
-            )
-            .unwrap(),
-        None
-    );
+fn retained_budget_preserves_reservation_lifecycle() {
     let budget = RetainedAgentBudget::new(1);
     let reservation = budget.reserve().unwrap();
     assert!(budget.reserve().is_err());
@@ -537,6 +505,27 @@ fn cadence_and_retained_budget_are_the_existing_domain_values() {
     assert!(budget.reserve().is_err());
     reservation.release();
     assert!(budget.reserve().is_ok());
+}
+
+#[test]
+fn original_retained_budget_exact_once_pending_commit_rollback_release() {
+    let budget = RetainedAgentBudget::new(2);
+    let pending = budget.reserve().unwrap();
+    let retained = budget.reserve().unwrap();
+    retained.commit();
+    retained.commit();
+    assert!(budget.reserve().is_err());
+    pending.rollback();
+    pending.rollback();
+    let replacement = budget.reserve().unwrap();
+    replacement.commit();
+    replacement.rollback();
+    assert!(budget.reserve().is_err());
+    retained.release();
+    retained.release();
+    let final_reservation = budget.reserve().unwrap();
+    final_reservation.rollback();
+    replacement.release();
 }
 
 #[test]

@@ -35,18 +35,6 @@ impl ContextStatus for RacingStatus {
             Ok("fitted".into())
         })
     }
-    fn observe_fitted<'a>(
-        &'a self,
-        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            parrot_core::compaction::fit_status(estimate, |context| async move {
-                self.observe(&context, cancellation).await
-            })
-            .await
-        })
-    }
 }
 
 #[tokio::test]

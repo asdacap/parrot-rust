@@ -414,13 +414,13 @@ impl SystemPrompt for EpochProduct {
             Ok(())
         })
     }
-    fn build(
+    fn read_system_prompts(
         &mut self,
         _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<String> {
+    ) -> PromptResult<Vec<(String, String)>> {
         assert!(!self.sampling);
         assert!(self.sampled.load(Ordering::SeqCst) > 0);
-        Ok("instructions".into())
+        Ok(vec![("test:instructions".into(), "instructions".into())])
     }
 }
 struct Status {

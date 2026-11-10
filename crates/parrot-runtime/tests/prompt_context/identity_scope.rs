@@ -29,7 +29,12 @@ fn scope_context_renders_only_effective_changes_from_ancestors_to_self() {
             ..identity()
         })
         .unwrap();
-    assert!(child.context(&templates).unwrap().ends_with(&rendered));
+    assert!(
+        render_agent_identity(&child, &templates)
+            .unwrap()
+            .1
+            .ends_with(&rendered)
+    );
     assert!(!planner.format(1).unwrap().contains("Inspect"));
 }
 #[test]

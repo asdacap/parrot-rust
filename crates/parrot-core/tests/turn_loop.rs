@@ -1,13 +1,14 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionFeedback, Content, ContextCadence, ContextCompaction,
-    ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
-    ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, FinishReason,
-    InputAdmission, Message, Outcome, PendingMessage, Preparation, PromotedInput, Provider,
-    ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role, Skill, SkillContent,
-    SkillMention, SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
-    ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
+    BoxFuture, CancellationToken, CompletionFeedback, ConfigKey, ConfigValue, Content,
+    ContextCompaction, ContextConfiguration, ContextModel, ContextReminderCheckpoint,
+    ContextSnapshot, ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind,
+    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PendingMessage, PendingPrompt,
+    PromotedInput, PromptPublication, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
+    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus,
+    Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
-    parse_skill_mentions, run, run_turn,
+    parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -28,6 +29,8 @@ mod compaction_dependencies;
 mod completion_policy;
 #[path = "turn_loop/context_preparation.rs"]
 mod context_preparation;
+#[path = "turn_loop/provider_cancellation.rs"]
+mod provider_cancellation;
 #[path = "turn_loop/request_assembly.rs"]
 mod request_assembly;
 #[path = "turn_loop/skills.rs"]
@@ -42,6 +45,49 @@ mod compaction_support;
 
 use cancellation::CancellationSource;
 use compaction_dependencies::MemoryCompaction;
+
+struct MemoryEventPublisher {
+    compacting: Arc<AtomicBool>,
+}
+
+impl EventPublisher for MemoryEventPublisher {
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.compacting.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+    fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.compacting.store(false, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+
+async fn run(
+    states: &mut MemoryState,
+    tools: &dyn Tools,
+    provider: &dyn Provider,
+    cancellation: CancellationToken<'_>,
+) -> Result<Outcome, Error> {
+    let publisher = MemoryEventPublisher {
+        compacting: states.compacting.clone(),
+    };
+    parrot_core::run(states, tools, provider, &publisher, cancellation).await
+}
+
+async fn run_turn(
+    states: &mut MemoryState,
+    tools: &dyn Tools,
+    provider: &dyn Provider,
+    cancellation: CancellationToken<'_>,
+) -> Result<Outcome, Error> {
+    let publisher = MemoryEventPublisher {
+        compacting: states.compacting.clone(),
+    };
+    parrot_core::run_turn(states, tools, provider, &publisher, cancellation).await
+}
 
 struct ThreadWake(thread::Thread);
 impl Wake for ThreadWake {
@@ -194,9 +240,83 @@ struct MemoryProvider {
     replies: Arc<Mutex<VecDeque<Reply>>>,
     fail_at: Arc<Mutex<Option<&'static str>>>,
     requests: Arc<Mutex<Vec<ProviderRequest>>>,
+    request: Arc<Mutex<MemoryRequestData>>,
+    compaction: Arc<Mutex<MemoryCompaction>>,
+    compacting: Arc<AtomicBool>,
+    cancellation: Arc<CancellationSource>,
 }
 impl Provider for MemoryProvider {
-    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[ToolDefinition],
+        messages: &[Message],
+    ) -> Result<i64, Error> {
+        if self.compacting.load(Ordering::SeqCst) {
+            return self
+                .compaction
+                .lock()
+                .unwrap()
+                .effects
+                .estimate_context_tokens(instructions, definitions, messages);
+        }
+        self.trace.step("estimate", *self.fail_at.lock().unwrap())?;
+        let mut request = self.request.lock().unwrap();
+        let tokens = request
+            .estimate_script
+            .pop_front()
+            .unwrap_or(request.estimated_input_tokens);
+        let request_index = request.rendered_instructions.len().saturating_sub(1);
+        request.estimates.push(InputEstimate {
+            request_index,
+            instructions: instructions.into(),
+            definitions: definitions.to_vec(),
+            messages: messages.to_vec(),
+            tokens,
+        });
+        Ok(tokens)
+    }
+    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
+        self.compaction
+            .lock()
+            .unwrap()
+            .effects
+            .estimate_tokens(messages)
+    }
+    fn estimate_summary_tokens(
+        &self,
+        preceding_summary: &str,
+        chunk_tokens: i64,
+        next_group: &[Message],
+    ) -> Result<i64, Error> {
+        self.compaction
+            .lock()
+            .unwrap()
+            .effects
+            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
+    }
+    fn summarize<'a, 'c>(
+        &'a self,
+        request: ProviderRequest,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, Error>>
+    where
+        'c: 'a,
+    {
+        let provider = self.compaction.lock().unwrap().provider.clone();
+        Box::pin(
+            async move { parrot_core::Provider::summarize(&provider, request, cancellation).await },
+        )
+    }
+
+    fn invoke<'a, 'c>(
+        &'a self,
+        request: ProviderRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    where
+        'c: 'a,
+    {
         Box::pin(async move {
             self.trace.step("invoke", *self.fail_at.lock().unwrap())?;
             self.requests.lock().unwrap().push(request);
@@ -235,7 +355,6 @@ struct InputEstimate {
 struct MemoryContext {
     configuration: ContextConfiguration,
     calibration: TokenCalibration,
-    cadence: ContextCadence,
 }
 
 struct CompactedContext {
@@ -256,12 +375,12 @@ struct MemoryRequestData {
     renderings: VecDeque<RenderedContext>,
 }
 
-#[derive(Clone)]
-struct MemoryPreparation {
-    trace: Trace,
-    request: Arc<Mutex<MemoryRequestData>>,
-    skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
-    fail_at: Option<&'static str>,
+#[derive(Default)]
+struct MemoryPromptData {
+    exit_blockers: VecDeque<Vec<String>>,
+    checkpoint: Option<ContextReminderCheckpoint>,
+    pending_prompts: VecDeque<Message>,
+    acknowledged_prompts: Vec<ContextSnapshot>,
 }
 
 struct MemoryState {
@@ -271,14 +390,14 @@ struct MemoryState {
     skill_reads: Mutex<Vec<String>>,
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
+    prompts: Arc<Mutex<MemoryPromptData>>,
     skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
     recorded_input_contexts: Vec<DerivedContext>,
     tools: MemoryTools,
     provider: MemoryProvider,
-    exit_blockers: VecDeque<Vec<String>>,
     completion_feedback: Vec<CompletionFeedback>,
     final_requests: Vec<usize>,
-    retries: Vec<(RetryReason, i32)>,
+    retries: Vec<(String, i32)>,
     recorded_tools: Vec<ProviderResponse>,
     applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
@@ -288,19 +407,10 @@ struct MemoryState {
     include_router_metadata: bool,
     compactions: VecDeque<CompactedContext>,
     compacted_definitions: Vec<Vec<ToolDefinition>>,
-    checkpoint: Option<ContextReminderCheckpoint>,
-    cadence_writes: Vec<ContextCadence>,
-    reminder: String,
-    rendered_reminders: Mutex<Vec<(ContextSnapshot, i32)>>,
     reminder_appends: Vec<(ContextReminderCheckpoint, String, i32)>,
     append_reminder: bool,
     reminder_publications: usize,
-    pending_prompts: VecDeque<Message>,
-    pending_prompt: Option<Message>,
-    pending_reminder: Option<(ContextReminderCheckpoint, String, i32)>,
     recorded_prompts: Vec<Message>,
-    acknowledged_prompts: Vec<ContextSnapshot>,
-    prompt_inserted: bool,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(PendingMessage, Message)>,
     next_input: usize,
@@ -315,18 +425,22 @@ struct MemoryState {
     recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
     fitted_statuses: Vec<String>,
     fail_at: Option<&'static str>,
+    budget: TurnBudget,
+    budget_read_error: Option<Error>,
+    budget_write_error: Option<Error>,
+    budget_writes: usize,
+    compaction: Arc<Mutex<MemoryCompaction>>,
+    compacting: Arc<AtomicBool>,
+    prompt_templates: Vec<(String, ConfigKey)>,
+    template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
+    template_engines: BTreeMap<String, String>,
 }
 impl MemoryState {
+    fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
+        self.prompts.lock().unwrap()
+    }
     fn request(&self) -> std::sync::MutexGuard<'_, MemoryRequestData> {
         self.request.lock().unwrap()
-    }
-    fn preparation(&self) -> MemoryPreparation {
-        MemoryPreparation {
-            trace: self.trace.clone(),
-            request: self.request.clone(),
-            skill_templates: self.skill_templates.clone(),
-            fail_at: self.fail_at,
-        }
     }
     fn new(replies: impl IntoIterator<Item = Reply>) -> Self {
         let trace = Trace::default();
@@ -347,19 +461,42 @@ impl MemoryState {
                     context_limit: None,
                 },
                 calibration: TokenCalibration::default(),
-                cadence: ContextCadence::new(),
             },
             instructions: "core request".into(),
             messages: Vec::new(),
             renderings: VecDeque::new(),
         }));
+        let cancellation = Arc::new(CancellationSource::default());
+        let compaction = Arc::new(Mutex::new(MemoryCompaction::default()));
+        let compacting = Arc::new(AtomicBool::new(false));
         let mut state = Self {
             skill_rows: Vec::new(),
             steers_after_results: VecDeque::new(),
             skill_lookups: Mutex::default(),
             skill_reads: Mutex::default(),
-            request,
+            request: request.clone(),
+            prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
+                (
+                    "agent-session.context-reminder".into(),
+                    "configured reminder".into(),
+                ),
+                (
+                    "agent-session.context-limit-reminder".into(),
+                    "configured reminder".into(),
+                ),
+                (
+                    "agent-session.truncated-tool-call".into(),
+                    "truncated tool calls".into(),
+                ),
+                (
+                    "agent-session.invalid-tool-call".into(),
+                    "invalid tool calls".into(),
+                ),
+                (
+                    "agent-session.final-request".into(),
+                    "Finish the current turn.".into(),
+                ),
                 (
                     "context.skill-selected".into(),
                     "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
@@ -388,8 +525,11 @@ impl MemoryState {
                 replies: Arc::new(Mutex::new(replies.into_iter().collect())),
                 fail_at: Arc::default(),
                 requests: Arc::default(),
+                request,
+                compaction: compaction.clone(),
+                compacting: compacting.clone(),
+                cancellation: cancellation.clone(),
             },
-            exit_blockers: VecDeque::new(),
             completion_feedback: Vec::new(),
             final_requests: Vec::new(),
             retries: Vec::new(),
@@ -402,25 +542,16 @@ impl MemoryState {
             include_router_metadata: false,
             compactions: VecDeque::new(),
             compacted_definitions: Vec::new(),
-            checkpoint: None,
-            cadence_writes: Vec::new(),
-            reminder: "configured reminder".into(),
-            rendered_reminders: Mutex::default(),
             reminder_appends: Vec::new(),
             append_reminder: true,
             reminder_publications: 0,
-            pending_prompts: VecDeque::new(),
-            pending_prompt: None,
-            pending_reminder: None,
             recorded_prompts: Vec::new(),
-            acknowledged_prompts: Vec::new(),
-            prompt_inserted: false,
             last_turn: None,
             pending_messages: VecDeque::new(),
             next_input: 0,
             turn_reads: AtomicUsize::new(0),
             admissions: Vec::new(),
-            cancellation: Arc::default(),
+            cancellation,
             unlimited: false,
             maximum: 10,
             reduced: true,
@@ -429,6 +560,15 @@ impl MemoryState {
             recorded_compactions: Vec::new(),
             fitted_statuses: Vec::new(),
             fail_at: None,
+            budget: TurnBudget::new(false),
+            budget_read_error: None,
+            budget_write_error: None,
+            budget_writes: 0,
+            compaction,
+            compacting,
+            prompt_templates: Vec::new(),
+            template_arguments: BTreeMap::new(),
+            template_engines: BTreeMap::new(),
         };
         state.enqueue_message(Delivery::Queue, "question");
         state
@@ -497,18 +637,7 @@ impl MemoryState {
             contents: vec![Content::Text("question".into())],
             ..Message::default()
         }];
-        request.context.cadence.restore(None);
-        let configuration = request.context.configuration.clone();
-        let message_count = request.messages.len() as i64;
-        request
-            .context
-            .cadence
-            .observe(
-                &ContextSnapshot::estimate(estimate, &configuration),
-                &configuration.model.canonical_model,
-                message_count,
-            )
-            .unwrap();
+        request.estimated_input_tokens = estimate;
     }
     fn capture_catalogs(&self) -> Vec<Vec<String>> {
         self.provider
@@ -540,100 +669,286 @@ impl MemoryState {
         let provider = self.provider.clone();
         self.run_with(&tools, &provider)
     }
+    fn apply_options(&mut self, options: &TurnOptions) {
+        self.maximum = options.maximum_requests;
+        self.model = options.model.clone();
+        self.reasoning = options.reasoning.clone();
+        self.provider_preferences = options.provider_preferences.clone();
+        self.include_router_metadata = options.include_router_metadata;
+    }
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
-        let mut compaction =
+        *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
-        self.run_with_dependencies(tools, provider, &mut compaction.dependencies())
-    }
-    fn run_with_compaction(
-        &mut self,
-        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
-    ) -> Result<Outcome, Error> {
-        let tools = self.tools.clone();
-        let provider = self.provider.clone();
-        self.run_with_dependencies(&tools, &provider, compaction)
-    }
-    fn run_with_dependencies(
-        &mut self,
-        tools: &dyn Tools,
-        provider: &dyn Provider,
-        compaction: &mut parrot_core::compaction::CompactionDependencies<'_>,
-    ) -> Result<Outcome, Error> {
-        let cancellation = self.cancellation.clone();
-        let is_cancelled = || cancellation.is_cancelled();
-        let cancelled = || cancellation.cancelled();
-        let options = self.capture_options();
-        let mut budget = TurnBudget::new(self.unlimited);
-        let mut preparation = self.preparation();
+        self.budget = TurnBudget::new(self.unlimited);
+        let source = self.cancellation.clone();
         finish(run(
             self,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction,
-            },
             tools,
             provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
+            CancellationToken::new(source.as_ref()),
         ))
     }
-}
-impl Preparation for MemoryPreparation {
-    fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error> {
-        self.trace.step("render_template", self.fail_at)?;
-        let templates = self.skill_templates.lock().unwrap();
-        let template = templates
-            .get(key)
-            .ok_or_else(|| Error::failed("unknown template"))?;
-        Ok(arguments
-            .iter()
-            .fold(template.clone(), |text, (name, value)| {
-                text.replace(&format!("{{{name}}}"), value)
-            }))
+    fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
+        std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
+        self.budget = TurnBudget::new(self.unlimited);
+        let tools = self.tools.clone();
+        let provider = self.provider.clone();
+        let result = finish(run(
+            self,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref()),
+        ));
+        std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
+        result
     }
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>> {
+}
+impl States for MemoryState {
+    fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
         Box::pin(async move {
-            self.trace.step("render", self.fail_at)?;
-            let mut request = self.request.lock().unwrap();
-            if let Some(rendered) = request.renderings.pop_front() {
+            match key {
+                ConfigKey::Turn => Ok(ConfigValue::Turn(self.capture_options())),
+                ConfigKey::Context => {
+                    self.trace.step("context_configuration", self.fail_at)?;
+                    Ok(ConfigValue::Context(
+                        self.request().context.configuration.clone(),
+                    ))
+                }
+                ConfigKey::Compaction => Ok(ConfigValue::Compaction(
+                    self.compaction.lock().unwrap().configuration.clone(),
+                )),
+                ConfigKey::SystemPromptBindings => {
+                    if self.fail_at == Some("prompt_templates") {
+                        return Err(Error::failed("prompt_templates"));
+                    }
+                    Ok(ConfigValue::SystemPromptBindings(
+                        self.prompt_templates.clone(),
+                    ))
+                }
+                key => {
+                    let key = key
+                        .get_prompt_template_id()
+                        .ok_or_else(|| Error::unsupported("configuration"))?;
+                    if key == "agent-session.context-reminder"
+                        || key == "agent-session.context-limit-reminder"
+                    {
+                        self.trace.step("reminder", self.fail_at)?;
+                    }
+                    self.trace.step("render_template", self.fail_at)?;
+                    let templates = self.skill_templates.lock().unwrap();
+                    let text = templates
+                        .get(key)
+                        .ok_or_else(|| Error::failed("unknown template"))?;
+                    let allowed = [
+                        "name",
+                        "path",
+                        "content",
+                        "message",
+                        "limit_bytes",
+                        "percentage",
+                        "estimated_tokens",
+                        "context_limit",
+                        "notification_interval",
+                        "trigger",
+                        "trigger_tokens",
+                        "items",
+                        "title",
+                        "instruction",
+                        "skills",
+                        "aliases",
+                        "depth",
+                        "session_id",
+                        "parent_session_id",
+                        "parent_session_name",
+                        "agent_name",
+                    ]
+                    .map(str::to_owned);
+                    let engine = self
+                        .template_engines
+                        .get(key)
+                        .map_or("scalar", String::as_str);
+                    Ok(ConfigValue::PromptTemplate(Arc::new(
+                        PromptTemplate::compile(
+                            &format!("prompt_templates.{key}"),
+                            text,
+                            engine,
+                            &allowed,
+                            &[],
+                        )?,
+                    )))
+                }
+            }
+        })
+    }
+    fn read_turn_budget(&self) -> Result<TurnBudget, Error> {
+        if let Some(error) = &self.budget_read_error {
+            return Err(error.clone());
+        }
+        Ok(self.budget.clone())
+    }
+    fn write_turn_budget(&mut self, budget: TurnBudget) -> Result<(), Error> {
+        self.budget_writes += 1;
+        if let Some(error) = &self.budget_write_error {
+            return Err(error.clone());
+        }
+        self.budget = budget;
+        Ok(())
+    }
+    fn get_last_context_reminder(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
+        Box::pin(async move {
+            self.trace.step("checkpoint", self.fail_at)?;
+            Ok(self.prompts().checkpoint.clone())
+        })
+    }
+    fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
+        Box::pin(async move {
+            self.step("pending_prompt")?;
+            Ok(self.prompts().pending_prompts.front().cloned())
+        })
+    }
+    fn acknowledge_pending_prompt<'a>(
+        &'a mut self,
+        prompt: &'a PendingPrompt,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("acknowledge_prompt")?;
+            self.prompts().acknowledged_prompts.push(context.clone());
+            if let PendingPrompt::Message(_) = prompt {
+                self.prompts().pending_prompts.pop_front();
+            }
+            Ok(())
+        })
+    }
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+        Box::pin(async move {
+            self.step("exit_blockers")?;
+            Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
+        })
+    }
+    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn render_status<'a, 'c>(
+        &'a self,
+        context: ContextSnapshot,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<String, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            finish(
+                self.compaction
+                    .lock()
+                    .unwrap()
+                    .status
+                    .render(context, cancellation),
+            )
+        })
+    }
+    fn spill_group<'a, 'c>(
+        &'a self,
+        messages: &'a [Message],
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            finish(
+                self.compaction
+                    .lock()
+                    .unwrap()
+                    .effects
+                    .spill_group(messages, cancellation),
+            )
+        })
+    }
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        progress: parrot_core::CompactionProgress,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            finish(
+                self.compaction
+                    .lock()
+                    .unwrap()
+                    .effects
+                    .report_progress(progress, cancellation),
+            )
+        })
+    }
+
+    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async move {
+            self.step("instruction_state")?;
+            let compacting = self.compacting.load(Ordering::SeqCst);
+            if !compacting {
+                self.trace.step("render", self.fail_at)?;
+            }
+            let mut request = self.request();
+            if let Some(rendered) = (!compacting)
+                .then(|| request.renderings.pop_front())
+                .flatten()
+            {
                 request.instructions = rendered.instructions;
                 request.context.configuration.model.maximum_output_tokens =
                     rendered.maximum_output_tokens;
                 request.messages = rendered.messages;
             }
             let instructions = request.instructions.clone();
-            request.rendered_instructions.push(instructions);
-            Ok(request.instructions.clone())
+            if !compacting {
+                request.rendered_instructions.push(instructions.clone());
+            }
+            Ok(vec![("memory:instructions".into(), instructions)])
         })
     }
-    fn estimate_input_tokens<'a>(
+    fn read_template_arguments<'a>(
         &'a self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
-        messages: &'a [Message],
-    ) -> BoxFuture<'a, Result<i64, Error>> {
+        key: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>> {
         Box::pin(async move {
-            self.trace.step("estimate", self.fail_at)?;
-            let mut request = self.request.lock().unwrap();
-            let tokens = request
-                .estimate_script
-                .pop_front()
-                .unwrap_or(request.estimated_input_tokens);
-            let request_index = request.rendered_instructions.len().saturating_sub(1);
-            request.estimates.push(InputEstimate {
-                request_index,
-                instructions: instructions.into(),
-                definitions: definitions.to_vec(),
-                messages: messages.to_vec(),
-                tokens,
-            });
-            Ok(tokens)
+            Ok(self
+                .template_arguments
+                .get(key)
+                .cloned()
+                .unwrap_or_default())
         })
     }
-}
-
-impl States for MemoryState {
+    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn read_model_aliases(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn read_agent_identity(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async { Ok(String::new()) })
+    }
+    fn read_skill_catalog(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],
@@ -783,137 +1098,75 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn read_context_configuration(&self) -> BoxFuture<'_, Result<ContextConfiguration, Error>> {
-        Box::pin(async move {
-            self.trace.step("context_configuration", self.fail_at)?;
-            Ok(self.request().context.configuration.clone())
-        })
-    }
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
         Box::pin(async move {
             self.trace.step("token_calibration", self.fail_at)?;
             Ok(self.request().context.calibration.clone())
         })
     }
-    fn record_final_request(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+    fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             self.step("final_request")?;
             let request_count = self.request().rendered_instructions.len();
             self.final_requests.push(request_count);
+            let message = Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.into())],
+                ..Message::default()
+            };
+            self.request().messages.push(message);
             Ok(())
         })
     }
-    fn get_pending_prompt<'a>(
+    fn record_pending_prompt<'a>(
         &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<Message>, Error>> {
-        Box::pin(async move {
-            self.step("pending_prompt")?;
-            self.pending_prompt = None;
-            self.pending_reminder = None;
-            self.prompt_inserted = false;
-            if let Some(prompt) = self.pending_prompts.front() {
-                self.pending_prompt = Some(prompt.clone());
-                return Ok(self.pending_prompt.clone());
-            }
-            self.step("context_cadence")?;
-            let mut cadence = self.request().context.cadence.clone();
-            if !cadence.is_restored() {
-                self.step("checkpoint")?;
-                cadence.restore(self.checkpoint.clone());
-            }
-            let (canonical_model, message_count) = {
-                let request = self.request();
-                (
-                    request.context.configuration.model.canonical_model.clone(),
-                    request.messages.len() as i64,
-                )
-            };
-            let observation = cadence.observe(context, &canonical_model, message_count);
-            self.step("cadence")?;
-            self.cadence_writes.push(cadence.clone());
-            self.request().context.cadence = cadence;
-            let Some(percentage) = observation? else {
-                return Ok(None);
-            };
-            self.step("reminder")?;
-            self.rendered_reminders
-                .lock()
-                .unwrap()
-                .push((context.clone(), percentage));
-            let canonical_model = self
-                .request()
-                .context
-                .configuration
-                .model
-                .canonical_model
-                .clone();
-            self.pending_reminder = Some((
-                ContextReminderCheckpoint {
-                    canonical_model,
-                    context_limit: context.context_limit,
-                    percentage,
-                },
-                self.reminder.clone(),
-                context.usage_percent.unwrap_or_default(),
-            ));
-            self.pending_prompt = Some(Message {
-                role: Role::System,
-                contents: vec![Content::Text(self.reminder.clone())],
-                ..Message::default()
-            });
-            Ok(self.pending_prompt.clone())
-        })
-    }
-    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
+        prompt: &'a PendingPrompt,
+    ) -> BoxFuture<'a, Result<Option<PromptPublication>, Error>> {
         Box::pin(async move {
             self.step("record_prompt")?;
-            if let Some(reminder) = self.pending_reminder.clone() {
-                self.step("append_reminder")?;
-                self.reminder_appends.push(reminder.clone());
-                if !self.append_reminder {
-                    return Ok(false);
+            let kind = match prompt {
+                PendingPrompt::ContextReminder {
+                    checkpoint,
+                    content,
+                    observed_percentage,
+                } => {
+                    self.step("append_reminder")?;
+                    self.reminder_appends.push((
+                        checkpoint.clone(),
+                        content.clone(),
+                        *observed_percentage,
+                    ));
+                    if !self.append_reminder {
+                        return Ok(None);
+                    }
+                    self.prompts().checkpoint = Some(checkpoint.clone());
+                    "context_reminder"
                 }
-                self.checkpoint = Some(reminder.0);
-            } else {
-                self.pending_prompts.pop_front().unwrap();
-            }
-            let message = self.pending_prompt.clone().unwrap();
+                PendingPrompt::Message(_) => "prompt",
+            };
+            let message = prompt.render_message();
             self.recorded_prompts.push(message.clone());
             self.request().messages.push(message.clone());
             self.append_turn_message(message);
-            self.prompt_inserted = true;
-            Ok(true)
+            Ok(Some(PromptPublication {
+                event_id: "memory-prompt".into(),
+                agent_session_id: "memory-session".into(),
+                kind: kind.into(),
+                notice: "prompt recorded".into(),
+            }))
         })
     }
-    fn acknowledge_prompt<'a>(
-        &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), Error>> {
+    fn publish_pending_prompt(
+        &mut self,
+        receipt: PromptPublication,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            self.step("acknowledge_prompt")?;
-            self.acknowledged_prompts.push(context.clone());
-            if self.pending_reminder.take().is_some() {
-                let mut cadence = self.request().context.cadence.clone();
-                let (canonical_model, message_count) = {
-                    let request = self.request();
-                    (
-                        request.context.configuration.model.canonical_model.clone(),
-                        request.messages.len() as i64,
-                    )
-                };
-                cadence.acknowledge(context, &canonical_model, message_count)?;
-                self.step("cadence")?;
-                self.cadence_writes.push(cadence.clone());
-                self.request().context.cadence = cadence;
-                if self.prompt_inserted {
-                    self.reminder_publications += 1;
-                    self.step("publish_reminder")?;
-                }
-            } else if self.prompt_inserted {
+            if receipt.kind == "context_reminder" {
+                self.reminder_publications += 1;
+                self.step("publish_reminder")?;
+            } else {
                 self.step("publish_prompt")?;
             }
-            self.pending_prompt = None;
             Ok(())
         })
     }
@@ -971,6 +1224,7 @@ impl States for MemoryState {
         result: Result<Option<parrot_core::compaction::FittedCompaction>, Error>,
     ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async move {
+            self.compacting.store(false, Ordering::SeqCst);
             self.step("compact")?;
             self.compacted_definitions.push(definitions.to_vec());
             self.request().instructions = instructions.into();
@@ -986,6 +1240,7 @@ impl States for MemoryState {
                 self.request().instructions = compacted.instructions;
                 self.request().messages = compacted.messages;
                 self.request().context = compacted.state;
+                self.prompts().checkpoint = None;
                 return Ok(ContextCompaction {
                     instructions: self.request().instructions.clone(),
                     reduced: compacted.reduced,
@@ -997,14 +1252,21 @@ impl States for MemoryState {
             })
         })
     }
-    fn record_retry(
-        &mut self,
-        reason: RetryReason,
+    fn record_retry<'a>(
+        &'a mut self,
+        content: &'a str,
         attempt: i32,
-    ) -> BoxFuture<'_, Result<(), Error>> {
+    ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             self.step("retry")?;
-            self.retries.push((reason, attempt));
+            self.retries.push((content.into(), attempt));
+            let message = Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.into())],
+                ..Message::default()
+            };
+            self.request().messages.push(message.clone());
+            self.append_turn_message(message);
             Ok(())
         })
     }
@@ -1029,12 +1291,6 @@ impl States for MemoryState {
             Ok(ToolCallReceipt {
                 assistant_sequence: i64::try_from(self.recorded_tools.len()).unwrap(),
             })
-        })
-    }
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
-        Box::pin(async move {
-            self.step("exit_blockers")?;
-            Ok(self.exit_blockers.pop_front().unwrap_or_default())
         })
     }
     fn record_completion_feedback(
@@ -1076,15 +1332,14 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
         [
             "catalog",
             "promote",
+            "instruction_state",
             "render",
             "messages",
             "context_configuration",
             "token_calibration",
             "estimate",
             "pending_prompt",
-            "context_cadence",
             "checkpoint",
-            "cadence",
             "messages",
             "context_configuration",
             "token_calibration",
@@ -1094,14 +1349,14 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "execute",
             "record_results",
             "promote",
+            "instruction_state",
             "render",
             "messages",
             "context_configuration",
             "token_calibration",
             "estimate",
             "pending_prompt",
-            "context_cadence",
-            "cadence",
+            "checkpoint",
             "messages",
             "context_configuration",
             "token_calibration",
@@ -1124,8 +1379,8 @@ fn invalid_and_truncated_tool_responses_retry_without_recording_or_executing_cal
     assert_eq!(
         state.retries,
         [
-            (RetryReason::TruncatedToolCalls, 1),
-            (RetryReason::InvalidToolCalls, 2),
+            ("truncated tool calls".into(), 1),
+            ("invalid tool calls".into(), 2),
         ]
     );
     assert!(
@@ -1196,24 +1451,15 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         state.maximum = 1;
         let tools = state.tools.clone();
         let provider = state.provider.clone();
-        let source = state.cancellation.clone();
-        let is_cancelled = || source.is_cancelled();
-        let cancelled = || source.cancelled();
-        let options = state.capture_options();
-        let mut budget = TurnBudget::new(disable_limits);
-        let mut preparation = state.preparation();
+
+        state.budget = TurnBudget::new(disable_limits);
+
         assert_eq!(
             finish(run(
                 &mut state,
-                &mut parrot_core::PreparationDependencies {
-                    request: &mut preparation,
-                    compaction: &mut MemoryCompaction::default().dependencies(),
-                },
                 &tools,
                 &provider,
-                &options,
-                &mut budget,
-                CancellationToken::new(&is_cancelled, &cancelled),
+                CancellationToken::new(provider.cancellation.as_ref())
             )),
             if disable_limits {
                 Ok(Outcome::Completed("answer".into()))
@@ -1221,7 +1467,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
                 Ok(Outcome::BudgetExhausted)
             }
         );
-        assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+        assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
         assert_eq!(
             state.request().rendered_instructions.len(),
             if disable_limits { 2 } else { 1 }
@@ -1320,10 +1566,11 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
     ]);
     state.maximum = 2;
     state
+        .prompts()
         .exit_blockers
         .push_back(vec!["unfinished goal".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+    assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
     assert_eq!(
         state
             .trace
@@ -1405,13 +1652,12 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     ]);
     state.maximum = 0;
     state.model = "unused/state-model".into();
-    state.exit_blockers.push_back(vec!["work remains".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["work remains".into()]);
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let token = CancellationToken::new(&is_cancelled, &cancelled);
     let options = TurnOptions {
         maximum_requests: 10,
         model: "first/model".into(),
@@ -1422,26 +1668,23 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         provider_preferences: " { \"raw\" : [1.2300] } ".into(),
         include_router_metadata: true,
     };
-    let mut budget = TurnBudget::new(false);
-    let mut preparation = state.preparation();
+    state.budget = TurnBudget::new(false);
+
     assert_eq!(
-        finish(run_turn(
-            &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
-            &tools,
-            &provider,
-            &options,
-            &mut budget,
-            token,
-        )),
+        finish({
+            state.apply_options(&options);
+            run_turn(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref()),
+            )
+        }),
         Ok(Outcome::Completed("first answer".into()))
     );
     assert_eq!(state.request().rendered_instructions.len(), 5);
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 5);
-    assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+    assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
     assert_eq!(state.applied_results.len(), 1);
     assert_eq!(state.completion_feedback.len(), 1);
     assert!(provider.requests.lock().unwrap().iter().all(|request| {
@@ -1463,20 +1706,17 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         include_router_metadata: false,
     };
     state.enqueue_message(Delivery::Queue, "second question");
-    let mut preparation = state.preparation();
+
     assert_eq!(
-        finish(run_turn(
-            &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
-            &tools,
-            &provider,
-            &options,
-            &mut budget,
-            token,
-        )),
+        finish({
+            state.apply_options(&options);
+            run_turn(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref()),
+            )
+        }),
         Ok(Outcome::Completed("second answer".into()))
     );
     {
@@ -1499,20 +1739,17 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 2);
 
     *tools.fail_at.lock().unwrap() = Some("catalog");
-    let mut preparation = state.preparation();
+
     assert_eq!(
-        finish(run(
-            &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
-            &tools,
-            &provider,
-            &options,
-            &mut budget,
-            token,
-        )),
+        finish({
+            state.apply_options(&options);
+            run(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref()),
+            )
+        }),
         Ok(Outcome::Completed(String::new()))
     );
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 7);
@@ -1532,24 +1769,15 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     assert!(state.trace.values().is_empty());
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let options = state.capture_options();
-    let source = state.cancellation.clone();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let mut budget = TurnBudget::new(false);
-    let mut preparation = state.preparation();
+
+    state.budget = TurnBudget::new(false);
+
     assert_eq!(
         finish(run_turn(
             &mut state,
-            &mut parrot_core::PreparationDependencies {
-                request: &mut preparation,
-                compaction: &mut MemoryCompaction::default().dependencies(),
-            },
             &tools,
             &provider,
-            &options,
-            &mut budget,
-            CancellationToken::new(&is_cancelled, &cancelled),
+            CancellationToken::new(provider.cancellation.as_ref())
         )),
         Err(Error::cancelled())
     );
@@ -1583,7 +1811,10 @@ fn adapter_errors_stop_at_the_failing_effect() {
         let mut state = MemoryState::new([reply]);
         state.fail_at = Some(stage);
         if stage == "completion_feedback" {
-            state.exit_blockers.push_back(vec!["answer the ask".into()]);
+            state
+                .prompts()
+                .exit_blockers
+                .push_back(vec!["answer the ask".into()]);
         }
         assert_eq!(state.run(), Err(Error::failed(stage)), "{stage}");
         assert_eq!(state.trace.values().last().unwrap(), stage);
@@ -1644,7 +1875,10 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
         Reply::tools("call7"),
     ]);
     state.maximum = 2;
-    state.exit_blockers.push_back(vec!["work remains".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.request().rendered_instructions.len(), 9);
     let catalogs = state.capture_catalogs();
@@ -1689,9 +1923,7 @@ fn tools_and_provider_operate_without_states() {
         arguments_json: " { \"a\" : 1 } ".into(),
     }];
     let source = CancellationSource::default();
-    let is_cancelled = || source.is_cancelled();
-    let cancelled = || source.cancelled();
-    let cancellation = CancellationToken::new(&is_cancelled, &cancelled);
+    let cancellation = CancellationToken::new(&source);
     let results = finish(tools.execute(
         calls.clone(),
         ToolCallReceipt {
@@ -1728,16 +1960,59 @@ fn tools_and_provider_operate_without_states() {
         ["read"]
     );
     let provider: &dyn Provider = &state.provider;
-    let response = finish(provider.invoke(ProviderRequest::default())).unwrap();
+    let response = finish(provider.invoke(
+        ProviderRequest::default(),
+        parrot_core::CancellationToken::uncancelled(),
+    ))
+    .unwrap();
     assert_eq!(response.assistant_text, "standalone");
     assert!(response.tool_calls.is_empty());
     assert!(state.provider.replies.lock().unwrap().is_empty());
     assert_eq!(state.trace.values(), ["catalog", "execute", "invoke"]);
 }
 
-struct EchoProvider;
+struct EchoProvider(MemoryProvider);
 impl Provider for EchoProvider {
-    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[ToolDefinition],
+        messages: &[Message],
+    ) -> Result<i64, Error> {
+        self.0
+            .estimate_input_tokens(instructions, definitions, messages)
+    }
+    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
+        self.0.estimate_tokens(messages)
+    }
+    fn estimate_summary_tokens(
+        &self,
+        preceding_summary: &str,
+        chunk_tokens: i64,
+        next_group: &[Message],
+    ) -> Result<i64, Error> {
+        self.0
+            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
+    }
+    fn summarize<'a, 'c>(
+        &'a self,
+        request: ProviderRequest,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, Error>>
+    where
+        'c: 'a,
+    {
+        self.0.summarize(request, cancellation)
+    }
+
+    fn invoke<'a, 'c>(
+        &'a self,
+        request: ProviderRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    where
+        'c: 'a,
+    {
         Box::pin(async move {
             assert_eq!(request.model, "memory/model");
             assert_eq!(
@@ -1768,7 +2043,7 @@ fn different_provider_implementations_share_the_same_states_tools_and_protocol()
     );
     states.enqueue_message(Delivery::Queue, "next question");
     assert_eq!(
-        states.run_with(&tools, &EchoProvider),
+        states.run_with(&tools, &EchoProvider(provider.clone())),
         Ok(Outcome::Completed("core request".into()))
     );
     assert!(states.provider.replies.lock().unwrap().is_empty());
@@ -1882,6 +2157,7 @@ fn unknown_finish_reasons_remain_lossless_without_triggering_truncation_retries(
 #[test]
 fn fixed_error_metadata_and_original_oversized_error_survive_core_recovery() {
     let error = Error {
+        detail: None,
         kind: ErrorKind::RequestTooLarge,
         code: ErrorCode::Http,
         message: "request rejected".into(),
@@ -1949,6 +2225,7 @@ fn failed_core_summary_is_recorded_before_propagation_without_retrying_the_turn_
     let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
     state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
     let error = Error {
+        detail: None,
         kind: ErrorKind::Failed,
         code: ErrorCode::Http,
         message: "summary provider failed".into(),
