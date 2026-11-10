@@ -114,6 +114,11 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 nix flake check
 ```
 
+`[profile.dev]` in the workspace `Cargo.toml` sets `debug = "line-tables-only"`,
+which keeps line numbers in stack traces at a fraction of a full debug build's
+size. Debuginfo otherwise fills most of a debug target directory, so set
+`CARGO_PROFILE_DEV_DEBUG=2` only when attaching a debugger is actually needed.
+
 When available, use `cargo nextest run --workspace --locked --test-threads "$RUST_TEST_THREADS"`
 to run tests across executables in parallel, followed by
 `cargo test --workspace --doc --locked` for doctests. Otherwise, use the Cargo
