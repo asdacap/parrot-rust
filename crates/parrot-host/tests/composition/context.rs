@@ -1,13 +1,18 @@
 //! The pre-existing T47 fixtures construct actual SQLite history, ContextController,
 //! native tool execution and RuntimeBackend. Their fake provider has no network/credentials.
+use parrot_runtime as runtime_crate;
+
 #[allow(dead_code, unused_imports)]
 #[path = "../../../parrot-runtime/tests/tool_settlement/fixture.rs"]
 mod fixture;
 use fixture::*;
 #[allow(dead_code, unused_imports)]
-#[path = "../../../parrot-runtime/tests/tool_settlement/harness.rs"]
-mod harness;
-use harness::*;
+#[path = "../../../parrot-runtime/tests/tool_settlement/common.rs"]
+mod common;
+use common::*;
+#[path = "context_resources.rs"]
+mod resources;
+use resources::BorrowedContextResources;
 #[path = "../../../parrot-runtime/tests/tool_settlement/runtime.rs"]
 mod runtime;
 use parrot_core::ContextReminderCheckpoint;
@@ -372,7 +377,8 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
         .batch(vec![call("fixedpoint", "compact_context")])
         .await;
     let (adapter, _, _) = bridge();
-    let mut harness = Harness::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
+    let mut harness =
+        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
     let provider = Scripted::new(vec![Step::complete("fixedpoint summary")]);
     harness.selection = selection(&provider);
     let definitions = harness.snapshot.definitions().to_vec();
@@ -737,7 +743,8 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
         samples.clone(),
     ))));
     let (adapter, ancillary, _) = status_bridge_with_prompt(Some(prompt.clone()));
-    let mut harness = Harness::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
+    let mut harness =
+        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
     let definitions = harness.snapshot.definitions().to_vec();
     for index in 0..2 {
         let output = bounded(adapter.invoke(
@@ -803,7 +810,8 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
 async fn retained_status_precancel_does_not_estimate_and_external_selection_has_no_inline_route() {
     let fixture = Fixture::new();
     let (adapter, ancillary, _) = status_bridge();
-    let mut harness = Harness::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
+    let mut harness =
+        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
     let definitions = harness.snapshot.definitions().to_vec();
     let cancelled = Signal::new();
     cancelled.cancel();
@@ -876,7 +884,8 @@ async fn retained_compact_preserves_live_prompt_cancellation_after_successful_co
         .batch(vec![call("cancel-build", "compact_context")])
         .await;
     let (adapter, _, _) = bridge();
-    let mut harness = Harness::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
+    let mut harness =
+        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
     let provider = Scripted::new(vec![Step::complete("actual completed summary")]);
     harness.selection = selection(&provider);
     let definitions = harness.snapshot.definitions().to_vec();
