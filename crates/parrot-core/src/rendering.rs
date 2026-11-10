@@ -1,8 +1,8 @@
 use crate::{
-    AgentIdentityDescription, CancellationToken, ConfigKey, Error, ModelAliasDescription,
-    PromptTemplate, Provider, SkillCatalogEntry, States,
+    AgentIdentityDescription, CancellationToken, ConfigKey, Error, PromptTemplate,
+    SkillCatalogEntry, States,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 fn render(template: &PromptTemplate, arguments: &[(String, Value)]) -> Result<String, Error> {
     template.render(arguments, CancellationToken::uncancelled())
@@ -17,10 +17,7 @@ pub(crate) async fn render_template(
     render(&template, arguments)
 }
 
-pub(crate) async fn render_instructions(
-    states: &mut dyn States,
-    provider: &dyn Provider,
-) -> Result<String, Error> {
+pub(crate) async fn render_instructions(states: &mut dyn States) -> Result<String, Error> {
     let mut sections = states.read_system_prompts().await?;
     let bindings = states
         .get_config(ConfigKey::SystemPromptBindings)
@@ -37,18 +34,6 @@ pub(crate) async fn render_instructions(
             .await?
             .into_prompt_template()?;
         sections.push(render_agents_files(&files, &template)?);
-    }
-    let aliases = provider.read_model_aliases().await?;
-    let guidance = provider.read_model_system_prompt().await?;
-    if !aliases.is_empty() || guidance.is_some() {
-        let template = states
-            .get_config(ConfigKey::ModelAliasesTemplate)
-            .await?
-            .into_prompt_template()?;
-        prepend_system_prompt_section(
-            &mut sections,
-            render_model_prompt(&aliases, &guidance, &template)?,
-        );
     }
     if let Some(identity) = states.read_agent_identity().await? {
         let template = states
@@ -93,44 +78,6 @@ pub fn render_agents_files(
     Ok((
         "runtime:system-context:07a-agents".into(),
         sections.join("\n\n"),
-    ))
-}
-
-pub fn render_model_prompt(
-    aliases: &[ModelAliasDescription],
-    guidance: &Option<String>,
-    template: &PromptTemplate,
-) -> Result<(String, String), Error> {
-    let aliases = aliases
-        .iter()
-        .filter(|alias| !alias.model.is_empty())
-        .map(|alias| {
-            let usage = match alias
-                .model_usage
-                .as_deref()
-                .filter(|usage| !usage.is_empty())
-            {
-                None => alias.usage.clone(),
-                Some(usage) if alias.usage.is_empty() => usage.to_owned(),
-                Some(usage) => format!("{}\n{usage}", alias.usage),
-            };
-            json!({"name": alias.name, "model": alias.model, "usage": usage})
-        })
-        .collect::<Vec<_>>();
-    let alias_section = if aliases.is_empty() {
-        String::new()
-    } else {
-        render(template, &[("aliases".into(), aliases.into())])?
-    };
-    let sections = [Some(alias_section.as_str()), guidance.as_deref()];
-    Ok((
-        "runtime:system-context:10-model-prompt".into(),
-        sections
-            .into_iter()
-            .flatten()
-            .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n"),
     ))
 }
 
@@ -189,21 +136,6 @@ pub fn render_skill_catalog_entries(
         "runtime:system-context:09b-skills".into(),
         render_catalog_entries(skills, template)?,
     ))
-}
-
-pub fn prepend_system_prompt_section(
-    sections: &mut Vec<(String, String)>,
-    section: (String, String),
-) {
-    if let Some((_, content)) = sections.iter_mut().find(|(key, _)| key == &section.0) {
-        *content = [section.1.as_str(), content.as_str()]
-            .into_iter()
-            .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-    } else {
-        sections.push(section);
-    }
 }
 
 pub fn render_system_prompt_sections(mut sections: Vec<(String, String)>) -> String {

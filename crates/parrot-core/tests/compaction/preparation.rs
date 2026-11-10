@@ -6,7 +6,7 @@ use parrot_core::compaction::{
 use parrot_core::{
     AgentIdentityDescription, BoxFuture, ConfigKey, ConfigValue, ContextConfiguration,
     ContextModel, ContextSnapshot, ErrorCode, ErrorDetail, EventPublisher, Message,
-    ModelAliasDescription, SkillCatalogEntry, States,
+    SkillCatalogEntry, States,
 };
 use std::sync::Mutex;
 
@@ -64,15 +64,6 @@ impl States for Preparation {
                 ConfigKey::SystemPromptBindings => {
                     Ok(ConfigValue::SystemPromptBindings(Vec::new()))
                 }
-                ConfigKey::ModelAliasesTemplate => Ok(ConfigValue::PromptTemplate(
-                    std::sync::Arc::new(parrot_core::PromptTemplate::compile(
-                        "prompt_templates.context.model-aliases",
-                        "{% for alias in aliases %}{{ alias.name }}={{ alias.model }}{% endfor %}",
-                        "minijinja",
-                        &["aliases".into()],
-                        &[],
-                    )?),
-                )),
                 _ => Err(Error::failed("preparation has no configured templates")),
             }
         })
@@ -147,8 +138,6 @@ impl States for Preparation {
 }
 
 struct Estimates {
-    model_aliases: Vec<ModelAliasDescription>,
-    model_system_prompt: Option<String>,
     tokens: i64,
     failure: bool,
     requests: Mutex<Vec<parrot_core::ProviderRequest>>,
@@ -158,8 +147,6 @@ impl Estimates {
     fn new(tokens: i64) -> Self {
         Self {
             tokens,
-            model_aliases: Vec::new(),
-            model_system_prompt: None,
             failure: false,
             requests: Mutex::default(),
         }
@@ -167,14 +154,6 @@ impl Estimates {
 }
 
 impl parrot_core::Provider for Estimates {
-    fn read_model_aliases(&self) -> BoxFuture<'_, Result<Vec<ModelAliasDescription>, Error>> {
-        Box::pin(async move { Ok(self.model_aliases.clone()) })
-    }
-
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async move { Ok(self.model_system_prompt.clone()) })
-    }
-
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -447,22 +426,15 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
 }
 
 #[test]
-fn compaction_preparation_uses_provider_model_guidance_and_state_alias_augmentation() {
+fn compaction_preparation_preserves_complete_native_sections_verbatim() {
     let mut preparation = Preparation {
         system_prompts: vec![(
-            "runtime:system-context:10-model-prompt".into(),
-            "literal {{ alias }}\n\ttext".into(),
+            "runtime:context:10-native".into(),
+            "native instructions\n\nliteral {{ untouched }}\n\ttext".into(),
         )],
         ..Default::default()
     };
-    let mut provider = Estimates::new(37);
-    provider.model_aliases = vec![ModelAliasDescription {
-        name: "preferred".into(),
-        model: "provider/model".into(),
-        usage: String::new(),
-        model_usage: None,
-    }];
-    provider.model_system_prompt = Some("model guidance".into());
+    let provider = Estimates::new(37);
 
     let input = finish(prepare_compaction(
         &mut preparation,
@@ -473,7 +445,7 @@ fn compaction_preparation_uses_provider_model_guidance_and_state_alias_augmentat
         parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
-    let expected = "sampled instructions\n\npreferred=provider/model\n\nmodel guidance\n\nliteral {{ alias }}\n\ttext";
+    let expected = "sampled instructions\n\nnative instructions\n\nliteral {{ untouched }}\n\ttext";
     assert_eq!(input.instructions, expected);
     assert_eq!(provider.requests.lock().unwrap()[0].instructions, expected);
 }

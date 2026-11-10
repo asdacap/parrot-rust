@@ -311,43 +311,19 @@ fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_tem
 }
 
 #[test]
-fn provider_model_guidance_and_raw_alias_augmentation_form_one_ordered_section() {
-    for augmentation in ["literal {{ alias }}\n\ttext", "  ", ""] {
+fn request_preserves_complete_native_sections_without_interpreting_their_contents() {
+    for content in [
+        "literal {{ untouched }}\n\ttext",
+        "native section\n\n\t\n\n  ",
+    ] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.provider.model_aliases = vec![parrot_core::ModelAliasDescription {
-            name: "preferred".into(),
-            model: "provider/model".into(),
-            usage: "choose deliberately".into(),
-            model_usage: Some("profile usage".into()),
-        }];
-        state.provider.model_system_prompt = Some("\t".into());
         state.system_prompts = vec![
-            (
-                "runtime:system-context:10-model-prompt".into(),
-                augmentation.into(),
-            ),
-            (
-                "runtime:system-context:10-model-prompt:custom".into(),
-                "custom section".into(),
-            ),
+            ("runtime:context:20-custom".into(), "custom section".into()),
+            ("runtime:context:10-native".into(), content.into()),
         ];
-        state
-            .template_engines
-            .insert("context.model-aliases".into(), "minijinja".into());
-        state.skill_templates.lock().unwrap().insert(
-            "context.model-aliases".into(),
-            "{% for alias in aliases %}{{ alias.name }}={{ alias.model }} [{{ alias.usage }}]{% endfor %}".into(),
-        );
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        let suffix = if augmentation.is_empty() {
-            String::new()
-        } else {
-            format!("\n\n{augmentation}")
-        };
-        let expected = format!(
-            "core request\n\npreferred=provider/model [choose deliberately\nprofile usage]\n\n\t{suffix}\n\ncustom section"
-        );
+        let expected = format!("core request\n\n{content}\n\ncustom section");
         let requests = state.provider.requests.lock().unwrap();
         assert_eq!(requests[0].instructions, expected);
         assert_eq!(state.capture_request_estimates()[0].instructions, expected);

@@ -7,16 +7,6 @@ struct WaitingProvider {
 }
 
 impl Provider for WaitingProvider {
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
-        self.estimates.read_model_aliases()
-    }
-
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        self.estimates.read_model_system_prompt()
-    }
-
     fn estimate_input_tokens(
         &self,
         instructions: &str,

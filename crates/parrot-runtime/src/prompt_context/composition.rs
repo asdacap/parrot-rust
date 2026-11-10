@@ -1,9 +1,8 @@
 use super::{
     AgentIdentityDescription, render, render_agent_identity, render_agents_files,
-    render_model_prompt, render_skill_catalog_entries, render_standing_instruction,
-    render_system_prompt_sections,
+    render_skill_catalog_entries, render_standing_instruction, render_system_prompt_sections,
 };
-use parrot_core::{ModelAliasDescription, SkillCatalogEntry};
+use parrot_core::SkillCatalogEntry;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
@@ -51,8 +50,9 @@ impl From<parrot_core::Error> for PromptError {
 }
 pub type PromptResult<T> = Result<T, PromptError>;
 
-/// Owns raw contributor state. Empty defaults mean this source does not own that contribution.
-/// Template expansion is performed only by the shared rendering conveniences.
+/// Owns contributor state and native system-prompt sections.
+/// Empty defaults mean this source does not own that contribution.
+/// Other raw contributions are expanded by the shared rendering conveniences.
 pub trait SystemPrompt: Send {
     fn renew_epoch(&mut self);
     fn sample_epoch<'a>(
@@ -93,15 +93,6 @@ pub trait SystemPrompt: Send {
     fn read_agents_files(&self) -> PromptResult<Vec<(String, String)>> {
         Ok(Vec::new())
     }
-    fn read_model_aliases(
-        &mut self,
-        _selection: &ResolvedModelSelection,
-    ) -> PromptResult<Vec<ModelAliasDescription>> {
-        Ok(Vec::new())
-    }
-    fn read_model_system_prompt(&self, _selection: &ResolvedModelSelection) -> Option<String> {
-        None
-    }
     fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
         None
     }
@@ -126,12 +117,11 @@ impl dyn SystemPrompt + '_ {
     pub fn build(&mut self, selection: &ResolvedModelSelection) -> PromptResult<String> {
         let sections = self.read_system_prompts(selection)?;
         let skills = self.read_skill_catalog()?;
-        self.render_sections(selection, sections, skills)
+        self.render_sections(sections, skills)
     }
 
     fn render_sections(
         &mut self,
-        selection: &ResolvedModelSelection,
         mut sections: Vec<(String, String)>,
         skills: Vec<SkillCatalogEntry>,
     ) -> PromptResult<String> {
@@ -148,18 +138,6 @@ impl dyn SystemPrompt + '_ {
                 &files,
                 self.require_template_catalog("runtime:system-context:07a-agents")?,
             )?);
-        }
-        let aliases = self.read_model_aliases(selection)?;
-        let guidance = self.read_model_system_prompt(selection);
-        if !aliases.is_empty() || guidance.is_some() {
-            parrot_core::rendering::prepend_system_prompt_section(
-                &mut sections,
-                render_model_prompt(
-                    &aliases,
-                    &guidance,
-                    self.require_template_catalog("runtime:system-context:10-model-prompt")?,
-                )?,
-            );
         }
         if let Some(identity) = self.read_agent_identity() {
             sections.push(render_agent_identity(
@@ -194,7 +172,7 @@ impl dyn SystemPrompt + '_ {
                 .read_system_prompts_live(selection, cancellation)
                 .await?;
             let skills = self.read_skill_catalog_live(cancellation).await?;
-            self.render_sections(selection, sections, skills)
+            self.render_sections(sections, skills)
         })
     }
 
@@ -340,21 +318,6 @@ impl SystemPrompt for CompositeSystemPrompt {
             values.extend(prompt.read_agents_files()?);
         }
         Ok(values)
-    }
-    fn read_model_aliases(
-        &mut self,
-        selection: &ResolvedModelSelection,
-    ) -> PromptResult<Vec<ModelAliasDescription>> {
-        let mut values = Vec::new();
-        for prompt in &mut self.prompts {
-            values.extend(prompt.read_model_aliases(selection)?);
-        }
-        Ok(values)
-    }
-    fn read_model_system_prompt(&self, selection: &ResolvedModelSelection) -> Option<String> {
-        self.prompts
-            .iter()
-            .find_map(|prompt| prompt.read_model_system_prompt(selection))
     }
     fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
         self.prompts

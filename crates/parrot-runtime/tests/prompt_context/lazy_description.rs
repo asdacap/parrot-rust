@@ -66,10 +66,65 @@ async fn raw_template_getters_return_literal_state_with_a_broken_template() {
 }
 
 #[tokio::test]
-async fn raw_system_prompts_include_only_the_selected_alias_augmentation_verbatim() {
-    let mut alias = ModelAliasDefinition::new("preferred", "unused/vendor/model", "primary");
-    alias.augment_system_prompt = Some("literal {{ alias }}\n\ttext".into());
-    let (_, router) = route(vec![alias]);
+async fn system_prompt_reads_include_complete_model_guidance_and_literal_augmentation() {
+    for guidance in ["model guidance", "\t"] {
+        for augmentation in ["literal {{ alias }}\n\ttext", "  ", ""] {
+            let mut alias =
+                ModelAliasDefinition::new("preferred", "unused/vendor/model", "primary");
+            alias.augment_system_prompt = Some(augmentation.into());
+            let (_, router) = route(vec![alias]);
+            let prompt = SessionPrompt::new(
+                ModelPromptProvider::new(
+                    profiles(&[("unused/vendor/model", Some("profile usage"), Some(guidance))]),
+                    router.clone(),
+                    templates(
+                        "prompt_templates:\n  context.model-aliases:\n    engine: minijinja\n    template: '{% for alias in aliases %}{{ alias.name }}={{ alias.model }} [{{ alias.usage }}]{% endfor %}'\n",
+                    ),
+                )
+                .materialize(&identity())
+                .unwrap(),
+            );
+            let cancellation = parrot_storage::events::NeverCancelled;
+            let selected = router.resolve("preferred").unwrap();
+            let sections = prompt
+                .read_system_prompts(&selected, &cancellation)
+                .await
+                .unwrap();
+            let base =
+                format!("preferred=unused/vendor/model [primary\nprofile usage]\n\n{guidance}");
+            let expected = if augmentation.is_empty() {
+                base.clone()
+            } else {
+                format!("{base}\n\n{augmentation}")
+            };
+            assert_eq!(
+                sections,
+                [(
+                    "runtime:system-context:10-model-prompt".into(),
+                    expected.clone()
+                )]
+            );
+            assert_eq!(
+                prompt
+                    .read_system_prompts(
+                        &router.resolve("unused/vendor/model").unwrap(),
+                        &cancellation,
+                    )
+                    .await
+                    .unwrap(),
+                [("runtime:system-context:10-model-prompt".into(), base)]
+            );
+            assert_eq!(
+                prompt.build(&selected, &cancellation).await.unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn system_prompt_reads_include_model_guidance_without_aliases() {
+    let (_, router) = route(Vec::new());
     let prompt = SessionPrompt::new(
         ModelPromptProvider::new(
             profiles(&[("unused/vendor/model", None, Some("model guidance"))]),
@@ -79,27 +134,47 @@ async fn raw_system_prompts_include_only_the_selected_alias_augmentation_verbati
         .materialize(&identity())
         .unwrap(),
     );
-    let cancellation = parrot_storage::events::NeverCancelled;
-    let selected = router.resolve("preferred").unwrap();
-    let sections = prompt
-        .read_system_prompts(&selected, &cancellation)
-        .await
-        .unwrap();
-    assert_eq!(sections.len(), 1);
-    assert_eq!(sections[0].1, "literal {{ alias }}\n\ttext");
-    assert!(
+    assert_eq!(
         prompt
             .read_system_prompts(
                 &router.resolve("unused/vendor/model").unwrap(),
-                &cancellation,
+                &parrot_storage::events::NeverCancelled,
             )
             .await
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        [(
+            "runtime:system-context:10-model-prompt".into(),
+            "model guidance".into()
+        )]
     );
-    let rendered = prompt.build(&selected, &cancellation).await.unwrap();
-    assert!(rendered.ends_with("model guidance\n\nliteral {{ alias }}\n\ttext"));
-    assert_eq!(rendered.matches("literal {{ alias }}").count(), 1);
+}
+
+#[tokio::test]
+async fn model_template_failures_surface_when_reading_system_prompts() {
+    let (_, router) = route(vec![ModelAliasDefinition::new(
+        "preferred",
+        "unused/vendor/model",
+        "primary",
+    )]);
+    let prompt = SessionPrompt::new(
+        ModelPromptProvider::new(
+            profiles(&[]),
+            router.clone(),
+            templates(
+                "prompt_templates:\n  context.model-aliases:\n    engine: minijinja\n    template: '{{ 1 / 0 }}'\n",
+            ),
+        )
+        .materialize(&identity())
+        .unwrap(),
+    );
+    let cancellation = parrot_storage::events::NeverCancelled;
+    prompt.ensure_epoch(&cancellation).await.unwrap();
+    assert!(matches!(
+        prompt
+            .read_system_prompts(&router.resolve("preferred").unwrap(), &cancellation)
+            .await,
+        Err(PromptError::Template(_))
+    ));
 }
 
 #[tokio::test]

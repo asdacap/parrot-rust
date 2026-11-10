@@ -569,9 +569,6 @@ impl ContextController {
                 &errors,
             );
             let preparation_provider = EpochProvider {
-                prompt: input.prompt,
-                selection: input.selection,
-                cancellation,
                 estimates: &estimates,
                 errors: &errors,
             };
@@ -1192,9 +1189,6 @@ impl Cancellation for Uncancelled {
 }
 
 struct EpochProvider<'a> {
-    prompt: &'a SessionPrompt,
-    selection: &'a ResolvedModelSelection,
-    cancellation: &'a dyn Cancellation,
     estimates: &'a CompactionEstimates,
     errors: &'a NativeErrors<ContextError>,
 }
@@ -1208,28 +1202,6 @@ impl EpochProvider<'_> {
 }
 
 impl parrot_core::Provider for EpochProvider<'_> {
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_model_aliases(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_model_system_prompt(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<String>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_model_system_prompt(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
     fn estimate_input_tokens(
         &self,
         instructions: &str,

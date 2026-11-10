@@ -1,5 +1,5 @@
 use super::{PromptError, PromptResult};
-use parrot_core::{AgentIdentityDescription, ModelAliasDescription, SkillCatalogEntry};
+use parrot_core::{AgentIdentityDescription, SkillCatalogEntry};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
 pub fn render_agents_files(
@@ -10,18 +10,6 @@ pub fn render_agents_files(
         .get_template("context.agents-file")
         .map_err(|error| PromptError::Template(error.to_string()))?;
     parrot_core::rendering::render_agents_files(files, &template).map_err(PromptError::from)
-}
-
-pub fn render_model_prompt(
-    aliases: &[ModelAliasDescription],
-    guidance: &Option<String>,
-    templates: &PromptTemplateCatalog,
-) -> PromptResult<(String, String)> {
-    let template = templates
-        .get_template("context.model-aliases")
-        .map_err(|error| PromptError::Template(error.to_string()))?;
-    parrot_core::rendering::render_model_prompt(aliases, guidance, &template)
-        .map_err(PromptError::from)
 }
 
 pub fn render_agent_identity(
