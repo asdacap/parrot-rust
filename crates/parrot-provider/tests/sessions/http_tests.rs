@@ -343,25 +343,21 @@ async fn non_success_http_body_and_status_survive_t29_error_bridge() {
     let body = r#"{"error":{"type":"overloaded_error","code":"busy","message":"try later"}}"#;
     let (transport, wire) = transport(503, &[body]);
     let sink = Arc::new(Sink::default());
-    let errors: HttpErrorSlot = Arc::new(Mutex::new(None));
-    let mut bridge = HttpEventsBridge::new(
-        driver(
-            transport,
-            Protocol::Responses,
-            b"{}".to_vec(),
-            2,
-            Some(trace(sink.clone(), None)),
-        ),
-        errors.clone(),
-    );
+    let mut bridge = HttpEventsBridge::new(driver(
+        transport,
+        Protocol::Responses,
+        b"{}".to_vec(),
+        2,
+        Some(trace(sink.clone(), None)),
+    ));
     let cancel = Cancel::never();
     assert_eq!(
         bridge.next_event(&cancel).await.unwrap(),
         Some(SessionEvent::HttpRequestStarted)
     );
     assert!(wire.requests.lock().unwrap().is_empty());
-    assert!(bridge.next_event(&cancel).await.is_err());
-    let Some(Error::Http(HttpError::Response(error))) = errors.lock().unwrap().clone() else {
+    let Error::Http(HttpError::Response(error)) = bridge.next_event(&cancel).await.unwrap_err()
+    else {
         panic!("structured original HTTP failure");
     };
     assert_eq!(error.status, 503);
@@ -380,11 +376,13 @@ async fn non_success_http_body_and_status_survive_t29_error_bridge() {
 #[tokio::test]
 async fn responses_bridge_preserves_lifecycle_without_prefetch() {
     let (transport, wire) = transport(200, &[TEXT, DONE]);
-    let errors = Arc::new(Mutex::new(None));
-    let mut bridge = HttpEventsBridge::new(
-        driver(transport, Protocol::Responses, b"{}".to_vec(), 2, None),
-        errors,
-    );
+    let mut bridge = HttpEventsBridge::new(driver(
+        transport,
+        Protocol::Responses,
+        b"{}".to_vec(),
+        2,
+        None,
+    ));
     let cancel = Cancel::never();
     assert_eq!(
         bridge.next_event(&cancel).await.unwrap(),

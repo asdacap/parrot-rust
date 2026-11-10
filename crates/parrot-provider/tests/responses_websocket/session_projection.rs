@@ -11,6 +11,7 @@ use parrot_provider::responses_websocket::{
     HttpEvents as HttpEventsTrait, HttpFallback, ReceivedFrame, Session, SessionEvent,
     Socket as SocketTrait, SocketState, WebSocketClient, WebSocketError, WebSocketRequest,
 };
+use parrot_provider::sessions::Error as ProviderError;
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -556,7 +557,7 @@ impl HeaderSource for Auth {
     fn headers<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Headers, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Headers, ProviderError>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             // Synthetic source-equivalent caller setup, not OAuth/routing implementation.
@@ -619,10 +620,10 @@ impl HttpEventsTrait for HttpEvents {
     fn next<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
         Box::pin(async move {
             if cancellation.is_cancelled() {
-                Err(WebSocketError::Cancelled)
+                Err(ProviderError::Socket(WebSocketError::Cancelled))
             } else {
                 Ok(self.events.pop_front())
             }
@@ -638,7 +639,7 @@ impl HttpFallback for Http {
         bytes: Vec<u8>,
         turn_state: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEventsTrait>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEventsTrait>, ProviderError>> {
         self.auth.calls.fetch_add(1, Ordering::SeqCst);
         let mut requests = self.requests.lock().unwrap();
         let state = self.states.get(requests.len()).cloned();
@@ -654,9 +655,13 @@ impl HttpFallback for Http {
                 match stream.next(cancellation).await {
                     Ok(Some(event)) => events.push_back(event),
                     Ok(None) => break,
-                    Err(ResponsesStreamError::Protocol(error)) => return Err(error.into()),
+                    Err(ResponsesStreamError::Protocol(error)) => {
+                        return Err(ProviderError::Socket(error.into()));
+                    }
                     Err(ResponsesStreamError::Transport(error)) => {
-                        return Err(WebSocketError::Transport(error.to_string()));
+                        return Err(ProviderError::Socket(WebSocketError::Transport(
+                            error.to_string(),
+                        )));
                     }
                 }
             }
@@ -727,7 +732,12 @@ fn event(event: SessionEvent) -> Value {
     }
     row
 }
-fn failure(error: WebSocketError, cancellation: &Cancel) -> Value {
+fn failure(error: ProviderError, cancellation: &Cancel) -> Value {
+    let error = match error {
+        ProviderError::Socket(error) => error,
+        ProviderError::Cancelled => WebSocketError::Cancelled,
+        error => panic!("unexpected provider error: {error:?}"),
+    };
     match error {
         WebSocketError::Cancelled => {
             json!({"kind":"cancelled", "cancellation_requested":cancellation.is_cancelled()})
