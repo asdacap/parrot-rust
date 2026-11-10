@@ -1,6 +1,15 @@
-use super::{PromptError, PromptResult};
-use parrot_core::{AgentIdentityDescription, SkillCatalogEntry};
+use super::{AgentIdentityDescription, PromptError, PromptResult, SkillCatalogEntry};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use serde_json::Value;
+
+fn render(
+    template: &parrot_core::PromptTemplate,
+    arguments: &[(String, Value)],
+) -> PromptResult<String> {
+    template
+        .render(arguments, parrot_core::CancellationToken::uncancelled())
+        .map_err(PromptError::from)
+}
 
 pub fn render_agents_files(
     files: &[(String, String)],
@@ -9,7 +18,20 @@ pub fn render_agents_files(
     let template = templates
         .get_template("context.agents-file")
         .map_err(|error| PromptError::Template(error.to_string()))?;
-    parrot_core::rendering::render_agents_files(files, &template).map_err(PromptError::from)
+    let mut sections = Vec::with_capacity(files.len());
+    for (path, content) in files {
+        sections.push(render(
+            &template,
+            &[
+                ("path".into(), path.clone().into()),
+                ("content".into(), content.clone().into()),
+            ],
+        )?);
+    }
+    Ok((
+        "runtime:system-context:07a-agents".into(),
+        sections.join("\n\n"),
+    ))
 }
 
 pub fn render_agent_identity(
@@ -19,7 +41,32 @@ pub fn render_agent_identity(
     let template = templates
         .get_template("system.agent-identity")
         .map_err(|error| PromptError::Template(error.to_string()))?;
-    parrot_core::rendering::render_agent_identity(identity, &template).map_err(PromptError::from)
+    let content = if identity.depth == 0 {
+        identity.scope_text.clone()
+    } else {
+        let content = render(
+            &template,
+            &[
+                ("session_id".into(), identity.session_id.clone().into()),
+                (
+                    "parent_session_id".into(),
+                    identity.parent_session_id.clone().into(),
+                ),
+                (
+                    "parent_session_name".into(),
+                    identity.parent_session_name.clone().into(),
+                ),
+                ("agent_name".into(), identity.agent_name.clone().into()),
+                ("depth".into(), identity.depth.to_string().into()),
+            ],
+        )?;
+        if identity.scope_text.is_empty() {
+            content
+        } else {
+            format!("{content}\n\n{}", identity.scope_text)
+        }
+    };
+    Ok(("runtime:system-context:14-session-identity".into(), content))
 }
 
 pub fn render_standing_instruction(
@@ -29,19 +76,94 @@ pub fn render_standing_instruction(
     let template = templates
         .get_template("context.standing-instruction")
         .map_err(|error| PromptError::Template(error.to_string()))?;
-    parrot_core::rendering::render_standing_instruction(instruction, &template)
-        .map_err(PromptError::from)
+    let content = if instruction.is_empty() {
+        String::new()
+    } else {
+        render(&template, &[("instruction".into(), instruction.into())])?
+    };
+    Ok((
+        "runtime:system-context:94-standing-instruction".into(),
+        content,
+    ))
 }
 
-pub fn render_skill_catalog_entries(
+pub(crate) fn render_skill_catalog_entries(
     skills: &[SkillCatalogEntry],
     templates: &PromptTemplateCatalog,
 ) -> PromptResult<(String, String)> {
+    Ok((
+        "runtime:system-context:09b-skills".into(),
+        render_catalog_entries(skills, templates)?,
+    ))
+}
+
+pub fn render_system_prompt_sections(mut sections: Vec<(String, String)>) -> String {
+    sections.sort_by(|(left, _), (right, _)| left.encode_utf16().cmp(right.encode_utf16()));
+    sections
+        .into_iter()
+        .map(|(_, content)| content)
+        .filter(|content| !content.chars().all(char::is_whitespace))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+pub const MAXIMUM_CATALOG_BYTES: usize = 64 * 1024;
+
+pub(crate) fn render_catalog_entries(
+    skills: &[SkillCatalogEntry],
+    templates: &PromptTemplateCatalog,
+) -> PromptResult<String> {
     let template = templates
         .get_template("context.skills")
         .map_err(|error| PromptError::Template(error.to_string()))?;
-    parrot_core::rendering::render_skill_catalog_entries(skills, &template)
-        .map_err(PromptError::from)
+    let available: Vec<_> = skills
+        .iter()
+        .filter(|skill| skill.enabled && skill.prompt_visible)
+        .collect();
+    if available.is_empty() {
+        return Ok(String::new());
+    }
+    let wrapper = render(&template, &[("skills".into(), "{skills}".into())])?;
+    let budget = (MAXIMUM_CATALOG_BYTES + "{skills}".len())
+        .checked_sub(wrapper.len())
+        .filter(|budget| *budget > 0)
+        .ok_or_else(|| {
+            PromptError::Context(
+                "The skills prompt template exceeds the 64 KiB catalogue limit.".into(),
+            )
+        })?;
+    let mut entries: Vec<String> = Vec::new();
+    let mut consumed = 0;
+    let mut omitted = 0;
+    for skill in available {
+        let entry = format!(
+            "- ${}: {} ({})\n",
+            skill.name, skill.description, skill.discovery_path
+        );
+        if consumed + entry.len() > budget {
+            omitted += 1;
+        } else {
+            consumed += entry.len();
+            entries.push(entry);
+        }
+    }
+    if omitted > 0 {
+        let mut diagnostic = omitted_catalog(omitted);
+        while !entries.is_empty() && consumed + diagnostic.len() > budget {
+            consumed -= entries.pop().unwrap().len();
+            omitted += 1;
+            diagnostic = omitted_catalog(omitted);
+        }
+        entries.push(diagnostic);
+    }
+    render(
+        &template,
+        &[("skills".into(), entries.concat().trim_end().into())],
+    )
 }
 
-pub use parrot_core::rendering::render_system_prompt_sections;
+fn omitted_catalog(count: usize) -> String {
+    format!(
+        "- {count} additional skill(s) omitted because the catalogue reached its 64 KiB limit.\n"
+    )
+}

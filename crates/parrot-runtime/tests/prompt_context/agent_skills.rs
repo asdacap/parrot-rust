@@ -1,45 +1,52 @@
 use super::*;
-use parrot_core::{Skill, SkillCatalogEntry, SkillContent, SkillReference};
+use parrot_core::{Skill, SkillContent, SkillReference};
 use parrot_domain::contracts::security::SecurityProvider;
 use std::sync::atomic::AtomicUsize;
 
-struct ClearedSkillViewPrompt {
-    templates: Arc<PromptTemplateCatalog>,
-}
-impl SystemPrompt for ClearedSkillViewPrompt {
-    fn renew_epoch(&mut self) {}
-    fn read_skill_catalog(&self) -> PromptResult<Vec<SkillCatalogEntry>> {
-        Err(PromptError::Context(
-            "The skill catalogue has not been sampled for this epoch.".into(),
-        ))
-    }
-    fn read_skill_catalog_live<'a>(
-        &'a mut self,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<Vec<SkillCatalogEntry>>> {
-        Box::pin(async {
-            Ok(vec![SkillCatalogEntry {
-                name: "retained".into(),
-                description: "acquired skill".into(),
-                discovery_path: "/skills/retained/SKILL.md".into(),
-                enabled: true,
-                prompt_visible: true,
-            }])
-        })
-    }
-    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
-        (source_key == "runtime:system-context:09b-skills").then_some(self.templates.as_ref())
-    }
-}
-
 #[tokio::test]
-async fn live_prompt_renders_acquired_skills_after_the_shared_view_is_cleared() {
-    let prompt = SessionPrompt::new(Box::new(ClearedSkillViewPrompt {
-        templates: templates(""),
-    }));
-    let rendered = prompt.build(&selection(), &Cancel::no()).await.unwrap();
-
-    assert!(rendered.contains("- $retained: acquired skill (/skills/retained/SKILL.md)"));
+async fn system_prompt_reads_include_current_skill_catalog() {
+    let (reader, catalog, skills) = skills_fixture();
+    let skills = Arc::new(tokio::sync::Mutex::new(skills));
+    let provider = AgentSkillPromptProvider::new(skills.clone()).await;
+    let mut prompt = provider.materialize(&identity()).unwrap();
+    let selection = selection();
+    let cancel = Cancel::no();
+    let sections = prompt
+        .read_system_prompts_live(&selection, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0].0, provider.key());
+    assert!(
+        sections[0]
+            .1
+            .contains("- $one: description (/skills/one/SKILL.md)")
+    );
+    assert!(
+        sections[0]
+            .1
+            .contains("- $two: description (/skills/two/SKILL.md)")
+    );
+    assert_eq!(prompt.build(&selection).unwrap(), sections[0].1);
+    skills.lock().await.begin_turn(&cancel).await.unwrap();
+    reader.skill("/skills/three/SKILL.md", "three");
+    catalog.invalidate().await;
+    assert_eq!(
+        prompt
+            .read_system_prompts_live(&selection, &cancel)
+            .await
+            .unwrap(),
+        sections
+    );
+    skills.lock().await.end_turn();
+    assert!(
+        prompt
+            .read_system_prompts_live(&selection, &cancel)
+            .await
+            .unwrap()[0]
+            .1
+            .contains("$three:")
+    );
 }
 
 struct Captures(AtomicUsize);

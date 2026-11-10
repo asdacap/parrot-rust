@@ -1,5 +1,4 @@
 use super::{PromptError, PromptResult, SystemPrompt};
-use parrot_core::{AgentIdentityDescription, SkillCatalogEntry};
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
 use tokio::sync::{Mutex, MutexGuard};
@@ -57,42 +56,6 @@ impl SessionPrompt {
             .await?
             .prompt
             .read_system_prompts_live(selection, cancellation)
-            .await
-    }
-
-    pub async fn read_agents_files(
-        &self,
-        cancellation: &dyn Cancellation,
-    ) -> PromptResult<Vec<(String, String)>> {
-        self.lock(cancellation).await?.prompt.read_agents_files()
-    }
-
-    pub async fn read_agent_identity(
-        &self,
-        cancellation: &dyn Cancellation,
-    ) -> PromptResult<Option<AgentIdentityDescription>> {
-        Ok(self.lock(cancellation).await?.prompt.read_agent_identity())
-    }
-
-    pub async fn read_standing_instruction(
-        &self,
-        cancellation: &dyn Cancellation,
-    ) -> PromptResult<String> {
-        Ok(self
-            .lock(cancellation)
-            .await?
-            .prompt
-            .read_standing_instruction())
-    }
-
-    pub async fn read_skill_catalog(
-        &self,
-        cancellation: &dyn Cancellation,
-    ) -> PromptResult<Vec<SkillCatalogEntry>> {
-        self.lock(cancellation)
-            .await?
-            .prompt
-            .read_skill_catalog_live(cancellation)
             .await
     }
 

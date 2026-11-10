@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn state_supplies_fresh_raw_instructions_on_each_request() {
+fn state_supplies_fresh_rendered_instructions_on_each_request() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("answer"),
@@ -244,21 +244,19 @@ fn context_preparation_and_message_read_errors_stop_before_provider_invocation()
 }
 
 #[test]
-fn request_preserves_complete_native_sections_without_interpreting_their_contents() {
+fn request_preserves_complete_native_prompt_without_interpreting_its_contents() {
     for content in [
+        "",
+        " \n\t",
         "literal {{ untouched }}\n\ttext",
         "native section\n\n\t\n\n  ",
     ] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.system_prompts = vec![
-            ("runtime:context:20-custom".into(), "custom section".into()),
-            ("runtime:context:10-native".into(), content.into()),
-        ];
+        state.request().instructions = content.into();
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        let expected = format!("core request\n\n{content}\n\ncustom section");
         let requests = state.provider.requests.lock().unwrap();
-        assert_eq!(requests[0].instructions, expected);
-        assert_eq!(state.capture_request_estimates()[0].instructions, expected);
+        assert_eq!(requests[0].instructions, content);
+        assert_eq!(state.capture_request_estimates()[0].instructions, content);
     }
 }

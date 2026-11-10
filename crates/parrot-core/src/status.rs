@@ -1,7 +1,7 @@
 use crate::{
     CancellationToken, ConfigKey, ConversationAddition, ConversationEvent, ConversationPersistence,
     Error, Message, Provider, ProviderRequest, Role, States, ToolDefinition,
-    compaction::fit_status, rendering::render_instructions,
+    compaction::fit_status,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,7 +51,7 @@ pub async fn prepare_status(
             }
             checkpoint
         };
-        let instructions = render_instructions(states).await?;
+        let instructions = states.capture_system_prompt().await?;
         let mut messages = states.read_provider_messages().await?;
         messages.extend(states.read_next_input_messages().await?);
         let configuration = states

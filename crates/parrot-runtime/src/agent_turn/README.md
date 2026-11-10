@@ -266,14 +266,13 @@ without selecting or rendering skills. Core parses skill mentions, reads metadat
 through `States::resolve_skill_references`, and deduplicates stable identities before reading
 bodies through `States::read_skill_content`. Native backing owns catalog lookup
 and authorized file reads. Core owns skill-context formatting, limits, and loaded
-paths. `States::capture_system_prompt_sections` supplies native system-prompt sections.
+paths. `States::capture_system_prompt` supplies the complete rendered system prompt.
 Providers render their own templates and keep template identities and arguments
-private. The runtime model contributor composes alias descriptions, selected model-profile
-guidance, and selected alias augmentation into one opaque section. `States` also
-exposes AGENTS files, identity, standing instructions, and catalog metadata.
-Core renders those remaining raw inputs using
-concrete templates from `States::get_config` and orders all sections. `ConfigKey`
-selects turn, context, compaction, or prompt-template configuration. The turn entry
+private, including AGENTS files, identity, standing instructions, and the skill catalog.
+The runtime model contributor composes alias descriptions, selected model-profile
+guidance, and selected alias augmentation into one section. Runtime orders and joins
+all sections. Core consumes the resulting prompt as opaque text. `ConfigKey`
+selects turn, context, compaction, or conversation-template configuration. The turn entry
 points accept `States`, `Tools`, `Provider`, `EventPublisher`, and the runtime's cancellation token.
 The publisher reports compaction start and preparation failure independently of request cancellation.
 Core passes that token to provider calls, tools, and compaction. State retains request

@@ -182,25 +182,6 @@ pub struct DerivedContext {
     pub loaded_paths: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct AgentIdentityDescription {
-    pub session_id: String,
-    pub parent_session_id: String,
-    pub parent_session_name: String,
-    pub agent_name: String,
-    pub depth: i32,
-    pub scope_text: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SkillCatalogEntry {
-    pub name: String,
-    pub description: String,
-    pub discovery_path: String,
-    pub enabled: bool,
-    pub prompt_visible: bool,
-}
-
 /// A prepared context reminder with the information needed to record it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextReminder {
@@ -332,31 +313,9 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.report_compaction_progress")) })
     }
 
-    /// Reads rendered provider-owned system-prompt sections and their namespace keys.
-    /// Retains native request bindings and samples epoch inputs without rendering
-    /// core-owned templates.
-    fn capture_system_prompt_sections(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.capture_system_prompt_sections")) })
-    }
-    /// Reads sampled AGENTS paths and unwrapped file contents.
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_agents_files")) })
-    }
-    /// Reads the supplied agent identity and scope without formatting either value.
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<AgentIdentityDescription>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_agent_identity")) })
-    }
-    /// Reads the current unwrapped standing instruction.
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_standing_instruction")) })
-    }
-    /// Reads current catalog metadata without rendering entries or applying prompt budgets.
-    fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_skill_catalog")) })
+    /// Captures the complete provider-rendered system prompt and native request bindings.
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.capture_system_prompt")) })
     }
     /// Reads tool calls and durable terminals after the settled watermark.
     fn read_tool_recovery(&self) -> BoxFuture<'_, Result<crate::ToolRecovery, Error>> {
@@ -925,10 +884,6 @@ pub enum ConfigKey {
     Turn,
     Context,
     Compaction,
-    AgentsFileTemplate,
-    AgentIdentityTemplate,
-    StandingInstructionTemplate,
-    SkillCatalogTemplate,
     SkillUnavailableTemplate,
     SkillSelectedTemplate,
     SkillTooLargeTemplate,

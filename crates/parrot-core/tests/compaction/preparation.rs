@@ -4,9 +4,8 @@ use parrot_core::compaction::{
     prepare_compaction,
 };
 use parrot_core::{
-    AgentIdentityDescription, BoxFuture, ConfigKey, ConfigValue, ContextConfiguration,
-    ContextModel, ContextSnapshot, ErrorCode, ErrorDetail, EventPublisher, Message,
-    SkillCatalogEntry, States,
+    BoxFuture, ConfigKey, ConfigValue, ContextConfiguration, ContextModel, ContextSnapshot,
+    ErrorCode, ErrorDetail, EventPublisher, Message, States,
 };
 use std::sync::Mutex;
 
@@ -26,7 +25,7 @@ struct Preparation {
     failure: Option<&'static str>,
     raw: ConversationState,
     contexts: Mutex<Vec<ContextSnapshot>>,
-    system_prompts: Vec<(String, String)>,
+    instructions: Option<String>,
 }
 
 #[derive(Default)]
@@ -74,35 +73,16 @@ impl States for Preparation {
         Box::pin(async { Err(Error::failed("preparation has no configured templates")) })
     }
 
-    fn capture_system_prompt_sections(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async move {
             if self.failure == Some("instructions") {
                 return Err(native_error("instructions"));
             }
-            let mut sections = self.system_prompts.clone();
-            sections.push(("fixture:instructions".into(), "sampled instructions".into()));
-            Ok(sections)
+            Ok(self
+                .instructions
+                .clone()
+                .unwrap_or_else(|| "sampled instructions".into()))
         })
-    }
-
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<AgentIdentityDescription>, Error>> {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async { Ok(String::new()) })
-    }
-
-    fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
     }
 
     fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
@@ -420,12 +400,11 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
 }
 
 #[test]
-fn compaction_preparation_preserves_complete_native_sections_verbatim() {
+fn compaction_preparation_preserves_complete_native_prompt_verbatim() {
     let mut preparation = Preparation {
-        system_prompts: vec![(
-            "runtime:context:10-native".into(),
-            "native instructions\n\nliteral {{ untouched }}\n\ttext".into(),
-        )],
+        instructions: Some(
+            "sampled instructions\n\nnative instructions\n\nliteral {{ untouched }}\n\ttext".into(),
+        ),
         ..Default::default()
     };
     let provider = Estimates::new(37);

@@ -450,7 +450,6 @@ struct MemoryState {
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
     compacting: Arc<AtomicBool>,
-    system_prompts: Vec<(String, String)>,
 }
 impl MemoryState {
     fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
@@ -584,7 +583,6 @@ impl MemoryState {
             budget_writes: 0,
             compaction,
             compacting,
-            system_prompts: Vec::new(),
         };
         state.enqueue_message(Delivery::Queue, "question");
         state
@@ -996,9 +994,7 @@ impl States for MemoryState {
         })
     }
 
-    fn capture_system_prompt_sections(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async move {
             self.step("instruction_state")?;
             let compacting = self.compacting.load(Ordering::SeqCst);
@@ -1019,26 +1015,8 @@ impl States for MemoryState {
             if !compacting {
                 request.rendered_instructions.push(instructions.clone());
             }
-            let mut sections = self.system_prompts.clone();
-            sections.push(("memory:instructions".into(), instructions));
-            Ok(sections)
+            Ok(instructions)
         })
-    }
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, Error>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async { Ok(String::new()) })
-    }
-    fn read_skill_catalog(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
     }
     fn advance_tool_settlement_watermark(
         &mut self,

@@ -156,7 +156,41 @@ fn fixture() -> (Arc<Reader>, Arc<Policy>) {
 }
 
 #[tokio::test]
-async fn agents_sampling_and_raw_reads_do_not_expand_templates() {
+async fn system_prompt_reads_include_agents_from_sampled_epoch() {
+    let (reader, policy) = fixture();
+    let provider = AgentsPromptProvider::new(
+        "/work/sub",
+        "/config",
+        reader.clone(),
+        policy,
+        templates(
+            "prompt_templates:\n  context.agents-file:\n    template: '[{path}] {content}'\n",
+        ),
+    )
+    .unwrap();
+    let mut prompt = provider.materialize(&identity()).unwrap();
+    prompt.sample_epoch(&Never).await.unwrap();
+    reader
+        .files
+        .lock()
+        .unwrap()
+        .insert("/work/sub/AGENTS.md".into(), b"next epoch".to_vec());
+    let expected = "[/config/AGENTS.md] global\n\n[/AGENTS.md] root\n\n[/work/AGENTS.md] parent\n\n[/work/sub/AGENTS.md] child";
+    assert_eq!(
+        prompt.read_system_prompts(&selection()).unwrap(),
+        [(provider.key().into(), expected.into())],
+    );
+    assert_eq!(prompt.build(&selection()).unwrap(), expected);
+    prompt.sample_epoch(&Never).await.unwrap();
+    assert!(
+        prompt.read_system_prompts(&selection()).unwrap()[0]
+            .1
+            .contains("next epoch")
+    );
+}
+
+#[tokio::test]
+async fn agents_sampling_defers_template_failures_until_system_prompt_reads() {
     let (reader, policy) = fixture();
     let provider = AgentsPromptProvider::new(
         "/work/sub",
@@ -169,15 +203,10 @@ async fn agents_sampling_and_raw_reads_do_not_expand_templates() {
     let prompt = SessionPrompt::new(provider.materialize(&identity()).unwrap());
 
     prompt.ensure_epoch(&Never).await.unwrap();
-    assert_eq!(
-        prompt.read_agents_files(&Never).await.unwrap(),
-        [
-            ("/config/AGENTS.md".into(), "global".into()),
-            ("/AGENTS.md".into(), "root".into()),
-            ("/work/AGENTS.md".into(), "parent".into()),
-            ("/work/sub/AGENTS.md".into(), "child".into()),
-        ]
-    );
+    assert!(matches!(
+        prompt.read_system_prompts(&selection(), &Never).await,
+        Err(PromptError::Template(_))
+    ));
     assert!(matches!(
         prompt.build(&selection(), &Never).await,
         Err(PromptError::Template(_))
