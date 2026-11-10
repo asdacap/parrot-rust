@@ -620,7 +620,6 @@ impl<E: fmt::Display> StatusFittingErrors<E> {
 
 struct StatusFittingProvider<'a, F, E> {
     estimate: std::sync::Mutex<F>,
-    cancellation: &'a dyn Cancellation,
     errors: &'a StatusFittingErrors<E>,
 }
 
@@ -629,14 +628,6 @@ where
     F: FnMut(&str) -> Result<ContextSnapshot, E> + Send,
     E: fmt::Display + Send,
 {
-    fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.cancellation.cancelled()
-    }
-
     fn estimate_status_context(
         &self,
         content: &str,
@@ -694,23 +685,26 @@ where
     let errors = StatusFittingErrors(std::sync::Mutex::new(None));
     let provider = StatusFittingProvider {
         estimate: std::sync::Mutex::new(estimate),
-        cancellation,
         errors: &errors,
     };
     let states = StatusFittingStates {
         render: &render,
         errors: &errors,
     };
-    parrot_core::compaction::fit_status(&states, &provider)
-        .await
-        .map_err(|error| {
-            errors
-                .0
-                .lock()
-                .expect("status fitting errors poisoned")
-                .take()
-                .unwrap_or_else(|| fallback(error))
-        })
+    parrot_core::compaction::fit_status(
+        &states,
+        &provider,
+        parrot_core::CancellationToken::new(cancellation),
+    )
+    .await
+    .map_err(|error| {
+        errors
+            .0
+            .lock()
+            .expect("status fitting errors poisoned")
+            .take()
+            .unwrap_or_else(|| fallback(error))
+    })
 }
 
 pub(crate) async fn fit_context_status<S: crate::compaction::ContextStatus + ?Sized>(

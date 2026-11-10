@@ -3,7 +3,7 @@ use crate::BoxFuture;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 struct Flag(AtomicBool);
-impl crate::Provider for Flag {
+impl crate::Cancellation for Flag {
     fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
@@ -40,7 +40,7 @@ fn owned_json_numbers_remain_native_numbers_in_nested_sequences_and_maps() {
     let flag = Flag(AtomicBool::new(false));
     assert_eq!(
         engine
-            .render(&arguments, CancellationToken::from_provider(&flag))
+            .render(&arguments, CancellationToken::new(&flag))
             .unwrap(),
         "-9223372036854775808,18446744073709551615,1.5|0.25|124|True|True|text"
     );
@@ -50,7 +50,7 @@ fn owned_json_numbers_remain_native_numbers_in_nested_sequences_and_maps() {
 fn writer_keeps_prior_bytes_private_and_uses_a_nonretryable_cancel_error() {
     let flag = Flag(AtomicBool::new(false));
     let mut writer = CancellationWriter {
-        cancellation: CancellationToken::from_provider(&flag),
+        cancellation: CancellationToken::new(&flag),
         output: Vec::new(),
         cancelled: false,
     };

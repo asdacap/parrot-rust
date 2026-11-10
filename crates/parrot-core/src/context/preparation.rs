@@ -11,14 +11,23 @@ pub(crate) async fn compact_context(
     states: &mut dyn States,
     provider: &dyn Provider,
     definitions: &[ToolDefinition],
+    cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
     let configuration = states
         .get_config(ConfigKey::Compaction)
         .await?
         .into_compaction()?;
-    let input = prepare_compaction(states, provider, definitions, &configuration).await?;
-    let compacted =
-        compact_conversation(&input, definitions, &configuration, states, provider).await;
+    let input =
+        prepare_compaction(states, provider, definitions, &configuration, cancellation).await?;
+    let compacted = compact_conversation(
+        &input,
+        definitions,
+        &configuration,
+        states,
+        provider,
+        cancellation,
+    )
+    .await;
     states
         .record_compaction(&input.instructions, definitions, compacted)
         .await
@@ -65,9 +74,9 @@ async fn prepare_pending_prompt(
                 .map_or_else(|| "unavailable".into(), |value| value.to_string())
                 .into(),
         ));
-        "agent-session.context-limit-reminder"
+        ConfigKey::ContextLimitReminderTemplate
     } else {
-        "agent-session.context-reminder"
+        ConfigKey::ContextReminderTemplate
     };
     let content = render_template(states, key, &arguments).await?;
     Ok(Some(PendingPrompt::ContextReminder {
@@ -90,7 +99,7 @@ pub(crate) async fn prepare_request(
     cancellation: CancellationToken<'_>,
 ) -> Result<ProviderRequest, Error> {
     if flags.final_phase {
-        let content = render_template(states, "agent-session.final-request", &[]).await?;
+        let content = render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
         states.record_steer(&content).await?;
     }
     if cancellation.is_cancelled() {
@@ -106,7 +115,7 @@ pub(crate) async fn prepare_request(
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        instructions = compact_context(states, provider, definitions)
+        instructions = compact_context(states, provider, definitions, cancellation)
             .await?
             .instructions;
         messages = states.read_messages().await?;
@@ -124,7 +133,7 @@ pub(crate) async fn prepare_request(
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
         if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            instructions = compact_context(states, provider, definitions)
+            instructions = compact_context(states, provider, definitions, cancellation)
                 .await?
                 .instructions;
             messages = states.read_messages().await?;

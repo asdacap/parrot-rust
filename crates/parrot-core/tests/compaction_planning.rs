@@ -1,6 +1,6 @@
 use parrot_core::{
-    BoxFuture, Content, ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode,
-    ErrorDetail, ErrorKind, Message, Provider, Role, ToolCall, ToolDefinition,
+    Content, ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail,
+    ErrorKind, Message, Provider, Role, ToolCall, ToolDefinition,
     compaction::{
         CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan,
         CompactionPolicy, PlanningError, group_messages, is_complete,
@@ -72,12 +72,6 @@ struct PlanningProvider {
 }
 
 impl Provider for PlanningProvider {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
     fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
         assert!(
             !self.reject_estimates,

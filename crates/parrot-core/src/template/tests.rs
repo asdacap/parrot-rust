@@ -3,7 +3,7 @@ use serde_json::json;
 
 struct Cancelled;
 
-impl crate::Provider for Cancelled {
+impl crate::Cancellation for Cancelled {
     fn is_cancelled(&self) -> bool {
         true
     }
@@ -88,7 +88,7 @@ fn cancellation_precedes_argument_validation_for_shared_templates() {
     )
     .unwrap();
     let error = template
-        .render(&[], CancellationToken::from_provider(&Cancelled))
+        .render(&[], CancellationToken::new(&Cancelled))
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Cancelled);
 }

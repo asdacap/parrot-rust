@@ -199,7 +199,6 @@ impl Compactor {
             &estimates,
             resources.sessions,
             BorrowedObserver(resources.observer),
-            resources.cancellation,
             &errors,
         );
         let mut states = CompactionStates {
@@ -208,10 +207,15 @@ impl Compactor {
             observer: resources.observer,
             errors: &errors,
         };
-        core::compact(plan, &mut states, &provider)
-            .await
-            .map(|result| result.map(Into::into))
-            .map_err(|error| errors.restore(error, CompactionError::from))
+        core::compact(
+            plan,
+            &mut states,
+            &provider,
+            CancellationToken::new(resources.cancellation),
+        )
+        .await
+        .map(|result| result.map(Into::into))
+        .map_err(|error| errors.restore(error, CompactionError::from))
     }
 }
 
@@ -328,7 +332,7 @@ impl CompactionEstimates {
                 .map(|message| artifact_message(&message))
                 .collect(),
         };
-        let path = blobs.persist(&group, &CoreCancellation(cancellation))?;
+        let path = blobs.persist(&group, &cancellation)?;
         let notice = self
             .templates
             .render(
@@ -451,7 +455,7 @@ impl parrot_core::States for CompactionStates<'_> {
     {
         Box::pin(async move {
             self.observer
-                .observe_progress(progress_event(progress), &CoreCancellation(cancellation))
+                .observe_progress(progress_event(progress), &cancellation)
                 .await
                 .map_err(CompactionError::from)
                 .map_err(|error| {
@@ -474,7 +478,6 @@ pub(crate) fn progress_event(progress: CompactionProgress) -> CompactionProgress
 pub(crate) struct CompactionProvider<'a, O, E> {
     estimates: &'a CompactionEstimates,
     collector: SummaryProviderAdapter<'a, O>,
-    cancellation: &'a dyn Cancellation,
     errors: &'a NativeErrors<E>,
 }
 
@@ -483,13 +486,11 @@ impl<'a, O, E> CompactionProvider<'a, O, E> {
         estimates: &'a CompactionEstimates,
         sessions: &'a ProviderSessions,
         observer: O,
-        cancellation: &'a dyn Cancellation,
         errors: &'a NativeErrors<E>,
     ) -> Self {
         Self {
             estimates,
             collector: SummaryProviderAdapter::new(estimates.selected.clone(), sessions, observer),
-            cancellation,
             errors,
         }
     }
@@ -498,12 +499,6 @@ impl<'a, O, E> CompactionProvider<'a, O, E> {
 impl<O: CompactionObserver, E: From<CompactionError> + Send> parrot_core::Provider
     for CompactionProvider<'_, O, E>
 {
-    fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.cancellation.cancelled()
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -585,14 +580,13 @@ impl<O: CompactionObserver> SummaryProviderAdapter<'_, O> {
         request: ProviderRequest,
         cancellation: CancellationToken<'_>,
     ) -> Result<SummaryResponse, CompactionError> {
-        self.collect(request.into(), CoreCancellation(cancellation))
-            .await
+        self.collect(request.into(), cancellation).await
     }
 
     async fn collect(
         &self,
         request: Request,
-        cancellation: CoreCancellation<'_>,
+        cancellation: CancellationToken<'_>,
     ) -> Result<SummaryResponse, CompactionError> {
         cancellation
             .check()
@@ -642,16 +636,6 @@ impl<O: CompactionObserver> SummaryProviderAdapter<'_, O> {
         // protocol failure; the session pool itself remains caller-owned.
         stream.close().await?;
         result
-    }
-}
-
-pub(crate) struct CoreCancellation<'a>(pub(crate) CancellationToken<'a>);
-impl Cancellation for CoreCancellation<'_> {
-    fn is_cancelled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.0.cancelled()
     }
 }
 

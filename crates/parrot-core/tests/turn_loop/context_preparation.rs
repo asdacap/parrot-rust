@@ -76,7 +76,12 @@ fn core_records_native_pending_prompts_once() {
 
     state.budget = TurnBudget::new(state.unlimited);
 
-    let result = finish(run_turn(&mut state, &tools, &provider));
+    let result = finish(run_turn(
+        &mut state,
+        &tools,
+        &provider,
+        CancellationToken::new(provider.cancellation.as_ref()),
+    ));
 
     assert_eq!(result, Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.recorded_prompts, [prompt.clone()]);

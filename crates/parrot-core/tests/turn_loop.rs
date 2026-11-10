@@ -29,6 +29,8 @@ mod compaction_dependencies;
 mod completion_policy;
 #[path = "turn_loop/context_preparation.rs"]
 mod context_preparation;
+#[path = "turn_loop/provider_cancellation.rs"]
+mod provider_cancellation;
 #[path = "turn_loop/request_assembly.rs"]
 mod request_assembly;
 #[path = "turn_loop/skills.rs"]
@@ -201,12 +203,6 @@ struct MemoryProvider {
     cancellation: Arc<CancellationSource>,
 }
 impl Provider for MemoryProvider {
-    fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.cancellation.cancelled()
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -270,7 +266,14 @@ impl Provider for MemoryProvider {
         )
     }
 
-    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+    fn invoke<'a, 'c>(
+        &'a self,
+        request: ProviderRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    where
+        'c: 'a,
+    {
         Box::pin(async move {
             self.trace.step("invoke", *self.fail_at.lock().unwrap())?;
             self.requests.lock().unwrap().push(request);
@@ -385,7 +388,7 @@ struct MemoryState {
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
     compacting: Arc<AtomicBool>,
-    prompt_templates: Vec<(String, String)>,
+    prompt_templates: Vec<(String, ConfigKey)>,
     template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
     template_engines: BTreeMap<String, String>,
 }
@@ -634,14 +637,25 @@ impl MemoryState {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
         self.budget = TurnBudget::new(self.unlimited);
-        finish(run(self, tools, provider))
+        let source = self.cancellation.clone();
+        finish(run(
+            self,
+            tools,
+            provider,
+            CancellationToken::new(source.as_ref()),
+        ))
     }
     fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
         std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
         self.budget = TurnBudget::new(self.unlimited);
         let tools = self.tools.clone();
         let provider = self.provider.clone();
-        let result = finish(run(self, &tools, &provider));
+        let result = finish(run(
+            self,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref()),
+        ));
         std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
         result
     }
@@ -660,7 +674,18 @@ impl States for MemoryState {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(
                     self.compaction.lock().unwrap().configuration.clone(),
                 )),
-                ConfigKey::PromptTemplate(key) => {
+                ConfigKey::SystemPromptBindings => {
+                    if self.fail_at == Some("prompt_templates") {
+                        return Err(Error::failed("prompt_templates"));
+                    }
+                    Ok(ConfigValue::SystemPromptBindings(
+                        self.prompt_templates.clone(),
+                    ))
+                }
+                key => {
+                    let key = key
+                        .get_prompt_template_id()
+                        .ok_or_else(|| Error::unsupported("configuration"))?;
                     if key == "agent-session.context-reminder"
                         || key == "agent-session.context-limit-reminder"
                     {
@@ -669,7 +694,7 @@ impl States for MemoryState {
                     self.trace.step("render_template", self.fail_at)?;
                     let templates = self.skill_templates.lock().unwrap();
                     let text = templates
-                        .get(&key)
+                        .get(key)
                         .ok_or_else(|| Error::failed("unknown template"))?;
                     let allowed = [
                         "name",
@@ -697,7 +722,7 @@ impl States for MemoryState {
                     .map(str::to_owned);
                     let engine = self
                         .template_engines
-                        .get(&key)
+                        .get(key)
                         .map_or("scalar", String::as_str);
                     Ok(ConfigValue::PromptTemplate(Arc::new(
                         PromptTemplate::compile(
@@ -853,9 +878,6 @@ impl States for MemoryState {
             }
             Ok(vec![("memory:instructions".into(), instructions)])
         })
-    }
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async move { Ok(self.prompt_templates.clone()) })
     }
     fn read_template_arguments<'a>(
         &'a self,
@@ -1402,7 +1424,12 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         state.budget = TurnBudget::new(disable_limits);
 
         assert_eq!(
-            finish(run(&mut state, &tools, &provider)),
+            finish(run(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref())
+            )),
             if disable_limits {
                 Ok(Outcome::Completed("answer".into()))
             } else {
@@ -1615,7 +1642,12 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(
         finish({
             state.apply_options(&options);
-            run_turn(&mut state, &tools, &provider)
+            run_turn(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref()),
+            )
         }),
         Ok(Outcome::Completed("first answer".into()))
     );
@@ -1647,7 +1679,12 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(
         finish({
             state.apply_options(&options);
-            run_turn(&mut state, &tools, &provider)
+            run_turn(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref()),
+            )
         }),
         Ok(Outcome::Completed("second answer".into()))
     );
@@ -1675,7 +1712,12 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(
         finish({
             state.apply_options(&options);
-            run(&mut state, &tools, &provider)
+            run(
+                &mut state,
+                &tools,
+                &provider,
+                CancellationToken::new(provider.cancellation.as_ref()),
+            )
         }),
         Ok(Outcome::Completed(String::new()))
     );
@@ -1700,7 +1742,12 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     state.budget = TurnBudget::new(false);
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Err(Error::cancelled())
     );
     assert!(state.trace.values().is_empty());
@@ -1845,7 +1892,7 @@ fn tools_and_provider_operate_without_states() {
         arguments_json: " { \"a\" : 1 } ".into(),
     }];
     let source = CancellationSource::default();
-    let cancellation = CancellationToken::from_provider(&source);
+    let cancellation = CancellationToken::new(&source);
     let results = finish(tools.execute(
         calls.clone(),
         ToolCallReceipt {
@@ -1882,7 +1929,11 @@ fn tools_and_provider_operate_without_states() {
         ["read"]
     );
     let provider: &dyn Provider = &state.provider;
-    let response = finish(provider.invoke(ProviderRequest::default())).unwrap();
+    let response = finish(provider.invoke(
+        ProviderRequest::default(),
+        parrot_core::CancellationToken::uncancelled(),
+    ))
+    .unwrap();
     assert_eq!(response.assistant_text, "standalone");
     assert!(response.tool_calls.is_empty());
     assert!(state.provider.replies.lock().unwrap().is_empty());
@@ -1891,12 +1942,6 @@ fn tools_and_provider_operate_without_states() {
 
 struct EchoProvider(MemoryProvider);
 impl Provider for EchoProvider {
-    fn is_cancelled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.0.cancelled()
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -1929,7 +1974,14 @@ impl Provider for EchoProvider {
         self.0.summarize(request, cancellation)
     }
 
-    fn invoke(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+    fn invoke<'a, 'c>(
+        &'a self,
+        request: ProviderRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    where
+        'c: 'a,
+    {
         Box::pin(async move {
             assert_eq!(request.model, "memory/model");
             assert_eq!(

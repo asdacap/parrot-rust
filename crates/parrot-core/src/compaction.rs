@@ -74,8 +74,8 @@ pub async fn compact(
     plan: Option<CompactionPlan>,
     states: &mut dyn States,
     provider: &dyn Provider,
+    cancellation: CancellationToken<'_>,
 ) -> Result<Option<CompactionResult>, Error> {
-    let cancellation = CancellationToken::from_provider(provider);
     let Some(plan) = plan else {
         return Ok(None);
     };

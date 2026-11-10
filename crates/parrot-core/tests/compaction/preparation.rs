@@ -31,8 +31,15 @@ struct Preparation {
 }
 
 impl States for Preparation {
-    fn get_config(&self, _: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
-        Box::pin(async { Err(Error::failed("preparation has no configured templates")) })
+    fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
+        Box::pin(async move {
+            match key {
+                ConfigKey::SystemPromptBindings => {
+                    Ok(ConfigValue::SystemPromptBindings(Vec::new()))
+                }
+                _ => Err(Error::failed("preparation has no configured templates")),
+            }
+        })
     }
 
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
@@ -67,10 +74,6 @@ impl States for Preparation {
                 "sampled instructions".into(),
             )])
         })
-    }
-
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
     }
 
     fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
@@ -157,12 +160,6 @@ impl Estimates {
 }
 
 impl parrot_core::Provider for Estimates {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -272,6 +269,7 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         &provider,
         &definitions,
         &configuration(),
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
 
@@ -353,6 +351,7 @@ fn preparation_preserves_incomplete_roots_and_does_not_promote_orphaned_results(
         &Estimates::new(1),
         &[],
         &configuration(),
+        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
     assert_eq!(input.base_watermark, 0);
@@ -386,6 +385,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
             &provider,
             &[],
             &configuration(),
+            parrot_core::CancellationToken::uncancelled(),
         ));
         let error = if stage == "cancel" {
             Error::cancelled()
@@ -412,6 +412,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
             &Estimates::new(0),
             &[],
             &configuration(),
+            parrot_core::CancellationToken::uncancelled()
         )),
         Err(native_error("failed publication"))
     );

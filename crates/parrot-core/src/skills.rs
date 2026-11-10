@@ -78,17 +78,11 @@ impl SkillPreparation {
         });
         let mut templates = BTreeMap::new();
         for key in [
-            "context.skill-unavailable",
-            "context.skill-selected",
-            "context.skill-too-large",
+            ConfigKey::SkillUnavailableTemplate,
+            ConfigKey::SkillSelectedTemplate,
+            ConfigKey::SkillTooLargeTemplate,
         ] {
-            templates.insert(
-                key,
-                states
-                    .get_config(ConfigKey::PromptTemplate(key.into()))
-                    .await?
-                    .into_prompt_template()?,
-            );
+            templates.insert(key, states.get_config(key).await?.into_prompt_template()?);
         }
         let preparation = SkillTemplates(templates);
         let preparation = &preparation;
@@ -111,13 +105,17 @@ impl SkillPreparation {
     }
 }
 
-struct SkillTemplates(BTreeMap<&'static str, Arc<PromptTemplate>>);
+struct SkillTemplates(BTreeMap<ConfigKey, Arc<PromptTemplate>>);
 
 impl SkillTemplates {
-    fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error> {
+    fn render_template(
+        &self,
+        key: ConfigKey,
+        arguments: &[(String, String)],
+    ) -> Result<String, Error> {
         let template = self
             .0
-            .get(key)
+            .get(&key)
             .ok_or_else(|| Error::failed("unknown skill template"))?;
         let arguments = arguments
             .iter()
@@ -146,7 +144,7 @@ fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Resul
         units += character.len_utf16();
     }
     preparation.render_template(
-        "context.skill-unavailable",
+        ConfigKey::SkillUnavailableTemplate,
         &[
             ("name".into(), escape(name)),
             ("message".into(), escape(&message)),
@@ -230,7 +228,7 @@ impl SkillRendering {
     ) -> Result<(), Error> {
         if content.len() > MAXIMUM_SKILL_BYTES {
             let value = preparation.render_template(
-                "context.skill-too-large",
+                ConfigKey::SkillTooLargeTemplate,
                 &[
                     ("name".into(), escape(&skill.name)),
                     ("path".into(), escape(&skill.path)),
@@ -241,7 +239,7 @@ impl SkillRendering {
             return Ok(());
         }
         let value = preparation.render_template(
-            "context.skill-selected",
+            ConfigKey::SkillSelectedTemplate,
             &[
                 ("name".into(), escape(&skill.name)),
                 ("path".into(), escape(&skill.path)),
