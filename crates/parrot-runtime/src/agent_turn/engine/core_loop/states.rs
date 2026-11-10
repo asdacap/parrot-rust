@@ -1,25 +1,223 @@
+use super::conversation::{render_event, render_origin, render_record};
 use super::*;
+use parrot_core::{ConversationAddition, ConversationPersistence, ConversationReceipt};
 
-impl<S, T> CoreStates for RuntimeStates<'_, S, T>
+pub(super) struct RuntimeStates<'a, S: AccessSnapshot> {
+    pub(super) history: &'a AgentHistoryView,
+    pub(super) sessions: &'a ProviderSessions,
+    pub(super) activity: &'a dyn SessionActivity,
+    pub(super) state: &'a Mutex<State>,
+    pub(super) prompt: &'a SessionPrompt,
+    pub(super) skills: &'a dyn TurnSkills,
+    pub(super) status: &'a dyn TurnStatus<S>,
+    pub(super) completion_sources: &'a [Arc<dyn CompletionStateSource>],
+    pub(super) templates: &'a PromptTemplateCatalog,
+    pub(super) publisher: &'a Publisher,
+    pub(super) usage: &'a SessionUsageRecorder,
+    pub(super) compactor: &'a crate::compaction::Compactor,
+    pub(super) event_id: &'a Arc<dyn Fn() -> String + Send + Sync>,
+    pub(super) events: ContextEmitter<'a>,
+    pub(super) binding: &'a TurnBinding<S>,
+    pub(super) cancellation: &'a dyn Cancellation,
+    pub(super) work: &'a dyn DrainWork,
+    pub(super) persistence_key: Option<TurnKey>,
+    pub(super) budget: &'a mut parrot_core::TurnBudget,
+}
+
+impl<S> CoreStates for RuntimeStates<'_, S>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
 {
     fn apply_conversation_addition(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, CoreError>> {
-        adapt_operation(conversation::apply_conversation_addition(self, addition))
+        adapt_operation(async move {
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
+            let mut sequence = 0;
+            let mut publications = Vec::new();
+            let cancellation = self.cancellation;
+            match addition.persistence {
+                ConversationPersistence::Append { origin, event } => {
+                    for message in &addition.messages {
+                        let event = render_event(self.events.event(), event.clone());
+                        let item = self
+                            .history
+                            .append_conversation(
+                                event.clone(),
+                                render_record(message, render_origin(origin))?,
+                            )
+                            .await?;
+                        sequence = item.sequence;
+                        publications.push(event);
+                    }
+                }
+                ConversationPersistence::Committed(publication) => {
+                    let event = render_event(
+                        Event {
+                            id: publication.event_id,
+                            agent_session_id: publication.agent_session_id,
+                            ..Event::new()
+                        },
+                        publication.event,
+                    );
+                    publications.push(event);
+                }
+                persistence @ (ConversationPersistence::Phase { .. }
+                | ConversationPersistence::Reminder { .. }
+                | ConversationPersistence::Status { .. }) => {
+                    return crate::compaction::apply_conversation_addition(
+                        self.history,
+                        &mut state.conversation,
+                        &mut state.context.initial_status_pending,
+                        ConversationAddition {
+                            messages: addition.messages,
+                            persistence,
+                        },
+                        &self.events,
+                        cancellation,
+                    )
+                    .await
+                    .map_err(Into::into);
+                }
+                persistence @ (ConversationPersistence::ToolResult { .. }
+                | ConversationPersistence::ToolImages { .. }) => {
+                    return state
+                        .tool_conversation
+                        .apply_conversation_addition(
+                            &mut state.conversation,
+                            ConversationAddition {
+                                messages: addition.messages,
+                                persistence,
+                            },
+                        )
+                        .await;
+                }
+                ConversationPersistence::CompletionFeedback(feedback) => {
+                    let mut candidate = Some(feedback.candidate);
+                    let sources = std::mem::take(
+                        &mut *self
+                            .binding
+                            .exit_blocker_sources
+                            .lock()
+                            .expect("completion sources poisoned"),
+                    );
+                    for ((source, kind), message) in sources.into_iter().zip(feedback.messages) {
+                        source
+                            .record_completion_feedback(
+                                &CompletionFeedback {
+                                    kind,
+                                    message,
+                                    candidate: candidate.take(),
+                                },
+                                cancellation,
+                            )
+                            .await?;
+                    }
+                }
+                ConversationPersistence::CloseTurn { finish_reason } => {
+                    self.work
+                        .join_mutations()
+                        .await
+                        .map_err(|error| TurnError::Service(error.to_string()))?;
+                    let key = self
+                        .persistence_key
+                        .as_ref()
+                        .ok_or_else(|| TurnError::Service("turn start is unavailable".into()))?;
+                    let totals = self.usage.capture().own.totals;
+                    let mut event = self.events.event();
+                    let completed: sessions::Completion = ProviderResponse {
+                        finish_reason,
+                        ..Default::default()
+                    }
+                    .into();
+                    event.set_turn_ended(protocol::TurnEnded {
+                        finish_reason: completed.finish_reason,
+                        input_tokens: totals.input_tokens,
+                        output_tokens: totals.output_tokens,
+                        ..Default::default()
+                    });
+                    let record = render_record(&addition.messages[0], ConversationOrigin::Model)?;
+                    let mut live = Vec::new();
+                    for message in addition.messages {
+                        live.push(
+                            crate::compaction::materialize_message(self.history, message).await?,
+                        );
+                    }
+                    let result = self
+                        .history
+                        .repository()
+                        .events()
+                        .close_turn_and_publish(
+                            key.clone(),
+                            event,
+                            Some(record),
+                            &PublisherRef(self.publisher),
+                            cancellation,
+                            |receipt| {
+                                if receipt.closure == TurnClosure::NewlyClosed {
+                                    for message in live {
+                                        state.conversation.add(message);
+                                    }
+                                }
+                            },
+                        )
+                        .await;
+                    let committed = match &result {
+                        Ok(receipt) => Some(receipt),
+                        Err(CloseTurnError::Publication { committed, .. }) => {
+                            Some(committed.as_ref())
+                        }
+                        _ => None,
+                    };
+                    if let Some(receipt) = committed {
+                        self.history.refresh().await?;
+                        if receipt.closure == TurnClosure::AlreadyClosed {
+                            state.conversation.reload().await?;
+                        }
+                    }
+                    let receipt = result.map_err(|error| match error {
+                        CloseTurnError::AdmissionCancelled => TurnError::Cancelled,
+                        CloseTurnError::Repository(error) => error.into(),
+                        CloseTurnError::Publication { error, .. } => TurnError::Publication(error),
+                    })?;
+                    return Ok(ConversationReceipt {
+                        inserted: receipt.closure == TurnClosure::NewlyClosed,
+                        sequence: 0,
+                    });
+                }
+            }
+            for message in addition.messages {
+                if message.role == parrot_core::Role::Assistant {
+                    let text: String = message
+                        .contents
+                        .iter()
+                        .filter_map(|content| match content {
+                            parrot_core::Content::Text(text) => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    self.activity.assistant_message(&text);
+                }
+                state
+                    .conversation
+                    .add(crate::compaction::materialize_message(self.history, message).await?);
+            }
+            for event in publications {
+                self.publisher
+                    .publish_committed(&Committed::after_commit(event), cancellation)
+                    .await
+                    .map_err(TurnError::Publication)?;
+            }
+            Ok(ConversationReceipt {
+                inserted: true,
+                sequence,
+            })
+        })
     }
     fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .history
-                .read_final_phase()
-                .await
-                .map_err(Into::into)
-        })
+        adapt_operation(async move { self.history.read_final_phase().await.map_err(Into::into) })
     }
     fn get_config(
         &self,
@@ -39,7 +237,7 @@ where
                     }))
                 }
                 ConfigKey::Context => {
-                    let state = self.backend.state.lock().await;
+                    let state = self.state.lock().await;
                     let selection = self.binding.capture_selection()?;
                     Ok(ConfigValue::Context(
                         state
@@ -50,14 +248,12 @@ where
                 ConfigKey::Compaction => {
                     let selection = self.binding.capture_selection()?;
                     Ok(ConfigValue::Compaction(
-                        self.backend
-                            .compactor
+                        self.compactor
                             .planner()
                             .capture_compaction_configuration(&selection.model, None),
                     ))
                 }
                 ConfigKey::SystemPromptBindings => self
-                    .backend
                     .prompt
                     .read_core_prompt_bindings(self.cancellation)
                     .await
@@ -65,7 +261,6 @@ where
                     .map_err(ContextError::from)
                     .map_err(Into::into),
                 key => self
-                    .backend
                     .templates
                     .get_template(
                         crate::prompt_context::get_prompt_template_id(key).ok_or_else(|| {
@@ -92,8 +287,7 @@ where
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ContextReminderCheckpoint>, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .state
+            self.state
                 .lock()
                 .await
                 .context
@@ -105,7 +299,7 @@ where
 
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
         adapt_operation(async move {
-            let _guard = self.backend.state.lock().await;
+            let _guard = self.state.lock().await;
             self.binding
                 .exit_blocker_sources
                 .lock()
@@ -117,19 +311,19 @@ where
                 .await
                 .map_err(|error| TurnError::Service(error.to_string()))?;
             let mut blockers = Vec::new();
-            for source in &self.backend.completion_sources {
+            for source in self.completion_sources {
                 if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
                     blockers.push(reminder);
                     sources.push((source.clone(), CompletionFeedbackKind::PendingAsks));
                 }
             }
-            for source in &self.backend.completion_sources {
+            for source in self.completion_sources {
                 if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
                     blockers.push(reminder);
                     sources.push((source.clone(), CompletionFeedbackKind::ActiveWork));
                 }
             }
-            for source in &self.backend.completion_sources {
+            for source in self.completion_sources {
                 if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
                     blockers.push(reminder);
                     sources.push((source.clone(), CompletionFeedbackKind::ExitReminders));
@@ -154,7 +348,6 @@ where
     {
         adapt_operation(async move {
             let status = self
-                .backend
                 .state
                 .lock()
                 .await
@@ -187,9 +380,9 @@ where
         'c: 'a,
     {
         Box::pin(async move {
-            let mut state = self.backend.state.lock().await;
+            let mut state = self.state.lock().await;
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            crate::compaction::CompactionEstimates::new(&self.backend.compactor, &selection.model)
+            crate::compaction::CompactionEstimates::new(self.compactor, &selection.model)
                 .spill_group(state.context.borrow_blobs(), messages, cancellation)
                 .map_err(Into::into)
         })
@@ -205,9 +398,7 @@ where
     {
         Box::pin(async move {
             crate::compaction::CompactionObserver::observe_progress(
-                &ContextEmitter {
-                    backend: self.backend,
-                },
+                &self.events,
                 protocol::CompactionProgressEvent {
                     phase: protocol::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
                     completed_groups: progress.completed_groups as u64,
@@ -226,21 +417,19 @@ where
         &mut self,
     ) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
         adapt_operation(async move {
-            let backend = self.backend;
             let selection = self.binding.capture_selection()?;
             {
-                let mut state = backend.state.lock().await;
-                state.request_status = Some(backend.status.bind(&selection));
+                let mut state = self.state.lock().await;
+                state.request_status = Some(self.status.bind(&selection));
                 self.cancellation
                     .check()
                     .map_err(|_| ContextError::Cancelled)?;
                 state
                     .context
-                    .ensure_epoch(&backend.prompt, self.cancellation)
+                    .ensure_epoch(self.prompt, self.cancellation)
                     .await?;
             }
-            backend
-                .prompt
+            self.prompt
                 .read_system_prompts(&selection.model, self.cancellation)
                 .await
                 .map_err(ContextError::from)
@@ -252,8 +441,7 @@ where
         source_key: &'a str,
     ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .prompt
+            self.prompt
                 .read_template_arguments(source_key, self.cancellation)
                 .await
                 .map_err(ContextError::from)
@@ -262,8 +450,7 @@ where
     }
     fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .prompt
+            self.prompt
                 .read_agents_files(self.cancellation)
                 .await
                 .map_err(ContextError::from)
@@ -274,8 +461,7 @@ where
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .prompt
+            self.prompt
                 .read_agent_identity(self.cancellation)
                 .await
                 .map_err(ContextError::from)
@@ -284,8 +470,7 @@ where
     }
     fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .prompt
+            self.prompt
                 .read_standing_instruction(self.cancellation)
                 .await
                 .map_err(ContextError::from)
@@ -296,8 +481,7 @@ where
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .prompt
+            self.prompt
                 .read_skill_catalog(self.cancellation)
                 .await
                 .map_err(ContextError::from)
@@ -306,8 +490,7 @@ where
     }
     fn read_tool_recovery(&self) -> BoxFuture<'_, Result<parrot_core::ToolRecovery, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .state
+            self.state
                 .lock()
                 .await
                 .tool_conversation
@@ -320,8 +503,7 @@ where
         through: i64,
     ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .state
+            self.state
                 .lock()
                 .await
                 .tool_conversation
@@ -333,7 +515,7 @@ where
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationTurn>, CoreError>> {
         adapt_operation(async move {
-            let state = self.backend.state.lock().await;
+            let state = self.state.lock().await;
             let Some(turn) = state.conversation.read_last_turn_messages() else {
                 return Ok(None);
             };
@@ -354,7 +536,7 @@ where
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::PendingMessage>, CoreError>> {
         adapt_operation(async move {
-            let Some(input) = self.backend.history.peek_pending_input().await? else {
+            let Some(input) = self.history.peek_pending_input().await? else {
                 return Ok(None);
             };
             let delivery = match input.delivery {
@@ -377,15 +559,78 @@ where
         &mut self,
         admission: parrot_core::InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::PromotedInput>, CoreError>> {
-        adapt_operation(async move { self.backend.promote(admission).await })
+        adapt_operation(async move {
+            let agent = self.history.agent_session_id().to_owned();
+            let ids = self.event_id.clone();
+            let mut promotions = self
+                .history
+                .promote_steers(move |input| {
+                    let mut event = Event {
+                        id: ids(),
+                        agent_session_id: agent.clone(),
+                        ..Event::new()
+                    };
+                    event.set_input_promoted(protocol::InputPromoted {
+                        input_id: input.id.clone(),
+                        message_id: input.message_id.clone(),
+                        ..Default::default()
+                    });
+                    Ok(event)
+                })
+                .await?;
+            if promotions.is_empty() && admission == parrot_core::InputAdmission::SteersOrNextQueued
+            {
+                let agent = self.history.agent_session_id().to_owned();
+                let ids = self.event_id.clone();
+                promotions = self
+                    .history
+                    .promote_next_queue(move |input| {
+                        let mut event = Event {
+                            id: ids(),
+                            agent_session_id: agent.clone(),
+                            ..Event::new()
+                        };
+                        event.set_input_promoted(protocol::InputPromoted {
+                            input_id: input.id.clone(),
+                            message_id: input.message_id.clone(),
+                            ..Default::default()
+                        });
+                        Ok(event)
+                    })
+                    .await?;
+            }
+            let mut inputs = Vec::with_capacity(promotions.len());
+            for promotion in promotions {
+                let contents = self.history.materialize(promotion.input.parts).await?;
+                let message = ModelMessage {
+                    role: MessageRole::User,
+                    contents,
+                    tool_calls: Vec::new(),
+                    tool_call_id: String::new(),
+                    provider_content: ProviderContent::default(),
+                };
+                inputs.push(parrot_core::PromotedInput {
+                    input_id: promotion.input.id.clone(),
+                    message: provider_message(&message).into(),
+                    publication: parrot_core::ConversationPublication {
+                        event_id: promotion.published.id,
+                        agent_session_id: promotion.published.agent_session_id,
+                        event: parrot_core::ConversationEvent::InputPromoted {
+                            input_id: promotion.input.id,
+                            message_id: promotion.input.message_id,
+                        },
+                    },
+                });
+            }
+            Ok(inputs)
+        })
     }
     fn resolve_skill_references<'a>(
         &'a self,
         references: &'a [parrot_core::SkillReference],
     ) -> BoxFuture<'a, Result<Vec<Option<parrot_core::Skill>>, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .skills
+            self.skills
                 .get_skills(references, self.cancellation)
                 .await
                 .map_err(TurnError::from)
@@ -396,8 +641,7 @@ where
         skill: &'a parrot_core::Skill,
     ) -> BoxFuture<'a, Result<parrot_core::SkillContent, CoreError>> {
         adapt_operation(async move {
-            self.backend
-                .skills
+            self.skills
                 .read_skill_content(skill, self.cancellation)
                 .await
                 .map_err(TurnError::from)
@@ -405,7 +649,7 @@ where
     }
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, CoreError>> {
         adapt_operation(async move {
-            let state = self.backend.state.lock().await;
+            let state = self.state.lock().await;
             Ok(state.context.budget().capture_state())
         })
     }
@@ -413,7 +657,7 @@ where
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
         adapt_operation(async move {
-            let state = self.backend.state.lock().await;
+            let state = self.state.lock().await;
             Ok(state
                 .conversation
                 .messages()
@@ -427,7 +671,7 @@ where
         &self,
     ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, CoreError>> {
         adapt_operation(async move {
-            let state = self.backend.state.lock().await;
+            let state = self.state.lock().await;
             state
                 .context
                 .read_conversation_state(&state.conversation)
@@ -444,10 +688,10 @@ where
         Box::pin(async move {
             let definitions: Vec<sessions::Tool> =
                 definitions.iter().cloned().map(Into::into).collect();
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
+
+            let mut guard = self.state.lock().await;
             let state = &mut *guard;
-            let events = ContextEmitter { backend };
+            let events = self.events;
             let compacted = match result {
                 Ok(compacted) => compacted,
                 Err(error) => {
@@ -472,8 +716,8 @@ where
                         selection: &selection.model,
                         tools: &definitions,
                         conversation: &mut state.conversation,
-                        prompt: &backend.prompt,
-                        sessions: &backend.sessions,
+                        prompt: self.prompt,
+                        sessions: self.sessions,
                         status: status.as_ref(),
                         events: &events,
                     },
@@ -491,4 +735,3 @@ where
         })
     }
 }
-

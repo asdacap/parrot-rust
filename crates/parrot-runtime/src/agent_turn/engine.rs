@@ -314,7 +314,12 @@ where
         let snapshot = self.snapshot(selection)?;
         let definitions = self.tools.definitions(&snapshot).to_vec();
         let status = self.status.bind(selection);
-        let events = ContextEmitter { backend: self };
+        let events = ContextEmitter::new(
+            &self.history,
+            self.publisher.as_ref(),
+            &self.broker,
+            self.event_id.as_ref(),
+        );
         state
             .context
             .compact(
@@ -367,73 +372,7 @@ where
             selection,
         )
     }
-    async fn promote(
-        &self,
-        admission: parrot_core::InputAdmission,
-    ) -> Result<Vec<parrot_core::PromotedInput>, TurnError> {
-        let agent = self.identity.session_id.clone();
-        let ids = self.event_id.clone();
-        let mut promotions = self
-            .history
-            .promote_steers(move |input| {
-                let mut event = Event {
-                    id: ids(),
-                    agent_session_id: agent.clone(),
-                    ..Event::new()
-                };
-                event.set_input_promoted(protocol::InputPromoted {
-                    input_id: input.id.clone(),
-                    message_id: input.message_id.clone(),
-                    ..Default::default()
-                });
-                Ok(event)
-            })
-            .await?;
-        if promotions.is_empty() && admission == parrot_core::InputAdmission::SteersOrNextQueued {
-            let agent = self.identity.session_id.clone();
-            let ids = self.event_id.clone();
-            promotions = self
-                .history
-                .promote_next_queue(move |input| {
-                    let mut event = Event {
-                        id: ids(),
-                        agent_session_id: agent.clone(),
-                        ..Event::new()
-                    };
-                    event.set_input_promoted(protocol::InputPromoted {
-                        input_id: input.id.clone(),
-                        message_id: input.message_id.clone(),
-                        ..Default::default()
-                    });
-                    Ok(event)
-                })
-                .await?;
-        }
-        let mut inputs = Vec::with_capacity(promotions.len());
-        for promotion in promotions {
-            let contents = self.history.materialize(promotion.input.parts).await?;
-            let message = ModelMessage {
-                role: MessageRole::User,
-                contents,
-                tool_calls: Vec::new(),
-                tool_call_id: String::new(),
-                provider_content: ProviderContent::default(),
-            };
-            inputs.push(parrot_core::PromotedInput {
-                input_id: promotion.input.id.clone(),
-                message: provider_message(&message).into(),
-                publication: parrot_core::ConversationPublication {
-                    event_id: promotion.published.id,
-                    agent_session_id: promotion.published.agent_session_id,
-                    event: parrot_core::ConversationEvent::InputPromoted {
-                        input_id: promotion.input.id,
-                        message_id: promotion.input.message_id,
-                    },
-                },
-            });
-        }
-        Ok(inputs)
-    }
+
     async fn fail(&self, message: String, body: String) -> Result<(), TurnError> {
         let mut event = self.event();
         event.set_turn_failed(protocol::TurnFailed {
@@ -583,15 +522,44 @@ impl ProviderActivity for ActivityBridge<'_> {
         self.0.finish_provider_request();
     }
 }
-struct ContextEmitter<'a, S: AccessSnapshot, T: TurnTools<S>> {
-    backend: &'a RuntimeBackend<S, T>,
+#[derive(Clone, Copy)]
+struct ContextEmitter<'a> {
+    history: &'a AgentHistoryView,
+    publisher: &'a Publisher,
+    broker: &'a EventBroker,
+    event_id: &'a (dyn Fn() -> String + Send + Sync),
 }
-impl<S, T> CompactionObserver for ContextEmitter<'_, S, T>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
+impl<'a> ContextEmitter<'a> {
+    fn new(
+        history: &'a AgentHistoryView,
+        publisher: &'a Publisher,
+        broker: &'a EventBroker,
+        event_id: &'a (dyn Fn() -> String + Send + Sync),
+    ) -> Self {
+        Self {
+            history,
+            publisher,
+            broker,
+            event_id,
+        }
+    }
+    fn event(&self) -> Event {
+        Event {
+            id: (self.event_id)(),
+            agent_session_id: self.history.agent_session_id().into(),
+            ..Event::new()
+        }
+    }
+    async fn emit(&self, event: Event, cancellation: &dyn Cancellation) -> Result<(), TurnError> {
+        self.history.append(event.clone(), None, None).await?;
+        self.publisher
+            .publish_committed(&Committed::after_commit(event), cancellation)
+            .await
+            .map_err(TurnError::Publication)
+    }
+}
+
+impl CompactionObserver for ContextEmitter<'_> {
     fn observe<'a>(
         &'a self,
         event: &'a sessions::Event,
@@ -599,9 +567,9 @@ where
     ) -> BoxFuture<'a, Result<(), sessions::Error>> {
         Box::pin(async move {
             provider_call::emit_retry(
-                &self.backend.history,
-                self.backend.publisher.as_ref(),
-                self.backend.event_id.as_ref(),
+                self.history,
+                self.publisher,
+                self.event_id,
                 event,
                 cancellation,
             )
@@ -621,43 +589,32 @@ where
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), sessions::Error>> {
         Box::pin(async move {
-            let mut event = self.backend.event();
+            let mut event = self.event();
             event.set_compaction_progress(progress);
-            self.backend
-                .emit(event, cancellation)
-                .await
-                .map_err(|error| {
-                    if error.is_cancelled() {
-                        sessions::Error::Cancelled
-                    } else {
-                        sessions::Error::Provider(error.to_string())
-                    }
-                })
+            self.emit(event, cancellation).await.map_err(|error| {
+                if error.is_cancelled() {
+                    sessions::Error::Cancelled
+                } else {
+                    sessions::Error::Provider(error.to_string())
+                }
+            })
         })
     }
 }
-impl<S, T> ContextEvents for ContextEmitter<'_, S, T>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
+impl ContextEvents for ContextEmitter<'_> {
     fn emit<'a>(
         &'a self,
         event: Event,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<()>> {
         Box::pin(async move {
-            self.backend
-                .emit(event, cancellation)
-                .await
-                .map_err(|error| {
-                    if error.is_cancelled() {
-                        ContextError::Cancelled
-                    } else {
-                        ContextError::Operation(error.to_string())
-                    }
-                })
+            self.emit(event, cancellation).await.map_err(|error| {
+                if error.is_cancelled() {
+                    ContextError::Cancelled
+                } else {
+                    ContextError::Operation(error.to_string())
+                }
+            })
         })
     }
     fn publish_committed<'a>(
@@ -666,8 +623,7 @@ where
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<()>> {
         Box::pin(async move {
-            self.backend
-                .publisher
+            self.publisher
                 .publish_committed(&event, cancellation)
                 .await
                 .map_err(|error| match error {
@@ -683,7 +639,7 @@ where
     ) -> BoxFuture<'a, ContextResult<()>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| ContextError::Cancelled)?;
-            self.backend.broker.publish_retained(&event);
+            self.broker.publish_retained(&event);
             Ok(())
         })
     }

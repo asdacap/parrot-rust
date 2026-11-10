@@ -47,9 +47,12 @@ where
             let provider = crate::compaction::SummaryProviderAdapter::new(
                 selection.model.canonical_model,
                 &self.backend.sessions,
-                ContextEmitter {
-                    backend: self.backend,
-                },
+                ContextEmitter::new(
+                    &self.backend.history,
+                    self.backend.publisher.as_ref(),
+                    &self.backend.broker,
+                    self.backend.event_id.as_ref(),
+                ),
             );
             provider
                 .summarize_native(request, cancellation)
@@ -125,4 +128,3 @@ where
         })
     }
 }
-

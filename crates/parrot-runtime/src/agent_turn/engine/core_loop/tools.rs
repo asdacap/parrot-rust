@@ -61,7 +61,12 @@ where
                 .request_status
                 .clone()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            let events = ContextEmitter { backend };
+            let events = ContextEmitter::new(
+                &backend.history,
+                backend.publisher.as_ref(),
+                &backend.broker,
+                backend.event_id.as_ref(),
+            );
             let chunk = backend
                 .tools
                 .execute(
@@ -107,4 +112,3 @@ where
         })
     }
 }
-
