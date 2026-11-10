@@ -215,11 +215,13 @@ pub struct PromptPublication {
 pub trait States: Send + Sync {
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
-    /// Snapshots the invocation budget, including settlement extensions from earlier turns.
+    /// Loads the provider-request budget that core updates during one turn, not a token budget.
+    /// Core resets the request count at turn start but retains settlement extensions from earlier turns.
     fn read_turn_budget(&self) -> Result<TurnBudget, Error> {
         Err(Error::unsupported("States.read_turn_budget"))
     }
-    /// Restores the budget after core finishes, including when the turn fails.
+    /// Saves the updated provider-request budget after the turn returns, even on error.
+    /// Retains settlement extensions for subsequent turns in the same invocation.
     fn write_turn_budget(&mut self, _budget: TurnBudget) -> Result<(), Error> {
         Err(Error::unsupported("States.write_turn_budget"))
     }
