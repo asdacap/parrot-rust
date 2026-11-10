@@ -250,6 +250,14 @@ pub struct ContextReminderPublication {
 
 /// Publishes compaction lifecycle notifications independently of conversation state.
 pub trait EventPublisher: Send + Sync {
+    /// Records and publishes the supplied event without adding conversation content.
+    fn publish<'a>(
+        &'a self,
+        _event: crate::ConversationEvent,
+        _cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("EventPublisher.publish")) })
+    }
     /// Publishes compaction start without request cancellation.
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction failure without request cancellation.
@@ -260,6 +268,14 @@ pub trait EventPublisher: Send + Sync {
 /// Mutations receive their input from the caller rather than retrieving staged input.
 /// Unsupported capabilities return explicit errors rather than inventing state.
 pub trait States: Send + Sync {
+    /// Commits the supplied messages, updates the live conversation on insertion, then publishes.
+    /// Storage conditions control deduplication only. Core supplies every message and its timing.
+    fn add_conversation(
+        &mut self,
+        _addition: crate::ConversationAddition,
+    ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.add_conversation")) })
+    }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
     /// Loads the provider-request budget that core updates during one turn, not a token budget.

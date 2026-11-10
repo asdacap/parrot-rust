@@ -3,11 +3,13 @@
 pub mod budget;
 pub mod compaction;
 mod context;
+mod conversation;
 mod protocol;
 pub mod rendering;
 mod skills;
 pub mod template;
 pub use context::*;
+pub use conversation::*;
 pub use protocol::*;
 pub use skills::{SkillMention, parse_skill_mentions};
 
