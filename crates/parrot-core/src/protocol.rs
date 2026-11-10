@@ -254,8 +254,10 @@ pub struct PromptPublication {
     pub notice: String,
 }
 
-/// Publishes compaction lifecycle notifications independently of conversation state.
+/// Publishes lifecycle notifications independently of conversation state.
 pub trait EventPublisher: Send + Sync {
+    /// Begins a prompt epoch before instructions are read, awaiting native refresh hooks.
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction start without request cancellation.
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction failure without request cancellation.
@@ -299,10 +301,6 @@ pub trait States: Send + Sync {
     /// Joins accepted mutations and reads ordered completion blockers.
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_exit_blockers")) })
-    }
-    /// Refreshes raw epoch observations without rendering instructions.
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.sample_epoch")) })
     }
     /// Observes native status for the exact context selected by core.
     fn render_status<'a, 'c>(

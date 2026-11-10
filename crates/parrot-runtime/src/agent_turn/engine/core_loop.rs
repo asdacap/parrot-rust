@@ -18,6 +18,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
 
 struct RuntimeEventPublisher<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
+    cancellation: &'a dyn Cancellation,
 }
 
 impl<S, T> parrot_core::EventPublisher for RuntimeEventPublisher<'_, S, T>
@@ -26,6 +27,15 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .sample_epoch(self.cancellation)
+                .await
+                .map_err(Into::into)
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             self.backend
@@ -304,7 +314,10 @@ where
                     &mut states,
                     &tools,
                     &provider,
-                    &RuntimeEventPublisher { backend },
+                    &RuntimeEventPublisher {
+                        backend,
+                        cancellation,
+                    },
                     parrot_core::CancellationToken::new(cancellation),
                 )
                 .await
@@ -449,15 +462,6 @@ where
         _: &'a CoreContextSnapshot,
     ) -> BoxFuture<'a, Result<(), CoreError>> {
         Box::pin(async { Ok(()) })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .sample_epoch(self.cancellation)
-                .await
-                .map_err(Into::into)
-        })
     }
 
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {

@@ -555,7 +555,9 @@ impl ContextController {
             let controller = tokio::sync::Mutex::new(&mut *self);
             let publisher = EpochEventPublisher {
                 controller: &controller,
+                prompt: input.prompt,
                 events: input.events,
+                cancellation,
                 errors: &errors,
             };
             let mut states = EpochStates {
@@ -819,11 +821,25 @@ impl ContextController {
 
 struct EpochEventPublisher<'a> {
     controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
+    prompt: &'a SessionPrompt,
     events: &'a dyn ContextEvents,
+    cancellation: &'a dyn Cancellation,
     errors: &'a NativeErrors<ContextError>,
 }
 
 impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.prompt
+                .sample_epoch(self.cancellation)
+                .await
+                .map_err(|error| {
+                    let error = ContextError::from(error);
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
         Box::pin(async move {
             self.controller
@@ -942,14 +958,6 @@ impl parrot_core::States for EpochStates<'_> {
                     .map(ConfigValue::PromptTemplate)
                     .map_err(|error| self.capture_error(PromptError::Template(error.to_string()))),
             }
-        })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .sample_epoch(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
         })
     }
     fn read_conversation_state(

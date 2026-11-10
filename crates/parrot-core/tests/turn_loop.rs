@@ -51,6 +51,9 @@ struct MemoryEventPublisher {
 }
 
 impl EventPublisher for MemoryEventPublisher {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.compacting.store(true, Ordering::SeqCst);
@@ -840,9 +843,6 @@ impl States for MemoryState {
             self.step("exit_blockers")?;
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
         })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
     }
     fn render_status<'a, 'c>(
         &'a self,
