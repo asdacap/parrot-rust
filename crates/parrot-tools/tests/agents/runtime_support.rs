@@ -5,6 +5,9 @@ pub mod admission_publisher;
 #[path = "../../../parrot-runtime/tests/children/support.rs"]
 pub mod support;
 
+#[path = "../../../parrot-runtime/tests/tool_execution_support.rs"]
+mod tool_execution_support;
+
 use std::{
     collections::{BTreeMap, VecDeque},
     fs::File,
@@ -347,6 +350,7 @@ impl ScopeFactory<Security> for Factory {
                 prepared.identity.session.parent_session_id.clone(),
             );
             let backend = RuntimeBackend::new(RuntimeConfig {
+                tool_execution: tool_execution_support::tool_execution_config(&prepared.history, templates.clone(), broker.clone()),
                 agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                     disable_max_turns: false,
                     ..Default::default()

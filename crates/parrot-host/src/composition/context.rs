@@ -18,7 +18,7 @@ use parrot_runtime::{
     agent_turn::{
         engine::RuntimeBackend,
         lifecycle::AgentSession,
-        services::{TurnError, TurnSelection, TurnTools},
+        services::{TurnError, TurnSelection},
     },
     compaction::{CompactionPlanner, ContextCompactionResult, EpochInput, provider_message},
     tool_settlement::{
@@ -194,8 +194,7 @@ impl<C: SessionControl> ContextControl<C> {
     ) -> Result<(), Failure>
     where
         S: AccessSnapshot + 'static,
-        T: TurnTools<S> + 'static,
-        T::Snapshot: 'static,
+        T: parrot_runtime::tool_settlement::ToolFactory<S> + ?Sized + 'static,
     {
         self.external
             .set(Arc::new(move |target, cancellation| {

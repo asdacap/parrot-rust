@@ -54,7 +54,7 @@ use parrot_runtime::{
     prompt_context::{PromptResult, SystemPrompt},
     tool_settlement::{
         self, SharedSecurity, ToolDiagnostics, ToolFactory, ToolFailure, ToolHandle, ToolInventory,
-        ToolMetadata, ToolOutput, ToolSettlement, ToolSettlementConfig,
+        ToolMetadata, ToolOutput, ToolExecutionConfig,
     },
 };
 use parrot_storage::{
@@ -378,7 +378,7 @@ impl SelectionSource<Security> for Selection {
     }
 }
 
-pub(super) type Backend = RuntimeBackend<Security, ToolSettlement<Security>>;
+pub(super) type Backend = RuntimeBackend<Security, dyn ToolFactory<Security>>;
 
 /// A caller-bound test bridge for precisely the Wait operation. Other operations
 /// deliberately fail if used; no canned successful runtime results are supplied.
@@ -662,16 +662,9 @@ impl Harness {
         );
         let activity = Arc::new(AgentSessionActivity::new(Arc::new(TestClock)));
         let bridge = Arc::new(WaitBridge::default());
-        let tools = Arc::new(
-            ToolSettlement::new(ToolSettlementConfig {
+        let tool_execution = ToolExecutionConfig {
                 path_variables: Default::default(),
-                factory: Arc::new(Factory(Arc::new(RetainedTool {
-                    metadata: ToolMetadata {
-                        name: "wait".into(),
-                        aliases: vec![],
-                    },
-                    tool: wait_tool(bridge.clone()),
-                }))),
+
                 templates: templates.clone(),
                 output_blobs: Arc::new(
                     ToolOutputBlobStore::for_session(&root, "scratch", Arc::new(Names)).unwrap(),
@@ -680,9 +673,14 @@ impl Harness {
                 activity: activity.clone(),
                 diagnostics: Arc::new(Diagnostics),
                 image_bytes_per_cycle: 0,
-            })
-            .unwrap(),
-        );
+            };
+        let tools = Arc::new(Factory(Arc::new(RetainedTool {
+                    metadata: ToolMetadata {
+                        name: "wait".into(),
+                        aliases: vec![],
+                    },
+                    tool: wait_tool(bridge.clone()),
+                })));
         let provider = Scripted::default();
         let backend = RuntimeBackend::new(RuntimeConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
@@ -709,6 +707,7 @@ impl Harness {
                 security: Arc::new(Security(42)),
             }))),
             tools,
+            tool_execution,
             prompt: Box::new(Prompt),
             skills: Arc::new(Skills),
             context,

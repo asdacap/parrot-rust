@@ -89,7 +89,7 @@ use parrot_runtime::{
         TaskSession,
     },
     tool_settlement::{
-        SharedSecurity, ToolFactory, ToolInventory, ToolSettlement, ToolSettlementConfig,
+        SharedSecurity, ToolFactory, ToolInventory, ToolExecutionConfig,
     },
 };
 use parrot_storage::{
@@ -1516,10 +1516,9 @@ where
                 ));
                 let activity = Arc::new(AgentSessionActivity::new(self.config.clock.clone()));
                 let bound_catalog = Arc::new(BoundCatalog::new());
-                let settlement = Arc::new(
-                    ToolSettlement::new(ToolSettlementConfig {
+                let tool_execution = ToolExecutionConfig {
                         path_variables: environment.materialize().clone(),
-                        factory: bound_catalog.clone(),
+
                         templates: self.user.templates.clone(),
                         output_blobs: blobs.clone(),
                         publisher: publisher.clone(),
@@ -1531,9 +1530,8 @@ where
                             .runtime
                             .request_limits
                             .image_bytes_per_tool_cycle,
-                    })
-                    .map_err(child)?,
-                );
+                    };
+                let settlement = bound_catalog.clone();
                 let compact = &self.config.configuration.runtime.compaction;
                 let settings = CompactionSettings {
                     trigger_percent: compact.trigger_percent,
@@ -1643,6 +1641,7 @@ where
                             router: self.config.router.clone(),
                         }),
                         tools: settlement,
+                    tool_execution,
                         prompt,
                         skills: skills.skills,
                         context: ContextController::new(

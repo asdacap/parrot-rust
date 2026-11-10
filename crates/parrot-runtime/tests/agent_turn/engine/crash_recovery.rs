@@ -203,6 +203,7 @@ async fn runtime(
             .unwrap(),
     );
     let backend = RuntimeBackend::new(RuntimeConfig {
+        tool_execution: tool_execution_config(&fixture.history, templates.clone(), erased.clone()),
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
             ..Default::default()
