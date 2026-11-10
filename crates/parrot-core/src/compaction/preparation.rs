@@ -3,8 +3,8 @@ use super::{
     ConversationState,
 };
 use crate::{
-    CancellationToken, Content, ContextSnapshot, Error, EventPublisher, Message, Provider, Role,
-    States, ToolDefinition,
+    CancellationToken, Content, ContextSnapshot, Error, EventPublisher, HistoryGroupMember,
+    Message, Provider, Role, States, ToolDefinition, assemble_history_groups,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -54,15 +54,16 @@ pub async fn prepare_compaction(
 
 pub(crate) fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryGroup> {
     let checkpoints: BTreeSet<_> = raw.checkpoint_sequences.iter().copied().collect();
-    let mut children: BTreeMap<i64, Vec<&ConversationHistoryItem>> = BTreeMap::new();
-    for item in &raw.history {
-        if item.is_compaction_status {
-            continue;
-        }
-        if let Some(owner) = item.tool_owner_sequence {
-            children.entry(owner).or_default().push(item);
-        }
-    }
+    let members: Vec<HistoryGroupMember> = raw.history.iter().map(history_group_member).collect();
+    let member_by_sequence: BTreeMap<i64, HistoryGroupMember> = members
+        .iter()
+        .map(|member| (member.sequence, member.clone()))
+        .collect();
+    let items: BTreeMap<i64, &ConversationHistoryItem> = raw
+        .history
+        .iter()
+        .map(|item| (item.sequence, item))
+        .collect();
     let mut groups = Vec::new();
     if let Some(summary) = &raw.summary {
         groups.push(CompactionHistoryGroup {
@@ -76,31 +77,37 @@ pub(crate) fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryG
             is_complete: true,
         });
     }
-    for item in &raw.history {
-        if item.is_compaction_status || item.tool_owner_sequence.is_some() {
-            continue;
-        }
-        let mut members = vec![item];
-        members.extend(children.remove(&item.sequence).into_iter().flatten());
-        members.sort_by_key(|member| member.sequence);
-        let has_calls = item.message.role == Role::Assistant && !item.message.tool_calls.is_empty();
-        let is_complete = !has_calls
-            || item.message.tool_calls.iter().all(|call| {
-                members.iter().any(|member| {
-                    member.message.role == Role::Tool && member.message.tool_call_id == call.id
-                })
-            });
+    for group in assemble_history_groups(&members) {
+        let owner = &member_by_sequence[&group.owner_sequence];
         groups.push(CompactionHistoryGroup {
-            end_watermark: members.last().expect("group has its owner").sequence,
-            messages: members
-                .into_iter()
-                .map(|member| member.message.clone())
+            end_watermark: *group.member_sequences.last().expect("group has its owner"),
+            messages: group
+                .member_sequences
+                .iter()
+                .map(|sequence| items[sequence].message.clone())
                 .collect(),
-            has_checkpoint_before: has_calls
-                && item.sequence > 0
-                && checkpoints.contains(&item.sequence),
-            is_complete,
+            has_checkpoint_before: owner.makes_tool_calls()
+                && group.owner_sequence > 0
+                && checkpoints.contains(&group.owner_sequence),
+            is_complete: group.is_complete,
         });
     }
     groups
+}
+
+fn history_group_member(item: &ConversationHistoryItem) -> HistoryGroupMember {
+    HistoryGroupMember {
+        sequence: item.sequence,
+        tool_owner_sequence: item.tool_owner_sequence,
+        is_compaction_status: item.is_compaction_status,
+        is_assistant: item.message.role == Role::Assistant,
+        tool_call_ids: item
+            .message
+            .tool_calls
+            .iter()
+            .map(|call| call.id.clone())
+            .collect(),
+        tool_result_call_id: (item.message.role == Role::Tool)
+            .then(|| item.message.tool_call_id.clone()),
+    }
 }
