@@ -1,8 +1,8 @@
 use super::{engine::Publisher, services::TurnError};
 use parrot_core::{
     BoxFuture, ConfigKey, ConfigValue, Content, ConversationAddition, ConversationPersistence,
-    ConversationReceipt, Error, PromptTemplate, States, ToolCall, ToolExecutionResult, ToolImage,
-    ToolRecovery, ToolRecoveryBatch, ToolResult, ToolSettlement, ToolStatus, YieldedProcess,
+    ConversationReceipt, Error, PromptTemplate, States, ToolCall, ToolImage, ToolRecovery,
+    ToolRecoveryBatch, ToolResult, ToolSettlement, ToolStatus,
 };
 use parrot_domain::{
     contracts::storage::Committed,
@@ -107,33 +107,15 @@ impl ToolConversation {
     pub async fn record_results(
         &mut self,
         conversation: &mut AgentConversation,
-        results: &[super::services::ToolExecutionResult],
+        results: &[ToolResult],
     ) -> Result<(), TurnError> {
-        let results = results
-            .iter()
-            .map(|execution| ToolExecutionResult {
-                result: execution.result.clone(),
-                yielded_process: execution
-                    .yielded_process
-                    .as_ref()
-                    .map(|value| YieldedProcess {
-                        process_id: value.process_id.clone(),
-                        name: value.name.clone(),
-                        inventory_instance_id: value.inventory_instance_id.clone(),
-                        visible_revision: value.visible_revision,
-                        stdout_path: value.stdout_path.clone(),
-                        stderr_path: value.stderr_path.clone(),
-                        activity_kind: value.activity_kind.value(),
-                    }),
-            })
-            .collect::<Vec<_>>();
         self.settlement
             .record_results(
                 &mut ToolState {
                     backing: &mut self.backing,
                     conversation,
                 },
-                &results,
+                results,
             )
             .await
             .map_err(TurnError::Core)
@@ -287,6 +269,7 @@ impl ToolBacking {
                         },
                         text,
                         error_message: String::new(),
+                        metadata: None,
                         images: terminal
                             .result_parts
                             .into_iter()
@@ -334,10 +317,9 @@ impl ToolBacking {
         match &addition.persistence {
             ConversationPersistence::ToolResult {
                 assistant_sequence,
-                result: execution,
+                result,
                 recovered,
             } => {
-                let result = &execution.result;
                 let terminal = ToolExecutionTerminal {
                     tool_call_id: result.call_id.clone(),
                     tool_name: result.tool_name.clone(),
@@ -397,21 +379,12 @@ impl ToolBacking {
                                     ..ArtifactReference::new()
                                 })
                                 .collect(),
-                            yielded_process: execution
-                                .yielded_process
-                                .clone()
-                                .map(|value| YieldedShellProcess {
-                                    process_id: value.process_id,
-                                    name: value.name,
-                                    inventory_instance_id: value.inventory_instance_id,
-                                    visible_revision: value.visible_revision,
-                                    stdout_path: value.stdout_path,
-                                    stderr_path: value.stderr_path,
-                                    activity_kind: protobuf::EnumOrUnknown::from_i32(
-                                        value.activity_kind,
-                                    ),
-                                    ..YieldedShellProcess::new()
-                                })
+                            yielded_process: result
+                                .metadata
+                                .as_deref()
+                                .map(<YieldedShellProcess as protobuf::Message>::parse_from_bytes)
+                                .transpose()
+                                .map_err(|error| TurnError::Service(error.to_string()))?
                                 .into(),
                             ..ToolFinished::new()
                         }),

@@ -1,9 +1,8 @@
 use parrot_core::{
     BoxFuture, CancellationToken, ConfigKey, ConfigValue, Content, ConversationAddition,
     ConversationPersistence, ConversationReceipt, Error, Message, PromptTemplate, Role, States,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolExecutionRequest, ToolExecutionResult,
-    ToolRecovery, ToolRecoveryBatch, ToolResult, ToolSettlement, ToolStatus, Tools,
-    budget::TurnFlags, execute_tools,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolExecutionRequest, ToolRecovery, ToolRecoveryBatch,
+    ToolResult, ToolSettlement, ToolStatus, Tools, budget::TurnFlags, execute_tools,
 };
 use std::{
     future::Future,
@@ -103,7 +102,7 @@ impl Tools for PrefixTools {
         &'a self,
         request: ToolExecutionRequest,
         _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             self.observations.lock().unwrap().push(Observation {
                 calls: request.calls.iter().map(|call| call.id.clone()).collect(),
@@ -115,20 +114,17 @@ impl Tools for PrefixTools {
                 return Err(Error::failed("later chunk failed"));
             }
             let call = &request.calls[0];
-            Ok(vec![
-                ToolResult {
-                    call_id: call.id.clone(),
-                    tool_name: call.name.clone(),
-                    text: format!("result {}", call.id),
-                    status: if request.starts_batch {
-                        ToolStatus::Cancelled
-                    } else {
-                        ToolStatus::Finished
-                    },
-                    ..ToolResult::default()
-                }
-                .into(),
-            ])
+            Ok(vec![ToolResult {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                text: format!("result {}", call.id),
+                status: if request.starts_batch {
+                    ToolStatus::Cancelled
+                } else {
+                    ToolStatus::Finished
+                },
+                ..ToolResult::default()
+            }])
         })
     }
 }
@@ -142,6 +138,45 @@ fn calls() -> Vec<ToolCall> {
             arguments_json: "{}".into(),
         })
         .collect()
+}
+
+#[test]
+fn settlement_forwards_opaque_metadata_unchanged_to_conversation_persistence() {
+    for metadata in [None, Some(Vec::new()), Some(vec![0, 255, 128, 1])] {
+        let mut state = State::default();
+        let mut settlement = ToolSettlement::default();
+        settlement
+            .begin_execution(17, vec![calls()[0].clone()])
+            .unwrap();
+        let execution = ToolResult {
+            call_id: "first".into(),
+            tool_name: "read".into(),
+            text: "tool result".into(),
+            metadata: metadata.clone(),
+            ..ToolResult::default()
+        };
+        finish(settlement.record_results(&mut state, std::slice::from_ref(&execution))).unwrap();
+        finish(settlement.complete_execution(&mut state, std::slice::from_ref(&execution)))
+            .unwrap();
+        assert_eq!(state.additions.len(), 1);
+        let addition = &state.additions[0];
+        let ConversationPersistence::ToolResult {
+            assistant_sequence,
+            result,
+            recovered,
+        } = &addition.persistence
+        else {
+            panic!("settlement must persist the tool result");
+        };
+        assert_eq!(*assistant_sequence, 17);
+        assert_eq!(result, &execution);
+        assert_eq!(result.metadata, metadata);
+        assert!(!recovered);
+        assert_eq!(
+            addition.messages[0].contents,
+            [Content::Text("tool result".into())]
+        );
+    }
 }
 
 #[test]
@@ -237,7 +272,7 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
         panic!("expected settlement");
     };
     assert!(*recovered);
-    assert_eq!(result.result, existing);
+    assert_eq!(result, &existing);
     let ConversationPersistence::ToolResult {
         result, recovered, ..
     } = &state.additions[1].persistence
@@ -245,10 +280,10 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
         panic!("expected crash settlement");
     };
     assert!(!recovered);
-    assert_eq!(result.result.call_id, "second");
-    assert_eq!(result.result.status, ToolStatus::Error);
-    assert_eq!(result.result.error_message, "configured crash");
-    assert_eq!(result.result.text, "configured error configured crash");
+    assert_eq!(result.call_id, "second");
+    assert_eq!(result.status, ToolStatus::Error);
+    assert_eq!(result.error_message, "configured crash");
+    assert_eq!(result.text, "configured error configured crash");
     assert_eq!(
         state.messages.lock().unwrap()[1].contents,
         [Content::Text("configured error configured crash".into())]

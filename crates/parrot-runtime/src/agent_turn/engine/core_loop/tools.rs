@@ -82,7 +82,7 @@ where
         &'a self,
         request: parrot_core::ToolExecutionRequest,
         cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolExecutionResult>, CoreError>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
             let snapshot = {
@@ -131,11 +131,7 @@ where
                 .expect("execution budget was initialized")
                 .clone();
             if request.cancel_remaining || cancellation.is_cancelled() {
-                return Ok(request
-                    .calls
-                    .iter()
-                    .map(|call| self.cancel(call).into())
-                    .collect());
+                return Ok(request.calls.iter().map(|call| self.cancel(call)).collect());
             }
             if !Self::parallel_safe(snapshot, assistant_sequence, first) {
                 let invocation = InvocationResources {
@@ -151,7 +147,7 @@ where
                 return self
                     .invoke(invocation, Some(resources), first, None)
                     .await
-                    .map(|result| vec![result.into()]);
+                    .map(|result| vec![result]);
             }
             let mut executions = InvocationBatch::new();
             let mut admitted = 0;
@@ -188,7 +184,7 @@ where
             if cancellation.is_cancelled()
                 || results
                     .iter()
-                    .any(|result| result.result.status == ToolStatus::Cancelled)
+                    .any(|result| result.status == ToolStatus::Cancelled)
             {
                 results.extend(
                     request.calls[admitted..]
@@ -196,7 +192,7 @@ where
                         .map(|call| self.cancel(call)),
                 );
             }
-            Ok(results.into_iter().map(Into::into).collect())
+            Ok(results)
         })
     }
 }

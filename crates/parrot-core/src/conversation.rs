@@ -64,7 +64,7 @@ pub enum ConversationPersistence {
     CompletionFeedback(CompletionFeedback),
     ToolResult {
         assistant_sequence: i64,
-        result: crate::ToolExecutionResult,
+        result: crate::ToolResult,
         recovered: bool,
     },
     ToolImages {

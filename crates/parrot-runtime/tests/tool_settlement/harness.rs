@@ -181,7 +181,7 @@ impl Harness {
         request: ToolExecutionChunk,
         capture: &dyn SelectionSource<Security>,
         cancellation: &dyn Cancellation,
-    ) -> Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError> {
+    ) -> Result<Vec<parrot_core::ToolResult>, TurnError> {
         let binding = TurnBinding::new();
         binding.bind(self.selection.clone());
         let tools = RuntimeTools {
@@ -218,31 +218,8 @@ impl Harness {
         )
         .await
         .map_err(TurnError::Core)
-        .map(|results| {
-            results
-                .into_iter()
-                .map(
-                    |execution| parrot_runtime::agent_turn::services::ToolExecutionResult {
-                        result: execution.result,
-                        yielded_process: execution.yielded_process.map(|value| {
-                            protocol::YieldedShellProcess {
-                                process_id: value.process_id,
-                                name: value.name,
-                                inventory_instance_id: value.inventory_instance_id,
-                                visible_revision: value.visible_revision,
-                                stdout_path: value.stdout_path,
-                                stderr_path: value.stderr_path,
-                                activity_kind: protobuf::EnumOrUnknown::from_i32(
-                                    value.activity_kind,
-                                ),
-                                ..Default::default()
-                            }
-                        }),
-                    },
-                )
-                .collect()
-        })
     }
+
     pub async fn restore(&mut self, fixture: &Fixture) -> Result<(), TurnError> {
         fixture.fresh_batches.lock().unwrap().clear();
         self.state.reset_pending();
@@ -287,8 +264,8 @@ impl Harness {
                         .await?;
                     cancelled |= results
                         .iter()
-                        .any(|result| result.result.status == parrot_core::ToolStatus::Cancelled);
-                    completed.extend(results.into_iter().map(|result| result.result));
+                        .any(|result| result.status == parrot_core::ToolStatus::Cancelled);
+                    completed.extend(results);
                 }
                 self.state
                     .complete_execution(&mut self.runtime_state.get_mut().conversation, &completed)

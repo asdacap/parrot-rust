@@ -98,7 +98,7 @@ impl Tools for CancellingCatalog {
         &'a self,
         _request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async { panic!("cancellation after initialization must prevent tool execution") })
     }
 }
@@ -135,7 +135,7 @@ impl Tools for JoiningTools {
         &'a self,
         request: ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -209,7 +209,7 @@ impl Tools for CancellingTools {
         &'a self,
         request: ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -229,7 +229,6 @@ impl Tools for CancellingTools {
                     text: "tool-owned cancellation result".into(),
                     ..ToolResult::default()
                 })
-                .map(Into::into)
                 .collect())
         })
     }

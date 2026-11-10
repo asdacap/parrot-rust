@@ -5,32 +5,6 @@ use crate::{
 };
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct YieldedProcess {
-    pub process_id: String,
-    pub name: String,
-    pub inventory_instance_id: String,
-    pub visible_revision: u64,
-    pub stdout_path: Option<String>,
-    pub stderr_path: Option<String>,
-    pub activity_kind: i32,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolExecutionResult {
-    pub result: ToolResult,
-    pub yielded_process: Option<YieldedProcess>,
-}
-
-impl From<ToolResult> for ToolExecutionResult {
-    fn from(result: ToolResult) -> Self {
-        Self {
-            result,
-            yielded_process: None,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct ToolExecutionRequest {
     pub calls: Vec<ToolCall>,
@@ -117,20 +91,12 @@ impl ToolSettlement {
                             text,
                             error_message,
                             images: Vec::new(),
+                            metadata: None,
                         },
                         false,
                     )
                 };
-                Self::record_result(
-                    states,
-                    batch.sequence,
-                    &ToolExecutionResult {
-                        result: result.clone(),
-                        yielded_process: None,
-                    },
-                    recovered,
-                )
-                .await?;
+                Self::record_result(states, batch.sequence, &result, recovered).await?;
                 settled.insert(call.id.clone(), result);
             }
             Self::finish_batch(
@@ -153,7 +119,7 @@ impl ToolSettlement {
     pub async fn record_results(
         &mut self,
         states: &mut dyn States,
-        results: &[ToolExecutionResult],
+        results: &[ToolResult],
     ) -> Result<(), Error> {
         let mut batch = self
             .pending
@@ -162,8 +128,7 @@ impl ToolSettlement {
         if results.is_empty() {
             return Err(Error::failed("tool execution returned no results"));
         }
-        for execution in results {
-            let result = &execution.result;
+        for result in results {
             let call = batch
                 .calls
                 .get(batch.index)
@@ -173,7 +138,7 @@ impl ToolSettlement {
                     "tool result does not match the prepared call",
                 ));
             }
-            Self::record_result(states, batch.sequence, execution, false).await?;
+            Self::record_result(states, batch.sequence, result, false).await?;
             batch.results.insert(result.call_id.clone(), result.clone());
             batch.index += 1;
         }
@@ -211,26 +176,21 @@ impl ToolSettlement {
     fn record_result<'a>(
         states: &'a mut dyn States,
         sequence: i64,
-        execution: &'a ToolExecutionResult,
+        result: &'a ToolResult,
         recovered: bool,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
-            let mut message = Message::text(Role::Tool, execution.result.text.clone());
-            message.contents.extend(
-                execution
-                    .result
-                    .images
-                    .iter()
-                    .cloned()
-                    .map(Content::Artifact),
-            );
-            message.tool_call_id = execution.result.call_id.clone();
+            let mut message = Message::text(Role::Tool, result.text.clone());
+            message
+                .contents
+                .extend(result.images.iter().cloned().map(Content::Artifact));
+            message.tool_call_id = result.call_id.clone();
             states
                 .apply_conversation_addition(ConversationAddition {
                     messages: vec![message],
                     persistence: ConversationPersistence::ToolResult {
                         assistant_sequence: sequence,
-                        result: execution.clone(),
+                        result: result.clone(),
                         recovered,
                     },
                 })
@@ -296,8 +256,8 @@ pub async fn execute_tools(
         settlement.record_results(states, &chunk).await?;
         cancel_remaining |= chunk
             .iter()
-            .any(|execution| execution.result.status == ToolStatus::Cancelled);
-        results.extend(chunk.into_iter().map(|execution| execution.result));
+            .any(|result| result.status == ToolStatus::Cancelled);
+        results.extend(chunk);
     }
     settlement.complete_execution(states, &results).await
 }

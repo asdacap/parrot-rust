@@ -74,30 +74,6 @@ pub struct TurnResources<'a> {
     pub usage: &'a super::usage::SessionUsageRecorder,
 }
 
-pub struct ToolExecutionResult {
-    pub result: parrot_core::ToolResult,
-    pub yielded_process: Option<parrot_domain::protocol::messages::parrot::YieldedShellProcess>,
-}
-
-impl From<ToolExecutionResult> for parrot_core::ToolExecutionResult {
-    fn from(execution: ToolExecutionResult) -> Self {
-        Self {
-            result: execution.result,
-            yielded_process: execution
-                .yielded_process
-                .map(|value| parrot_core::YieldedProcess {
-                    process_id: value.process_id,
-                    name: value.name,
-                    inventory_instance_id: value.inventory_instance_id,
-                    visible_revision: value.visible_revision,
-                    stdout_path: value.stdout_path,
-                    stderr_path: value.stderr_path,
-                    activity_kind: value.activity_kind.value(),
-                }),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CompletionFeedbackKind {
     PendingAsks,

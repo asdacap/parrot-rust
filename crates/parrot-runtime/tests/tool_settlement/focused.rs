@@ -338,7 +338,7 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].result.call_id, "first");
+    assert_eq!(results[0].call_id, "first");
     assert_eq!(
         tool.calls
             .lock()
@@ -422,11 +422,7 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
         )
         .await
         .unwrap();
-    let completed: Vec<_> = results
-        .into_iter()
-        .chain(remaining)
-        .map(|result| result.result)
-        .collect();
+    let completed: Vec<_> = results.into_iter().chain(remaining).collect();
     harness
         .state
         .complete_execution(

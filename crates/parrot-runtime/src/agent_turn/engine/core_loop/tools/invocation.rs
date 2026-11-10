@@ -16,7 +16,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
         borrowed: Option<TurnResources<'a>>,
         call: &'a ToolCall,
         launched: Option<Arc<AtomicBool>>,
-    ) -> BoxFuture<'a, Result<ToolExecutionResult, TurnError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, TurnError>> {
         let InvocationResources {
             history,
             usage,
@@ -138,7 +138,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 let result = result?;
                 if result.outcome == ToolOutcome::ImageBudgetExceeded {
                     let mut settlement = self.fail(call, result.text).map_err(turn_failure)?;
-                    settlement.result.status = ToolStatus::ImageBudgetExceeded;
+                    settlement.status = ToolStatus::ImageBudgetExceeded;
                     return Ok(settlement);
                 }
                 let mut text = self
@@ -191,7 +191,17 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                         origin: image.origin,
                     })
                     .collect();
-                let yielded_process = result.yielded_process;
+                let metadata = result
+                    .yielded_process
+                    .as_ref()
+                    .map(protobuf::Message::write_to_bytes)
+                    .transpose()
+                    .map_err(|error| {
+                        OperationError::Failed(ToolFailure::new(
+                            error.to_string(),
+                            FailureKind::Unexpected,
+                        ))
+                    })?;
                 self.diagnostic(
                     history,
                     call,
@@ -204,16 +214,14 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                         began: Some(began),
                     },
                 );
-                Ok(ToolExecutionResult {
-                    result: ToolResult {
-                        call_id: call.id.clone(),
-                        tool_name: call.name.clone(),
-                        status: ToolStatus::Finished,
-                        text,
-                        error_message: String::new(),
-                        images,
-                    },
-                    yielded_process,
+                Ok(ToolResult {
+                    call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    status: ToolStatus::Finished,
+                    text,
+                    error_message: String::new(),
+                    images,
+                    metadata,
                 })
             }
             .await;
@@ -257,20 +265,18 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
             }
         })
     }
-    pub(super) fn cancel(&self, call: &ToolCall) -> ToolExecutionResult {
-        ToolExecutionResult {
-            result: ToolResult {
-                call_id: call.id.clone(),
-                tool_name: call.name.clone(),
-                status: ToolStatus::Cancelled,
-                text: self.interrupted_result.into(),
-                error_message: String::new(),
-                images: Vec::new(),
-            },
-            yielded_process: None,
+    pub(super) fn cancel(&self, call: &ToolCall) -> ToolResult {
+        ToolResult {
+            call_id: call.id.clone(),
+            tool_name: call.name.clone(),
+            status: ToolStatus::Cancelled,
+            text: self.interrupted_result.into(),
+            error_message: String::new(),
+            images: Vec::new(),
+            metadata: None,
         }
     }
-    fn fail(&self, call: &ToolCall, message: String) -> Result<ToolExecutionResult, TurnError> {
+    fn fail(&self, call: &ToolCall, message: String) -> Result<ToolResult, TurnError> {
         let text = self
             .config
             .templates
@@ -280,16 +286,14 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 &NeverCancelled,
             )
             .map_err(|error| TurnError::Service(error.to_string()))?;
-        Ok(ToolExecutionResult {
-            result: ToolResult {
-                call_id: call.id.clone(),
-                tool_name: call.name.clone(),
-                status: ToolStatus::Error,
-                text,
-                error_message: message,
-                images: Vec::new(),
-            },
-            yielded_process: None,
+        Ok(ToolResult {
+            call_id: call.id.clone(),
+            tool_name: call.name.clone(),
+            status: ToolStatus::Error,
+            text,
+            error_message: message,
+            images: Vec::new(),
+            metadata: None,
         })
     }
     fn diagnostic(
