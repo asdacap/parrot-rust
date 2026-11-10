@@ -1,12 +1,11 @@
 use super::{
-    AgentIdentityDescription, render, render_agent_identity, render_agents_files,
+    AgentIdentityDescription, render_agent_identity, render_agents_files,
     render_skill_catalog_entries, render_standing_instruction, render_system_prompt_sections,
 };
 use parrot_core::SkillCatalogEntry;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
-use serde_json::Value;
 use std::{collections::HashSet, fmt, sync::Arc};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,12 +80,6 @@ pub trait SystemPrompt: Send {
             self.read_system_prompts(selection)
         })
     }
-    fn read_prompt_templates(&self) -> Vec<(String, String)> {
-        Vec::new()
-    }
-    fn read_template_arguments(&self, _source_key: &str) -> Vec<(String, Value)> {
-        Vec::new()
-    }
     fn get_template_catalog(&self, _source_key: &str) -> Option<&PromptTemplateCatalog> {
         None
     }
@@ -125,13 +118,6 @@ impl dyn SystemPrompt + '_ {
         mut sections: Vec<(String, String)>,
         skills: Vec<SkillCatalogEntry>,
     ) -> PromptResult<String> {
-        for (key, template) in self.read_prompt_templates() {
-            let arguments = self.read_template_arguments(&key);
-            sections.push((
-                key.clone(),
-                render(self.require_template_catalog(&key)?, &template, &arguments)?,
-            ));
-        }
         let files = self.read_agents_files()?;
         if !files.is_empty() {
             sections.push(render_agents_files(
@@ -294,18 +280,6 @@ impl SystemPrompt for CompositeSystemPrompt {
             }
             Ok(values)
         })
-    }
-    fn read_prompt_templates(&self) -> Vec<(String, String)> {
-        self.prompts
-            .iter()
-            .flat_map(|prompt| prompt.read_prompt_templates())
-            .collect()
-    }
-    fn read_template_arguments(&self, source_key: &str) -> Vec<(String, Value)> {
-        self.prompts
-            .iter()
-            .flat_map(|prompt| prompt.read_template_arguments(source_key))
-            .collect()
     }
     fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
         self.prompts

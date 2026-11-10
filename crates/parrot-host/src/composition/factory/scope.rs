@@ -88,9 +88,7 @@ use parrot_runtime::{
         ForkHistoryMode, SchedulerConfig, TaskConfiguration, TaskDiagnostic, TaskDiagnostics,
         TaskSession,
     },
-    tool_settlement::{
-        SharedSecurity, ToolFactory, ToolInventory, ToolSettlement, ToolSettlementConfig,
-    },
+    tool_settlement::{SharedSecurity, ToolExecutionConfig, ToolFactory, ToolInventory},
 };
 use parrot_storage::{
     artifacts::{compaction::CompactionGroupBlobStore, output_blobs::ToolOutputBlobStore},
@@ -1516,24 +1514,22 @@ where
                 ));
                 let activity = Arc::new(AgentSessionActivity::new(self.config.clock.clone()));
                 let bound_catalog = Arc::new(BoundCatalog::new());
-                let settlement = Arc::new(
-                    ToolSettlement::new(ToolSettlementConfig {
-                        path_variables: environment.materialize().clone(),
-                        factory: bound_catalog.clone(),
-                        templates: self.user.templates.clone(),
-                        output_blobs: blobs.clone(),
-                        publisher: publisher.clone(),
-                        activity: activity.clone(),
-                        diagnostics: log.clone(),
-                        image_bytes_per_cycle: self
-                            .config
-                            .configuration
-                            .runtime
-                            .request_limits
-                            .image_bytes_per_tool_cycle,
-                    })
-                    .map_err(child)?,
-                );
+                let tool_execution = ToolExecutionConfig {
+                    path_variables: environment.materialize().clone(),
+
+                    templates: self.user.templates.clone(),
+                    output_blobs: blobs.clone(),
+                    publisher: publisher.clone(),
+                    activity: activity.clone(),
+                    diagnostics: log.clone(),
+                    image_bytes_per_cycle: self
+                        .config
+                        .configuration
+                        .runtime
+                        .request_limits
+                        .image_bytes_per_tool_cycle,
+                };
+                let settlement = bound_catalog.clone();
                 let compact = &self.config.configuration.runtime.compaction;
                 let settings = CompactionSettings {
                     trigger_percent: compact.trigger_percent,
@@ -1643,6 +1639,7 @@ where
                             router: self.config.router.clone(),
                         }),
                         tools: settlement,
+                        tool_execution,
                         prompt,
                         skills: skills.skills,
                         context: ContextController::new(

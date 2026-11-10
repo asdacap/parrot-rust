@@ -47,6 +47,7 @@ easy review and modification.
 - DO NOT modify generated predefined_config.yaml or existing values in assets/config/predefined_config.*.yaml without user authorization. You may add new keys, but do not modify existing
 keys. These are critical files that should be human modified only. If you do have to modify an existing prompt, do not change its wording or rephrase it.
 - Consider very long session, which mean long history. Do not do a linear scan unless necessary.
+- Document behavior, not code
 
 ## Async lifecycle
 

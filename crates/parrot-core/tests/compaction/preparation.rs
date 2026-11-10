@@ -70,15 +70,8 @@ impl EventPublisher for PreparationEventPublisher {
 }
 
 impl States for Preparation {
-    fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
-        Box::pin(async move {
-            match key {
-                ConfigKey::SystemPromptBindings => {
-                    Ok(ConfigValue::SystemPromptBindings(Vec::new()))
-                }
-                _ => Err(Error::failed("preparation has no configured templates")),
-            }
-        })
+    fn get_config(&self, _key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
+        Box::pin(async { Err(Error::failed("preparation has no configured templates")) })
     }
 
     fn capture_system_prompt_sections(

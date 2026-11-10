@@ -279,7 +279,7 @@ impl CompletionStateSource for CallbackBinding {
         })
     }
 }
-type Backend = RuntimeBackend<Security, Tools>;
+type Backend = RuntimeBackend<Security>;
 struct Built {
     identity: Arc<AgentIdentity>,
     session: AgentSession<Backend>,
@@ -438,6 +438,11 @@ impl ScopeFactory<Security> for Factory {
                 })
                 .collect();
             let backend = RuntimeBackend::new(RuntimeConfig {
+                tool_execution: crate::tool_execution_support::tool_execution_config(
+                    &history,
+                    templates(),
+                    publisher.clone(),
+                ),
                 agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                     disable_max_turns: false,
                     ..Default::default()

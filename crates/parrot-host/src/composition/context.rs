@@ -18,7 +18,7 @@ use parrot_runtime::{
     agent_turn::{
         engine::RuntimeBackend,
         lifecycle::AgentSession,
-        services::{TurnError, TurnSelection, TurnTools},
+        services::{TurnError, TurnSelection},
     },
     compaction::{CompactionPlanner, ContextCompactionResult, EpochInput, provider_message},
     tool_settlement::{
@@ -188,14 +188,12 @@ impl<C: SessionControl> ContextControl<C> {
     }
     /// Bind once after the real session is constructed. The weak edge avoids a
     /// session -> retained tool -> control -> session ownership cycle.
-    pub fn bind_session<S, T>(
+    pub fn bind_session<S>(
         &self,
-        session: Weak<AgentSession<RuntimeBackend<S, T>>>,
+        session: Weak<AgentSession<RuntimeBackend<S>>>,
     ) -> Result<(), Failure>
     where
         S: AccessSnapshot + 'static,
-        T: TurnTools<S> + 'static,
-        T::Snapshot: 'static,
     {
         self.external
             .set(Arc::new(move |target, cancellation| {

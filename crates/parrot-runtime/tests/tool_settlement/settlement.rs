@@ -1,21 +1,5 @@
 use super::*;
 
-pub(super) fn terminal_ids(events: &[Event]) -> Vec<String> {
-    events
-        .iter()
-        .filter_map(|event| {
-            if event.has_tool_finished() {
-                Some(event.tool_finished().tool_call_id.clone())
-            } else if event.has_tool_error() {
-                Some(event.tool_error().tool_call_id.clone())
-            } else if event.has_tool_cancelled() {
-                Some(event.tool_cancelled().tool_call_id.clone())
-            } else {
-                None
-            }
-        })
-        .collect()
-}
 async fn terminals(fixture: &Fixture, ids: &[&str]) -> Vec<ToolExecutionTerminal> {
     fixture
         .history

@@ -1,4 +1,3 @@
-use super::{PromptError, PromptResult};
 use parrot_core::ConfigKey;
 
 const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
@@ -48,50 +47,14 @@ const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
         "agent-session.invalid-tool-call",
     ),
     (
-        ConfigKey::OptionalCliUtilitiesTemplate,
-        "context.optional-cli-utilities",
-    ),
-    (
-        ConfigKey::ExpectedCliUtilitiesTemplate,
-        "context.expected-cli-utilities",
-    ),
-    (
         ConfigKey::CrashedToolTemplate,
         "agent-session.crashed-tool-result",
     ),
     (ConfigKey::ToolErrorTemplate, "tool-result.error"),
-    (ConfigKey::PlatformTemplate, "context.platform"),
-    (
-        ConfigKey::WorkingDirectoryTemplate,
-        "system.working-directory",
-    ),
-    (ConfigKey::GitRepositoryTemplate, "context.git-repository"),
-    (ConfigKey::SubagentsTemplate, "context.subagents"),
-    (
-        ConfigKey::SecurityProfileTemplate,
-        "context.security-profile",
-    ),
-    (
-        ConfigKey::AgentPathEnvironmentTemplate,
-        "context.agent-path-environment",
-    ),
-    (ConfigKey::AgentScratchTemplate, "context.agent-scratch"),
-    (ConfigKey::AgentHistoryTemplate, "context.agent-history"),
 ];
 
 pub(crate) fn get_prompt_template_id(key: ConfigKey) -> Option<&'static str> {
     PROMPT_TEMPLATE_CONFIG_KEYS
         .iter()
         .find_map(|(candidate, id)| (*candidate == key).then_some(*id))
-}
-
-pub(crate) fn resolve_prompt_template_key(id: &str) -> PromptResult<ConfigKey> {
-    PROMPT_TEMPLATE_CONFIG_KEYS
-        .iter()
-        .find_map(|(key, candidate)| (*candidate == id).then_some(*key))
-        .ok_or_else(|| {
-            PromptError::Template(format!(
-                "prompt_templates.{id} is not an enumerated core prompt template"
-            ))
-        })
 }

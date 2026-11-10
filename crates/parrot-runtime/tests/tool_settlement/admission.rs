@@ -54,26 +54,22 @@ fn install_publisher(fixture: &Fixture, harness: &mut Harness, publisher: Arc<To
         templates().as_ref(),
     )
     .unwrap();
-    harness.tools = Arc::new(
-        ToolSettlement::new(ToolSettlementConfig {
-            path_variables: Default::default(),
-            factory: harness.factory.clone(),
-            templates: templates(),
-            output_blobs: Arc::new(
-                ToolOutputBlobStore::for_session(
-                    fixture.repository.events().database().selected_root(),
-                    "scratch",
-                    Arc::new(Names),
-                )
-                .unwrap(),
-            ),
-            publisher,
-            activity: harness.activity.clone(),
-            diagnostics: harness.diagnostics.clone(),
-            image_bytes_per_cycle: 1024 * 1024,
-        })
-        .unwrap(),
-    );
+    harness.config = ToolExecutionConfig {
+        path_variables: Default::default(),
+        templates: templates(),
+        output_blobs: Arc::new(
+            ToolOutputBlobStore::for_session(
+                fixture.repository.events().database().selected_root(),
+                "scratch",
+                Arc::new(Names),
+            )
+            .unwrap(),
+        ),
+        publisher,
+        activity: harness.activity.clone(),
+        diagnostics: harness.diagnostics.clone(),
+        image_bytes_per_cycle: 1024 * 1024,
+    };
 }
 async fn assert_only_first_invoked(fixture: &Fixture, tool: &RecordingTool, harness: &Harness) {
     let events = fixture.events().await;

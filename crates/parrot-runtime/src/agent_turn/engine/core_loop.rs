@@ -6,93 +6,14 @@ use parrot_core::{
 };
 
 mod conversation;
-
-struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
-    backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S>,
-    cancellation: &'a dyn Cancellation,
-    work: &'a dyn DrainWork,
-    persistence_key: Option<TurnKey>,
-    budget: &'a mut parrot_core::TurnBudget,
-}
-
-struct RuntimeEventPublisher<'a, S: AccessSnapshot, T: TurnTools<S>> {
-    backend: &'a RuntimeBackend<S, T>,
-    cancellation: &'a dyn Cancellation,
-}
-
-impl<S, T> parrot_core::EventPublisher for RuntimeEventPublisher<'_, S, T>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
-    fn publish<'a>(
-        &'a self,
-        event: parrot_core::ConversationEvent,
-        cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .emit(
-                    conversation::render_event(self.backend.event(), event),
-                    &cancellation,
-                )
-                .await
-        })
-    }
-    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .sample_epoch(self.cancellation)
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .report_epoch_started(&ContextEmitter {
-                    backend: self.backend,
-                })
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .fail_epoch_compaction(
-                    message,
-                    &ContextEmitter {
-                        backend: self.backend,
-                    },
-                )
-                .await
-                .map_err(Into::into)
-        })
-    }
-}
-
-struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
-    backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S>,
-    captured: std::sync::Mutex<Option<CapturedTools<T::Snapshot>>>,
-}
-
-struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
-    backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S>,
-}
+mod events;
+use events::RuntimeEventPublisher;
+mod provider;
+use provider::RuntimeProvider;
+mod states;
+use states::RuntimeStates;
+mod tools;
+use tools::RuntimeTools;
 
 struct CapturedTools<T> {
     normal: T,
@@ -175,39 +96,13 @@ impl From<TurnError> for CoreError {
     }
 }
 
-impl<'a, S, T> RuntimeStates<'a, S, T>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
-    fn new(
-        backend: &'a RuntimeBackend<S, T>,
-        binding: &'a TurnBinding<S>,
-        cancellation: &'a dyn Cancellation,
-        work: &'a dyn DrainWork,
-        budget: &'a mut parrot_core::TurnBudget,
-    ) -> Self {
-        Self {
-            backend,
-            binding,
-            cancellation,
-            work,
-            persistence_key: None,
-            budget,
-        }
-    }
-}
-
-pub(super) async fn run<S, T>(
-    backend: &RuntimeBackend<S, T>,
+pub(super) async fn run<S>(
+    backend: &RuntimeBackend<S>,
     cancellation: &dyn Cancellation,
     work: &dyn DrainWork,
 ) -> (Result<Execution, TurnError>, Option<TurnKey>)
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
 {
     let initialized = {
         let mut guard = backend.state.lock().await;
@@ -232,7 +127,32 @@ where
                 return Ok(parrot_core::Outcome::Completed(answer));
             }
             let binding = TurnBinding::new();
-            let mut states = RuntimeStates::new(backend, &binding, cancellation, work, &mut budget);
+            let mut states = RuntimeStates {
+                history: &backend.history,
+                sessions: &backend.sessions,
+                activity: backend.activity.as_ref(),
+                state: &backend.state,
+                prompt: &backend.prompt,
+                skills: backend.skills.as_ref(),
+                status: backend.status.as_ref(),
+                completion_sources: &backend.completion_sources,
+                templates: &backend.templates,
+                publisher: backend.publisher.as_ref(),
+                usage: &backend.usage,
+                compactor: &backend.compactor,
+                event_id: &backend.event_id,
+                events: ContextEmitter::new(
+                    &backend.history,
+                    backend.publisher.as_ref(),
+                    &backend.broker,
+                    backend.event_id.as_ref(),
+                ),
+                binding: &binding,
+                cancellation,
+                work,
+                persistence_key: None,
+                budget: &mut budget,
+            };
             if cancellation.is_cancelled() {
                 return Err(CoreError::cancelled());
             }
@@ -242,20 +162,39 @@ where
             {
                 return Ok(parrot_core::Outcome::Completed(answer));
             }
+
+            let tool_events = ContextEmitter::new(
+                &backend.history,
+                backend.publisher.as_ref(),
+                &backend.broker,
+                backend.event_id.as_ref(),
+            );
             let tools = RuntimeTools {
-                backend,
+                config: &backend.tool_execution,
+                factory: backend.tools.as_ref(),
+                materialized: &backend.materialized_tools,
+                execution: &backend.tool_execution_cycle,
+                state: &backend.state,
+                history: &backend.history,
+                prompt: &backend.prompt,
+                sessions: &backend.sessions,
+                usage: &backend.usage,
+                capture: backend.selection.as_ref(),
                 binding: &binding,
+                events: &tool_events,
+                interrupted_result: &backend.notices.interrupted_result,
                 captured: std::sync::Mutex::new(None),
-            };
-            let provider = RuntimeProvider {
-                backend,
-                binding: &binding,
             };
             let result = async {
                 adapt_operation(async {
                     let mut guard = backend.state.lock().await;
                     let state = &mut *guard;
-                    let events = ContextEmitter { backend };
+                    let events = ContextEmitter::new(
+                        &backend.history,
+                        backend.publisher.as_ref(),
+                        &backend.broker,
+                        backend.event_id.as_ref(),
+                    );
                     backend.skills.end_turn().await;
                     let mut selection = backend.selection.capture()?;
                     backend.sessions.begin_turn().await?;
@@ -290,7 +229,7 @@ where
                         .await?;
                     loop {
                         let snapshot = backend.snapshot(&selection)?;
-                        let definitions = backend.tools.definitions(&snapshot).to_vec();
+                        let definitions = snapshot.definitions().to_vec();
                         let status = backend.status.bind(&selection);
                         let outcome = state
                             .context
@@ -320,12 +259,36 @@ where
                     Ok(())
                 })
                 .await?;
+                let provider = RuntimeProvider {
+                    model: binding.capture_selection().map_err(CoreError::from)?.model,
+                    sessions: &backend.sessions,
+                    history: &backend.history,
+                    publisher: backend.publisher.as_ref(),
+                    event_id: backend.event_id.as_ref(),
+                    output: backend.output.as_ref(),
+                    activity: backend.activity.as_ref(),
+                    compactor: &backend.compactor,
+                    state: &backend.state,
+                    events: ContextEmitter::new(
+                        &backend.history,
+                        backend.publisher.as_ref(),
+                        &backend.broker,
+                        backend.event_id.as_ref(),
+                    ),
+                };
                 parrot_core::run_turn(
                     &mut states,
                     &tools,
                     &provider,
                     &RuntimeEventPublisher {
-                        backend,
+                        events: ContextEmitter::new(
+                            &backend.history,
+                            backend.publisher.as_ref(),
+                            &backend.broker,
+                            backend.event_id.as_ref(),
+                        ),
+                        prompt: &backend.prompt,
+                        state: &backend.state,
                         cancellation,
                     },
                     parrot_core::CancellationToken::new(cancellation),
@@ -374,771 +337,42 @@ where
     (execution, failed_key)
 }
 
-impl<S, T> CoreStates for RuntimeStates<'_, S, T>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
-    fn apply_conversation_addition(
-        &mut self,
-        addition: parrot_core::ConversationAddition,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, CoreError>> {
-        adapt_operation(conversation::apply_conversation_addition(self, addition))
-    }
-    fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .history
-                .read_final_phase()
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn get_config(
-        &self,
-        key: parrot_core::ConfigKey,
-    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, CoreError>> {
-        adapt_operation(async move {
-            use parrot_core::{ConfigKey, ConfigValue};
-            match key {
-                ConfigKey::Turn => {
-                    let selection = self.binding.capture_selection()?;
-                    Ok(ConfigValue::Turn(TurnOptions {
-                        maximum_requests: selection.profile.maximum_requests,
-                        model: selection.model.canonical_model.model.id.clone(),
-                        reasoning: selection.model.canonical_model.reasoning().map(Into::into),
-                        provider_preferences: String::new(),
-                        include_router_metadata: false,
-                    }))
-                }
-                ConfigKey::Context => {
-                    let state = self.backend.state.lock().await;
-                    let selection = self.binding.capture_selection()?;
-                    Ok(ConfigValue::Context(
-                        state
-                            .context
-                            .capture_context_configuration(&selection.model),
-                    ))
-                }
-                ConfigKey::Compaction => {
-                    let selection = self.binding.capture_selection()?;
-                    Ok(ConfigValue::Compaction(
-                        self.backend
-                            .compactor
-                            .planner()
-                            .capture_compaction_configuration(&selection.model, None),
-                    ))
-                }
-                ConfigKey::SystemPromptBindings => self
-                    .backend
-                    .prompt
-                    .read_core_prompt_bindings(self.cancellation)
-                    .await
-                    .map(ConfigValue::SystemPromptBindings)
-                    .map_err(ContextError::from)
-                    .map_err(Into::into),
-                key => self
-                    .backend
-                    .templates
-                    .get_template(
-                        crate::prompt_context::get_prompt_template_id(key).ok_or_else(|| {
-                            TurnError::Service("unsupported template configuration key".into())
-                        })?,
-                    )
-                    .map(ConfigValue::PromptTemplate)
-                    .map_err(|error| {
-                        TurnError::Prompt(crate::prompt_context::PromptError::Template(
-                            error.to_string(),
-                        ))
-                    }),
-            }
-        })
-    }
-    fn read_turn_budget(&self) -> Result<parrot_core::TurnBudget, CoreError> {
-        Ok(self.budget.clone())
-    }
-    fn write_turn_budget(&mut self, budget: parrot_core::TurnBudget) -> Result<(), CoreError> {
-        *self.budget = budget;
-        Ok(())
-    }
-    fn read_last_context_reminder_checkpoint(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::ContextReminderCheckpoint>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .get_last_context_reminder()
-                .await
-                .map_err(Into::into)
-        })
-    }
-
-    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
-        adapt_operation(async move {
-            let _guard = self.backend.state.lock().await;
-            self.binding
-                .exit_blocker_sources
-                .lock()
-                .expect("completion sources poisoned")
-                .clear();
-            let mut sources = Vec::new();
-            self.work
-                .join_mutations()
-                .await
-                .map_err(|error| TurnError::Service(error.to_string()))?;
-            let mut blockers = Vec::new();
-            for source in &self.backend.completion_sources {
-                if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
-                    blockers.push(reminder);
-                    sources.push((source.clone(), CompletionFeedbackKind::PendingAsks));
-                }
-            }
-            for source in &self.backend.completion_sources {
-                if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
-                    blockers.push(reminder);
-                    sources.push((source.clone(), CompletionFeedbackKind::ActiveWork));
-                }
-            }
-            for source in &self.backend.completion_sources {
-                if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
-                    blockers.push(reminder);
-                    sources.push((source.clone(), CompletionFeedbackKind::ExitReminders));
-                }
-            }
-            *self
-                .binding
-                .exit_blocker_sources
-                .lock()
-                .expect("completion sources poisoned") = sources;
-            Ok(blockers)
-        })
-    }
-
-    fn render_status<'a, 'c>(
-        &'a self,
-        context: CoreContextSnapshot,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, CoreError>>
-    where
-        'c: 'a,
-    {
-        adapt_operation(async move {
-            let status = self
-                .backend
-                .state
-                .lock()
-                .await
-                .request_status
-                .clone()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            status
-                .observe(
-                    &crate::compaction::ContextSnapshot {
-                        estimated_tokens: context.estimated_tokens,
-                        context_limit: context.context_limit,
-                        usage_percent: context.usage_percent,
-                        trigger_percent: context.trigger_percent,
-                        input_limit: context.input_limit,
-                        trigger_tokens: context.trigger_tokens,
-                        has_context_limit_override: context.has_context_limit_override,
-                    },
-                    &cancellation,
-                )
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn write_to_scratch<'a, 'c>(
-        &'a self,
-        contents: &'a [u8],
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .borrow_blobs()
-                .write_to_scratch(contents, &cancellation)
-                .map(|path| path.to_string_lossy().into_owned())
-                .map_err(crate::compaction::CompactionError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_file<'a, 'c>(
-        &'a self,
-        path: &'a str,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(
-            async move { crate::compaction::read_file(path, &cancellation).map_err(Into::into) },
-        )
-    }
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        progress: parrot_core::compaction::CompactionProgress,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), CoreError>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            crate::compaction::CompactionObserver::observe_progress(
-                &ContextEmitter {
-                    backend: self.backend,
-                },
-                protocol::CompactionProgressEvent {
-                    phase: protocol::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
-                    completed_groups: progress.completed_groups as u64,
-                    total_groups: progress.total_groups as u64,
-                    ..protocol::CompactionProgressEvent::new()
-                },
-                &cancellation,
-            )
-            .await
-            .map_err(crate::compaction::CompactionError::from)
-            .map_err(Into::into)
-        })
-    }
-
-    fn capture_system_prompt_sections(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let selection = self.binding.capture_selection()?;
-            {
-                let mut state = backend.state.lock().await;
-                state.request_status = Some(backend.status.bind(&selection));
-                self.cancellation
-                    .check()
-                    .map_err(|_| ContextError::Cancelled)?;
-                state
-                    .context
-                    .ensure_epoch(&backend.prompt, self.cancellation)
-                    .await?;
-            }
-            backend
-                .prompt
-                .read_system_prompts(&selection.model, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_template_arguments<'a>(
-        &'a self,
-        source_key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_template_arguments(source_key, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_agents_files(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_agent_identity(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_standing_instruction(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_skill_catalog(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_skill_catalog(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<parrot_core::ToolRecovery, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .tool_conversation
-                .read_recovery()
-                .await
-        })
-    }
-    fn advance_tool_settlement_watermark(
-        &mut self,
-        through: i64,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .tool_conversation
-                .advance_watermark(through);
-            Ok(())
-        })
-    }
-    fn get_last_turn(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationTurn>, CoreError>> {
-        adapt_operation(async move {
-            let state = self.backend.state.lock().await;
-            let Some(turn) = state.conversation.read_last_turn_messages() else {
-                return Ok(None);
-            };
-            let messages: Vec<parrot_core::Message> =
-                turn.iter().map(provider_message).map(Into::into).collect();
-            let result = messages
-                .iter()
-                .rev()
-                .find(|message| message.role != parrot_core::Role::System)
-                .filter(|message| {
-                    message.role == parrot_core::Role::Assistant && message.tool_calls.is_empty()
-                })
-                .cloned();
-            Ok(Some(parrot_core::ConversationTurn { messages, result }))
-        })
-    }
-    fn peek_pending_input_header(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::PendingMessage>, CoreError>> {
-        adapt_operation(async move {
-            let Some(input) = self.backend.history.peek_pending_input().await? else {
-                return Ok(None);
-            };
-            let delivery = match input.delivery {
-                protocol::Delivery::DELIVERY_STEER => parrot_core::Delivery::Steer,
-                protocol::Delivery::DELIVERY_QUEUE => parrot_core::Delivery::Queue,
-                protocol::Delivery::DELIVERY_UNSPECIFIED => {
-                    return Err(TurnError::Service(
-                        "pending input delivery is unspecified".into(),
-                    ));
-                }
-            };
-            Ok(Some(parrot_core::PendingMessage {
-                input_id: input.id,
-                message_id: input.message_id,
-                delivery,
-            }))
-        })
-    }
-    fn promote_pending_inputs(
-        &mut self,
-        admission: parrot_core::InputAdmission,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::PromotedInput>, CoreError>> {
-        adapt_operation(async move { self.backend.promote(admission).await })
-    }
-    fn resolve_skill_references<'a>(
-        &'a self,
-        references: &'a [parrot_core::SkillReference],
-    ) -> BoxFuture<'a, Result<Vec<Option<parrot_core::Skill>>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .skills
-                .get_skills(references, self.cancellation)
-                .await
-                .map_err(TurnError::from)
-        })
-    }
-    fn read_skill_content<'a>(
-        &'a self,
-        skill: &'a parrot_core::Skill,
-    ) -> BoxFuture<'a, Result<parrot_core::SkillContent, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .skills
-                .read_skill_content(skill, self.cancellation)
-                .await
-                .map_err(TurnError::from)
-        })
-    }
-    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, CoreError>> {
-        adapt_operation(async move {
-            let state = self.backend.state.lock().await;
-            Ok(state.context.budget().capture_state())
-        })
-    }
-    fn read_provider_messages(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
-        adapt_operation(async move {
-            let state = self.backend.state.lock().await;
-            Ok(state
-                .conversation
-                .messages()
-                .iter()
-                .map(provider_message)
-                .map(Into::into)
-                .collect())
-        })
-    }
-    fn read_conversation_summary(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .read_conversation_summary()
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn read_conversation_tail(
-        &self,
-        after: i64,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, CoreError>> {
-        adapt_operation(async move {
-            let state = self.backend.state.lock().await;
-            state
-                .context
-                .read_conversation_tail(&state.conversation, after)
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .read_checkpoint_sequences()
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn finalize_compaction<'a>(
-        &'a mut self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
-        result: Result<Option<parrot_core::compaction::FittedCompaction>, CoreError>,
-    ) -> BoxFuture<'a, Result<CoreContextCompaction, CoreError>> {
-        Box::pin(async move {
-            let definitions: Vec<sessions::Tool> =
-                definitions.iter().cloned().map(Into::into).collect();
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let events = ContextEmitter { backend };
-            let compacted = match result {
-                Ok(compacted) => compacted,
-                Err(error) => {
-                    state
-                        .context
-                        .fail_epoch_compaction(error.to_string(), &events)
-                        .await
-                        .map_err(TurnError::from)
-                        .map_err(CoreError::from)?;
-                    return Err(error);
-                }
-            };
-            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| CoreError::failed("request status is unavailable"))?;
-            let result = state
-                .context
-                .record_epoch_compaction(
-                    &mut EpochInput {
-                        selection: &selection.model,
-                        tools: &definitions,
-                        conversation: &mut state.conversation,
-                        prompt: &backend.prompt,
-                        sessions: &backend.sessions,
-                        status: status.as_ref(),
-                        events: &events,
-                    },
-                    instructions.into(),
-                    Ok(compacted),
-                    self.cancellation,
-                )
-                .await
-                .map_err(TurnError::from)
-                .map_err(CoreError::from)?;
-            Ok(CoreContextCompaction {
-                instructions: result.instructions,
-                reduced: result.reduced,
-            })
-        })
-    }
-}
-
-impl<S, T> parrot_core::Tools for RuntimeTools<'_, S, T>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
-    fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            let normal = self.backend.snapshot(&selection)?;
-            let final_phase = self.backend.tools.enabled_after_interruption(&normal);
-            let catalog = ToolCatalog {
-                normal: self
-                    .backend
-                    .tools
-                    .definitions(&normal)
-                    .iter()
-                    .cloned()
-                    .map(Into::into)
-                    .collect(),
-                final_phase: self
-                    .backend
-                    .tools
-                    .definitions(&final_phase)
-                    .iter()
-                    .cloned()
-                    .map(Into::into)
-                    .collect(),
-            };
-            *self.captured.lock().expect("captured tools poisoned") = Some(CapturedTools {
-                normal,
-                final_phase,
-            });
-            Ok(catalog)
-        })
-    }
-    fn execute<'a>(
-        &'a self,
-        request: parrot_core::ToolExecutionRequest,
-        cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let selection = self.binding.capture_selection()?;
-            let snapshot = {
-                let guard = self.captured.lock().expect("captured tools poisoned");
-                let tools = guard
-                    .as_ref()
-                    .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
-                if request.flags.final_phase {
-                    tools.final_phase.clone()
-                } else {
-                    tools.normal.clone()
-                }
-            };
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            let events = ContextEmitter { backend };
-            backend
-                .tools
-                .execute(
-                    ToolExecutionChunk {
-                        assistant_sequence: request.receipt.assistant_sequence,
-                        starts_batch: request.starts_batch,
-                        calls: request.calls,
-                        cancel_remaining: request.cancel_remaining,
-                    },
-                    TurnResources {
-                        history: &backend.history,
-                        conversation: &mut state.conversation,
-                        context: &mut state.context,
-                        prompt: &backend.prompt,
-                        sessions: &backend.sessions,
-                        status: status.as_ref(),
-                        events: &events,
-                        usage: &backend.usage,
-                    },
-                    &selection,
-                    &snapshot,
-                    backend.selection.as_ref(),
-                    &cancellation,
-                )
-                .await
-        })
-    }
-}
-
-impl<S, T> parrot_core::Provider for RuntimeProvider<'_, S, T>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
-    fn estimate_input_tokens(
-        &self,
-        instructions: &str,
-        definitions: &[ToolDefinition],
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, CoreError> {
-        let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-        crate::compaction::CompactionEstimates::new(&self.backend.compactor, &selection.model)
-            .estimate_context_tokens(instructions, definitions, messages)
-            .map_err(Into::into)
-    }
-    fn estimate_tokens(&self, messages: &[parrot_core::Message]) -> Result<i64, CoreError> {
-        let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-        crate::compaction::CompactionEstimates::new(&self.backend.compactor, &selection.model)
-            .estimate_tokens(messages)
-            .map_err(Into::into)
-    }
-    fn estimate_summary_tokens(
-        &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[parrot_core::Message],
-    ) -> Result<i64, CoreError> {
-        let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-        crate::compaction::CompactionEstimates::new(&self.backend.compactor, &selection.model)
-            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
-            .map_err(Into::into)
-    }
-    fn summarize<'a, 'c>(
-        &'a self,
-        request: ProviderRequest,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<parrot_core::compaction::SummaryResponse, CoreError>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            let provider = crate::compaction::SummaryProviderAdapter::new(
-                selection.model.canonical_model,
-                &self.backend.sessions,
-                ContextEmitter {
-                    backend: self.backend,
-                },
-            );
-            provider
-                .summarize_native(request, cancellation)
-                .await
-                .map_err(Into::into)
-        })
-    }
-
-    fn invoke<'a, 'c>(
-        &'a self,
-        request: ProviderRequest,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<ProviderResponse, CoreError>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            let backend = self.backend;
-            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            let selected = &selection.model.canonical_model;
-            let mut state = backend.state.lock().await;
-            let request: sessions::Request = request.into();
-            let estimate = crate::compaction::CompactionPlanner::estimate_input_tokens(
-                selected,
-                &request.instructions,
-                &request.tools,
-                &request.messages,
-            )
-            .map_err(|error| CoreError::from(TurnError::Planning(error)))?;
-            state.request_accounting = Some(RequestAccounting {
-                selected: selected.clone(),
-                estimated_input_tokens: estimate,
-            });
-            let session = backend
-                .sessions
-                .get(selected.provider.clone())
-                .await
-                .map_err(|error| CoreError::from(TurnError::Provider(error)))?;
-            let output = OutputBridge(backend.output.as_ref());
-            let activity = ActivityBridge(backend.activity.as_ref());
-            let mut call = ProviderCall {
-                history: &backend.history,
-                publisher: backend.publisher.as_ref(),
-                event_id: backend.event_id.as_ref(),
-                output: &output,
-                activity: &activity,
-                usage: &mut *state,
-            };
-            let event = match call.stream(session.as_ref(), request, &cancellation).await {
-                Ok(event) => event,
-                Err(
-                    error @ provider_call::ProviderCallError::Provider(
-                        sessions::Error::Http(
-                            parrot_provider::http_stream::HttpError::RequestTooLarge(_),
-                        )
-                        | sessions::Error::Socket(
-                            parrot_provider::responses_websocket::WebSocketError::RequestTooLarge {
-                                ..
-                            },
-                        ),
-                    ),
-                ) => {
-                    let mut error = CoreError::from(TurnError::ProviderCall(error));
-                    error.kind = ErrorKind::RequestTooLarge;
-                    return Err(error);
-                }
-                Err(error) => return Err(CoreError::from(TurnError::ProviderCall(error))),
-            };
-            match event.base_event() {
-                sessions::Event::Completed(completed) => Ok(completed.clone().into()),
-                _ => unreachable!("provider call returns completion"),
-            }
-        })
-    }
-}
-
-pub(super) async fn interrupt<S, T>(
-    backend: &RuntimeBackend<S, T>,
+pub(super) async fn interrupt<S>(
+    backend: &RuntimeBackend<S>,
     work: &dyn DrainWork,
     key: &TurnKey,
 ) -> Result<(), TurnError>
 where
     S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
 {
     let binding = TurnBinding::new();
     let mut budget = parrot_core::TurnBudget::new(backend.agent_limits.disable_max_turns);
-    let mut states = RuntimeStates::new(backend, &binding, &NeverCancelled, work, &mut budget);
+    let mut states = RuntimeStates {
+        history: &backend.history,
+        sessions: &backend.sessions,
+        activity: backend.activity.as_ref(),
+        state: &backend.state,
+        prompt: &backend.prompt,
+        skills: backend.skills.as_ref(),
+        status: backend.status.as_ref(),
+        completion_sources: &backend.completion_sources,
+        templates: &backend.templates,
+        publisher: backend.publisher.as_ref(),
+        usage: &backend.usage,
+        compactor: &backend.compactor,
+        event_id: &backend.event_id,
+        events: ContextEmitter::new(
+            &backend.history,
+            backend.publisher.as_ref(),
+            &backend.broker,
+            backend.event_id.as_ref(),
+        ),
+        binding: &binding,
+        cancellation: &NeverCancelled,
+        work,
+        persistence_key: None,
+        budget: &mut budget,
+    };
     states.persistence_key = Some(key.clone());
     if let Some(message) = parrot_core::interrupt_turn(&mut states)
         .await
