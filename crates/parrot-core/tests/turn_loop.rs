@@ -754,9 +754,6 @@ impl States for MemoryState {
             Ok(self.prompts().checkpoint.clone())
         })
     }
-    fn read_history_size(&self) -> BoxFuture<'_, Result<i64, Error>> {
-        Box::pin(async move { Ok(self.request().messages.len() as i64) })
-    }
     fn write_context_cadence(
         &mut self,
         cadence: ContextCadence,

@@ -228,13 +228,11 @@ pub trait States: Send + Sync {
     fn read_context_cadence(&self) -> BoxFuture<'_, Result<ContextCadence, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_context_cadence")) })
     }
+    /// Reads the last persisted context reminder checkpoint to restore reminder cadence.
     fn read_context_checkpoint(
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_context_checkpoint")) })
-    }
-    fn read_history_size(&self) -> BoxFuture<'_, Result<i64, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_history_size")) })
     }
     fn write_context_cadence(
         &mut self,

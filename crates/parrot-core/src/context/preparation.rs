@@ -28,6 +28,7 @@ async fn prepare_pending_prompt(
     states: &mut dyn States,
     context: &ContextSnapshot,
     configuration: &ContextConfiguration,
+    message_count: usize,
 ) -> Result<Option<PendingPrompt>, Error> {
     if let Some(prompt) = states.read_pending_prompt().await? {
         return Ok(Some(PendingPrompt::Message(prompt)));
@@ -37,7 +38,7 @@ async fn prepare_pending_prompt(
         cadence.restore(states.read_context_checkpoint().await?);
     }
     let canonical_model = &configuration.model.canonical_model;
-    let observation = cadence.observe(context, canonical_model, states.read_history_size().await?);
+    let observation = cadence.observe(context, canonical_model, message_count as i64);
     states.write_context_cadence(cadence).await?;
     let Some(percentage) = observation? else {
         return Ok(None);
@@ -88,15 +89,12 @@ async fn acknowledge_prompt(
     states: &mut dyn States,
     prompt: &PendingPrompt,
     context: &ContextSnapshot,
+    message_count: usize,
 ) -> Result<(), Error> {
     states.acknowledge_pending_prompt(prompt, context).await?;
     if let PendingPrompt::ContextReminder { checkpoint, .. } = prompt {
         let mut cadence = states.read_context_cadence().await?;
-        cadence.acknowledge(
-            context,
-            &checkpoint.canonical_model,
-            states.read_history_size().await?,
-        )?;
+        cadence.acknowledge(context, &checkpoint.canonical_model, message_count as i64)?;
         states.write_context_cadence(cadence).await?;
     }
     Ok(())
@@ -139,7 +137,9 @@ pub(crate) async fn prepare_request(
         context = ContextSnapshot::estimate(estimate, &configuration);
         context.ensure_input_fits()?;
     }
-    if let Some(prompt) = prepare_pending_prompt(states, &context, &configuration).await? {
+    if let Some(prompt) =
+        prepare_pending_prompt(states, &context, &configuration, messages.len()).await?
+    {
         let mut candidate = messages.clone();
         candidate.push(prompt.render_message());
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
@@ -165,7 +165,7 @@ pub(crate) async fn prepare_request(
             } else {
                 inserted
             };
-            acknowledge_prompt(states, &prompt, &acknowledged).await?;
+            acknowledge_prompt(states, &prompt, &acknowledged, messages.len()).await?;
             if let Some(receipt) = receipt {
                 states.publish_pending_prompt(receipt).await?;
             }

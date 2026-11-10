@@ -401,11 +401,6 @@ where
                 .map_err(Into::into)
         })
     }
-    fn read_history_size(&self) -> BoxFuture<'_, Result<i64, CoreError>> {
-        adapt_operation(
-            async move { Ok(self.backend.state.lock().await.conversation.len() as i64) },
-        )
-    }
     fn write_context_cadence(
         &mut self,
         cadence: parrot_core::ContextCadence,
