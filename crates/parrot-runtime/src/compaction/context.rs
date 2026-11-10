@@ -108,6 +108,15 @@ pub trait ContextStatus: Send + Sync {
         context: &'a ContextSnapshot,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<String>>;
+    /// Offers the standing status slots for a safe point: source-computed
+    /// hashes in registry order, without a usage snapshot. Defaults to no
+    /// slots, which steers nothing.
+    fn slots<'a>(
+        &'a self,
+        _cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
+        Box::pin(async { Ok(parrot_core::StatusOffering::default()) })
+    }
 }
 
 /// `emit` persists a new event; `publish_committed` requires its real transaction receipt.
@@ -151,12 +160,6 @@ pub struct ContextCompactionResult {
     pub context: ContextSnapshot,
     pub reduced: bool,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StatusInjection {
-    Complete,
-    /// The caller must refresh its full profile/model/security selection and try again.
-    RefreshSelection,
-}
 
 pub struct ContextController {
     compactor: Compactor,
@@ -164,7 +167,6 @@ pub struct ContextController {
     blobs: parrot_storage::artifacts::compaction::CompactionGroupBlobStore,
     templates: Arc<PromptTemplateCatalog>,
     budget: ProviderTokenBudget,
-    pub(crate) initial_status_pending: bool,
 }
 impl ContextController {
     pub fn new(
@@ -179,7 +181,6 @@ impl ContextController {
             blobs,
             templates,
             budget: ProviderTokenBudget::default(),
-            initial_status_pending: true,
         }
     }
     pub fn compactor(&self) -> &Compactor {
@@ -263,67 +264,6 @@ impl ContextController {
         )?)
     }
 
-    /// Fits and commits status through core before input promotion.
-    pub async fn inject_status(
-        &mut self,
-        input: EpochInput<'_>,
-        depth: i32,
-        profile_id: &str,
-        cancellation: &dyn Cancellation,
-    ) -> ContextResult<StatusInjection> {
-        self.ensure_epoch(input.prompt, cancellation).await?;
-        let configuration = self
-            .compactor
-            .planner()
-            .capture_compaction_configuration(input.selection, None);
-        let definitions = input
-            .tools
-            .iter()
-            .cloned()
-            .map(Into::into)
-            .collect::<Vec<_>>();
-        let estimates = CompactionEstimates::new(&self.compactor, input.selection);
-        let errors = NativeErrors::new();
-        let templates = self.templates.clone();
-        let controller = tokio::sync::Mutex::new(self);
-        let mut states = EpochStates {
-            controller: &controller,
-            conversation: input.conversation,
-            prompt: input.prompt,
-            selection: input.selection,
-            status: input.status,
-            status_request: StatusRequest {
-                depth,
-                profile_id: profile_id.into(),
-            },
-            sessions: input.sessions,
-            events: input.events,
-            configuration,
-            templates,
-            cancellation,
-            estimates: &estimates,
-            errors: &errors,
-        };
-        let provider = EpochProvider {
-            estimates: &estimates,
-            errors: &errors,
-            sessions: input.sessions,
-            events: input.events,
-        };
-        let outcome = parrot_core::prepare_status(
-            &mut states,
-            &provider,
-            &definitions,
-            parrot_core::CancellationToken::new(cancellation),
-        )
-        .await
-        .map_err(|error| errors.restore(error, ContextError::from))?;
-        Ok(match outcome {
-            parrot_core::StatusPreparation::Complete => StatusInjection::Complete,
-            parrot_core::StatusPreparation::RefreshSelection => StatusInjection::RefreshSelection,
-        })
-    }
-
     pub async fn inject_final_provider_request_prompt(
         &self,
         conversation: &mut AgentConversation,
@@ -400,13 +340,11 @@ impl ContextController {
             prompt: input.prompt,
             selection: input.selection,
             status: input.status,
-            status_request: StatusRequest::default(),
             sessions: input.sessions,
             events: input.events,
             configuration,
             templates,
             cancellation,
-            estimates: &estimates,
             errors: &errors,
         };
         let provider = EpochProvider {
@@ -486,13 +424,11 @@ impl ContextController {
                 prompt: input.prompt,
                 selection: input.selection,
                 status: input.status,
-                status_request: StatusRequest::default(),
                 sessions: input.sessions,
                 events: input.events,
                 configuration: configuration.clone(),
                 templates,
                 cancellation,
-                estimates: &estimates,
                 errors: &errors,
             };
             let provider = CompactionProvider::new(
@@ -588,34 +524,49 @@ impl ContextController {
         &mut self.blobs
     }
 
-    pub(crate) async fn read_conversation_state(
+    pub(crate) async fn read_conversation_summary(
+        &self,
+    ) -> ContextResult<Option<parrot_core::ConversationSummary>> {
+        let snapshot = self
+            .history
+            .repository()
+            .compaction(self.history.agent_session_id().into())
+            .await?;
+        Ok(snapshot.map(|snapshot| parrot_core::ConversationSummary {
+            content: snapshot.summary,
+            watermark: snapshot.watermark,
+        }))
+    }
+
+    pub(crate) async fn read_conversation_tail(
         &self,
         conversation: &AgentConversation,
-    ) -> ContextResult<parrot_core::compaction::ConversationState> {
-        let state = self.history.read_conversation_state().await?;
-        let mut history = Vec::with_capacity(state.items.len());
-        for item in state.items {
-            history.push(parrot_core::compaction::ConversationHistoryItem {
+        after: i64,
+    ) -> ContextResult<Vec<parrot_core::ConversationHistoryItem>> {
+        let items = self
+            .history
+            .repository()
+            .read_conversation_tail(self.history.agent_session_id().into(), after)
+            .await?;
+        let mut history = Vec::with_capacity(items.len());
+        for item in items {
+            history.push(parrot_core::ConversationHistoryItem {
                 sequence: item.item.sequence,
                 tool_owner_sequence: item.tool_owner_sequence,
                 is_compaction_status: item.is_compaction_status,
                 message: provider_message(&conversation.materialize(item.item).await?).into(),
             });
         }
-        Ok(parrot_core::compaction::ConversationState {
-            summary: state
-                .snapshot
-                .map(|snapshot| parrot_core::compaction::ConversationSummary {
-                    content: snapshot.summary,
-                    watermark: snapshot.watermark,
-                }),
-            history,
-            checkpoint_sequences: state.checkpoint_sequences,
-            messages: provider_messages(conversation)
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        })
+        Ok(history)
+    }
+
+    pub(crate) async fn read_checkpoint_sequences(&self) -> ContextResult<Vec<i64>> {
+        Ok(self
+            .history
+            .active_checkpoint_assistant_sequences()
+            .await?
+            .into_iter()
+            .collect())
     }
 
     async fn apply_compaction(
@@ -748,12 +699,6 @@ impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
     }
 }
 
-#[derive(Default)]
-struct StatusRequest {
-    depth: i32,
-    profile_id: String,
-}
-
 struct ContextAdditionStates<'a> {
     errors: &'a NativeErrors<ContextError>,
     history: &'a AgentHistoryView,
@@ -770,15 +715,14 @@ impl parrot_core::States for ContextAdditionStates<'_> {
         Box::pin(async { Err(parrot_core::Error::unsupported("States.get_config")) })
     }
 
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
         Box::pin(async move {
-            super::add_conversation(
+            super::apply_conversation_addition(
                 self.history,
                 self.conversation,
-                &mut false,
                 addition,
                 self.events,
                 self.cancellation,
@@ -798,13 +742,11 @@ struct EpochStates<'a> {
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
     status: &'a dyn ContextStatus,
-    status_request: StatusRequest,
     sessions: &'a ProviderSessions,
     events: &'a dyn ContextEvents,
     configuration: parrot_core::CompactionConfiguration,
     templates: Arc<PromptTemplateCatalog>,
     cancellation: &'a dyn Cancellation,
-    estimates: &'a CompactionEstimates,
     errors: &'a NativeErrors<ContextError>,
 }
 
@@ -854,18 +796,17 @@ impl EpochStates<'_> {
 }
 
 impl parrot_core::States for EpochStates<'_> {
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
         Box::pin(async move {
             let result = {
-                let mut controller = self.controller.lock().await;
+                let controller = self.controller.lock().await;
                 let history = controller.history.clone();
-                super::add_conversation(
+                super::apply_conversation_addition(
                     &history,
                     self.conversation,
-                    &mut controller.initial_status_pending,
                     addition,
                     self.events,
                     self.cancellation,
@@ -876,34 +817,32 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_status_observation(
+    fn read_status_offering(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::StatusObservation, parrot_core::Error>> {
+    ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, parrot_core::Error>> {
         Box::pin(async move {
-            let controller = self.controller.lock().await;
-            let pending = if self.status_request.depth == 0 {
-                controller
-                    .history
-                    .pending_status()
-                    .await
-                    .map_err(|error| self.capture_error(error))?
-                    .map(|pending| parrot_core::StatusCheckpoint::Mode {
-                        mode: pending.mode,
-                        version: pending.version,
-                    })
-            } else {
-                None
-            };
-            Ok(parrot_core::StatusObservation {
-                depth: self.status_request.depth,
-                profile_id: self.status_request.profile_id.clone(),
-                initial_pending: controller.initial_status_pending,
-                pending,
-            })
+            self.status
+                .slots(self.cancellation)
+                .await
+                .map_err(|error| self.capture_error(error))
         })
     }
 
-    fn read_pending_inputs(
+    fn read_standing_statuses(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::StatusStanding, parrot_core::Error>> {
+        Box::pin(async move {
+            let controller = self.controller.lock().await;
+            controller
+                .history
+                .standing_statuses()
+                .await
+                .map_err(|error| self.capture_error(error))
+                .map(|standing| standing.unwrap_or_default())
+        })
+    }
+
+    fn read_next_input_messages(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {
         Box::pin(async move {
@@ -933,7 +872,7 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_messages(
+    fn read_provider_messages(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {
         Box::pin(async move {
@@ -953,7 +892,7 @@ impl parrot_core::States for EpochStates<'_> {
         Box::pin(async move { Ok(self.controller.lock().await.budget.capture_state()) })
     }
 
-    fn get_last_context_reminder(
+    fn read_last_context_reminder_checkpoint(
         &self,
     ) -> BoxFuture<'_, Result<Option<CoreContextReminderCheckpoint>, parrot_core::Error>> {
         Box::pin(async move {
@@ -966,7 +905,7 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn record_compaction<'a>(
+    fn finalize_compaction<'a>(
         &'a mut self,
         instructions: &'a str,
         definitions: &'a [parrot_core::ToolDefinition],
@@ -1016,12 +955,6 @@ impl parrot_core::States for EpochStates<'_> {
             match key {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(self.configuration.clone())),
                 ConfigKey::Context => Ok(ConfigValue::Context(self.configuration.context.clone())),
-                ConfigKey::SystemPromptBindings => self
-                    .prompt
-                    .read_core_prompt_bindings(self.cancellation)
-                    .await
-                    .map(ConfigValue::SystemPromptBindings)
-                    .map_err(|error| self.capture_error(error)),
                 ConfigKey::Turn => Err(parrot_core::Error::failed(
                     "turn configuration is unavailable for a compaction epoch",
                 )),
@@ -1036,14 +969,37 @@ impl parrot_core::States for EpochStates<'_> {
             }
         })
     }
-    fn read_conversation_state(
+    fn read_conversation_summary(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationState, parrot_core::Error>> {
+    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, parrot_core::Error>> {
         Box::pin(async move {
             self.controller
                 .lock()
                 .await
-                .read_conversation_state(self.conversation)
+                .read_conversation_summary()
+                .await
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+    fn read_conversation_tail(
+        &self,
+        after: i64,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .read_conversation_tail(self.conversation, after)
+                .await
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .read_checkpoint_sequences()
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -1074,21 +1030,35 @@ impl parrot_core::States for EpochStates<'_> {
                 .map_err(|error| self.capture_error(error))
         })
     }
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [parrot_core::Message],
+        contents: &'a [u8],
         cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::Message>, parrot_core::Error>>
+    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
-            self.estimates
-                .spill_group(
-                    self.controller.lock().await.borrow_blobs(),
-                    messages,
-                    cancellation,
-                )
+            self.controller
+                .lock()
+                .await
+                .borrow_blobs()
+                .write_to_scratch(contents, &cancellation)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(CompactionError::from)
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+    fn read_file<'a, 'c>(
+        &'a self,
+        path: &'a str,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            crate::compaction::read_file(path, &cancellation)
                 .map_err(|error| self.capture_error(error))
         })
     }
@@ -1108,67 +1078,10 @@ impl parrot_core::States for EpochStates<'_> {
                 .map_err(|error| self.capture_error(error))
         })
     }
-    fn read_system_prompts(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, parrot_core::Error>> {
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, parrot_core::Error>> {
         Box::pin(async move {
             self.prompt
-                .read_system_prompts(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_agents_files(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_agents_files(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, parrot_core::Error>>
-    {
-        Box::pin(async move {
-            self.prompt
-                .read_agent_identity(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_standing_instruction(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_skill_catalog(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_skill_catalog(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_template_arguments<'a>(
-        &'a self,
-        source_key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_template_arguments(source_key, self.cancellation)
+                .build(self.selection, self.cancellation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })

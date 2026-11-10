@@ -5,12 +5,13 @@ pub use agents::AgentsPromptProvider;
 pub(crate) use agents::decode_agents_text as decode_source_text;
 mod composition;
 mod core_templates;
-pub(crate) use core_templates::{get_prompt_template_id, resolve_prompt_template_key};
+pub(crate) use core_templates::get_prompt_template_id;
 mod rendering;
 mod session;
+pub(crate) use rendering::render_skill_catalog_entries;
 pub use rendering::{
-    render_agent_identity, render_agents_files, render_skill_catalog_entries,
-    render_standing_instruction, render_system_prompt_sections,
+    render_agent_identity, render_agents_files, render_standing_instruction,
+    render_system_prompt_sections,
 };
 pub use session::SessionPrompt;
 mod environment;
@@ -36,6 +37,7 @@ pub use skills_discovery::{
 mod agent_skills;
 pub use agent_skills::{AgentSkillPromptProvider, AgentSkills};
 mod skills_rendering;
+pub(crate) use skills_rendering::SkillCatalogEntry;
 pub use skills_rendering::{MAXIMUM_CATALOG_BYTES, render_skill_catalog};
 mod skills_parsing;
 pub use parrot_core::{SkillMention, parse_skill_mentions};

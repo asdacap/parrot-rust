@@ -136,7 +136,7 @@ async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
         .await;
         harness.restore(&fixture).await.unwrap();
         harness.restore(&fixture).await.unwrap();
-        let messages = harness.conversation.messages();
+        let messages = harness.runtime_state.get_mut().conversation.messages();
         assert!(
             messages
                 .iter()
@@ -284,6 +284,10 @@ async fn yielded_process_metadata_is_preserved_on_finished_event_and_result_proj
     yielded.stdout_path = Some("scratch/process.stdout".into());
     yielded.stderr_path = Some("scratch/process.stderr".into());
     yielded.activity_kind = protobuf::EnumOrUnknown::from_i32(-37);
+    yielded
+        .special_fields
+        .mut_unknown_fields()
+        .add_varint(127, 12345);
     tool.output.yielded_process = Some(yielded.clone());
     let tool = Arc::new(tool);
     fixture.batch(vec![call("yielded", "process")]).await;

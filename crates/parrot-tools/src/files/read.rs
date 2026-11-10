@@ -14,8 +14,8 @@ use parrot_domain::{
 };
 
 use super::{
-    FileToolError, FileToolInvocation, FileToolResult, Formatter, WorkspacePaths, file_error,
-    input::ReadInput,
+    FileToolError, FileToolInvocation, FileToolResult, Formatter, WorkspacePaths,
+    append_short_path_note, file_error, input::ReadInput,
 };
 
 mod stream;
@@ -83,7 +83,14 @@ impl<S: AuthorizedReadService> ReadTool<S> {
             return self
                 .list_directory(&metadata, snapshot, cancellation, &formatter)
                 .await
-                .map(FileToolResult::text);
+                .and_then(|text| {
+                    append_short_path_note(
+                        &self.paths,
+                        &input.path,
+                        &formatter,
+                        FileToolResult::text(text),
+                    )
+                });
         }
         if metadata.kind != EntryKind::Regular {
             return formatter.error("no such file or directory");
@@ -102,7 +109,14 @@ impl<S: AuthorizedReadService> ReadTool<S> {
         cancellation
             .check()
             .map_err(|_| OperationError::Cancelled)?;
-        renderer.finish(&formatter).map(FileToolResult::text)
+        renderer.finish(&formatter).and_then(|text| {
+            append_short_path_note(
+                &self.paths,
+                &input.path,
+                &formatter,
+                FileToolResult::text(text),
+            )
+        })
     }
 
     async fn list_directory(

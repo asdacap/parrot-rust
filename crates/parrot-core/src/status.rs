@@ -1,93 +1,196 @@
 use crate::{
     CancellationToken, ConfigKey, ConversationAddition, ConversationEvent, ConversationPersistence,
     Error, Message, Provider, ProviderRequest, Role, States, ToolDefinition,
-    compaction::fit_status, rendering::render_instructions,
+    compaction::fit_status,
 };
+use std::{collections::BTreeMap, fmt};
 
+/// Names one status slot of a conversation. Keys are stable across engine restarts
+/// and iterate in string order so status assembly stays deterministic.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct StatusKey(String);
+
+impl StatusKey {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for StatusKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+/// One offered status slot. The source computes the hash over its own inputs, so
+/// the core steers without re-rendering anything and a meaning-preserving re-render
+/// of unchanged inputs can be suppressed at the source.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum StatusCheckpoint {
-    Initial,
-    Mode { mode: String, version: i64 },
+pub struct StatusOffer {
+    pub hash: String,
+    pub text: String,
+    pub is_auto_update: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct StatusObservation {
-    pub depth: i32,
-    pub profile_id: String,
-    pub initial_pending: bool,
-    pub pending: Option<StatusCheckpoint>,
+/// The status slots offered to the core for one assembly, in fixed slot order.
+pub type StatusOffering = BTreeMap<StatusKey, StatusOffer>;
+
+/// The per-slot hashes recorded by the status assembly currently standing in the
+/// conversation, read from the latest persisted status message.
+pub type StatusStanding = BTreeMap<StatusKey, String>;
+
+/// Returns whether the core should steer a new status assembly at a safe point.
+/// Non-auto slots never trigger steering on their own. A new conversation has
+/// empty standing state, so the first safe point steers the initial assembly
+/// even when every slot is static. An auto-update slot with no standing hash
+/// counts as changed, because its content was never injected.
+pub fn status_steering_needed(offering: &StatusOffering, standing: &StatusStanding) -> bool {
+    if offering.is_empty() {
+        return false;
+    }
+    standing.is_empty()
+        || offering
+            .iter()
+            .filter(|(_, offer)| offer.is_auto_update)
+            .any(|(key, offer)| standing.get(key) != Some(&offer.hash))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StatusPreparation {
-    Complete,
-    RefreshSelection,
-}
-
-pub async fn prepare_status(
+/// Steers one status assembly at a safe point. Reads the offered slots and the
+/// standing hashes, and when steering is required commits a fully assembled,
+/// usage-fitted system message whose persistence records every offered slot's
+/// hash. Safe points are the core turn loop's iterations between provider
+/// requests, so the steered assembly reaches the provider request assembled
+/// right after this call.
+pub async fn steer_status(
     states: &mut dyn States,
     provider: &dyn Provider,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
-) -> Result<StatusPreparation, Error> {
-    loop {
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
-        }
-        let observation = states.read_status_observation().await?;
-        let checkpoint = if observation.depth > 0 {
-            if !observation.initial_pending {
-                return Ok(StatusPreparation::Complete);
-            }
-            StatusCheckpoint::Initial
-        } else {
-            let Some(checkpoint) = observation.pending else {
-                return Ok(StatusPreparation::Complete);
-            };
-            if let StatusCheckpoint::Mode { mode, .. } = &checkpoint {
-                if *mode != observation.profile_id {
-                    return Ok(StatusPreparation::RefreshSelection);
-                }
-            }
-            checkpoint
-        };
-        let instructions = render_instructions(states).await?;
-        let mut messages = states.read_messages().await?;
-        messages.extend(states.read_pending_inputs().await?);
-        let configuration = states
-            .get_config(ConfigKey::Context)
-            .await?
-            .into_context()?;
-        let content = fit_status(
-            &ProviderRequest {
-                instructions,
-                messages,
-                tools: definitions.to_vec(),
-                ..ProviderRequest::default()
-            },
-            &configuration,
-            states,
-            provider,
-            cancellation,
-        )
-        .await?;
-        let receipt = states
-            .add_conversation(ConversationAddition {
-                messages: vec![Message::text(Role::System, content)],
-                persistence: ConversationPersistence::Status {
-                    checkpoint,
-                    event: ConversationEvent::Notice {
-                        kind: "status".into(),
-                        notice: "Status prompt injected".into(),
-                    },
+) -> Result<(), Error> {
+    if cancellation.is_cancelled() {
+        return Err(Error::cancelled());
+    }
+    let offering = states.read_status_offering().await?;
+    let standing = states.read_standing_statuses().await?;
+    if !status_steering_needed(&offering, &standing) {
+        return Ok(());
+    }
+    let instructions = states.capture_system_prompt().await?;
+    // Steering sits after this iteration's input promotion, so the provider
+    // messages already include everything the upcoming request admits.
+    let messages = states.read_provider_messages().await?;
+    let configuration = states
+        .get_config(ConfigKey::Context)
+        .await?
+        .into_context()?;
+    let content = fit_status(
+        &ProviderRequest {
+            instructions,
+            messages,
+            tools: definitions.to_vec(),
+            ..ProviderRequest::default()
+        },
+        &configuration,
+        states,
+        provider,
+        cancellation,
+    )
+    .await?;
+    let standing = offering
+        .iter()
+        .map(|(key, offer)| (key.clone(), offer.hash.clone()))
+        .collect();
+    states
+        .apply_conversation_addition(ConversationAddition {
+            messages: vec![Message::text(Role::System, content)],
+            persistence: ConversationPersistence::StatusSteering {
+                standing,
+                event: ConversationEvent::Notice {
+                    kind: "status".into(),
+                    notice: "Status prompt injected".into(),
                 },
+            },
+        })
+        .await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StatusKey, StatusOffer, StatusOffering, StatusStanding, status_steering_needed};
+
+    fn offering(entries: &[(&str, &str, bool)]) -> StatusOffering {
+        entries
+            .iter()
+            .map(|(key, hash, is_auto_update)| {
+                (
+                    StatusKey::new(*key),
+                    StatusOffer {
+                        hash: (*hash).into(),
+                        text: (*key).into(),
+                        is_auto_update: *is_auto_update,
+                    },
+                )
             })
-            .await?;
-        if !receipt.inserted {
-            return Ok(StatusPreparation::RefreshSelection);
-        }
-        if observation.depth > 0 {
-            return Ok(StatusPreparation::Complete);
-        }
+            .collect()
+    }
+
+    fn standing(entries: &[(&str, &str)]) -> StatusStanding {
+        entries
+            .iter()
+            .map(|(key, hash)| (StatusKey::new(*key), (*hash).into()))
+            .collect()
+    }
+
+    #[test]
+    fn empty_standing_steers_initial_assembly() {
+        let current = offering(&[("selection", "a", true), ("time", "b", false)]);
+        assert!(status_steering_needed(&current, &StatusStanding::default()));
+    }
+
+    #[test]
+    fn matching_standing_steers_nothing() {
+        let current = offering(&[("selection", "a", true), ("time", "b", false)]);
+        let recorded = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(!status_steering_needed(&current, &recorded));
+    }
+
+    #[test]
+    fn changed_auto_hash_steers() {
+        let current = offering(&[("selection", "a2", true), ("time", "b", false)]);
+        let recorded = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(status_steering_needed(&current, &recorded));
+    }
+
+    #[test]
+    fn non_auto_change_alone_steers_nothing() {
+        let current = offering(&[("selection", "a", true), ("time", "b2", false)]);
+        let recorded = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(!status_steering_needed(&current, &recorded));
+    }
+
+    #[test]
+    fn unchanged_after_restart_steers_nothing() {
+        let restored = offering(&[("selection", "a2", true), ("time", "b2", false)]);
+        let recorded = standing(&[("selection", "a2"), ("time", "b2")]);
+        assert!(!status_steering_needed(&restored, &recorded));
+    }
+
+    #[test]
+    fn auto_slot_without_standing_hash_counts_as_changed() {
+        let current = offering(&[("selection", "a", true), ("work", "w", true)]);
+        let recorded = standing(&[("selection", "a")]);
+        assert!(status_steering_needed(&current, &recorded));
+    }
+
+    #[test]
+    fn empty_offering_steers_nothing() {
+        let current = StatusOffering::default();
+        let recorded = standing(&[("selection", "a")]);
+        assert!(!status_steering_needed(&current, &recorded));
     }
 }

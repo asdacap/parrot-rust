@@ -358,6 +358,18 @@ async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_arti
         ConversationPart::ImageArtifact { metadata } if metadata.artifact_id == "artifact"
     ));
     assert!(state.items.iter().all(|item| !item.is_compaction_status));
+    assert_eq!(
+        repo.read_conversation_tail("agent".into(), 0)
+            .await
+            .unwrap(),
+        state.items
+    );
+    assert_eq!(
+        repo.read_conversation_tail("agent".into(), between)
+            .await
+            .unwrap(),
+        state.items[2..]
+    );
     repo.events().database().close().await.unwrap();
 }
 
@@ -525,6 +537,18 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
     assert_eq!(state.items[3].tool_owner_sequence, Some(archived));
     assert_eq!(state.items[3].item.message.tool_call_id, "archived");
     assert_eq!(single_text(&state.items[6].item), "tail");
+    assert_eq!(
+        repo.read_conversation_tail("agent".into(), archived)
+            .await
+            .unwrap(),
+        state.items
+    );
+    assert_eq!(
+        repo.read_conversation_tail("agent".into(), latest)
+            .await
+            .unwrap(),
+        state.items[2..]
+    );
     assert_eq!(
         state
             .items

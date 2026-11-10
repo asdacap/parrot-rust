@@ -10,6 +10,7 @@ use parrot_domain::{
 
 use super::{
     FileToolError, FileToolInvocation, FileToolResult, Formatter, WorkspacePaths,
+    append_short_path_note,
     diff::{FileChange, render},
     file_error,
     input::{EditInput, WriteInput},
@@ -83,9 +84,14 @@ impl<S: AuthorizedMutationService> WriteTool<S> {
             .as_deref()
             .map_or(0, |bytes| String::from_utf8_lossy(bytes).lines().count());
         let after_lines = input.content.lines().count();
-        Ok(FileToolResult::text(format!(
-            "Lines before: {before_lines}\nLines after: {after_lines}"
-        )))
+        append_short_path_note(
+            &self.paths,
+            &input.path,
+            &formatter,
+            FileToolResult::text(format!(
+                "Lines before: {before_lines}\nLines after: {after_lines}"
+            )),
+        )
     }
 }
 
@@ -170,7 +176,12 @@ impl<S: AuthorizedMutationService> EditTool<S> {
             ));
         }
         if matches == 0 {
-            return Ok(FileToolResult::text(NO_CHANGES));
+            return append_short_path_note(
+                &self.paths,
+                &input.path,
+                &formatter,
+                FileToolResult::text(NO_CHANGES),
+            );
         }
         let replaced = if input.replace_all {
             text.replace(&input.old_string, &input.new_string)
@@ -183,7 +194,12 @@ impl<S: AuthorizedMutationService> EditTool<S> {
         }
         after.extend_from_slice(replaced.as_bytes());
         if before == after {
-            return Ok(FileToolResult::text(NO_CHANGES));
+            return append_short_path_note(
+                &self.paths,
+                &input.path,
+                &formatter,
+                FileToolResult::text(NO_CHANGES),
+            );
         }
         let target = match self
             .service
@@ -193,11 +209,16 @@ impl<S: AuthorizedMutationService> EditTool<S> {
             Ok(target) => target,
             Err(error) => return mutation_error(error, &formatter),
         };
-        Ok(FileToolResult::text(render(&[FileChange {
-            path: &target.display_path,
-            before: Some(&before),
-            after: Some(&after),
-        }])))
+        append_short_path_note(
+            &self.paths,
+            &input.path,
+            &formatter,
+            FileToolResult::text(render(&[FileChange {
+                path: &target.display_path,
+                before: Some(&before),
+                after: Some(&after),
+            }])),
+        )
     }
 }
 

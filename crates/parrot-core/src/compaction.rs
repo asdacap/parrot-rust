@@ -13,6 +13,7 @@ use std::fmt;
 mod fitting;
 mod planning;
 mod preparation;
+mod scratch;
 pub use fitting::{compact_conversation, fit_compaction, fit_status};
 pub use planning::{
     CompactionConfiguration, CompactionPolicy, PlanningError, group_messages, is_complete,
@@ -113,10 +114,8 @@ impl CompactionRunner<'_, '_> {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
                 }
                 substituted[index] = true;
-                let notice = self
-                    .states
-                    .spill_group(&group.messages, self.cancellation)
-                    .await?;
+                let notice =
+                    scratch::spill_group(self.states, &group.messages, self.cancellation).await?;
                 if self.provider.estimate_summary_tokens("", 0, &notice)? > plan.input_budget {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
                 }
@@ -149,10 +148,9 @@ impl CompactionRunner<'_, '_> {
                 if !pending[index].can_spill() || substituted[index] {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
                 }
-                messages = self
-                    .states
-                    .spill_group(&pending[index].messages, self.cancellation)
-                    .await?;
+                messages =
+                    scratch::spill_group(self.states, &pending[index].messages, self.cancellation)
+                        .await?;
                 substituted[index] = true;
                 if self
                     .provider

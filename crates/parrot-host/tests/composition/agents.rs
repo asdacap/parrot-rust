@@ -62,8 +62,8 @@ mod fixture {
         event_broker::EventBroker,
         prompt_context::{PromptResult, SystemPrompt},
         tool_settlement::{
-            self, SharedSecurity, ToolDiagnostics, ToolFactory, ToolFailure, ToolHandle,
-            ToolInventory, ToolMetadata, ToolOutput, ToolSettlement, ToolSettlementConfig,
+            self, SharedSecurity, ToolDiagnostics, ToolExecutionConfig, ToolFactory, ToolFailure,
+            ToolHandle, ToolInventory, ToolMetadata, ToolOutput,
         },
     };
     use parrot_storage::{
@@ -398,7 +398,7 @@ mod fixture {
         }
     }
 
-    type Backend = RuntimeBackend<Security, ToolSettlement<Security>>;
+    type Backend = RuntimeBackend<Security>;
     type WaitTool = AgentTool<ScopedAgentRuntime<Security>, ModelRouter>;
     fn definition(name: &str) -> ConfiguredToolDefinition {
         use parrot_foundation::config::{
@@ -628,34 +628,32 @@ mod fixture {
                     .unwrap(),
             );
             let waiting = Arc::new(Semaphore::new(0));
-            let tools = Arc::new(
-                ToolSettlement::new(ToolSettlementConfig {
-                    path_variables: Default::default(),
-                    factory: Arc::new(RetainedFactory::new(
-                        bridge.clone(),
-                        provider.router(),
-                        waiting.clone(),
-                    )),
-                    templates: templates.clone(),
-                    output_blobs: Arc::new(
-                        ToolOutputBlobStore::for_session(
-                            self.histories
-                                .repository
-                                .events()
-                                .database()
-                                .selected_root(),
-                            "scratch",
-                            Arc::new(Names),
-                        )
-                        .unwrap(),
-                    ),
-                    publisher: broker.clone(),
-                    activity: activity.clone(),
-                    diagnostics: Arc::new(Diagnostics),
-                    image_bytes_per_cycle: 0,
-                })
-                .unwrap(),
-            );
+            let tool_execution = ToolExecutionConfig {
+                path_variables: Default::default(),
+
+                templates: templates.clone(),
+                output_blobs: Arc::new(
+                    ToolOutputBlobStore::for_session(
+                        self.histories
+                            .repository
+                            .events()
+                            .database()
+                            .selected_root(),
+                        "scratch",
+                        Arc::new(Names),
+                    )
+                    .unwrap(),
+                ),
+                publisher: broker.clone(),
+                activity: activity.clone(),
+                diagnostics: Arc::new(Diagnostics),
+                image_bytes_per_cycle: 0,
+            };
+            let tools = Arc::new(RetainedFactory::new(
+                bridge.clone(),
+                provider.router(),
+                waiting.clone(),
+            ));
             let statistics = prepared
                 .history
                 .repository()
@@ -681,6 +679,7 @@ mod fixture {
                 publisher: publisher.clone(),
                 selection: prepared.selection.clone(),
                 tools,
+                tool_execution,
                 prompt: Box::new(Prompt),
                 skills: Arc::new(Skills),
                 context: self.histories.controller(prepared.history.clone()),

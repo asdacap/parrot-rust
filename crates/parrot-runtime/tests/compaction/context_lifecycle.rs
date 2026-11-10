@@ -1,92 +1,13 @@
 use super::*;
-use parrot_domain::protocol::messages::parrot::Delivery;
+use parrot_core::ConversationEvent;
 use parrot_storage::{
     artifacts::{ImageArtifactRepository, ImageArtifactStore},
     conversation::ConversationPart,
 };
 
 #[tokio::test]
-async fn status_fitting_preserves_native_render_errors_without_committing() {
-    enum FailingStatus {
-        Argument,
-        Cancelled,
-    }
-    impl ContextStatus for FailingStatus {
-        fn observe<'a>(
-            &'a self,
-            _: &'a ContextSnapshot,
-            _: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, ContextResult<String>> {
-            Box::pin(async move {
-                Err(match self {
-                    Self::Argument => ContextError::Argument("original render error".into()),
-                    Self::Cancelled => ContextError::Cancelled,
-                })
-            })
-        }
-    }
-
-    for status in [FailingStatus::Argument, FailingStatus::Cancelled] {
-        let fixture = Fixture::new();
-        let history = fixture.history();
-        user(&history, "existing").await;
-        let provider = Scripted::default();
-        let selection = provider.selection(10000);
-        let sessions = ProviderSessions::new();
-        let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-        let prompt = EpochPrompt::default();
-        let events = Events::new(history.clone());
-        let mut controller = fixture.controller(history, 90);
-
-        let error = controller
-            .inject_status(
-                EpochInput {
-                    selection: &selection,
-                    tools: &[],
-                    conversation: &mut conversation,
-                    prompt: &prompt.prompt,
-                    sessions: &sessions,
-                    status: &status,
-                    events: &events,
-                },
-                1,
-                "mode",
-                &NeverCancelled,
-            )
-            .await
-            .unwrap_err();
-        match status {
-            FailingStatus::Argument => assert!(matches!(
-                error,
-                ContextError::Argument(message) if message == "original render error"
-            )),
-            FailingStatus::Cancelled => assert!(matches!(error, ContextError::Cancelled)),
-        }
-        assert_eq!(conversation.messages().len(), 1);
-        assert!(events.published.lock().unwrap().is_empty());
-        sessions.close().await.unwrap();
-        fixture
-            .repository
-            .events()
-            .database()
-            .close()
-            .await
-            .unwrap();
-    }
-}
-
-#[tokio::test]
-async fn core_template_failure_retains_native_prompt_error_and_terminal_publication() {
-    struct MissingArguments;
-    impl SystemPrompt for MissingArguments {
-        fn renew_epoch(&mut self) {}
-        fn read_prompt_templates(&self) -> Vec<(String, String)> {
-            vec![(
-                "test:missing-arguments".into(),
-                "context.standing-instruction".into(),
-            )]
-        }
-    }
+async fn provider_template_failure_retains_native_prompt_error_and_terminal_publication() {
+    use parrot_runtime::prompt_context::{SystemPromptProvider, TemplateSystemPromptProvider};
 
     let fixture = Fixture::new();
     let history = fixture.history();
@@ -95,7 +16,16 @@ async fn core_template_failure_retains_native_prompt_error_and_terminal_publicat
     let selection = provider.selection(10000);
     let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-    let prompt = SessionPrompt::new(Box::new(MissingArguments));
+    let prompt = SessionPrompt::new(
+        TemplateSystemPromptProvider::new(
+            "test:missing-arguments",
+            "context.standing-instruction",
+            Vec::new(),
+            templates(),
+        )
+        .materialize(&Default::default())
+        .unwrap(),
+    );
     let status = Status::default();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history, 90);
@@ -139,96 +69,74 @@ async fn core_template_failure_retains_native_prompt_error_and_terminal_publicat
 }
 
 #[tokio::test]
-async fn mode_change_during_status_fitting_requires_refresh_without_publishing_stale_status() {
-    struct SwitchingStatus {
-        metadata: SessionIndex,
-        switched: AtomicBool,
-    }
-    impl ContextStatus for SwitchingStatus {
-        fn observe<'a>(
-            &'a self,
-            _: &'a ContextSnapshot,
-            _: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, ContextResult<String>> {
-            Box::pin(async move {
-                if !self.switched.swap(true, Ordering::SeqCst) {
-                    self.metadata.update_mode("next").await.unwrap();
-                }
-                Ok("stale fitted status".into())
-            })
-        }
-    }
-
-    let fixture = Fixture::with_identity("agent", "initial");
+async fn status_steering_appends_records_and_publishes_the_newest_standing() {
+    let fixture = Fixture::with_identity("agent", "mode");
     let history = fixture.history();
     user(&history, "existing").await;
-    let provider = Scripted::default();
-    let selection = provider.selection(10000);
-    let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-    let before = conversation.messages().to_vec();
-    let prompt = EpochPrompt::default();
-    let status = SwitchingStatus {
-        metadata: Fixture::metadata(&fixture.path),
-        switched: AtomicBool::new(false),
-    };
     let events = Events::new(history.clone());
-    let mut controller = fixture.controller(history.clone(), 90);
+    let notice = || ConversationEvent::Notice {
+        kind: "status".into(),
+        notice: "Status prompt injected".into(),
+    };
+    let standing = |hash: &str| {
+        parrot_core::StatusStanding::from([(parrot_core::StatusKey::new("mode"), hash.to_string())])
+    };
+    let addition = |content: &str, hash: &str| parrot_core::ConversationAddition {
+        messages: vec![parrot_core::Message::text(
+            parrot_core::Role::System,
+            content,
+        )],
+        persistence: parrot_core::ConversationPersistence::StatusSteering {
+            standing: standing(hash),
+            event: notice(),
+        },
+    };
 
+    parrot_runtime::compaction::apply_conversation_addition(
+        &history,
+        &mut conversation,
+        addition("fitted status", "h1"),
+        &events,
+        &NeverCancelled,
+    )
+    .await
+    .unwrap();
+    assert_eq!(conversation.messages().len(), 2);
+    assert_eq!(conversation.messages()[1].content(), "fitted status");
     assert_eq!(
-        controller
-            .inject_status(
-                EpochInput {
-                    selection: &selection,
-                    tools: &[],
-                    conversation: &mut conversation,
-                    prompt: &prompt.prompt,
-                    sessions: &sessions,
-                    status: &status,
-                    events: &events,
-                },
-                0,
-                "initial",
-                &NeverCancelled,
-            )
-            .await
-            .unwrap(),
-        StatusInjection::RefreshSelection
+        history.standing_statuses().await.unwrap().unwrap(),
+        standing("h1")
     );
-    assert_eq!(conversation.messages(), before);
-    assert!(events.published.lock().unwrap().is_empty());
-    let pending = history.pending_status().await.unwrap().unwrap();
-    assert_eq!((pending.mode.as_str(), pending.version), ("next", 1));
 
-    let status = Status::default();
+    parrot_runtime::compaction::apply_conversation_addition(
+        &history,
+        &mut conversation,
+        addition("next status", "h2"),
+        &events,
+        &NeverCancelled,
+    )
+    .await
+    .unwrap();
+    assert_eq!(conversation.messages().len(), 3);
+    assert_eq!(conversation.messages()[2].content(), "next status");
     assert_eq!(
-        controller
-            .inject_status(
-                EpochInput {
-                    selection: &selection,
-                    tools: &[],
-                    conversation: &mut conversation,
-                    prompt: &prompt.prompt,
-                    sessions: &sessions,
-                    status: &status,
-                    events: &events,
-                },
-                0,
-                "next",
-                &NeverCancelled,
-            )
+        history.standing_statuses().await.unwrap().unwrap(),
+        standing("h2")
+    );
+    assert_eq!(events.published.lock().unwrap().len(), 2);
+    // Project-only status notices are retained broadcasts, not durable Event rows.
+    assert!(events.committed.lock().unwrap().is_empty());
+    assert!(
+        !history
+            .repository()
+            .events()
+            .replay()
             .await
-            .unwrap(),
-        StatusInjection::Complete
+            .unwrap()
+            .iter()
+            .any(|event| event.agent_notice().kind == "status")
     );
-    assert_eq!(conversation.messages().len(), before.len() + 1);
-    assert_eq!(
-        conversation.messages().last().unwrap().content(),
-        status.fitted
-    );
-    assert!(history.pending_status().await.unwrap().is_none());
-    assert_eq!(events.published.lock().unwrap().len(), 1);
-    sessions.close().await.unwrap();
     fixture
         .repository
         .events()
@@ -236,142 +144,6 @@ async fn mode_change_during_status_fitting_requires_refresh_without_publishing_s
         .close()
         .await
         .unwrap();
-}
-
-#[tokio::test]
-async fn pending_and_initial_status_fit_actual_next_promotion_before_commit_once() {
-    for depth in [0, 1] {
-        let fixture = Fixture::with_identity("agent", "mode");
-        let history = fixture.history();
-        user(&history, "existing").await;
-        history
-            .admit_parts(
-                "pending-message".into(),
-                vec![ConversationPart::text("p".repeat(8000))],
-                Delivery::DELIVERY_STEER,
-                |_| Ok(event("agent")),
-            )
-            .await
-            .unwrap();
-        let provider = Scripted::default();
-        let selection = provider.selection(10000);
-        let sessions = ProviderSessions::new();
-        let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-        let mut prompt = EpochPrompt::default();
-        let status = Status::default();
-        let events = Events::new(history.clone());
-        let mut controller = fixture.controller(history.clone(), 90);
-        controller
-            .ensure_epoch(&prompt.prompt, &NeverCancelled)
-            .await
-            .unwrap();
-        if depth == 0 {
-            assert_eq!(
-                controller
-                    .inject_status(
-                        input(
-                            &selection,
-                            &mut conversation,
-                            &mut prompt,
-                            &sessions,
-                            &status,
-                            &events
-                        ),
-                        depth,
-                        "stale",
-                        &NeverCancelled
-                    )
-                    .await
-                    .unwrap(),
-                StatusInjection::RefreshSelection
-            );
-            assert!(status.estimates.lock().unwrap().is_empty());
-        }
-        let expected = controller
-            .compactor()
-            .planner()
-            .estimate_selected_context(
-                &selection,
-                "instructions",
-                &[],
-                &[
-                    sessions::Message::user("existing"),
-                    sessions::Message::user("p".repeat(8000)),
-                    sessions::Message::system(&status.fitted),
-                ],
-            )
-            .unwrap();
-        assert_eq!(
-            controller
-                .inject_status(
-                    input(
-                        &selection,
-                        &mut conversation,
-                        &mut prompt,
-                        &sessions,
-                        &status,
-                        &events
-                    ),
-                    depth,
-                    "mode",
-                    &NeverCancelled
-                )
-                .await
-                .unwrap(),
-            StatusInjection::Complete
-        );
-        let rendered = status.estimates.lock().unwrap().clone();
-        assert_eq!(rendered.last(), Some(&expected));
-        assert_eq!(prompt.sampled.load(Ordering::SeqCst), 1);
-        assert_eq!(conversation.messages().len(), 2);
-        assert_eq!(conversation.messages()[1].content(), status.fitted);
-        assert!(history.has_pending_inputs().await.unwrap());
-        assert_eq!(
-            controller
-                .inject_status(
-                    input(
-                        &selection,
-                        &mut conversation,
-                        &mut prompt,
-                        &sessions,
-                        &status,
-                        &events
-                    ),
-                    depth,
-                    "mode",
-                    &NeverCancelled
-                )
-                .await
-                .unwrap(),
-            StatusInjection::Complete
-        );
-        assert_eq!(conversation.messages().len(), 2);
-        assert_eq!(
-            status.estimates.lock().unwrap().as_slice(),
-            rendered.as_slice()
-        );
-        assert_eq!(events.published.lock().unwrap().len(), 1);
-        assert!(events.committed.lock().unwrap().is_empty());
-        // Source project-only status notices are retained broadcasts, not durable Event rows.
-        assert!(
-            !history
-                .repository()
-                .events()
-                .replay()
-                .await
-                .unwrap()
-                .iter()
-                .any(|event| event.agent_notice().kind == "status")
-        );
-        sessions.close().await.unwrap();
-        fixture
-            .repository
-            .events()
-            .database()
-            .close()
-            .await
-            .unwrap();
-    }
 }
 
 #[tokio::test]

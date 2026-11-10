@@ -151,7 +151,8 @@ impl ProviderRegistryBuilder {
                 .services
                 .clients
                 .resolve(&config.base_url, config.allow_invalid_tls_certificate)?;
-            let external_models = if id == "chatgpt" {
+            let implementation = ProviderImplementation::resolve(&id, config);
+            let external_models = if implementation == ProviderImplementation::ChatGpt {
                 filter_chatgpt_external(
                     external.get("openai").map_or(&[], Vec::as_slice),
                     "chatgpt",

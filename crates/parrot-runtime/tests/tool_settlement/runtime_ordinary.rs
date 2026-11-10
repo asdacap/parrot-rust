@@ -5,7 +5,7 @@ use parrot_runtime::agent_turn::lifecycle::ExecutionStatus;
 async fn actual_runtime_preserves_native_yielded_process_metadata_and_records_core_result() {
     let fixture = Fixture::new();
     let mut tool = RecordingTool::new(&fixture, "process", ParallelSafety::Sequential);
-    let yielded = protocol::YieldedShellProcess {
+    let mut yielded = protocol::YieldedShellProcess {
         process_id: "owned-process".into(),
         name: "named process".into(),
         inventory_instance_id: "inventory-instance".into(),
@@ -15,6 +15,10 @@ async fn actual_runtime_preserves_native_yielded_process_metadata_and_records_co
         activity_kind: protobuf::EnumOrUnknown::from_i32(-37),
         ..protocol::YieldedShellProcess::new()
     };
+    yielded
+        .special_fields
+        .mut_unknown_fields()
+        .add_varint(127, 12345);
     tool.output.yielded_process = Some(yielded.clone());
     let tool = Arc::new(tool);
     let mut first = Step::complete("tool request");
@@ -177,28 +181,22 @@ async fn actual_runtime_executes_whole_mixed_batch_with_parallel_and_sequential_
     gates[1].entered().await;
     assert!(tools[2].calls.lock().unwrap().is_empty());
     assert!(tools[3].calls.lock().unwrap().is_empty());
-    assert!(settlement::terminal_ids(&fixture.events().await).is_empty());
+    assert!(terminal_ids(&fixture.events().await).is_empty());
     gates[1].open();
     gates[0].open();
     gates[2].entered().await;
-    assert_eq!(
-        settlement::terminal_ids(&fixture.events().await),
-        ["a", "b"]
-    );
+    assert_eq!(terminal_ids(&fixture.events().await), ["a", "b"]);
     assert!(tools[3].calls.lock().unwrap().is_empty());
     gates[2].open();
     gates[3].entered().await;
-    assert_eq!(
-        settlement::terminal_ids(&fixture.events().await),
-        ["a", "b", "serial"]
-    );
+    assert_eq!(terminal_ids(&fixture.events().await), ["a", "b", "serial"]);
     gates[3].open();
     assert_eq!(
         bounded(sent.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
     );
     assert_eq!(
-        settlement::terminal_ids(&fixture.events().await),
+        terminal_ids(&fixture.events().await),
         ["a", "b", "serial", "tail"]
     );
     let requests = provider.requests.lock().unwrap().clone();

@@ -334,28 +334,11 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
     assert_eq!(request.calls.len(), 2);
     request.calls.truncate(1);
     let results = harness
-        .tools
-        .execute(
-            request,
-            TurnResources {
-                history: &fixture.history,
-                conversation: &mut harness.conversation,
-                context: &mut harness.context,
-                prompt: &harness.prompt,
-                sessions: &harness.sessions,
-                status: &Status,
-                events: &harness.events,
-                usage: &harness.usage,
-            },
-            &harness.selection,
-            &harness.snapshot,
-            harness.capture.as_ref(),
-            &NeverCancelled,
-        )
+        .execute(request, harness.capture.clone().as_ref(), &NeverCancelled)
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].result.call_id, "first");
+    assert_eq!(results[0].call_id, "first");
     assert_eq!(
         tool.calls
             .lock()
@@ -391,7 +374,7 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
     );
     harness
         .state
-        .record_results(&mut harness.conversation, &results)
+        .record_results(&mut harness.runtime_state.get_mut().conversation, &results)
         .await
         .unwrap();
     assert_eq!(
@@ -428,39 +411,24 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
         ["second"]
     );
     let remaining = harness
-        .tools
-        .execute(
-            next,
-            TurnResources {
-                history: &fixture.history,
-                conversation: &mut harness.conversation,
-                context: &mut harness.context,
-                prompt: &harness.prompt,
-                sessions: &harness.sessions,
-                status: &Status,
-                events: &harness.events,
-                usage: &harness.usage,
-            },
-            &harness.selection,
-            &harness.snapshot,
-            harness.capture.as_ref(),
-            &NeverCancelled,
+        .execute(next, harness.capture.clone().as_ref(), &NeverCancelled)
+        .await
+        .unwrap();
+    harness
+        .state
+        .record_results(
+            &mut harness.runtime_state.get_mut().conversation,
+            &remaining,
         )
         .await
         .unwrap();
+    let completed: Vec<_> = results.into_iter().chain(remaining).collect();
     harness
         .state
-        .record_results(&mut harness.conversation, &remaining)
-        .await
-        .unwrap();
-    let completed: Vec<_> = results
-        .into_iter()
-        .chain(remaining)
-        .map(|result| result.result)
-        .collect();
-    harness
-        .state
-        .complete_execution(&mut harness.conversation, &completed)
+        .complete_execution(
+            &mut harness.runtime_state.get_mut().conversation,
+            &completed,
+        )
         .await
         .unwrap();
     assert_eq!(

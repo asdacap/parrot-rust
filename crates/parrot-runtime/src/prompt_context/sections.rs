@@ -1,8 +1,18 @@
 use super::{PromptResult, SystemPrompt, SystemPromptProvider};
-pub use parrot_core::AgentIdentityDescription;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::routing::aliases::ResolvedModelSelection;
 use serde_json::{Value, json};
 use std::sync::Arc;
+
+#[derive(Clone, Debug, Default)]
+pub struct AgentIdentityDescription {
+    pub session_id: String,
+    pub parent_session_id: String,
+    pub parent_session_name: String,
+    pub agent_name: String,
+    pub depth: i32,
+    pub scope_text: String,
+}
 
 /// This enum describes source rule spelling only. It grants no access.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,18 +103,14 @@ struct TemplateSystemPrompt {
 }
 impl SystemPrompt for TemplateSystemPrompt {
     fn renew_epoch(&mut self) {}
-    fn read_prompt_templates(&self) -> Vec<(String, String)> {
-        vec![(self.key.clone(), self.template.clone())]
-    }
-    fn read_template_arguments(&self, source_key: &str) -> Vec<(String, Value)> {
-        if source_key == self.key {
-            self.arguments.clone()
-        } else {
-            Vec::new()
-        }
-    }
-    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
-        (source_key == self.key).then_some(self.templates.as_ref())
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![(
+            self.key.clone(),
+            super::render(&self.templates, &self.template, &self.arguments)?,
+        )])
     }
 }
 
@@ -174,12 +180,14 @@ struct SessionIdentityPrompt {
 }
 impl SystemPrompt for SessionIdentityPrompt {
     fn renew_epoch(&mut self) {}
-    fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
-        Some(self.identity.clone())
-    }
-    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
-        (source_key == "runtime:system-context:14-session-identity")
-            .then_some(self.templates.as_ref())
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![super::render_agent_identity(
+            &self.identity,
+            &self.templates,
+        )?])
     }
 }
 

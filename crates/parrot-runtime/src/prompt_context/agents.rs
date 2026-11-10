@@ -10,6 +10,7 @@ use parrot_domain::contracts::{
     security::SecurityProvider,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::routing::aliases::ResolvedModelSelection;
 use std::{path::PathBuf, sync::Arc};
 
 pub struct AgentsPromptProvider<
@@ -152,13 +153,17 @@ where
             Ok(())
         })
     }
-    fn read_agents_files(&self) -> PromptResult<Vec<(String, String)>> {
-        self.sampled.clone().ok_or_else(|| {
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        let files = self.sampled.as_ref().ok_or_else(|| {
             PromptError::Context("The system context has not been sampled for this epoch.".into())
-        })
-    }
-    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
-        (source_key == "runtime:system-context:07a-agents").then_some(self.templates.as_ref())
+        })?;
+        if files.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(vec![super::render_agents_files(files, &self.templates)?])
     }
 }
 

@@ -37,7 +37,7 @@ pub(crate) async fn compact_context(
     )
     .await;
     states
-        .record_compaction(&input.instructions, definitions, compacted)
+        .finalize_compaction(&input.instructions, definitions, compacted)
         .await
 }
 
@@ -46,7 +46,7 @@ pub(crate) async fn prepare_context_reminder(
     context: &ContextSnapshot,
     configuration: &ContextConfiguration,
 ) -> Result<Option<ContextReminder>, Error> {
-    let last_reminder = states.get_last_context_reminder().await?;
+    let last_reminder = states.read_last_context_reminder_checkpoint().await?;
     let canonical_model = &configuration.model.canonical_model;
     let Some(percentage) =
         context.select_reminder_percentage(canonical_model, last_reminder.as_ref())
@@ -112,7 +112,7 @@ pub(crate) async fn prepare_request(
         crate::prepare_context_epoch(states, provider, publisher, definitions, cancellation)
             .await?
             .instructions;
-    let messages = states.read_messages().await?;
+    let messages = states.read_provider_messages().await?;
     let configuration = states
         .get_config(ConfigKey::Context)
         .await?

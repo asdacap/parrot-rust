@@ -105,6 +105,7 @@ impl StatusProvider for Scripted {
             Ok(StatusObservation {
                 available: self.available,
                 text: self.text.replace("{call}", &call.to_string()),
+                ..StatusObservation::default()
             })
         })
     }
@@ -545,7 +546,11 @@ async fn profile_reports_only_a_nonblank_prompt() {
             provider.observe(&query(), &NeverCancelled).await.unwrap(),
             StatusObservation {
                 available,
-                text: expected.into()
+                text: expected.into(),
+                hash: available
+                    .then(|| format!("profile-prompt:{expected}"))
+                    .unwrap_or_default(),
+                is_auto_update: available,
             }
         );
     }

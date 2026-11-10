@@ -4,6 +4,7 @@ members = [
     "crates/parrot-core",
     "crates/parrot-domain",
     "crates/parrot-foundation",
+    "crates/parrot-media",
     "crates/parrot-storage",
     "crates/parrot-provider",
     "crates/parrot-runtime",
@@ -31,6 +32,9 @@ cookie_store = { version = "=0.21.1", default-features = false }
 version = "0.0.0-dev"
 edition = "2024"
 rust-version = "1.85"
+
+[profile.dev]
+debug = "line-tables-only"
 
 [profile.release]
 opt-level = 1

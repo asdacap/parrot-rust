@@ -1,7 +1,6 @@
 use super::source_cases::{arguments, cases_for, hex_decode};
 use parrot_provider::image_inspection::{
-    FALLBACK_IMAGE_TOKENS, HEADER_LENGTH, calculate_image_tokens, detect_media_type,
-    image_reference, inspect,
+    FALLBACK_IMAGE_TOKENS, ImageInspection, calculate_image_tokens, image_reference,
 };
 use serde_json::Value;
 
@@ -13,12 +12,12 @@ fn source_image_format_and_truncation_cases() {
         let args = arguments(&case).expect("source test input");
         let bytes = hex_decode(args[0].as_str().unwrap());
         let expected_media = args[1].as_str().unwrap();
-        let expected_frames = args[2].as_i64().unwrap() as i32;
+        let expected_frames = args[2].as_i64().unwrap() as u32;
         assert_eq!(
-            detect_media_type(&bytes[..HEADER_LENGTH]),
+            ImageInspection::detect_media_type(&bytes[..ImageInspection::HEADER_LENGTH]),
             Some(expected_media)
         );
-        let image = inspect(&bytes).unwrap();
+        let image = ImageInspection::inspect(&bytes).unwrap();
         assert_eq!(image.media_type, expected_media);
         assert_eq!(image.width, 3);
         assert_eq!(image.height, 2);
@@ -31,7 +30,11 @@ fn source_image_format_and_truncation_cases() {
         let input = arguments(&case).expect("source test input");
         let mut bytes = hex_decode(input[0].as_str().unwrap());
         bytes.truncate(bytes.len() - 1);
-        assert!(inspect(&bytes).is_err(), "{}", case["coverage_id"]);
+        assert!(
+            ImageInspection::inspect(&bytes).is_err(),
+            "{}",
+            case["coverage_id"]
+        );
     }
 }
 

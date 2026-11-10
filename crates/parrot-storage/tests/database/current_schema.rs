@@ -58,7 +58,7 @@ fn unversioned_tables_and_views_are_rejected_without_writes() {
 
 #[test]
 fn unknown_versions_are_rejected_without_writes() {
-    for version in [1, 2, 3, 4, 5, 6, 7, 8, 10] {
+    for version in [1, 2, 3, 4, 5, 6, 7, 8, 9, 11] {
         let fixture = Fixture::new();
         let path = fixture.0.join("session.db");
         let connection = Connection::open(&path).unwrap();
@@ -99,7 +99,7 @@ async fn empty_unversioned_file_initializes_the_current_format() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (9, 5));
+    assert_eq!(state, (10, 5));
     database.close().await.unwrap();
 }
 
@@ -128,7 +128,7 @@ async fn current_format_reopens_without_schema_repair() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (9, 5, false));
+    assert_eq!(state, (10, 5, false));
     reopened.close().await.unwrap();
 }
 
@@ -191,15 +191,15 @@ async fn compaction_status_is_unique_and_clears_without_deleting_history() {
 }
 
 #[tokio::test]
-async fn mode_revisions_and_history_anchor_constraints_match_the_current_contract() {
+async fn status_slots_and_history_anchor_constraints_match_the_current_contract() {
     let fixture = Fixture::new();
     let database = SessionDatabase::open(fixture.root()).unwrap();
     database.admit("revisions", &active(), |tx| {
-        tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,mode_status_revision) VALUES('agent','system','system','','at',0)", [])?;
-        let revision: Option<i64> = tx.query_row("SELECT mode_status_revision FROM conversation_item", [], |row| row.get(0))?;
-        assert_eq!(revision,Some(0));
-        assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,mode_status_revision) VALUES('agent','system','system','','at',0)", []).is_err());
-        assert!(tx.execute("UPDATE conversation_item SET mode_status_revision=-1", []).is_err());
+        tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,status_slots) VALUES('agent','system','system','','at','{}')", [])?;
+        let record: String = tx.query_row("SELECT status_slots FROM conversation_item", [], |row| row.get(0))?;
+        assert_eq!(record,"{}");
+        assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,status_slots) VALUES('agent','system','system','','at','not json')", []).is_err());
+        tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,status_slots) VALUES('agent','system','system','','at','{\"runtime:selection\":\"h1\"}')", [])?;
         tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','system','system','','at'),('agent','system','system','','at')", [])?;
         tx.execute("INSERT INTO event(id,agent_session,payload,created_at,history_anchor) VALUES('anchored','agent',X'','at',42)", [])?;
         let anchor: i64 = tx.query_row("SELECT history_anchor FROM event WHERE id='anchored'", [], |row| row.get(0))?;

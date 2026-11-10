@@ -4,9 +4,8 @@ use parrot_core::compaction::{
     prepare_compaction,
 };
 use parrot_core::{
-    AgentIdentityDescription, BoxFuture, ConfigKey, ConfigValue, ContextConfiguration,
-    ContextModel, ContextSnapshot, ErrorCode, ErrorDetail, EventPublisher, Message,
-    SkillCatalogEntry, States,
+    BoxFuture, ConfigKey, ConfigValue, ContextConfiguration, ContextModel, ContextSnapshot,
+    ErrorCode, ErrorDetail, EventPublisher, Message, States,
 };
 use std::sync::Mutex;
 
@@ -26,7 +25,7 @@ struct Preparation {
     failure: Option<&'static str>,
     raw: ConversationState,
     contexts: Mutex<Vec<ContextSnapshot>>,
-    system_prompts: Vec<(String, String)>,
+    instructions: Option<String>,
 }
 
 #[derive(Default)]
@@ -70,52 +69,66 @@ impl EventPublisher for PreparationEventPublisher {
 }
 
 impl States for Preparation {
-    fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
-        Box::pin(async move {
-            match key {
-                ConfigKey::SystemPromptBindings => {
-                    Ok(ConfigValue::SystemPromptBindings(Vec::new()))
-                }
-                _ => Err(Error::failed("preparation has no configured templates")),
-            }
-        })
+    fn get_config(&self, _key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
+        Box::pin(async { Err(Error::failed("preparation has no configured templates")) })
     }
 
-    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async move {
             if self.failure == Some("instructions") {
                 return Err(native_error("instructions"));
             }
-            let mut sections = self.system_prompts.clone();
-            sections.push(("fixture:instructions".into(), "sampled instructions".into()));
-            Ok(sections)
+            Ok(self
+                .instructions
+                .clone()
+                .unwrap_or_else(|| "sampled instructions".into()))
         })
     }
 
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<AgentIdentityDescription>, Error>> {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async { Ok(String::new()) })
-    }
-
-    fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-
-    fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
+    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async move {
-            if self.failure == Some("read") {
-                return Err(native_error("read"));
+            if self.failure == Some("messages") {
+                return Err(native_error("messages"));
             }
-            Ok(self.raw.clone())
+            Ok(self.raw.messages.clone())
+        })
+    }
+
+    fn read_conversation_summary(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<ConversationSummary>, Error>> {
+        Box::pin(async move {
+            if self.failure == Some("summary") {
+                return Err(native_error("summary"));
+            }
+            Ok(self.raw.summary.clone())
+        })
+    }
+
+    fn read_conversation_tail(
+        &self,
+        after: i64,
+    ) -> BoxFuture<'_, Result<Vec<ConversationHistoryItem>, Error>> {
+        Box::pin(async move {
+            if self.failure == Some("tail") {
+                return Err(native_error("tail"));
+            }
+            Ok(self
+                .raw
+                .history
+                .iter()
+                .filter(|item| item.sequence > after)
+                .cloned()
+                .collect())
+        })
+    }
+
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
+        Box::pin(async move {
+            if self.failure == Some("checkpoints") {
+                return Err(native_error("checkpoints"));
+            }
+            Ok(self.raw.checkpoint_sequences.clone())
         })
     }
 
@@ -240,6 +253,7 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
             watermark: 10,
         }),
         history: vec![
+            item(9, message("already summarized"), None),
             item(11, assistant.clone(), None),
             status_item,
             item(13, message("intervening user"), None),
@@ -365,7 +379,10 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         "start",
         "sample",
         "instructions",
-        "read",
+        "summary",
+        "tail",
+        "checkpoints",
+        "messages",
         "estimate",
         "status",
         "cancel",
@@ -425,12 +442,11 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
 }
 
 #[test]
-fn compaction_preparation_preserves_complete_native_sections_verbatim() {
+fn compaction_preparation_preserves_complete_native_prompt_verbatim() {
     let mut preparation = Preparation {
-        system_prompts: vec![(
-            "runtime:context:10-native".into(),
-            "native instructions\n\nliteral {{ untouched }}\n\ttext".into(),
-        )],
+        instructions: Some(
+            "sampled instructions\n\nnative instructions\n\nliteral {{ untouched }}\n\ttext".into(),
+        ),
         ..Default::default()
     };
     let provider = Estimates::new(37);

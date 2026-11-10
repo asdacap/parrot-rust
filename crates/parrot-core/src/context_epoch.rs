@@ -2,7 +2,6 @@ use crate::{
     CancellationToken, ConfigKey, ContextSnapshot, Error, EventPublisher, Provider, States,
     ToolDefinition, add_context_reminder,
     context::{compact_context, prepare_context_reminder},
-    rendering::render_instructions,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,8 +20,8 @@ pub async fn prepare_context_epoch(
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let mut instructions = render_instructions(states).await?;
-    let mut messages = states.read_messages().await?;
+    let mut instructions = states.capture_system_prompt().await?;
+    let mut messages = states.read_provider_messages().await?;
     let mut configuration = states
         .get_config(ConfigKey::Context)
         .await?
@@ -36,7 +35,7 @@ pub async fn prepare_context_epoch(
             compact_context(states, provider, publisher, definitions, cancellation).await?;
         instructions = compacted.instructions;
         reduced = compacted.reduced;
-        messages = states.read_messages().await?;
+        messages = states.read_provider_messages().await?;
         configuration = states
             .get_config(ConfigKey::Context)
             .await?
@@ -55,7 +54,7 @@ pub async fn prepare_context_epoch(
                 compact_context(states, provider, publisher, definitions, cancellation).await?;
             instructions = compacted.instructions;
             reduced |= compacted.reduced;
-            messages = states.read_messages().await?;
+            messages = states.read_provider_messages().await?;
             configuration = states
                 .get_config(ConfigKey::Context)
                 .await?

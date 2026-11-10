@@ -157,6 +157,7 @@ fn complete_fresh_tool_results_reach_state_without_rewriting_metadata() {
             display_name: "display".into(),
             origin: "origin".into(),
         }],
+        metadata: Some(vec![0, 255, 128, 1]),
     };
     state
         .tools
@@ -207,7 +208,7 @@ impl Tools for EchoTools {
         &'a self,
         request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -223,7 +224,6 @@ impl Tools for EchoTools {
                     text: call.arguments_json,
                     ..ToolResult::default()
                 })
-                .map(Into::into)
                 .collect())
         })
     }

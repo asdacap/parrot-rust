@@ -63,14 +63,36 @@ pub struct StatusQuery {
 pub struct StatusObservation {
     pub available: bool,
     pub text: String,
+    /// Source-computed identity over the observation's inputs, matching the
+    /// status slot hashing contract rather than the rendered text.
+    pub hash: String,
+    pub is_auto_update: bool,
 }
 impl StatusObservation {
     pub fn available_text(text: impl Into<String>) -> Self {
         Self {
             available: true,
             text: text.into(),
+            hash: String::new(),
+            is_auto_update: false,
         }
     }
+    /// Attaches the source-computed identity of an observation, which the
+    /// steering diff reads rather than the rendered text.
+    pub fn with_identity(mut self, hash: impl Into<String>, is_auto_update: bool) -> Self {
+        self.hash = hash.into();
+        self.is_auto_update = is_auto_update;
+        self
+    }
+}
+
+/// One offered status slot from a registry observation, in registry key order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StatusSlot {
+    pub key: String,
+    pub hash: String,
+    pub text: String,
+    pub is_auto_update: bool,
 }
 
 pub trait StatusProvider: Send + Sync {
@@ -105,6 +127,25 @@ impl StatusRegistry {
         additional: Option<&dyn StatusProvider>,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
+        let slots = self
+            .observe_slots(query, profile, additional, cancellation)
+            .await?;
+        Ok(slots
+            .iter()
+            .map(|slot| slot.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n"))
+    }
+
+    /// Observes every provider once and returns the resulting slots in registry
+    /// key order. The join poll semantics match `observe` above.
+    pub async fn observe_slots(
+        &self,
+        query: &StatusQuery,
+        profile: Option<&dyn StatusProvider>,
+        additional: Option<&dyn StatusProvider>,
+        cancellation: &dyn Cancellation,
+    ) -> StatusResult<Vec<StatusSlot>> {
         let mut providers: Vec<&dyn StatusProvider> =
             self.providers.iter().map(Arc::as_ref).collect();
         for (extra, subject) in [
@@ -137,7 +178,7 @@ impl StatusRegistry {
                             format!("{}: {error}", provider.key()),
                             error,
                         ))),
-                        Ok(section) => Ok(section),
+                        Ok(section) => Ok((provider.key().to_owned(), section)),
                     }
                 }))
             })
@@ -167,10 +208,15 @@ impl StatusRegistry {
         let mut cancelled = false;
         for result in results {
             match result.expect("every provider observation was joined") {
-                Ok(section)
+                Ok((key, section))
                     if section.available && !section.text.chars().all(char::is_whitespace) =>
                 {
-                    sections.push(section.text)
+                    sections.push(StatusSlot {
+                        key,
+                        hash: section.hash,
+                        text: section.text,
+                        is_auto_update: section.is_auto_update,
+                    })
                 }
                 Ok(_) => {}
                 Err(OperationError::Cancelled) => cancelled = true,
@@ -181,7 +227,7 @@ impl StatusRegistry {
         if cancelled {
             Err(OperationError::Cancelled)
         } else {
-            Ok(sections.join("\n\n"))
+            Ok(sections)
         }
     }
 }
@@ -245,6 +291,7 @@ impl StatusProvider for ProfileStatusProvider {
                 StatusObservation::default()
             } else {
                 StatusObservation::available_text(&self.prompt)
+                    .with_identity(format!("profile-prompt:{}", self.prompt), true)
             })
         })
     }
@@ -264,12 +311,30 @@ impl StatusProvider for SelectionStatusProvider {
     ) -> BoxFuture<'a, StatusResult<StatusObservation>> {
         Box::pin(async move {
             check(cancellation)?;
-            render(&self.templates, "status.selection", json!({
-                "profile": query.profile, "model": query.requested_model,
-                "parent_session_id": query.parent_session_id, "parent_session_name": query.parent_session_name,
-                "has_parent": !query.parent_session_id.chars().all(char::is_whitespace),
-                "has_parent_name": !query.parent_session_name.chars().all(char::is_whitespace),
-            }).as_object().unwrap().clone(), cancellation)
+            render(
+                &self.templates,
+                "status.selection",
+                json!({
+                    "profile": query.profile, "model": query.requested_model,
+                    "parent_session_id": query.parent_session_id, "parent_session_name": query.parent_session_name,
+                    "has_parent": !query.parent_session_id.chars().all(char::is_whitespace),
+                    "has_parent_name": !query.parent_session_name.chars().all(char::is_whitespace),
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                cancellation,
+            )
+            .map(|observation| {
+                observation.with_identity(
+                    format!(
+                        "selection:{}:{}:{}:{}",
+                        query.profile, query.requested_model, query.parent_session_id,
+                        query.parent_session_name
+                    ),
+                    true,
+                )
+            })
         })
     }
 }
@@ -290,12 +355,15 @@ impl StatusProvider for GeneratedTimeStatusProvider {
         Box::pin(async move {
             check(cancellation)?;
             let time = format_utc(self.clock.utc_now()).map_err(OperationError::Failed)?;
+            // The rendered time is recomputed by every fresh assembly, so the
+            // stable identity never changes and this slot never triggers steering.
             render(
                 &self.templates,
                 "status.generated-time",
                 Map::from_iter([("time".into(), time.into())]),
                 cancellation,
             )
+            .map(|observation| observation.with_identity("generated-time:recomputed", false))
         })
     }
 }
@@ -375,6 +443,9 @@ impl StatusProvider for ContextStatusProvider {
                 model,
                 cancellation,
             )
+            // The usage rendering is refitted by every fresh assembly, so the
+            // stable identity never changes and this slot never triggers steering.
+            .map(|observation| observation.with_identity("context-usage:recomputed", false))
         })
     }
 }
@@ -398,7 +469,19 @@ impl StatusProvider for StatisticsStatusProvider {
                 "session_id": query.session_id,
                 "views": [usage_view(&self.snapshot.own, false), usage_view(&self.snapshot.cumulative, true)],
                 "incomplete_legacy_tool_counts": self.snapshot.has_incomplete_legacy_tool_counts,
-            }).as_object().unwrap().clone(), cancellation)
+            }).as_object().unwrap().clone(), cancellation).map(|observation| {
+                observation.with_identity(
+                    format!(
+                        "statistics:{}:{}:{}:{}:{}",
+                        self.snapshot.own.totals.input_tokens,
+                        self.snapshot.own.totals.output_tokens,
+                        self.snapshot.own.totals.tool_calls,
+                        self.snapshot.cumulative.totals.input_tokens,
+                        self.snapshot.has_incomplete_legacy_tool_counts
+                    ),
+                    true,
+                )
+            })
         })
     }
 }
@@ -520,6 +603,24 @@ impl RuntimeStatus {
         .observe(query, None, None, cancellation)
         .await
     }
+    pub async fn observe_slots(
+        &self,
+        query: &StatusQuery,
+        profile_prompt: &str,
+        cancellation: &dyn Cancellation,
+    ) -> StatusResult<Vec<StatusSlot>> {
+        self.full
+            .observe_slots(
+                query,
+                Some(&ProfileStatusProvider {
+                    key: format!("profile:{}", query.profile),
+                    prompt: profile_prompt.to_owned(),
+                }),
+                None,
+                cancellation,
+            )
+            .await
+    }
     pub async fn observe_with_context(
         &self,
         query: &StatusQuery,
@@ -565,6 +666,33 @@ impl crate::compaction::ContextStatus for BoundContextStatus {
                 )
                 .await
                 .map_err(context_error)
+        })
+    }
+
+    fn slots<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, crate::compaction::ContextResult<parrot_core::StatusOffering>> {
+        Box::pin(async move {
+            self.runtime
+                .observe_slots(&self.query, &self.profile_prompt, cancellation)
+                .await
+                .map_err(context_error)
+                .map(|slots| {
+                    slots
+                        .into_iter()
+                        .map(|slot| {
+                            (
+                                parrot_core::StatusKey::new(slot.key),
+                                parrot_core::StatusOffer {
+                                    hash: slot.hash,
+                                    text: slot.text,
+                                    is_auto_update: slot.is_auto_update,
+                                },
+                            )
+                        })
+                        .collect()
+                })
         })
     }
 }

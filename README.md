@@ -29,190 +29,77 @@ ported from the .NET repository. Repository contributor guidance is in
 
 ## Core and runtime
 
-`parrot-core` owns the agent turn protocol, loop, and shared compaction algorithm.
-Its turn contracts are:
+Agent turns process admitted user input until the assistant completes, a request
+budget is exhausted, or an error stops the turn. Idle sessions do not initialize
+a provider request or record a turn start. Model and profile settings stay fixed
+for each active turn, and its executable tools are captured once.
 
-- `States`: factual conversation turns and pending-message headers, skill records
-  and content, context configuration/calibration, explicit messages, result
-  recording, observed completion context, and explicit persistence effects.
-- `Preparation`: live instruction construction, exact token estimates, and
-  expansion of explicitly supplied templates and arguments.
-- `Tools`: turn-bound catalogs and execution of explicitly supplied calls.
-- `Provider`: model invocation and awaited stream cleanup.
+### Input and completion
 
-Turn calls borrow request preparation and compaction services together through
-`PreparationDependencies`. Compaction receives configuration and native effects
-through `CompactionDependencies`.
-Core samples instructions, assembles durable conversation groups, computes target
-limits, selects the safe prefix, runs summaries, and fits the actual replacement
-status. `CompactionPreparationEffects` supplies prompt sampling, instruction
-rendering, and preparation lifecycle publication. `CompactionEffects` supplies
-model-aware estimates, actual blob notices, and awaited progress. `StatusRenderer`
-renders the context supplied by core without making fitting decisions.
-`SummaryProvider` invokes private summary requests and joins their streams. Its
-typed summary outcome preserves diagnostics without exposing provider stream
-representations.
+Steers can join an active turn. Queued messages wait until admission permits a
+new turn. Inspecting pending input does not reserve or consume it, and steers
+admitted together remain in one batch.
 
-Requests, responses, tool execution results, messages, tool definitions, and errors
-are concrete core-owned types. Adapters implement the same interface; they do not
-choose their own associated payload types. Shared compaction permits native error
-types so standalone callers preserve their concrete failures; payloads remain
-core-owned. `Provider` accepts a complete request;
-`Tools` accepts explicit calls and the caller's cancellation token. Core assembles
-each provider request from caller-supplied turn settings, exposed context state,
-explicit messages, and its selected tool definitions. States never returns a
-provider request or a prepared output-token budget. Native initialization binds
-the final model/profile selection; execution receives no workflow phase or
-adapter-specific callbacks. Attempts, request phases, and context decisions stay
-in core. Native tokenization and provider-specific image costing supply estimates.
+A no-tool assistant response is a completion candidate, not proof that the turn
+has closed. Outstanding work and reminders can block completion, even when a
+blocker's message text is empty. The candidate is retained once, blocker messages
+are recorded in order, and the assistant continues with a renewed request budget.
+Accepted mutations finish before completion checks and final closure.
 
-The core specifies and implements:
+Provider-request limits trigger the final request phase. Request or tool-settlement
+limit exhaustion produces a recorded failure rather than a successful completion.
+Scheduled session operations run between turns. Unscheduled turns share their
+request budget until a scheduled-work boundary ends that budget scope.
 
-- Provider-request assembly, request admission/counting, limit-triggered final-phase
-  catalog selection, and bounded tool-settlement extensions.
-- Context preparation: strict raw/calibrated compaction triggers, pending-prompt
-  candidate fitting, final-request notices, and output-token capacity.
-- Truncated tool-call detection and JSON-argument validation before recording or
-  executing calls.
-- Shared compaction request assembly, ordered first-pass and summary-dependent
-  spill decisions, bounded atomic-group chunking, and recursive empty-summary
-  fallback. Automatic, explicit, and oversized-request compaction use this algorithm.
-- The one-compaction retry guard for oversized requests, exit blocking from state
-  messages, candidate retention, retry continuation, and request-budget resets.
-- Conversation readiness and input-admission decisions from actual turn/message
-  state, recording assistant calls before execution, and completion ordering before
-  closing a turn.
-- Skill mention parsing, turn-scoped deduplication, selected-skill ordering, prompt
-  composition, and skill-context size limits.
+### Context, skills, and compaction
 
-For core-selected automatic compaction and oversized recovery,
-`States::read_conversation_state` returns one raw summary and its durable tail,
-stored tool ownership, active checkpoint sequences, and current in-memory messages.
-The durable facts are captured in one transaction. The tail starts after the
-summary watermark, not at the beginning of the archive. Current messages remain
-separate because they can include transient notices.
+Requests include the selected instructions, conversation, tool definitions, and
+pending context that fits the model's limits. Token estimates include native
+text tokenization and provider-specific image costs. Usage calibration survives
+later streaming or publication errors and resets only after successful compaction
+persistence.
 
-Core's `prepare_compaction` samples instructions, excludes old compaction-status
-rows, assembles causal groups from stored ownership, derives completeness and
-checkpoint flags, and renders initial status from the current-message estimate.
-The state getter performs no preparation or lifecycle effects and retains no
-pending compaction. Runtime composition supplies configuration and native effects
-independently. Core's `compact_conversation` selects the plan, runs summaries, and
-fits replacement status. State records that outcome with the explicitly supplied
-instructions and tool definitions. After a successful start, preparation failures
-publish failure before returning without recording. Native state retains summary
-and watermark persistence, conversation reload, and terminal publication. Inline
-and explicit native paths
-use the same core preparation and compaction implementation.
+Skill mentions are resolved for each admitted input. Unknown references permit
+one catalog refresh per lookup batch. Skill identities are deduplicated per turn
+before instruction bodies are read, then selected-skill ordering and prompt-size
+limits apply. Templates use their configured engine and declared arguments.
 
-Core owns checkpoint selection, incomplete-group protection, watermark progress,
-and final context validation. Status fitting compares complete context snapshots
-and permits at most eight rerenders after the initial rendering. Native planning
-and status conveniences delegate to these core computations. The automatic runtime
-adapter awaits blob publication and locks state only for the spill. It retains no
-state guard during summaries or status rendering.
+Automatic, explicit, and oversized-request compaction follow the same retention
+rules. They protect incomplete tool-call groups, respect checkpoints, and summarize
+a safe history prefix. Large tool groups can be stored as blobs and replaced with
+notices whose actual text must fit. Empty summaries trigger recursive fallback.
+Final status fitting permits at most eight rerenders after the initial rendering.
 
-`States` exposes the latest visible conversation segment and its result, not a
-precomputed work flag. A no-tool assistant candidate can be present while durable
-turn closure is still pending. Pending-message peeks return stable identities and
-delivery mode without reserving, promoting, or materializing their bodies. Core
-chooses whether admission allows only steers or also the next queued message;
-native promotion rechecks the queue and keeps all steers in one batch. Promotion
-returns the admitted inputs with their identities and content. It does not select
-or render skills. Core parses their skill mentions and resolves references in one
-batch per input through `States::get_skills`. That read returns metadata without
-loading instruction bodies and permits one fallback catalog refresh per batch.
-Core deduplicates records by stable identity before calling
-`States::read_skill_content`, then applies formatting and injection limits.
-`Preparation::render_template` only expands the configured template and supplied
-arguments. Core explicitly persists the resulting context through
-`States::record_input_context`. State implementations can supply skill records
-from files or a database without preparing a prompt themselves.
+Compaction reads the previous summary, its post-watermark durable tail, active
+checkpoints, and current messages separately during a serialized epoch. Core
+uses the summary watermark to bound the tail and assembles the state without
+a combined atomic snapshot or cached capture. The tail retains tool ownership
+and status metadata. Current transient notices remain distinct from durable
+history. A successful compaction persists its summary and watermark before
+reloading the visible conversation. Summarized history remains in the database.
+A preparation failure after compaction starts reports failure without recording
+a replacement. Oversized requests allow only one compaction retry.
 
-There is no `States::prepare_context` workflow hook. Core reads raw model limits
-and context overrides through `read_context_configuration` and token calibration
-through `read_token_calibration`, then directs explicit native effects.
-`States::get_pending_prompt` observes native readiness and returns an optional steer
-or status message, retaining its source identity for idempotent recording. Core fits
-that exact message before insertion or compaction, acknowledges the fitted or
-persisted context, and calculates the output budget from the final messages and
-tool definitions. `Preparation` owns instruction rendering and exact token
-estimation. The runtime preparation adapter retains request-status bindings and
-uses the live prompt services. Native state owns reminder checkpoint restoration,
-cadence, reminder rendering, idempotent persistence, and acknowledgement before
-uncancelled post-commit notice publication.
-Calibration survives later stream/publication failures and resets only after
-successful compaction persistence.
+### Tools, recovery, and accounting
 
-After a no-tool response, core calls `get_exit_blockers` for an ordered list of
-message strings. An empty list permits completion; any nonempty list, including
-one containing empty strings, blocks it. Core retains the candidate once, adds
-all messages in state-provided order, forces continuation, and restarts the request
-budget after feedback recording succeeds. Core has no blocker categories or
-category-specific retention policy. Native state owns observation order, configured
-prompt rendering, source identity, and per-message persistence/publication. It
-joins accepted mutations before observing blockers and before final closure.
+Truncated tool calls and invalid JSON arguments are rejected before recording or
+execution. Valid assistant calls are recorded before tools run. Only calls from
+a new model response enter execution. Tool batches preserve parallel-safe grouping
+and tool-specific budgets, with each group's results recorded before the next
+group starts.
 
-Each `run_turn` call executes one active turn using immutable, caller-supplied
-`TurnOptions` and returns an `Outcome`. Core captures tools once and continues
-until completion, exhaustion, or error. Native orchestration checks actual
-conversation and pending-input facts before initializing provider/skill context,
-recording the start event, and passing the finalized settings into core. Idle
-passes perform none of that initialization. There is no core begin-turn hook,
-runtime open-turn flag, or core state query for one. Native start-event identities
-are invocation-scoped persistence metadata for terminal arbitration and error
-cleanup, including initialization failures before core is entered. Successful turn
-activity finishes after core returns, while accepted-response persistence remains
-its final awaited effect to preserve commit/publication order.
+Cancellation reaches executing tools, and admitted tool work is joined before
+execution returns. Advertised tool definitions do not substitute for executable
+tools or grant permissions.
 
-`run` is the multi-turn convenience entry point: it checks factual readiness before
-each turn and uses the supplied settings throughout that convenience call. Both
-entry points accept a caller-owned core `TurnBudget`, initialized from run
-configuration rather than queried through `States`. Native orchestration checks
-its scheduled-operation queue between `run_turn` calls. Unscheduled turns share the
-existing budget scope; a native scheduled-work boundary ends that scope before
-processing queued operations. Scheduler priority never changes what the state
-getters report, and core has no scheduler-query method. Provider-request limits
-are the only final-phase trigger; cancellation uses the separate live token, not a
-state-polled wrap-up signal.
+On recovery, a historical tool call without a saved result receives a durable
+error stating that the process crashed before the tool completed. It is not
+automatically executed again. Existing results are restored without modification
+or republication. A crash error does not mean the tool made no external changes.
 
-Core returns a typed `BudgetExhausted` outcome when request or settlement limits
-are reached. Native orchestration renders, records, and publishes the configured
-failure before pass cleanup. Tool-restoration prompts also stay native: turn
-catalog preparation restores that context after capturing executable snapshots
-and before input promotion, without a separate core state operation.
-
-`parrot-runtime` implements the turn and compaction contracts with private adapters.
-Persistence, prompt rendering, configuration capture, native token estimates, blobs,
-security, streaming, accounting, cancellation, events, and session lifecycle stay
-outside the core. Provider representations are translated losslessly at the
-interface, including raw provider extensions and multimodal content. Runtime
-bindings retain the actual selected model and executable tool snapshots; tools
-are never reconstructed from advertised definitions.
-
-Native state initialization reconciles historical tool results before entering the
-core, without invoking tools. Any historical call without a saved result receives
-a durable error saying that the process crashed before the tool completed; it is
-never automatically executed again. Existing results are restored without
-modification or republication. The core has no history-recovery hook.
-
-Only calls from a new model response enter execution. The core passes the whole
-explicit batch and the caller's live cancellation token to tools once, then asks
-state to record the complete returned results. Tools observe cancellation and join
-admitted work before returning results or an error; core does not race or drop the
-execution future. State owns conversation projection and synthetic image messages.
-The native tools adapter coordinates execution chunks internally, recording each group's
-results through native conversation state before starting the next group. Tools
-retain parallel-safe grouping, tool-specific budgets, cancellation propagation, and
-execution-local state; they do not discover work by scanning conversation history.
-A crash error does not assert that the tool made no external changes.
-
-The session drain serializes operations. Each adapter borrows the existing runtime
-state lock only for its operation, including borrowed-resource tool execution.
-Runtime state observes every streamed completion through the existing usage hook,
-calibrates its token budget, then awaits durable usage recording—even if the stream
-later fails. The provider adapter does not own estimates or calibration. The core
-depends on neither runtime, storage, nor provider implementations.
+Session operations are serialized. Usage from an observed streamed completion is
+recorded durably even if the stream later fails. Provider-specific extensions and
+multimodal content are preserved across request and history conversion.
 
 ## Compiler cache
 
@@ -227,6 +114,11 @@ cache reuse across clean targets or worktrees, run `CARGO_INCREMENTAL=0 cargo bu
 (or set that variable for the desired session). This does not make every Rust
 compilation cacheable; for example, linking binaries is not cached. Use
 `sccache --show-stats` to inspect cache hits and non-cacheable compilations.
+
+Development and test builds keep file and line information for backtraces, but
+omit debugger local-variable and type information. Set
+`CARGO_PROFILE_DEV_DEBUG=2` for `cargo build` or `cargo test` when you need full
+debug information. The release profile is unchanged.
 
 ## Running tests
 

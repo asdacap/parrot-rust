@@ -5,10 +5,11 @@ use parrot_core::{
     ConversationPersistence, ConversationReceipt, ConversationTurn, Delivery, DerivedContext,
     Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
     PendingMessage, PromotedInput, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
-    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
-    ToolExecutionResult, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
-    budget::{TurnBudget, TurnFlags},
+    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, StatusKey,
+    StatusOffer, StatusOffering, StatusStanding, TokenCalibration, ToolCall, ToolCallReceipt,
+    ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolImage, ToolResult, ToolStatus, Tools,
+    TurnOptions,
+    budget::{AgentState, TurnFlags},
     parse_skill_mentions,
 };
 use std::{
@@ -226,7 +227,7 @@ impl Tools for MemoryTools {
         &'a self,
         request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -240,7 +241,7 @@ impl Tools for MemoryTools {
             self.flags.lock().unwrap().push(flags);
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
-                return Ok(reply.into_iter().map(Into::into).collect());
+                return Ok(reply);
             }
             Ok(calls
                 .into_iter()
@@ -250,7 +251,6 @@ impl Tools for MemoryTools {
                     tool_name: call.name,
                     ..ToolResult::default()
                 })
-                .map(Into::into)
                 .collect())
         })
     }
@@ -444,17 +444,17 @@ struct MemoryState {
     summary_provider: compaction_support::Provider,
     recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
     fitted_statuses: Vec<String>,
+    status_offering: StatusOffering,
+    next_status_offering: Option<StatusOffering>,
+    status_standing: StatusStanding,
+    status_steered: Vec<(String, StatusStanding)>,
     fail_at: Option<&'static str>,
-    budget: TurnBudget,
+    budget: AgentState,
     budget_read_error: Option<Error>,
     budget_write_error: Option<Error>,
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
     compacting: Arc<AtomicBool>,
-    system_prompts: Vec<(String, String)>,
-    prompt_templates: Vec<(String, ConfigKey)>,
-    template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
-    template_engines: BTreeMap<ConfigKey, String>,
 }
 impl MemoryState {
     fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
@@ -499,6 +499,7 @@ impl MemoryState {
             request: request.clone(),
             prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
+                (ConfigKey::OversizedToolGroupTemplate, "{path}".into()),
                 (
                     ConfigKey::ContextReminderTemplate,
                     "configured reminder".into(),
@@ -580,17 +581,17 @@ impl MemoryState {
             summary_provider: compaction_support::Provider::new([]),
             recorded_compactions: Vec::new(),
             fitted_statuses: Vec::new(),
+            status_offering: StatusOffering::default(),
+            next_status_offering: None,
+            status_standing: StatusStanding::default(),
+            status_steered: Vec::new(),
             fail_at: None,
-            budget: TurnBudget::new(false),
+            budget: AgentState::new(false),
             budget_read_error: None,
             budget_write_error: None,
             budget_writes: 0,
             compaction,
             compacting,
-            system_prompts: Vec::new(),
-            prompt_templates: Vec::new(),
-            template_arguments: BTreeMap::new(),
-            template_engines: BTreeMap::new(),
         };
         state.enqueue_message(Delivery::Queue, "question");
         state
@@ -712,7 +713,7 @@ impl MemoryState {
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
-        self.budget = TurnBudget::new(self.unlimited);
+        self.budget = AgentState::new(self.unlimited);
         let source = self.cancellation.clone();
         finish(run(
             self,
@@ -723,7 +724,7 @@ impl MemoryState {
     }
     fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
         std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
-        self.budget = TurnBudget::new(self.unlimited);
+        self.budget = AgentState::new(self.unlimited);
         let tools = self.tools.clone();
         let provider = self.provider.clone();
         let result = finish(run(
@@ -737,10 +738,23 @@ impl MemoryState {
     }
 }
 impl States for MemoryState {
-    fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async { Ok(false) })
+    fn read_status_offering(&self) -> BoxFuture<'_, Result<StatusOffering, Error>> {
+        Box::pin(async { Ok(self.status_offering.clone()) })
     }
-    fn add_conversation(
+    fn read_standing_statuses(&self) -> BoxFuture<'_, Result<StatusStanding, Error>> {
+        Box::pin(async { Ok(self.status_standing.clone()) })
+    }
+    fn read_next_input_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async move {
+            Ok(self
+                .pending_messages
+                .front()
+                .map(|(_, message)| message.clone())
+                .into_iter()
+                .collect())
+        })
+    }
+    fn apply_conversation_addition(
         &mut self,
         addition: ConversationAddition,
     ) -> BoxFuture<'_, Result<ConversationReceipt, Error>> {
@@ -766,6 +780,9 @@ impl States for MemoryState {
                     ConversationEvent::Retry { reason, attempt } => {
                         self.step("retry")?;
                         self.retries.push((reason.clone(), *attempt));
+                        if let Some(next) = self.next_status_offering.take() {
+                            self.status_offering = next;
+                        }
                     }
                     ConversationEvent::Message if *origin == ConversationOrigin::Model => {
                         self.step("record_tools")?;
@@ -786,12 +803,12 @@ impl States for MemoryState {
                 },
                 ConversationPersistence::ToolResult { result, .. } => {
                     self.step("record_results")?;
-                    self.applied_results.push(result.result.clone());
+                    self.applied_results.push(result.clone());
+                    if let Some(next) = self.next_status_offering.take() {
+                        self.status_offering = next;
+                    }
                 }
                 ConversationPersistence::ToolImages { .. } => {}
-                ConversationPersistence::Status { .. } => {
-                    return Err(Error::unsupported("memory status persistence"));
-                }
                 ConversationPersistence::Committed(_) => {}
                 ConversationPersistence::Phase { final_phase, .. } => {
                     if !final_phase {
@@ -817,6 +834,24 @@ impl States for MemoryState {
                         return Ok(ConversationReceipt::default());
                     }
                     self.prompts().checkpoint = Some(checkpoint.clone());
+                }
+                ConversationPersistence::StatusSteering { standing, event } => {
+                    self.step("steer_status")?;
+                    assert!(matches!(
+                        event,
+                        ConversationEvent::Notice { kind, notice }
+                            if kind == "status" && notice == "Status prompt injected"
+                    ));
+                    let content = addition.messages[0]
+                        .contents
+                        .iter()
+                        .map(|part| match part {
+                            Content::Text(text) => text.as_str(),
+                            _ => "",
+                        })
+                        .collect::<String>();
+                    self.status_steered.push((content, standing.clone()));
+                    self.status_standing = standing.clone();
                 }
                 ConversationPersistence::CompletionFeedback(feedback) => {
                     self.step("completion_feedback")?;
@@ -872,14 +907,6 @@ impl States for MemoryState {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(
                     self.compaction.lock().unwrap().configuration.clone(),
                 )),
-                ConfigKey::SystemPromptBindings => {
-                    if self.fail_at == Some("prompt_templates") {
-                        return Err(Error::failed("prompt_templates"));
-                    }
-                    Ok(ConfigValue::SystemPromptBindings(
-                        self.prompt_templates.clone(),
-                    ))
-                }
                 key => {
                     if matches!(
                         key,
@@ -905,8 +932,6 @@ impl States for MemoryState {
                         "notification_interval",
                         "trigger",
                         "trigger_tokens",
-                        "items",
-                        "title",
                         "instruction",
                         "skills",
                         "depth",
@@ -916,15 +941,11 @@ impl States for MemoryState {
                         "agent_name",
                     ]
                     .map(str::to_owned);
-                    let engine = self
-                        .template_engines
-                        .get(&key)
-                        .map_or("scalar", String::as_str);
                     Ok(ConfigValue::PromptTemplate(Arc::new(
                         PromptTemplate::compile(
                             &format!("test.{key:?}"),
                             text,
-                            engine,
+                            "scalar",
                             &allowed,
                             &[],
                         )?,
@@ -933,21 +954,27 @@ impl States for MemoryState {
             }
         })
     }
-    fn read_turn_budget(&self) -> Result<TurnBudget, Error> {
-        if let Some(error) = &self.budget_read_error {
-            return Err(error.clone());
-        }
-        Ok(self.budget.clone())
+    fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
+        Box::pin(async move {
+            if let Some(error) = &self.budget_read_error {
+                return Err(error.clone());
+            }
+            let mut state = self.budget.clone();
+            state.final_phase = false;
+            Ok(state)
+        })
     }
-    fn write_turn_budget(&mut self, budget: TurnBudget) -> Result<(), Error> {
-        self.budget_writes += 1;
-        if let Some(error) = &self.budget_write_error {
-            return Err(error.clone());
-        }
-        self.budget = budget;
-        Ok(())
+    fn set_agent_state(&mut self, state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.budget_writes += 1;
+            if let Some(error) = &self.budget_write_error {
+                return Err(error.clone());
+            }
+            self.budget = state;
+            Ok(())
+        })
     }
-    fn get_last_context_reminder(
+    fn read_last_context_reminder_checkpoint(
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
         Box::pin(async move {
@@ -955,7 +982,7 @@ impl States for MemoryState {
             Ok(self.prompts().checkpoint.clone())
         })
     }
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async move {
             self.step("exit_blockers")?;
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
@@ -979,11 +1006,11 @@ impl States for MemoryState {
             )
         })
     }
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [Message],
+        contents: &'a [u8],
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {
@@ -993,7 +1020,7 @@ impl States for MemoryState {
                     .lock()
                     .unwrap()
                     .effects
-                    .spill_group(messages, cancellation),
+                    .write_to_scratch(contents, cancellation),
             )
         })
     }
@@ -1016,7 +1043,7 @@ impl States for MemoryState {
         })
     }
 
-    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async move {
             self.step("instruction_state")?;
             let compacting = self.compacting.load(Ordering::SeqCst);
@@ -1037,40 +1064,13 @@ impl States for MemoryState {
             if !compacting {
                 request.rendered_instructions.push(instructions.clone());
             }
-            let mut sections = self.system_prompts.clone();
-            sections.push(("memory:instructions".into(), instructions));
-            Ok(sections)
+            Ok(instructions)
         })
     }
-    fn read_template_arguments<'a>(
-        &'a self,
-        key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>> {
-        Box::pin(async move {
-            Ok(self
-                .template_arguments
-                .get(key)
-                .cloned()
-                .unwrap_or_default())
-        })
-    }
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, Error>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async { Ok(String::new()) })
-    }
-    fn read_skill_catalog(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-    fn write_tool_watermark(&mut self, _through: i64) -> BoxFuture<'_, Result<(), Error>> {
+    fn advance_tool_settlement_watermark(
+        &mut self,
+        _through: i64,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             if let Some(steer) = self.steers_after_results.pop_front() {
                 self.enqueue_message(Delivery::Steer, &steer);
@@ -1087,7 +1087,7 @@ impl States for MemoryState {
             Ok(self.last_turn.clone())
         })
     }
-    fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
+    fn peek_pending_input_header(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
         Box::pin(async move {
             if self.fail_at == Some("pending_message") {
                 self.trace.step("pending_message", self.fail_at)?;
@@ -1100,7 +1100,7 @@ impl States for MemoryState {
                 .map(|(message, _)| message.clone()))
         })
     }
-    fn promote_input(
+    fn promote_pending_inputs(
         &mut self,
         admission: InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>> {
@@ -1128,12 +1128,12 @@ impl States for MemoryState {
                 .collect())
         })
     }
-    fn get_skills<'a>(
+    fn resolve_skill_references<'a>(
         &'a self,
         references: &'a [SkillReference],
     ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
         Box::pin(async move {
-            self.trace.step("get_skills", self.fail_at)?;
+            self.trace.step("resolve_skill_references", self.fail_at)?;
             self.skill_lookups
                 .lock()
                 .unwrap()
@@ -1180,17 +1180,32 @@ impl States for MemoryState {
             Ok(self.request().context.calibration.clone())
         })
     }
-    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async move {
             self.trace.step("messages", self.fail_at)?;
             Ok(self.request().messages.clone())
         })
     }
-    fn read_conversation_state(
+    fn read_conversation_summary(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, Error>> {
+    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, Error>> {
         Box::pin(async move {
-            self.trace.step("conversation_state", self.fail_at)?;
+            self.trace.step("conversation_summary", self.fail_at)?;
+            Ok(None)
+        })
+    }
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
+        Box::pin(async move {
+            self.trace.step("checkpoint_sequences", self.fail_at)?;
+            Ok(Vec::new())
+        })
+    }
+    fn read_conversation_tail(
+        &self,
+        after: i64,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, Error>> {
+        Box::pin(async move {
+            self.trace.step("conversation_tail", self.fail_at)?;
             let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
                 (
                     plan.groups
@@ -1219,15 +1234,12 @@ impl States for MemoryState {
                         message,
                     }
                 })
+                .filter(|item| item.sequence > after)
                 .collect();
-            Ok(parrot_core::compaction::ConversationState {
-                history,
-                messages: self.request().messages.clone(),
-                ..Default::default()
-            })
+            Ok(history)
         })
     }
-    fn record_compaction<'a>(
+    fn finalize_compaction<'a>(
         &'a mut self,
         instructions: &'a str,
         definitions: &'a [ToolDefinition],
@@ -1391,7 +1403,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         let tools = state.tools.clone();
         let provider = state.provider.clone();
 
-        state.budget = TurnBudget::new(disable_limits);
+        state.budget = AgentState::new(disable_limits);
 
         assert_eq!(
             finish(run(
@@ -1607,7 +1619,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         provider_preferences: " { \"raw\" : [1.2300] } ".into(),
         include_router_metadata: true,
     };
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish({
@@ -1709,7 +1721,7 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish(run_turn(
@@ -1878,10 +1890,7 @@ fn tools_and_provider_operate_without_states() {
     .unwrap();
     assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(
-        results
-            .into_iter()
-            .map(|execution| execution.result)
-            .collect::<Vec<_>>(),
+        results,
         [ToolResult {
             call_id: "explicit-call".into(),
             tool_name: "read".into(),
@@ -2207,4 +2216,146 @@ fn failed_core_summary_is_recorded_before_propagation_without_retrying_the_turn_
     assert_eq!(state.recorded_compactions, [Err(error)]);
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
+}
+
+fn status_offer(entries: &[(&str, bool, &str)]) -> StatusOffering {
+    entries
+        .iter()
+        .map(|(key, is_auto_update, hash)| {
+            (
+                StatusKey::new(*key),
+                StatusOffer {
+                    hash: (*hash).into(),
+                    text: (*key).into(),
+                    is_auto_update: *is_auto_update,
+                },
+            )
+        })
+        .collect()
+}
+
+fn status_standing(entries: &[(&str, &str)]) -> StatusStanding {
+    entries
+        .iter()
+        .map(|(key, hash)| (StatusKey::new(*key), (*hash).into()))
+        .collect()
+}
+
+#[test]
+fn steering_commits_the_initial_assembly_once_before_the_first_request() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.status_offering = status_offer(&[("selection", true, "h1"), ("time", false, "t1")]);
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [(
+            "fitted status".into(),
+            status_standing(&[("selection", "h1"), ("time", "t1")])
+        )]
+    );
+    let request_messages = state.request().messages.clone();
+    let steered = request_messages
+        .iter()
+        .filter(|message| message.role == Role::System)
+        .map(|message| match &message.contents[0] {
+            Content::Text(text) => text.clone(),
+            _ => String::new(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(steered, ["fitted status".to_string()]);
+    assert!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "steer_status")
+            .count()
+            == 1
+    );
+}
+
+#[test]
+fn unchanged_hashes_never_steer_again_across_turns() {
+    let mut state = MemoryState::new([
+        Reply::final_response("answer"),
+        Reply::final_response("second answer"),
+    ]);
+    state.status_offering = status_offer(&[("selection", true, "h1"), ("time", false, "t1")]);
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    state.enqueue_message(Delivery::Queue, "follow up");
+    assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [(
+            "fitted status".into(),
+            status_standing(&[("selection", "h1"), ("time", "t1")])
+        )]
+    );
+    let steered = state
+        .trace
+        .values()
+        .iter()
+        .filter(|step| *step == "steer_status")
+        .count();
+    assert_eq!(steered, 1);
+}
+
+#[test]
+fn changed_auto_hash_steers_again_at_the_next_safe_point() {
+    let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
+    state.status_offering = status_offer(&[("selection", true, "h1")]);
+    state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h1")])
+            ),
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h2")])
+            ),
+        ]
+    );
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "steer_status")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn changed_auto_hash_steers_at_a_retry_continuation() {
+    let mut state = MemoryState::new([Reply::truncated("cut"), Reply::final_response("answer")]);
+    state.status_offering = status_offer(&[("selection", true, "h1")]);
+    state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h1")])
+            ),
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h2")])
+            ),
+        ]
+    );
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "steer_status")
+            .count(),
+        2
+    );
 }

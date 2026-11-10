@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn state_supplies_fresh_raw_instructions_on_each_request() {
+fn state_supplies_fresh_rendered_instructions_on_each_request() {
     let mut state = MemoryState::new([
         Reply::final_response("candidate"),
         Reply::final_response("answer"),
@@ -22,7 +22,7 @@ fn state_supplies_fresh_raw_instructions_on_each_request() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(state.unlimited);
+    state.budget = AgentState::new(state.unlimited);
 
     assert_eq!(
         finish(run(
@@ -158,18 +158,6 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
         assert_eq!(request.messages, estimate.messages);
         assert_eq!(request.instructions, estimate.instructions);
     }
-    assert_eq!(
-        state
-            .trace
-            .values()
-            .into_iter()
-            .filter(|step| matches!(step.as_str(), "render" | "messages" | "invoke" | "compact"))
-            .collect::<Vec<_>>(),
-        [
-            "render", "messages", "messages", "invoke", "compact", "render", "messages",
-            "messages", "invoke"
-        ]
-    );
 }
 
 #[test]
@@ -244,88 +232,19 @@ fn context_preparation_and_message_read_errors_stop_before_provider_invocation()
 }
 
 #[test]
-fn prompt_template_configuration_errors_stop_before_provider_invocation() {
-    let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.fail_at = Some("prompt_templates");
-
-    assert_eq!(state.run(), Err(Error::failed("prompt_templates")));
-    assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(state.tools.requests.lock().unwrap().is_empty());
-}
-
-#[test]
-fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_templates() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.request().instructions = "raw system instructions".into();
-    state.prompt_templates = vec![
-        ("memory:00-list".into(), ConfigKey::AgentScratchTemplate),
-        ("memory:10-scalar".into(), ConfigKey::AgentHistoryTemplate),
-    ];
-    state.template_arguments.insert(
-        "memory:00-list".into(),
-        vec![
-            ("title".into(), serde_json::json!("literal {{ untouched }}")),
-            ("items".into(), serde_json::json!(["alpha", "beta"])),
-        ],
-    );
-    state.template_arguments.insert(
-        "memory:10-scalar".into(),
-        vec![("content".into(), serde_json::json!("opaque {title}"))],
-    );
-    state
-        .template_engines
-        .insert(ConfigKey::AgentScratchTemplate, "minijinja".into());
-    state.skill_templates.lock().unwrap().extend([
-        (
-            ConfigKey::AgentScratchTemplate,
-            "{{ title }}{% for item in items %}[{{ item }}]{% endfor %}".into(),
-        ),
-        (
-            ConfigKey::AgentHistoryTemplate,
-            "configured {content}".into(),
-        ),
-    ]);
-    let tools = state.tools.clone();
-    let provider = state.provider.clone();
-
-    assert_eq!(
-        finish(run_turn(
-            &mut state,
-            &tools,
-            &provider,
-            CancellationToken::new(provider.cancellation.as_ref())
-        )),
-        Ok(Outcome::Completed("answer".into()))
-    );
-
-    let requests = provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0].instructions,
-        "literal {{ untouched }}[alpha][beta]\n\nconfigured opaque {title}\n\nraw system instructions"
-    );
-    assert_eq!(
-        state.capture_request_estimates()[0].instructions,
-        requests[0].instructions
-    );
-}
-
-#[test]
-fn request_preserves_complete_native_sections_without_interpreting_their_contents() {
+fn request_preserves_complete_native_prompt_without_interpreting_its_contents() {
     for content in [
+        "",
+        " \n\t",
         "literal {{ untouched }}\n\ttext",
         "native section\n\n\t\n\n  ",
     ] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.system_prompts = vec![
-            ("runtime:context:20-custom".into(), "custom section".into()),
-            ("runtime:context:10-native".into(), content.into()),
-        ];
+        state.request().instructions = content.into();
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        let expected = format!("core request\n\n{content}\n\ncustom section");
         let requests = state.provider.requests.lock().unwrap();
-        assert_eq!(requests[0].instructions, expected);
-        assert_eq!(state.capture_request_estimates()[0].instructions, expected);
+        assert_eq!(requests[0].instructions, content);
+        assert_eq!(state.capture_request_estimates()[0].instructions, content);
     }
 }

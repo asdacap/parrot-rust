@@ -1,7 +1,7 @@
 use super::{ContextError, ContextEvents, ContextResult};
 use parrot_core::{
     Content, ConversationAddition, ConversationEvent, ConversationPersistence, ConversationReceipt,
-    Message, Role, StatusCheckpoint,
+    Message, Role,
 };
 use parrot_domain::{
     contracts::async_ops::Cancellation,
@@ -9,16 +9,13 @@ use parrot_domain::{
     values::identifiers::Identifier,
 };
 use parrot_storage::{
-    conversation::{
-        AgentConversation, AgentHistoryView, ModelContent, ModelMessage, PendingStatus,
-    },
+    conversation::{AgentConversation, AgentHistoryView, ModelContent, ModelMessage},
     events::{MessageRole, NeverCancelled, ProviderContent, ToolCall},
 };
 
-pub(crate) async fn add_conversation(
+pub async fn apply_conversation_addition(
     history: &AgentHistoryView,
     conversation: &mut AgentConversation,
-    initial_status_pending: &mut bool,
     addition: ConversationAddition,
     events: &dyn ContextEvents,
     cancellation: &dyn Cancellation,
@@ -68,31 +65,12 @@ pub(crate) async fn add_conversation(
                 .await?;
             (inserted, published)
         }
-        ConversationPersistence::Status { checkpoint, event } => {
+        ConversationPersistence::StatusSteering { standing, event } => {
             let published = notice(history, event)?;
-            let inserted = match checkpoint {
-                StatusCheckpoint::Initial => {
-                    if *initial_status_pending {
-                        history
-                            .append_system_prompt(published.clone(), content)
-                            .await?;
-                        *initial_status_pending = false;
-                        true
-                    } else {
-                        false
-                    }
-                }
-                StatusCheckpoint::Mode { mode, version } => {
-                    history
-                        .append_status_prompt(
-                            published.clone(),
-                            PendingStatus { mode, version },
-                            content,
-                        )
-                        .await?
-                }
-            };
-            (inserted, published)
+            history
+                .append_status_assembly(published.clone(), standing.clone(), content)
+                .await?;
+            (true, published)
         }
         _ => {
             return Err(ContextError::InvalidOperation(

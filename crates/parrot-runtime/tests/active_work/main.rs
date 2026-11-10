@@ -1,3 +1,5 @@
+#[path = "../tool_execution_support.rs"]
+mod tool_execution_support;
 // One shared identity counter prevents independent fixture imports reusing paths.
 #[allow(dead_code)]
 #[path = "../children/admission_publisher.rs"]

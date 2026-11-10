@@ -1,5 +1,6 @@
 use super::{AgentIdentityDescription, PromptResult, SystemPrompt, SystemPromptProvider, render};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::routing::aliases::ResolvedModelSelection;
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -107,15 +108,22 @@ impl StandingInstruction {
 }
 impl SystemPrompt for StandingInstruction {
     fn renew_epoch(&mut self) {}
-    fn read_standing_instruction(&self) -> String {
-        self.instruction
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        let instruction = self
+            .instruction
             .read()
             .expect("standing instruction lock poisoned")
-            .clone()
-    }
-    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
-        (source_key == "runtime:system-context:94-standing-instruction")
-            .then_some(self.templates.as_ref())
+            .clone();
+        if instruction.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(vec![super::render_standing_instruction(
+            &instruction,
+            &self.templates,
+        )?])
     }
 }
 impl SystemPromptProvider for StandingInstruction {

@@ -74,45 +74,6 @@ pub struct TurnResources<'a> {
     pub usage: &'a super::usage::SessionUsageRecorder,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolExecutionChunk {
-    pub assistant_sequence: i64,
-    pub starts_batch: bool,
-    pub calls: Vec<parrot_core::ToolCall>,
-    pub cancel_remaining: bool,
-}
-
-pub struct ToolExecutionResult {
-    pub result: parrot_core::ToolResult,
-    pub yielded_process: Option<parrot_domain::protocol::messages::parrot::YieldedShellProcess>,
-}
-
-/// The snapshot retains the concrete factory/tool identity in its owner-chosen
-/// type. Runtime cannot replace it with a names-only reconstructed catalog.
-pub trait TurnTools<S: AccessSnapshot>: Send + Sync {
-    type Snapshot: Clone + Send + Sync;
-    fn materialize(&self) -> Result<Self::Snapshot, TurnError>;
-    fn permitted(
-        &self,
-        snapshot: &Self::Snapshot,
-        selection: &TurnSelection<S>,
-    ) -> Result<Self::Snapshot, TurnError>;
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool];
-    fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot;
-    /// Executes the first sequential call or parallel-safe run from the supplied
-    /// calls, joining admitted work before returning an ordered result prefix.
-    /// Conversation recovery and terminal persistence/publication belong to state.
-    fn execute<'a>(
-        &'a self,
-        request: ToolExecutionChunk,
-        resources: TurnResources<'a>,
-        selection: &'a TurnSelection<S>,
-        snapshot: &'a Self::Snapshot,
-        capture: &'a dyn SelectionSource<S>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, TurnError>>;
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CompletionFeedbackKind {
     PendingAsks,

@@ -243,12 +243,12 @@ Lineage retains retired identities and successive occupants of a reused agent
 name. Retiring an agent removes its current `agent-state.json`, not its permanent
 lineage record. Lineage alone does not restore a retired agent or run its work.
 
-SQLite owns the status message and its consumed mode revision in one transaction.
-A failed message projection leaves status pending. Reopening does not insert a
-second status for a consumed revision. Metadata replacement is not a transaction
-with SQLite or the recovery snapshots.
+SQLite stores each status assembly as one system row with a JSON record of the
+slot hashes it stands for. Assemblies append only; reopening writes no duplicate
+for unchanged hashes. Metadata replacement is not a transaction with SQLite or
+the recovery snapshots.
 
-To inspect the actual artifacts of a closed format-9 session, run from the source
+To inspect the actual artifacts of a closed format-10 session, run from the source
 checkout inside the development shell:
 
 ```sh
@@ -256,7 +256,7 @@ python3 scripts/verify-session-storage /absolute/path/to/session
 ```
 
 The read-only check verifies the database format, all 5 application table names,
-JSON identity and lineage, and consumed status revisions.
+JSON identity and lineage, and the standing status slot records.
 Add `--reused-path main/worker` to require multiple historical occupants of that
 name-based directory.
 See [session storage ownership](../session-storage.md) for the design rationale.

@@ -6,8 +6,9 @@ mod context;
 mod context_additions;
 mod context_epoch;
 mod conversation;
+mod history_groups;
 mod protocol;
-pub mod rendering;
+mod rendering;
 mod skills;
 mod status;
 pub mod template;
@@ -16,6 +17,7 @@ pub use context::*;
 pub use context_additions::*;
 pub use context_epoch::*;
 pub use conversation::*;
+pub use history_groups::*;
 pub use protocol::*;
 pub use skills::{SkillMention, parse_skill_mentions};
 pub use status::*;
@@ -36,7 +38,7 @@ pub async fn run(
         }
         let turn = states.get_last_turn().await?;
         if !turn.as_ref().is_some_and(ConversationTurn::needs_response)
-            && states.get_pending_message().await?.is_none()
+            && states.peek_pending_input_header().await?.is_none()
         {
             return Ok(Outcome::Completed(answer));
         }
@@ -55,17 +57,9 @@ pub async fn run_turn(
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
-    let mut budget = states.read_turn_budget()?;
-    let result = execute_turn(
-        states,
-        tools,
-        provider,
-        publisher,
-        cancellation,
-        &mut budget,
-    )
-    .await;
-    states.write_turn_budget(budget)?;
+    let mut state = states.get_agent_state().await?;
+    let result = execute_turn(states, tools, provider, publisher, cancellation, &mut state).await;
+    states.set_agent_state(state).await?;
     result
 }
 
@@ -75,15 +69,15 @@ async fn execute_turn(
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
-    budget: &mut TurnBudget,
+    state: &mut AgentState,
 ) -> Result<Outcome, Error> {
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
     let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
-    budget.begin_turn();
+    state.begin_turn();
     let catalog = tools.capture_catalog().await?;
-    if states.read_final_phase().await? {
+    if state.final_phase {
         let restored =
             rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
         add_phase_prompt(states, &restored, false).await?;
@@ -100,10 +94,10 @@ async fn execute_turn(
         } else {
             InputAdmission::SteersOrNextQueued
         };
-        let inputs = states.promote_input(admission).await?;
+        let inputs = states.promote_pending_inputs(admission).await?;
         for input in &inputs {
             states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![input.message.clone()],
                     persistence: ConversationPersistence::Committed(input.publication.clone()),
                 })
@@ -112,7 +106,7 @@ async fn execute_turn(
         let context = skills.prepare(states, &inputs, cancellation).await?;
         if !context.content.is_empty() {
             states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![Message::text(Role::User, context.content)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::System,
@@ -129,7 +123,7 @@ async fn execute_turn(
                     .await?;
             }
         }
-        let Some(flags) = budget.admit(options.maximum_requests) else {
+        let Some(flags) = state.admit(options.maximum_requests) else {
             return Ok(Outcome::BudgetExhausted);
         };
         let definitions = if flags.final_phase {
@@ -137,6 +131,7 @@ async fn execute_turn(
         } else {
             &catalog.normal
         };
+        crate::steer_status(states, provider, definitions, cancellation).await?;
         let request = context::prepare_request(
             states,
             provider,
@@ -147,7 +142,7 @@ async fn execute_turn(
             cancellation,
         )
         .await?;
-        let attempt = budget.count_request();
+        let attempt = state.count_request();
         let response = match provider.invoke(request, cancellation).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
@@ -168,7 +163,7 @@ async fn execute_turn(
                 rendering::render_template(states, ConfigKey::TruncatedToolCallTemplate, &[])
                     .await?;
             states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![Message::text(Role::System, &content)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::System,
@@ -189,7 +184,7 @@ async fn execute_turn(
             let content =
                 rendering::render_template(states, ConfigKey::InvalidToolCallTemplate, &[]).await?;
             states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![Message::text(Role::System, &content)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::System,
@@ -204,7 +199,7 @@ async fn execute_turn(
         }
         if !response.tool_calls.is_empty() {
             let recorded = states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::Model,
@@ -232,15 +227,15 @@ async fn execute_turn(
                 cancellation,
             )
             .await?;
-            if flags.final_phase && !budget.try_extend_settlement() {
+            if flags.final_phase && !state.try_extend_settlement() {
                 return Ok(Outcome::BudgetExhausted);
             }
             continue;
         }
-        let messages = states.get_exit_blockers().await?;
+        let messages = states.collect_completion_blockers().await?;
         if messages.is_empty() {
             states
-                .add_conversation(ConversationAddition {
+                .apply_conversation_addition(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
                         finish_reason: response.finish_reason.clone(),
@@ -256,7 +251,7 @@ async fn execute_turn(
                 .map(|message| Message::text(Role::System, message)),
         );
         states
-            .add_conversation(ConversationAddition {
+            .apply_conversation_addition(ConversationAddition {
                 messages: additions,
                 persistence: ConversationPersistence::CompletionFeedback(CompletionFeedback {
                     messages,
@@ -264,7 +259,7 @@ async fn execute_turn(
                 }),
             })
             .await?;
-        budget.restart();
+        state.restart();
     }
 }
 
@@ -272,7 +267,7 @@ async fn execute_turn(
 pub async fn interrupt_turn(states: &mut dyn States) -> Result<Option<String>, Error> {
     let content = rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
     let receipt = states
-        .add_conversation(ConversationAddition {
+        .apply_conversation_addition(ConversationAddition {
             messages: vec![Message::text(Role::Assistant, &content)],
             persistence: ConversationPersistence::CloseTurn {
                 finish_reason: FinishReason::Interrupted,

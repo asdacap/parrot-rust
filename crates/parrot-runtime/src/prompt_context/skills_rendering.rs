@@ -1,8 +1,16 @@
-use super::{PromptError, PromptResult, SkillMetadata};
-use parrot_core::SkillCatalogEntry;
+use super::{PromptResult, SkillMetadata};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
-pub use parrot_core::rendering::MAXIMUM_CATALOG_BYTES;
+pub use super::rendering::MAXIMUM_CATALOG_BYTES;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SkillCatalogEntry {
+    pub name: String,
+    pub description: String,
+    pub discovery_path: String,
+    pub enabled: bool,
+    pub prompt_visible: bool,
+}
 
 pub fn render_skill_catalog(
     skills: &[SkillMetadata],
@@ -18,8 +26,5 @@ pub fn render_skill_catalog(
             prompt_visible: skill.prompt_visible,
         })
         .collect::<Vec<_>>();
-    let template = templates
-        .get_template("context.skills")
-        .map_err(|error| PromptError::Template(error.to_string()))?;
-    parrot_core::rendering::render_catalog_entries(&entries, &template).map_err(PromptError::from)
+    super::rendering::render_catalog_entries(&entries, templates)
 }

@@ -94,6 +94,7 @@ impl StatusProvider for RuntimeTreeStatusProvider {
                 .check()
                 .map_err(|_| OperationError::Cancelled)?;
             let snapshot = self.source.capture().map_err(OperationError::Failed)?;
+            let hash = tree_snapshot_hash(&snapshot);
             let nodes = build_nodes(&query.session_id, snapshot);
             let mut agents = Vec::new();
             append(
@@ -112,8 +113,32 @@ impl StatusProvider for RuntimeTreeStatusProvider {
                     .clone(),
                 cancellation,
             )
+            .map(|observation| observation.with_identity(hash, true))
         })
     }
+}
+/// Stable identity of the tree snapshot. Every agent, active marker, running
+/// process, and drain state affects a steer; rendered node text does not.
+fn tree_snapshot_hash(snapshot: &RuntimeTreeSnapshot) -> String {
+    let mut hash = format!("tree:{}", snapshot.agents.len());
+    for agent in &snapshot.agents {
+        hash.push_str(&format!("|{}", agent.session_id));
+    }
+    for agent in &snapshot.active_agents {
+        hash.push_str(&format!("|active:{}", agent.session_id));
+    }
+    for process in &snapshot.processes {
+        hash.push_str(&format!("|process:{}", process.owner_session_id));
+    }
+    for (session_id, state) in &snapshot.activity {
+        hash.push_str(&format!("|state:{}", session_id));
+        match state {
+            DrainState::Idle => hash.push_str(":idle"),
+            DrainState::Running => hash.push_str(":running"),
+            DrainState::Interrupting => hash.push_str(":interrupting"),
+        }
+    }
+    hash
 }
 struct Node {
     session_id: String,

@@ -1,5 +1,6 @@
 use super::*;
 use crate::events::{Admission, AdmittedInput, NeverCancelled, Promotion, ToolExecutionTerminal};
+use parrot_core::StatusStanding;
 use parrot_domain::protocol::messages::parrot::{Delivery, Event, RequestUsageRecorded};
 
 impl ConversationRepository {
@@ -328,17 +329,17 @@ impl AgentHistoryView {
     pub async fn read_final_phase(&self) -> Result<bool, EventError> {
         self.repository.read_final_phase(self.agent.clone()).await
     }
-    pub async fn pending_status(&self) -> Result<Option<PendingStatus>, EventError> {
-        self.repository.pending_status(self.agent.clone()).await
+    pub async fn standing_statuses(&self) -> Result<Option<StatusStanding>, EventError> {
+        self.repository.standing_statuses(self.agent.clone()).await
     }
-    pub async fn append_status_prompt(
+    pub async fn append_status_assembly(
         &self,
         event: Event,
-        expected: PendingStatus,
+        standing: StatusStanding,
         content: String,
-    ) -> Result<bool, EventError> {
+    ) -> Result<(), EventError> {
         self.repository
-            .append_status_prompt(event, expected, content)
+            .append_status_assembly(event, standing, content)
             .await
     }
     pub async fn append_system_prompt(

@@ -36,7 +36,6 @@ pub struct ConversationRepository {
     pub(crate) events: EventRepository,
     pub(crate) image_store: Option<crate::artifacts::ImageArtifactStore>,
     pub(crate) projection: Option<Arc<dyn HistoryProjection>>,
-    pub(crate) metadata: SessionIndex,
 }
 impl ConversationRepository {
     pub fn new(events: EventRepository, metadata: SessionIndex) -> Result<Self, EventError> {
@@ -47,7 +46,6 @@ impl ConversationRepository {
         }
         Ok(Self {
             events,
-            metadata,
             image_store: None,
             projection: None,
         })

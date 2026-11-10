@@ -1,4 +1,4 @@
-use crate::contracts::async_ops::Clock;
+use crate::{contracts::async_ops::Clock, protocol::messages::parrot::event::Payload};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -9,6 +9,32 @@ pub enum DrainState {
     Idle,
     Running,
     Interrupting,
+}
+
+/// Root-turn busy answers whether the root agent session holds an open
+/// application turn. A turn opens at the root TurnStarted and settles when the
+/// producer publishes ModeTurnCompleted once the turn's drain finishes, or at
+/// the root TurnFailed after a failure. TurnEnded only ends one provider
+/// exchange inside the turn, so it never settles the application turn.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RootTurnActivity {
+    busy: bool,
+}
+
+impl RootTurnActivity {
+    /// Observes one payload belonging to the root agent session. Subagent
+    /// session payloads must be filtered by the caller before reaching here.
+    pub fn observe_root(&mut self, payload: Option<&Payload>) {
+        match payload {
+            Some(Payload::TurnStarted(_)) => self.busy = true,
+            Some(Payload::ModeTurnCompleted(_) | Payload::TurnFailed(_)) => self.busy = false,
+            _ => {}
+        }
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.busy
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

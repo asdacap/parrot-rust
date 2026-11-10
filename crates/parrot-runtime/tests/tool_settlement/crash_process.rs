@@ -99,7 +99,12 @@ async fn process_kill_does_not_replay_an_unfinished_tool_effect() {
         std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "crash_process::process_kill_does_not_replay_an_unfinished_tool_effect",
+                concat!(
+                    module_path!(),
+                    "::process_kill_does_not_replay_an_unfinished_tool_effect"
+                )
+                .strip_prefix("parrot_runtime::")
+                .unwrap(),
                 "--nocapture",
             ])
             .env(ROOT, &fixture.path)

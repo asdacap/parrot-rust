@@ -2,14 +2,16 @@
 mod budget;
 mod execution;
 pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
-pub(crate) use execution::{CompactionEstimates, SummaryProviderAdapter};
+pub(crate) use execution::{CompactionEstimates, SummaryText, read_file};
 mod context;
 mod conversation;
 pub use context::{
     ContextCompactionResult, ContextController, ContextError, ContextEvents, ContextResult,
-    ContextStatus, EpochInput, EpochResult, StatusInjection, provider_message,
+    ContextStatus, EpochInput, EpochResult, provider_message,
 };
-pub(crate) use conversation::{add_conversation, materialize_message};
+pub use conversation::apply_conversation_addition;
+pub(crate) use conversation::materialize_message;
+pub use parrot_core::{StatusKey, StatusOffer, StatusOffering, StatusStanding};
 mod planning;
 
 pub use budget::ProviderTokenBudget;

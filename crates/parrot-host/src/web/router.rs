@@ -7,7 +7,9 @@ use crate::grpc::{
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
     protocol::{bindings::parrot::parrot_client::ParrotClient, messages::parrot as wire},
-    values::{identifiers::UserSessionId, project_workspace::ProjectWorkspace},
+    values::{
+        activity::RootTurnActivity, identifiers::UserSessionId, project_workspace::ProjectWorkspace,
+    },
 };
 use parrot_foundation::paths::{ApplicationRoots, UserSessionResources};
 use parrot_storage::diagnostics::FileDiagnosticLog;
@@ -96,7 +98,7 @@ impl WebSessionRouter {
             .lock()
             .expect("web activities poisoned")
             .get(user_session_id)
-            .is_some_and(|activity| activity.busy)
+            .is_some_and(|activity| activity.root_turn.is_busy())
     }
 
     pub async fn open_default(
@@ -176,7 +178,7 @@ fn attach_status(error: AttachError) -> Status {
 #[derive(Default)]
 struct TurnActivity {
     subagents: HashSet<String>,
-    busy: bool,
+    root_turn: RootTurnActivity,
 }
 
 impl TurnActivity {
@@ -186,11 +188,7 @@ impl TurnActivity {
         {
             self.subagents.insert(published.agent_session_id.clone());
         } else if !self.subagents.contains(&published.agent_session_id) {
-            match published.payload {
-                Some(Payload::TurnStarted(_)) => self.busy = true,
-                Some(Payload::ModeTurnCompleted(_) | Payload::TurnFailed(_)) => self.busy = false,
-                _ => {}
-            }
+            self.root_turn.observe_root(published.payload.as_ref());
         }
     }
 }

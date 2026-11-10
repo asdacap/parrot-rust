@@ -1,5 +1,5 @@
 //! Remaining R06/R08 predicates through the actual durable drain.
-//! Tool settlement is the injected SQLite fixture, not the production T47 adapter.
+//! Registered leaf tools exercise actual runtime tool settlement.
 use super::*;
 
 const RUNAWAY: &str = "the turn exceeded its provider-request limit";
@@ -8,56 +8,30 @@ struct EdgeTools {
     inner: Tools,
     name: &'static str,
 }
-impl TurnTools<Security> for EdgeTools {
-    type Snapshot = Vec<sessions::Tool>;
-    fn materialize(&self) -> Result<Self::Snapshot, TurnError> {
-        Ok(vec![sessions::Tool {
+impl ToolFactory<Security> for EdgeTools {
+    fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
+        let definitions = vec![sessions::Tool {
             name: self.name.into(),
             description: String::new(),
             parameters_json: "{}".into(),
-        }])
-    }
-    fn permitted(
-        &self,
-        snapshot: &Self::Snapshot,
-        selection: &TurnSelection<Security>,
-    ) -> Result<Self::Snapshot, TurnError> {
-        self.inner.permitted(snapshot, selection)
-    }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
-        snapshot
-    }
-    fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
-        snapshot
-            .iter()
-            .filter(|tool| tool.name == "survivor")
-            .cloned()
-            .collect()
-    }
-    fn execute<'a>(
-        &'a self,
-        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
-        resources: TurnResources<'a>,
-        selection: &'a TurnSelection<Security>,
-        snapshot: &'a Self::Snapshot,
-        capture: &'a dyn SelectionSource<Security>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<
-        'a,
-        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
-    > {
-        self.inner.execute(
-            request,
-            resources,
-            selection,
-            snapshot,
-            capture,
-            cancellation,
-        )
+        }];
+        Ok(inventory(
+            vec![ToolHandle::Borrowed(Arc::new(FixtureTool {
+                metadata: ToolMetadata {
+                    name: self.name.into(),
+                    aliases: vec![],
+                },
+                tools: self.inner.clone(),
+                final_phase: self.name == "survivor",
+                text: "fake tool result",
+                observations: None,
+            }))],
+            &definitions,
+        ))
     }
 }
 struct EdgeRuntime {
-    session: AgentSession<RuntimeBackend<Security, EdgeTools>>,
+    session: AgentSession<RuntimeBackend<Security>>,
 }
 impl EdgeRuntime {
     async fn new(
@@ -112,6 +86,11 @@ impl EdgeRuntime {
             .unwrap(),
         );
         let backend = RuntimeBackend::new(RuntimeConfig {
+            tool_execution: tool_execution_config(
+                &fixture.history,
+                templates.clone(),
+                publisher.clone(),
+            ),
             agent_limits,
             identity: SessionIdentity {
                 session_id: "agent".into(),

@@ -1,10 +1,11 @@
 //! Source turn-request and bounded settlement budget, distinct from token limits.
 
-pub use crate::{TurnBudget, TurnFlags};
+pub use crate::{AgentState, TurnFlags};
 
-impl TurnBudget {
+impl AgentState {
     pub fn new(disable_max_turns: bool) -> Self {
         Self {
+            final_phase: false,
             disable_max_turns,
             provider_requests: 0,
             settlement_extensions: 0,

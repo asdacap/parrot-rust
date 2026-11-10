@@ -1,7 +1,22 @@
 use crate::{
-    CompletionFeedback, Content, ContextReminderCheckpoint, FinishReason, Message,
-    ProviderResponse, Role,
+    CompletionFeedback, Content, ContextReminderCheckpoint, ConversationState, Error, FinishReason,
+    Message, ProviderResponse, Role, States,
 };
+
+/// Assembles summary, durable tail, checkpoints, and the current provider-visible messages.
+pub async fn read_conversation_state(states: &dyn States) -> Result<ConversationState, Error> {
+    let summary = states.read_conversation_summary().await?;
+    let watermark = summary.as_ref().map_or(0, |summary| summary.watermark);
+    let history = states.read_conversation_tail(watermark).await?;
+    let checkpoint_sequences = states.read_checkpoint_sequences().await?;
+    let messages = states.read_provider_messages().await?;
+    Ok(ConversationState {
+        summary,
+        history,
+        checkpoint_sequences,
+        messages,
+    })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConversationOrigin {
@@ -57,14 +72,16 @@ pub enum ConversationPersistence {
         checkpoint: ContextReminderCheckpoint,
         event: ConversationEvent,
     },
-    Status {
-        checkpoint: crate::StatusCheckpoint,
+    /// Persists one steered status assembly. `standing` records the per-slot
+    /// hashes the assembly stands for, so the next safe point can diff against it.
+    StatusSteering {
+        standing: crate::StatusStanding,
         event: ConversationEvent,
     },
     CompletionFeedback(CompletionFeedback),
     ToolResult {
         assistant_sequence: i64,
-        result: crate::ToolExecutionResult,
+        result: crate::ToolResult,
         recovered: bool,
     },
     ToolImages {

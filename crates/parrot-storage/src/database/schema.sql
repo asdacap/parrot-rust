@@ -24,10 +24,10 @@ CREATE TABLE IF NOT EXISTS conversation_item (
         json_extract(context_reminder, '$.context_limit') > 0
         AND json_extract(context_reminder, '$.percentage') > 0
     ),
+    status_slots TEXT CHECK (json_valid(status_slots)),
     provider_id   TEXT NOT NULL DEFAULT '',
     provider_content TEXT NOT NULL DEFAULT '',
     tool_owner_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE SET NULL,
-    mode_status_revision INTEGER CHECK (mode_status_revision >= 0),
     compaction_watermark INTEGER CHECK (compaction_watermark >= 0),
     compaction_status_sequence INTEGER UNIQUE REFERENCES conversation_item(sequence) ON DELETE SET NULL,
     CHECK (
@@ -52,9 +52,9 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     )
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS conversation_mode_status
-    ON conversation_item (agent_session, mode_status_revision)
-    WHERE mode_status_revision IS NOT NULL;
+CREATE INDEX IF NOT EXISTS conversation_status_by_session
+    ON conversation_item (agent_session, sequence DESC)
+    WHERE status_slots IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS conversation_by_session
     ON conversation_item (agent_session, sequence);

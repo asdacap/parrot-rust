@@ -38,20 +38,31 @@ impl Provider for UnavailableProvider {}
 #[test]
 fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_results() {
     let mut states = UnavailableState;
-    let reminder = finish(states.get_last_context_reminder()).unwrap_err();
+    let reminder = finish(states.read_last_context_reminder_checkpoint()).unwrap_err();
     assert_eq!(reminder.code, ErrorCode::InvalidOperation);
-    assert!(reminder.message.contains("get_last_context_reminder"));
-    let blockers = finish(states.get_exit_blockers()).unwrap_err();
+    assert!(
+        reminder
+            .message
+            .contains("read_last_context_reminder_checkpoint")
+    );
+    let blockers = finish(states.collect_completion_blockers()).unwrap_err();
     assert_eq!(blockers.code, ErrorCode::InvalidOperation);
-    assert!(blockers.message.contains("get_exit_blockers"));
-    let budget = states.read_turn_budget().unwrap_err();
-    assert_eq!(budget.code, ErrorCode::InvalidOperation);
-    assert!(budget.message.contains("read_turn_budget"));
-    let write = states
-        .write_turn_budget(parrot_core::TurnBudget::new(false))
-        .unwrap_err();
+    assert!(blockers.message.contains("collect_completion_blockers"));
+    let state = finish(states.get_agent_state()).unwrap_err();
+    assert_eq!(state.code, ErrorCode::InvalidOperation);
+    assert!(state.message.contains("get_agent_state"));
+    let write = finish(states.set_agent_state(parrot_core::AgentState::new(false))).unwrap_err();
     assert_eq!(write.code, ErrorCode::InvalidOperation);
-    assert!(write.message.contains("write_turn_budget"));
+    assert!(write.message.contains("set_agent_state"));
+    let scratch =
+        finish(states.write_to_scratch(b"contents", parrot_core::CancellationToken::uncancelled()))
+            .unwrap_err();
+    assert_eq!(scratch.code, ErrorCode::InvalidOperation);
+    assert!(scratch.message.contains("write_to_scratch"));
+    let file = finish(states.read_file("image.png", parrot_core::CancellationToken::uncancelled()))
+        .unwrap_err();
+    assert_eq!(file.code, ErrorCode::InvalidOperation);
+    assert!(file.message.contains("read_file"));
 }
 
 #[test]

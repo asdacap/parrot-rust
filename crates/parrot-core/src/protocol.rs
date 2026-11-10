@@ -145,7 +145,7 @@ pub trait Tools: Send + Sync {
         &'a self,
         request: crate::ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<crate::ToolExecutionResult>, Error>>;
+    ) -> BoxFuture<'a, Result<Vec<crate::ToolResult>, Error>>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -180,25 +180,6 @@ pub enum SkillContent {
 pub struct DerivedContext {
     pub content: String,
     pub loaded_paths: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct AgentIdentityDescription {
-    pub session_id: String,
-    pub parent_session_id: String,
-    pub parent_session_name: String,
-    pub agent_name: String,
-    pub depth: i32,
-    pub scope_text: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SkillCatalogEntry {
-    pub name: String,
-    pub description: String,
-    pub discovery_path: String,
-    pub enabled: bool,
-    pub prompt_visible: bool,
 }
 
 /// A prepared context reminder with the information needed to record it.
@@ -243,45 +224,57 @@ pub trait EventPublisher: Send + Sync {
 pub trait States: Send + Sync {
     /// Commits the supplied messages, updates the live conversation on insertion, then publishes.
     /// Storage metadata selects the atomic write. Core supplies every message and its timing.
-    fn add_conversation(
+    fn apply_conversation_addition(
         &mut self,
         _addition: crate::ConversationAddition,
     ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.add_conversation")) })
+        Box::pin(async { Err(Error::unsupported("States.apply_conversation_addition")) })
     }
-    /// Reads the durable final-phase marker without changing the conversation.
-    fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_final_phase")) })
+    fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_final_phase_marker")) })
     }
-    /// Reads current status revisions and the bound profile without choosing insertion.
-    fn read_status_observation(&self) -> BoxFuture<'_, Result<crate::StatusObservation, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_status_observation")) })
+    /// Reads the status slots offered to the core, each with a source-computed
+    /// hash. Defaults to no statuses, which steers nothing.
+    fn read_status_offering(&self) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
+        Box::pin(async { Ok(crate::StatusOffering::default()) })
+    }
+    /// Reads the per-slot hashes recorded by the latest persisted status assembly.
+    /// Defaults to empty standing state, which would steer the initial assembly.
+    /// A states side that never appends will also never offer, so both defaults
+    /// keep steering inert until the adapter opts in.
+    fn read_standing_statuses(&self) -> BoxFuture<'_, Result<crate::StatusStanding, Error>> {
+        Box::pin(async { Ok(crate::StatusStanding::default()) })
     }
     /// Reads materialized pending input without admitting it to the conversation.
-    fn read_pending_inputs(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_pending_inputs")) })
+    fn read_next_input_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_next_input_messages")) })
     }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
-    /// Loads the provider-request budget that core updates during one turn, not a token budget.
-    /// Core resets the request count at turn start but retains settlement extensions from earlier turns.
-    fn read_turn_budget(&self) -> Result<TurnBudget, Error> {
-        Err(Error::unsupported("States.read_turn_budget"))
+    /// Reads the consolidated agent state that survives across turns, including
+    /// the durable final-phase marker and the provider-request budget. Core resets
+    /// the request count at turn start but retains settlement extensions from earlier turns.
+    fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.get_agent_state")) })
     }
-    /// Saves the updated provider-request budget after the turn returns, even on error.
+    /// Saves the updated agent state after the turn returns, even on error.
     /// Retains settlement extensions for subsequent turns in the same invocation.
-    fn write_turn_budget(&mut self, _budget: TurnBudget) -> Result<(), Error> {
-        Err(Error::unsupported("States.write_turn_budget"))
+    fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.set_agent_state")) })
     }
     /// Reads the last stored context reminder in the current compaction epoch.
-    fn get_last_context_reminder(
+    fn read_last_context_reminder_checkpoint(
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.get_last_context_reminder")) })
+        Box::pin(async {
+            Err(Error::unsupported(
+                "States.read_last_context_reminder_checkpoint",
+            ))
+        })
     }
     /// Joins accepted mutations and reads ordered completion blockers.
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.get_exit_blockers")) })
+    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.collect_completion_blockers")) })
     }
     /// Observes native status for the exact context selected by core.
     fn render_status<'a, 'c>(
@@ -294,16 +287,27 @@ pub trait States: Send + Sync {
     {
         Box::pin(async { Err(Error::unsupported("States.render_status")) })
     }
-    /// Persists an original atomic group and returns notices with its actual saved path.
-    fn spill_group<'a, 'c>(
+    /// Writes the supplied bytes to agent-local scratch storage and returns the saved path.
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        _messages: &'a [Message],
+        _contents: &'a [u8],
         _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {
-        Box::pin(async { Err(Error::unsupported("States.spill_group")) })
+        Box::pin(async { Err(Error::unsupported("States.write_to_scratch")) })
+    }
+    /// Reads the supplied file without interpreting its contents.
+    fn read_file<'a, 'c>(
+        &'a self,
+        _path: &'a str,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("States.read_file")) })
     }
     /// Publishes aggregate summary progress without disclosing generated content.
     fn report_compaction_progress<'a, 'c>(
@@ -317,44 +321,24 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.report_compaction_progress")) })
     }
 
-    /// Reads native system-prompt sections and their namespace keys.
-    /// Retains native request bindings and samples epoch inputs without rendering
-    /// core-owned templates.
-    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_system_prompts")) })
-    }
-    /// Reads literal template arguments for the supplied registered source.
-    fn read_template_arguments<'a>(
-        &'a self,
-        _source_key: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_template_arguments")) })
-    }
-    /// Reads sampled AGENTS paths and unwrapped file contents.
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_agents_files")) })
-    }
-    /// Reads the supplied agent identity and scope without formatting either value.
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<AgentIdentityDescription>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_agent_identity")) })
-    }
-    /// Reads the current unwrapped standing instruction.
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_standing_instruction")) })
-    }
-    /// Reads current catalog metadata without rendering entries or applying prompt budgets.
-    fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_skill_catalog")) })
+    /// Captures the complete provider-rendered system prompt and native request bindings.
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.capture_system_prompt")) })
     }
     /// Reads tool calls and durable terminals after the settled watermark.
     fn read_tool_recovery(&self) -> BoxFuture<'_, Result<crate::ToolRecovery, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_tool_recovery")) })
     }
     /// Advances the session-local tool settlement watermark after successful settlement.
-    fn write_tool_watermark(&mut self, _through: i64) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.write_tool_watermark")) })
+    fn advance_tool_settlement_watermark(
+        &mut self,
+        _through: i64,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "States.advance_tool_settlement_watermark",
+            ))
+        })
     }
     /// Reads the latest visible logical turn, including retained completion candidates.
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
@@ -362,26 +346,26 @@ pub trait States: Send + Sync {
     }
     /// Peeks at the next durable pending input header without reserving, promoting,
     /// or materializing its content.
-    fn get_pending_message(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.get_pending_message")) })
+    fn peek_pending_input_header(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.peek_pending_input_header")) })
     }
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and returning the promoted content explicitly.
     /// Returns commit receipts without adding messages, publishing, or preparing prompts.
-    fn promote_input(
+    fn promote_pending_inputs(
         &mut self,
         _admission: InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.promote_input")) })
+        Box::pin(async { Err(Error::unsupported("States.promote_pending_inputs")) })
     }
     /// Retrieves skill metadata in one batch without reading instruction bodies.
     /// Returns one result per reference in the supplied order, preserving backing-store
     /// precedence and name/path matching semantics.
-    fn get_skills<'a>(
+    fn resolve_skill_references<'a>(
         &'a self,
         _references: &'a [SkillReference],
     ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.get_skills")) })
+        Box::pin(async { Err(Error::unsupported("States.resolve_skill_references")) })
     }
     /// Reads the selected record's complete instruction body or unavailable diagnostic.
     /// Does not format prompt text, update turn deduplication, or record context.
@@ -396,25 +380,36 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.read_token_calibration")) })
     }
     /// Reads the current provider-visible conversation after context preparation.
-    fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_messages")) })
+    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_provider_messages")) })
     }
-    /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot,
-    /// plus current messages, without sampling prompts or preparing compaction input.
-    fn read_conversation_state(
+    /// Reads the latest stored summary and its compaction watermark.
+    fn read_conversation_summary(
         &self,
-    ) -> BoxFuture<'_, Result<crate::compaction::ConversationState, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
+    ) -> BoxFuture<'_, Result<Option<ConversationSummary>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_conversation_summary")) })
+    }
+    /// Reads the chronological durable tail after the supplied watermark.
+    /// Retains stored ownership and status metadata and materializes message contents.
+    fn read_conversation_tail(
+        &self,
+        _after: i64,
+    ) -> BoxFuture<'_, Result<Vec<ConversationHistoryItem>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_conversation_tail")) })
+    }
+    /// Reads active checkpoint assistant sequences after the current summary watermark.
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_checkpoint_sequences")) })
     }
     /// Persists the fitted compaction with the supplied sampled instructions and tools,
     /// awaiting terminal lifecycle effects on success or failure.
-    fn record_compaction<'a>(
+    fn finalize_compaction<'a>(
         &'a mut self,
         _instructions: &'a str,
         _definitions: &'a [ToolDefinition],
         _result: Result<Option<crate::compaction::FittedCompaction>, Error>,
     ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_compaction")) })
+        Box::pin(async { Err(Error::unsupported("States.finalize_compaction")) })
     }
 }
 
@@ -580,6 +575,8 @@ pub struct ToolResult {
     pub text: String,
     pub error_message: String,
     pub images: Vec<ToolImage>,
+    /// Adapter-owned metadata forwarded unchanged to conversation persistence.
+    pub metadata: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -783,16 +780,23 @@ pub struct TokenCalibration {
     pub(crate) actual_input_tokens: i32,
 }
 
+/// Consolidates the agent-local state that survives across turns. Core reads it at
+/// turn start and saves it after the turn returns, even on error.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentState {
+    /// Durable final-phase marker read without changing the conversation.
+    pub final_phase: bool,
+    /// Per-invocation setting that turns off the provider-request limit entirely.
+    pub(crate) disable_max_turns: bool,
+    /// Provider requests counted during the current turn. Not a token budget.
+    pub(crate) provider_requests: i32,
+    /// Settlement extensions retained across turns within the same invocation.
+    pub(crate) settlement_extensions: i32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TurnFlags {
     pub final_phase: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct TurnBudget {
-    pub(crate) disable_max_turns: bool,
-    pub(crate) provider_requests: i32,
-    pub(crate) settlement_extensions: i32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -906,16 +910,12 @@ pub enum ConfigKey {
     Turn,
     Context,
     Compaction,
-    SystemPromptBindings,
-    AgentsFileTemplate,
-    AgentIdentityTemplate,
-    StandingInstructionTemplate,
-    SkillCatalogTemplate,
     SkillUnavailableTemplate,
     SkillSelectedTemplate,
     SkillTooLargeTemplate,
     ContextReminderTemplate,
     ContextLimitReminderTemplate,
+    OversizedToolGroupTemplate,
     FinalRequestTemplate,
     RestoredToolsTemplate,
     InterruptedTemplate,
@@ -923,24 +923,12 @@ pub enum ConfigKey {
     InvalidToolCallTemplate,
     CrashedToolTemplate,
     ToolErrorTemplate,
-    OptionalCliUtilitiesTemplate,
-    ExpectedCliUtilitiesTemplate,
-    PlatformTemplate,
-    WorkingDirectoryTemplate,
-    GitRepositoryTemplate,
-    SubagentsTemplate,
-    SecurityProfileTemplate,
-    AgentPathEnvironmentTemplate,
-    AgentScratchTemplate,
-    AgentHistoryTemplate,
 }
 
 pub enum ConfigValue {
     Turn(TurnOptions),
     Context(ContextConfiguration),
     Compaction(CompactionConfiguration),
-    /// Ordered namespace keys and their explicitly enumerated template configuration keys.
-    SystemPromptBindings(Vec<(String, ConfigKey)>),
     PromptTemplate(Arc<PromptTemplate>),
 }
 
@@ -961,14 +949,6 @@ impl ConfigValue {
         match self {
             Self::Compaction(value) => Ok(value),
             _ => Err(Error::failed("expected compaction configuration")),
-        }
-    }
-    pub fn into_system_prompt_bindings(self) -> Result<Vec<(String, ConfigKey)>, Error> {
-        match self {
-            Self::SystemPromptBindings(value) => Ok(value),
-            _ => Err(Error::failed(
-                "expected system prompt bindings configuration",
-            )),
         }
     }
     pub fn into_prompt_template(self) -> Result<Arc<PromptTemplate>, Error> {
