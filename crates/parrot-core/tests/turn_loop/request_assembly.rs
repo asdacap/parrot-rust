@@ -25,7 +25,12 @@ fn state_supplies_fresh_raw_instructions_on_each_request() {
     state.budget = TurnBudget::new(state.unlimited);
 
     assert_eq!(
-        finish(run(&mut state, &tools, &provider)),
+        finish(run(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed("answer".into()))
     );
     let requests = provider.requests.lock().unwrap();
@@ -271,7 +276,12 @@ fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_tem
     let provider = state.provider.clone();
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Ok(Outcome::Completed("answer".into()))
     );
 

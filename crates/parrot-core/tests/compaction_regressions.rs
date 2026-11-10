@@ -110,19 +110,25 @@ struct ScriptedSummaryProvider {
     fail_at: Option<&'static str>,
 }
 
-impl Provider for ScriptedSummaryProvider {
+struct SummaryCancellation<'a>(&'a AtomicBool);
+
+impl parrot_core::Cancellation for SummaryCancellation<'_> {
     fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.0.load(Ordering::SeqCst)
     }
+
     fn cancelled(&self) -> BoxFuture<'_, ()> {
         Box::pin(poll_fn(|_| {
-            if self.is_cancelled() {
+            if self.0.load(Ordering::SeqCst) {
                 Poll::Ready(())
             } else {
                 Poll::Pending
             }
         }))
     }
+}
+
+impl Provider for ScriptedSummaryProvider {
     fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
         Ok(messages.len() as i64)
     }
@@ -153,7 +159,7 @@ impl Provider for ScriptedSummaryProvider {
     fn summarize<'a, 'c>(
         &'a self,
         request: ProviderRequest,
-        _: CancellationToken<'c>,
+        cancellation: CancellationToken<'c>,
     ) -> BoxFuture<'a, Result<SummaryResponse, Error>>
     where
         'c: 'a,
@@ -164,6 +170,8 @@ impl Provider for ScriptedSummaryProvider {
             let result = self.replies.lock().unwrap().pop_front().unwrap();
             if self.cancel_before_cleanup {
                 self.cancelled.store(true, Ordering::SeqCst);
+                assert!(cancellation.is_cancelled());
+                cancellation.cancelled().await;
                 let mut yielded = false;
                 poll_fn(|context| {
                     if yielded {
@@ -234,10 +242,12 @@ impl Fixture {
 
     fn run(&mut self) -> Result<Option<CompactionResult>, Error> {
         self.provider.fail_at = self.effects.fail_at;
+        let source = SummaryCancellation(&self.provider.cancelled);
         finish(compact(
             Some(self.plan.clone()),
             &mut self.effects,
             &self.provider,
+            CancellationToken::new(&source),
         ))
     }
 }

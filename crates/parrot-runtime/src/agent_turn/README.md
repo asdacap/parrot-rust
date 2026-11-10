@@ -248,9 +248,10 @@ AGENTS files, model guidance, identity, standing instructions, and catalog metad
 These getters do not expand templates. Core reads that state and renders the ordered
 instruction sections using concrete templates from `States::get_config`. `ConfigKey`
 selects turn, context, compaction, or prompt-template configuration. The turn entry
-points accept only `States`, `Tools`, and `Provider`. State retains request status
-bindings, sampled epoch inputs, and the drain's request budget. Provider supplies
-cancellation, model-specific token estimates, and private summary calls. Core owns
+points accept `States`, `Tools`, `Provider`, and the runtime's cancellation token.
+Core passes that token to provider calls, tools, and compaction. State retains request
+status bindings, sampled epoch inputs, and the drain's request budget. Provider supplies
+model-specific token estimates, model invocation, and private summary calls. Core owns
 reminder rendering and cadence decisions, while State stores cadence and durable
 checkpoints. Turn and standalone compaction both use State and Provider rather than
 separate preparation, status, summary, or compaction-effect contracts. Core records

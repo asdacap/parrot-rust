@@ -8,8 +8,11 @@ use crate::{
 };
 use std::future::Future;
 
-pub async fn fit_status(states: &dyn States, provider: &dyn Provider) -> Result<String, Error> {
-    let cancellation = CancellationToken::from_provider(provider);
+pub async fn fit_status(
+    states: &dyn States,
+    provider: &dyn Provider,
+    cancellation: CancellationToken<'_>,
+) -> Result<String, Error> {
     fit_status_with(
         |content| provider.estimate_status_context(content),
         |context| states.render_status(context, cancellation),
@@ -45,8 +48,8 @@ pub async fn fit_compaction(
     result: Option<CompactionResult>,
     states: &dyn States,
     provider: &dyn Provider,
+    cancellation: CancellationToken<'_>,
 ) -> Result<Option<FittedCompaction>, Error> {
-    let cancellation = CancellationToken::from_provider(provider);
     let result = result.filter(|result| result.watermark > input.base_watermark);
     let Some(result) = result else {
         let tokens =
@@ -92,8 +95,18 @@ pub async fn compact_conversation(
     configuration: &CompactionConfiguration,
     states: &mut dyn States,
     provider: &dyn Provider,
+    cancellation: CancellationToken<'_>,
 ) -> Result<Option<FittedCompaction>, Error> {
     let plan = CompactionPlan::select(input, definitions, configuration, provider)?;
-    let result = compact(plan, states, provider).await?;
-    fit_compaction(input, definitions, configuration, result, states, provider).await
+    let result = compact(plan, states, provider, cancellation).await?;
+    fit_compaction(
+        input,
+        definitions,
+        configuration,
+        result,
+        states,
+        provider,
+        cancellation,
+    )
+    .await
 }

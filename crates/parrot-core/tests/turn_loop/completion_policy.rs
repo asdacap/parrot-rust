@@ -242,7 +242,12 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     state.budget = TurnBudget::new(false);
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Err(Error::failed("completion_feedback"))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
@@ -280,7 +285,12 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     state.budget = TurnBudget::new(false);
 
     assert_eq!(
-        finish(run_turn(&mut state, &tools, &provider)),
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
         Err(Error::failed("exit_blockers"))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);

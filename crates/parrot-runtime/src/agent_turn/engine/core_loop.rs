@@ -23,22 +23,9 @@ struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     captured: std::sync::Mutex<Option<CapturedTools<T::Snapshot>>>,
 }
 
-struct RuntimeCancellation<'a>(parrot_core::CancellationToken<'a>);
-
-impl Cancellation for RuntimeCancellation<'_> {
-    fn is_cancelled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.0.cancelled()
-    }
-}
-
 struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S>,
-    cancellation: &'a dyn Cancellation,
 }
 
 struct CapturedTools<T> {
@@ -198,7 +185,6 @@ where
             let provider = RuntimeProvider {
                 backend,
                 binding: &binding,
-                cancellation,
             };
             let result = async {
                 adapt_operation(async {
@@ -269,7 +255,13 @@ where
                     Ok(())
                 })
                 .await?;
-                parrot_core::run_turn(&mut states, &tools, &provider).await
+                parrot_core::run_turn(
+                    &mut states,
+                    &tools,
+                    &provider,
+                    parrot_core::CancellationToken::new(cancellation),
+                )
+                .await
             }
             .await;
             match result {
@@ -543,7 +535,7 @@ where
                         trigger_tokens: context.trigger_tokens,
                         has_context_limit_override: context.has_context_limit_override,
                     },
-                    &RuntimeCancellation(cancellation),
+                    &cancellation,
                 )
                 .await
                 .map_err(Into::into)
@@ -585,7 +577,7 @@ where
                     total_groups: progress.total_groups as u64,
                     ..protocol::CompactionProgressEvent::new()
                 },
-                &RuntimeCancellation(cancellation),
+                &cancellation,
             )
             .await
             .map_err(crate::compaction::CompactionError::from)
@@ -1183,7 +1175,6 @@ where
         cancellation: parrot_core::CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
-            let cancellation = RuntimeCancellation(cancellation);
             let backend = self.backend;
             let assistant_sequence = receipt.assistant_sequence;
             let selection = self.binding.capture_selection()?;
@@ -1256,12 +1247,6 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.cancellation.cancelled()
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -1314,10 +1299,14 @@ where
         })
     }
 
-    fn invoke(
-        &self,
+    fn invoke<'a, 'c>(
+        &'a self,
         request: ProviderRequest,
-    ) -> BoxFuture<'_, Result<ProviderResponse, CoreError>> {
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, CoreError>>
+    where
+        'c: 'a,
+    {
         Box::pin(async move {
             let backend = self.backend;
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
@@ -1350,10 +1339,7 @@ where
                 activity: &activity,
                 usage: &mut *state,
             };
-            let event = match call
-                .stream(session.as_ref(), request, self.cancellation)
-                .await
-            {
+            let event = match call.stream(session.as_ref(), request, &cancellation).await {
                 Ok(event) => event,
                 Err(
                     error @ provider_call::ProviderCallError::Provider(

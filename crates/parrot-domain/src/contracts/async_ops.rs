@@ -1,5 +1,7 @@
 //! Cancellation observation and explicit ownership of asynchronous work.
 
+pub use parrot_core::{Cancellation, Cancelled};
+
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -7,18 +9,6 @@ use std::time::Instant;
 
 /// A Send future whose lifetime exposes any borrowed operation inputs.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-/// The caller cancelled an operation before its cancellation boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Cancelled;
-
-impl fmt::Display for Cancelled {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("operation cancelled")
-    }
-}
-
-impl std::error::Error for Cancelled {}
 
 /// Cancellation is distinct from an operation-specific failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -47,23 +37,6 @@ impl<E: std::error::Error + 'static> std::error::Error for OperationError<E> {
 
 /// A result with cancellation distinct from an operation-specific failure.
 pub type OperationResult<T, E> = Result<T, OperationError<E>>;
-
-/// Read-only cancellation observation; only the scope owner may cancel.
-pub trait Cancellation: Send + Sync {
-    fn is_cancelled(&self) -> bool;
-
-    /// Resolves when cancellation is observed, including prior cancellation.
-    fn cancelled(&self) -> BoxFuture<'_, ()>;
-
-    /// Checks the actual current state, rather than assuming success.
-    fn check(&self) -> Result<(), Cancelled> {
-        if self.is_cancelled() {
-            Err(Cancelled)
-        } else {
-            Ok(())
-        }
-    }
-}
 
 /// Monotonic time, with an observable cancellation boundary for sleeping.
 pub trait Clock: Send + Sync {

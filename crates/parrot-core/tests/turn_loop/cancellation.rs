@@ -33,7 +33,7 @@ impl CancellationSource {
     }
 }
 
-impl Provider for CancellationSource {
+impl parrot_core::Cancellation for CancellationSource {
     fn is_cancelled(&self) -> bool {
         self.is_cancelled()
     }
@@ -54,7 +54,7 @@ impl Wake for WakeCounter {
 #[test]
 fn copied_tokens_observe_live_and_prior_cancellation() {
     let source = CancellationSource::default();
-    let token = CancellationToken::from_provider(&source);
+    let token = CancellationToken::new(&source);
     let copied = token;
     assert!(!token.is_cancelled());
     assert!(!copied.is_cancelled());
@@ -68,7 +68,7 @@ fn copied_tokens_observe_live_and_prior_cancellation() {
 #[test]
 fn token_notification_wakes_pending_work() {
     let source = CancellationSource::default();
-    let token = CancellationToken::from_provider(&source);
+    let token = CancellationToken::new(&source);
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
     let mut context = Context::from_waker(&waker);
@@ -175,7 +175,12 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
 
     state.budget = TurnBudget::new(state.unlimited);
     let result = {
-        let mut running = std::pin::pin!(run(&mut state, &tools, &provider));
+        let mut running = std::pin::pin!(run(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        ));
         assert!(running.as_mut().poll(&mut context).is_pending());
         assert!(tools.admitted.load(Ordering::SeqCst));
         assert!(!joined.load(Ordering::SeqCst));
