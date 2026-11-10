@@ -728,6 +728,43 @@ impl ContextStatus for Status {
         })
     }
 }
+/// Leaves steering inert by default so exact-history assertions stay unchanged.
+struct OfferingStatus(Arc<Trace>);
+impl ContextStatus for OfferingStatus {
+    fn observe<'a>(
+        &'a self,
+        _: &'a ContextSnapshot,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<String>> {
+        Box::pin(async move {
+            self.0.push("status");
+            Ok("actual status".into())
+        })
+    }
+    fn slots<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
+        Box::pin(async move {
+            self.0.push("status");
+            Ok([(
+                parrot_core::StatusKey::new("trace"),
+                parrot_core::StatusOffer {
+                    hash: "initial".into(),
+                    text: "actual status".into(),
+                    is_auto_update: false,
+                },
+            )]
+            .into_iter()
+            .collect())
+        })
+    }
+}
+impl TurnStatus<Security> for OfferingStatus {
+    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
+        Arc::new(OfferingStatus(self.0.clone()))
+    }
+}
 impl TurnStatus<Security> for Status {
     fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
         Arc::new(Status(self.0.clone()))
@@ -1050,7 +1087,17 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
     let trace = tools.trace.clone();
     let provider = Scripted::new(vec![Step::complete("answer")]);
     let runtime = fixture
-        .runtime(provider.clone(), tools, vec![], Arc::new(Signal::new()), 0)
+        .runtime_with_overrides(
+            provider.clone(),
+            tools,
+            vec![],
+            Arc::new(Signal::new()),
+            0,
+            RuntimeOverrides {
+                status: Some(Arc::new(OfferingStatus(trace.clone()))),
+                ..RuntimeOverrides::default()
+            },
+        )
         .await;
     let sent = runtime
         .send("question $example", protocol::Delivery::DELIVERY_STEER)
@@ -1062,9 +1109,11 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
     let trace = trace.values();
     let position = |name: &str| trace.iter().position(|entry| entry == name).unwrap();
     assert!(position("epoch-start") < position("epoch-done"));
-    assert!(position("epoch-done") < position("status"));
-    assert!(position("status") < position("skills-begin"));
+    // Steering is a core-loop safe point: turn setup, then skill lookup, then
+    // the status assembly read right before the provider request.
+    assert!(position("epoch-done") < position("skills-begin"));
     assert!(position("skills-begin") < position("skills-get"));
+    assert!(position("skills-get") < position("status"));
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 1);
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 1);

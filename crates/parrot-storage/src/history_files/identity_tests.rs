@@ -6,10 +6,8 @@ use parrot_domain::{
 };
 use std::{
     fs,
-    future::Future,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
-    task::Poll,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -192,78 +190,6 @@ async fn same_mode_updates_advance_checked_revision_and_failed_publication_prese
     fs::write(fixture.index.metadata_path(), &bytes).unwrap();
     assert!(fixture.index.update_mode("query").await.is_err());
     assert_eq!(fs::read(fixture.index.metadata_path()).unwrap(), bytes);
-}
-
-#[tokio::test]
-async fn status_guard_matches_exact_identity_mode_and_revision_and_allows_other_preferences() {
-    let fixture = Fixture::new();
-    let expected = fixture.index.read_session_state().unwrap().mode;
-    assert!(
-        fixture
-            .index
-            .guard_status("child", &expected)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        fixture
-            .index
-            .guard_status(
-                "root",
-                &PendingStatus {
-                    mode: "plan".into(),
-                    version: 0,
-                }
-            )
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        fixture
-            .index
-            .guard_status(
-                "root",
-                &PendingStatus {
-                    mode: "query".into(),
-                    version: 1,
-                }
-            )
-            .await
-            .unwrap()
-            .is_none()
-    );
-    let guard = fixture
-        .index
-        .guard_status("root", &expected)
-        .await
-        .unwrap()
-        .unwrap();
-    let clone = fixture.index.clone();
-    let change = clone.update_mode("plan");
-    tokio::pin!(change);
-    assert!(
-        std::future::poll_fn(|context| Poll::Ready(change.as_mut().poll(context).is_pending()))
-            .await
-    );
-    fixture
-        .index
-        .update_model_selection(&SessionModelSelection {
-            provider_id: "other".into(),
-            canonical_model: "other/model".into(),
-            selector: "alias".into(),
-        })
-        .unwrap();
-    fixture.index.update_fast_mode(true).unwrap();
-    assert_eq!(fixture.index.read_session_state().unwrap().mode, expected);
-    drop(guard);
-    change.await.unwrap();
-    let metadata = fixture.index.find().unwrap().unwrap();
-    assert_eq!(metadata.provider_id.as_deref(), Some("other"));
-    assert_eq!(metadata.fast_mode, Some(true));
-    assert_eq!(metadata.mode.as_deref(), Some("plan"));
-    assert_eq!(metadata.mode_revision, Some(1));
 }
 
 #[test]

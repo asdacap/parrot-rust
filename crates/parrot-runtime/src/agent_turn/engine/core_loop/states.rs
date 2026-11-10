@@ -66,11 +66,10 @@ where
                 }
                 persistence @ (ConversationPersistence::Phase { .. }
                 | ConversationPersistence::Reminder { .. }
-                | ConversationPersistence::Status { .. }) => {
+                | ConversationPersistence::StatusSteering { .. }) => {
                     return crate::compaction::apply_conversation_addition(
                         self.history,
                         &mut state.conversation,
-                        &mut state.context.initial_status_pending,
                         ConversationAddition {
                             messages: addition.messages,
                             persistence,
@@ -362,6 +361,32 @@ where
                 )
                 .await
                 .map_err(Into::into)
+        })
+    }
+    fn read_status_offering(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, CoreError>> {
+        adapt_operation(async move {
+            let status = self
+                .state
+                .lock()
+                .await
+                .request_status
+                .clone()
+                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
+            status.slots(self.cancellation).await.map_err(Into::into)
+        })
+    }
+    fn read_standing_statuses(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::StatusStanding, CoreError>> {
+        adapt_operation(async move {
+            Ok(self
+                .history
+                .standing_statuses()
+                .await
+                .map_err(TurnError::from)?
+                .unwrap_or_default())
         })
     }
     fn write_to_scratch<'a, 'c>(

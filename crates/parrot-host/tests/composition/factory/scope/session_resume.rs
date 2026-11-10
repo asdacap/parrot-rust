@@ -1572,17 +1572,28 @@ async fn actual_unstarted_full_fork_does_not_activate_inherited_unfinished_paren
     )
     .await
     .unwrap();
+    // The inherited trail ends with the parent's queued user input; the standing
+    // status assembly sits above it and no assistant work exists yet.
+    let inherited = child
+        .history()
+        .conversation()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|line| line.message)
+        .collect::<Vec<_>>();
     assert_eq!(
-        child
-            .history()
-            .conversation()
-            .await
-            .unwrap()
-            .last()
-            .unwrap()
-            .message
-            .role,
-        parrot_storage::conversation::MessageRole::User
+        inherited
+            .iter()
+            .rev()
+            .find(|message| message.role != parrot_storage::conversation::MessageRole::System)
+            .map(|message| message.role),
+        Some(parrot_storage::conversation::MessageRole::User)
+    );
+    assert!(
+        !inherited
+            .iter()
+            .any(|message| message.role == parrot_storage::conversation::MessageRole::Assistant)
     );
     let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
     bounded(hosted.close()).await.unwrap();
@@ -1792,12 +1803,17 @@ async fn json_identity_lineage_and_status_survive_retirement_name_reuse_and_root
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!((version, tables), (9, 5));
-    let revisions = database.prepare(
-        "SELECT mode_status_revision FROM conversation_item WHERE agent_session=?1 AND mode_status_revision IS NOT NULL ORDER BY mode_status_revision",
-    ).unwrap().query_map([&root_id], |row| row.get::<_, i64>(0)).unwrap()
+    assert_eq!((version, tables), (10, 5));
+    let records = database.prepare(
+        "SELECT status_slots FROM conversation_item WHERE agent_session=?1 AND status_slots IS NOT NULL ORDER BY sequence",
+    ).unwrap().query_map([&root_id], |row| row.get::<_, String>(0)).unwrap()
         .collect::<Result<Vec<_>, _>>().unwrap();
-    assert_eq!(revisions, vec![0, 1]);
+    assert_eq!(records.len(), 2);
+    let standing: serde_json::Value = serde_json::from_str(records[1].as_str()).unwrap();
+    assert!(
+        standing.as_object().unwrap().contains_key("profile:build"),
+        "the newer assembly stands for the switched build profile: {standing}"
+    );
     println!("SCHEMA13_SESSION_ROOT={}", selected.path().display());
 }
 

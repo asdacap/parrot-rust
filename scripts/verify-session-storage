@@ -44,15 +44,15 @@ def main():
             )
         }
         require(
-            version == 9 and tables == TABLES,
-            f"Expected format 9 and 5 application tables. Observed format {version} "
+            version == 10 and tables == TABLES,
+            f"Expected format 10 and 5 application tables. Observed format {version} "
             f"and {len(tables)} tables {sorted(tables)}.",
         )
         require(database.execute("PRAGMA integrity_check").fetchall() == [("ok",)], "Database integrity failed.")
         require(not database.execute("PRAGMA foreign_key_check").fetchall(), "Foreign keys are inconsistent.")
-        consumed = database.execute(
-            "SELECT agent_session, mode_status_revision FROM conversation_item "
-            "WHERE mode_status_revision IS NOT NULL ORDER BY sequence"
+        assemblies = database.execute(
+            "SELECT agent_session, status_slots FROM conversation_item "
+            "WHERE status_slots IS NOT NULL ORDER BY sequence"
         ).fetchall()
 
     metadata = json.loads((root / "meta.json").read_text(encoding="utf-8"))
@@ -93,10 +93,20 @@ def main():
     if args.reused_path is not None:
         require(len(occupants.get(args.reused_path, [])) >= 2, "The requested reused directory has fewer than two occupants.")
 
-    require(len(consumed) == len(set(consumed)), "A mode revision was consumed twice.")
-    require(all(agent == root_id and 0 <= value <= revision for agent, value in consumed), "A conversation checkpoint disagrees with canonical mode state.")
+    standing = {}
+    for agent, record in assemblies:
+        slots = json.loads(record)
+        require(isinstance(slots, dict) and bool(slots), "A status assembly record is empty or not an object.")
+        require(
+            all(isinstance(key, str) and bool(key) and isinstance(value, str) and bool(value) for key, value in slots.items()),
+            "A status assembly record slot is not a nonblank key-to-hash mapping.",
+        )
+        standing = slots
     if args.expect_current_status:
-        require((root_id, revision) in consumed, "The current mode status has not been consumed.")
+        require(
+            standing.get(f"profile:{mode}") is not None,
+            "The newest status assembly does not stand for the current mode.",
+        )
     print(json.dumps({
         "format_version": version,
         "application_tables": sorted(tables),
@@ -104,7 +114,7 @@ def main():
         "mode": mode,
         "mode_revision": revision,
         "directory_occupants": occupants,
-        "consumed_mode_revisions": consumed,
+        "standing_status_slots": standing,
     }, indent=2))
 
 

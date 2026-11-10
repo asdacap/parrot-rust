@@ -5,9 +5,10 @@ use parrot_core::{
     ConversationPersistence, ConversationReceipt, ConversationTurn, Delivery, DerivedContext,
     Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
     PendingMessage, PromotedInput, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
-    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolImage,
-    ToolResult, ToolStatus, Tools, TurnOptions,
+    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, StatusKey,
+    StatusOffer, StatusOffering, StatusStanding, TokenCalibration, ToolCall, ToolCallReceipt,
+    ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolImage, ToolResult, ToolStatus, Tools,
+    TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions,
 };
@@ -443,6 +444,10 @@ struct MemoryState {
     summary_provider: compaction_support::Provider,
     recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
     fitted_statuses: Vec<String>,
+    status_offering: StatusOffering,
+    next_status_offering: Option<StatusOffering>,
+    status_standing: StatusStanding,
+    status_steered: Vec<(String, StatusStanding)>,
     fail_at: Option<&'static str>,
     budget: TurnBudget,
     budget_read_error: Option<Error>,
@@ -576,6 +581,10 @@ impl MemoryState {
             summary_provider: compaction_support::Provider::new([]),
             recorded_compactions: Vec::new(),
             fitted_statuses: Vec::new(),
+            status_offering: StatusOffering::default(),
+            next_status_offering: None,
+            status_standing: StatusStanding::default(),
+            status_steered: Vec::new(),
             fail_at: None,
             budget: TurnBudget::new(false),
             budget_read_error: None,
@@ -732,6 +741,22 @@ impl States for MemoryState {
     fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async { Ok(false) })
     }
+    fn read_status_offering(&self) -> BoxFuture<'_, Result<StatusOffering, Error>> {
+        Box::pin(async { Ok(self.status_offering.clone()) })
+    }
+    fn read_standing_statuses(&self) -> BoxFuture<'_, Result<StatusStanding, Error>> {
+        Box::pin(async { Ok(self.status_standing.clone()) })
+    }
+    fn read_next_input_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async move {
+            Ok(self
+                .pending_messages
+                .front()
+                .map(|(_, message)| message.clone())
+                .into_iter()
+                .collect())
+        })
+    }
     fn apply_conversation_addition(
         &mut self,
         addition: ConversationAddition,
@@ -758,6 +783,9 @@ impl States for MemoryState {
                     ConversationEvent::Retry { reason, attempt } => {
                         self.step("retry")?;
                         self.retries.push((reason.clone(), *attempt));
+                        if let Some(next) = self.next_status_offering.take() {
+                            self.status_offering = next;
+                        }
                     }
                     ConversationEvent::Message if *origin == ConversationOrigin::Model => {
                         self.step("record_tools")?;
@@ -779,11 +807,11 @@ impl States for MemoryState {
                 ConversationPersistence::ToolResult { result, .. } => {
                     self.step("record_results")?;
                     self.applied_results.push(result.clone());
+                    if let Some(next) = self.next_status_offering.take() {
+                        self.status_offering = next;
+                    }
                 }
                 ConversationPersistence::ToolImages { .. } => {}
-                ConversationPersistence::Status { .. } => {
-                    return Err(Error::unsupported("memory status persistence"));
-                }
                 ConversationPersistence::Committed(_) => {}
                 ConversationPersistence::Phase { final_phase, .. } => {
                     if !final_phase {
@@ -809,6 +837,24 @@ impl States for MemoryState {
                         return Ok(ConversationReceipt::default());
                     }
                     self.prompts().checkpoint = Some(checkpoint.clone());
+                }
+                ConversationPersistence::StatusSteering { standing, event } => {
+                    self.step("steer_status")?;
+                    assert!(matches!(
+                        event,
+                        ConversationEvent::Notice { kind, notice }
+                            if kind == "status" && notice == "Status prompt injected"
+                    ));
+                    let content = addition.messages[0]
+                        .contents
+                        .iter()
+                        .map(|part| match part {
+                            Content::Text(text) => text.as_str(),
+                            _ => "",
+                        })
+                        .collect::<String>();
+                    self.status_steered.push((content, standing.clone()));
+                    self.status_standing = standing.clone();
                 }
                 ConversationPersistence::CompletionFeedback(feedback) => {
                     self.step("completion_feedback")?;
@@ -2167,4 +2213,146 @@ fn failed_core_summary_is_recorded_before_propagation_without_retrying_the_turn_
     assert_eq!(state.recorded_compactions, [Err(error)]);
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
+}
+
+fn status_offer(entries: &[(&str, bool, &str)]) -> StatusOffering {
+    entries
+        .iter()
+        .map(|(key, is_auto_update, hash)| {
+            (
+                StatusKey::new(*key),
+                StatusOffer {
+                    hash: (*hash).into(),
+                    text: (*key).into(),
+                    is_auto_update: *is_auto_update,
+                },
+            )
+        })
+        .collect()
+}
+
+fn status_standing(entries: &[(&str, &str)]) -> StatusStanding {
+    entries
+        .iter()
+        .map(|(key, hash)| (StatusKey::new(*key), (*hash).into()))
+        .collect()
+}
+
+#[test]
+fn steering_commits_the_initial_assembly_once_before_the_first_request() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.status_offering = status_offer(&[("selection", true, "h1"), ("time", false, "t1")]);
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [(
+            "fitted status".into(),
+            status_standing(&[("selection", "h1"), ("time", "t1")])
+        )]
+    );
+    let request_messages = state.request().messages.clone();
+    let steered = request_messages
+        .iter()
+        .filter(|message| message.role == Role::System)
+        .map(|message| match &message.contents[0] {
+            Content::Text(text) => text.clone(),
+            _ => String::new(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(steered, ["fitted status".to_string()]);
+    assert!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "steer_status")
+            .count()
+            == 1
+    );
+}
+
+#[test]
+fn unchanged_hashes_never_steer_again_across_turns() {
+    let mut state = MemoryState::new([
+        Reply::final_response("answer"),
+        Reply::final_response("second answer"),
+    ]);
+    state.status_offering = status_offer(&[("selection", true, "h1"), ("time", false, "t1")]);
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    state.enqueue_message(Delivery::Queue, "follow up");
+    assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [(
+            "fitted status".into(),
+            status_standing(&[("selection", "h1"), ("time", "t1")])
+        )]
+    );
+    let steered = state
+        .trace
+        .values()
+        .iter()
+        .filter(|step| *step == "steer_status")
+        .count();
+    assert_eq!(steered, 1);
+}
+
+#[test]
+fn changed_auto_hash_steers_again_at_the_next_safe_point() {
+    let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
+    state.status_offering = status_offer(&[("selection", true, "h1")]);
+    state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h1")])
+            ),
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h2")])
+            ),
+        ]
+    );
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "steer_status")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn changed_auto_hash_steers_at_a_retry_continuation() {
+    let mut state = MemoryState::new([Reply::truncated("cut"), Reply::final_response("answer")]);
+    state.status_offering = status_offer(&[("selection", true, "h1")]);
+    state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(
+        state.status_steered,
+        [
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h1")])
+            ),
+            (
+                "fitted status".into(),
+                status_standing(&[("selection", "h2")])
+            ),
+        ]
+    );
+    assert_eq!(
+        state
+            .trace
+            .values()
+            .iter()
+            .filter(|step| *step == "steer_status")
+            .count(),
+        2
+    );
 }

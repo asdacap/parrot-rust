@@ -217,16 +217,6 @@ impl SessionIndex {
         })
     }
 
-    pub(crate) async fn guard_status(
-        &self,
-        agent: &str,
-        expected: &PendingStatus,
-    ) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>> {
-        let guard = self.shared.mode_gate.clone().lock_owned().await;
-        let state = self.read_session_state()?;
-        Ok((state.root_agent_session_id == agent && state.mode == *expected).then_some(guard))
-    }
-
     fn require_metadata(&self) -> Result<SessionMeta> {
         self.find()?.ok_or_else(|| {
             Error::invalid_data(

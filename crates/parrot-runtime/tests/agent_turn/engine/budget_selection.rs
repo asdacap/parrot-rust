@@ -2,6 +2,44 @@
 //! Registered leaf tools exercise production catalog filtering and execution.
 use super::*;
 
+/// Reproduces the original first-turn initial status injection for these
+/// budget fixtures: one offered static slot steers the assembly once.
+struct InitialStatus(Arc<Trace>);
+impl ContextStatus for InitialStatus {
+    fn observe<'a>(
+        &'a self,
+        _: &'a ContextSnapshot,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<String>> {
+        Box::pin(async move {
+            self.0.push("status");
+            Ok("actual status".into())
+        })
+    }
+    fn slots<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
+        Box::pin(async move {
+            self.0.push("status");
+            Ok([(
+                parrot_core::StatusKey::new("mode"),
+                parrot_core::StatusOffer {
+                    hash: "initial".into(),
+                    text: "actual status".into(),
+                    is_auto_update: false,
+                },
+            )]
+            .into_iter()
+            .collect())
+        })
+    }
+}
+impl TurnStatus<Security> for InitialStatus {
+    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
+        Arc::new(InitialStatus(self.0.clone()))
+    }
+}
 struct BudgetTools {
     inner: Tools,
     definitions: Vec<sessions::Tool>,
@@ -157,7 +195,7 @@ impl BudgetRuntime {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context,
-            status: Arc::new(Status(trace.clone())),
+            status: Arc::new(InitialStatus(trace.clone())),
             completion_sources: vec![],
             templates,
             reminders,

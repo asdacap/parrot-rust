@@ -14,7 +14,7 @@ use crate::{
     active_work::exit_reminders::{ExitReminders, ReminderError},
     compaction::{
         CompactionObserver, ContextController, ContextError, ContextEvents, ContextResult,
-        EpochInput, StatusInjection, provider_message,
+        EpochInput, provider_message,
     },
     event_broker::{BrokerError, EventBroker},
     prompt_context::{SessionPrompt, SystemPrompt},

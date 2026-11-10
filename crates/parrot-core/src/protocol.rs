@@ -234,9 +234,17 @@ pub trait States: Send + Sync {
     fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_final_phase_marker")) })
     }
-    /// Reads current status revisions and the bound profile without choosing insertion.
-    fn read_status_observation(&self) -> BoxFuture<'_, Result<crate::StatusObservation, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_status_observation")) })
+    /// Reads the status slots offered to the core, each with a source-computed
+    /// hash. Defaults to no statuses, which steers nothing.
+    fn read_status_offering(&self) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
+        Box::pin(async { Ok(crate::StatusOffering::default()) })
+    }
+    /// Reads the per-slot hashes recorded by the latest persisted status assembly.
+    /// Defaults to empty standing state, which would steer the initial assembly.
+    /// A states side that never appends will also never offer, so both defaults
+    /// keep steering inert until the adapter opts in.
+    fn read_standing_statuses(&self) -> BoxFuture<'_, Result<crate::StatusStanding, Error>> {
+        Box::pin(async { Ok(crate::StatusStanding::default()) })
     }
     /// Reads materialized pending input without admitting it to the conversation.
     fn read_next_input_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {

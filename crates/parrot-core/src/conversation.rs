@@ -72,8 +72,10 @@ pub enum ConversationPersistence {
         checkpoint: ContextReminderCheckpoint,
         event: ConversationEvent,
     },
-    Status {
-        checkpoint: crate::StatusCheckpoint,
+    /// Persists one steered status assembly. `standing` records the per-slot
+    /// hashes the assembly stands for, so the next safe point can diff against it.
+    StatusSteering {
+        standing: crate::StatusStanding,
         event: ConversationEvent,
     },
     CompletionFeedback(CompletionFeedback),

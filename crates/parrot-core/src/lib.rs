@@ -139,6 +139,7 @@ async fn execute_turn(
         } else {
             &catalog.normal
         };
+        crate::steer_status(states, provider, definitions, cancellation).await?;
         let request = context::prepare_request(
             states,
             provider,

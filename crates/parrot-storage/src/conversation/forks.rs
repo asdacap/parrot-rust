@@ -401,7 +401,7 @@ fn initialize_fork(
         for item in &group.items {
             let sequence = projection::project(tx, destination, &item.message, &clock())?.sequence;
             tx.execute(
-                "UPDATE conversation_item SET final_phase = ?1, tool_result_name = (SELECT tool_result_name FROM conversation_item WHERE sequence = ?2), tool_result_status = (SELECT tool_result_status FROM conversation_item WHERE sequence = ?2) WHERE sequence = ?3;",
+                "UPDATE conversation_item SET final_phase = ?1, tool_result_name = (SELECT tool_result_name FROM conversation_item WHERE sequence = ?2), tool_result_status = (SELECT tool_result_status FROM conversation_item WHERE sequence = ?2), status_slots = (SELECT status_slots FROM conversation_item WHERE sequence = ?2) WHERE sequence = ?3;",
                 params![item.final_phase, item.sequence, sequence],
             )?;
             sequences.insert(item.sequence, sequence);

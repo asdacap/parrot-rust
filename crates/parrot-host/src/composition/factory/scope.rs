@@ -76,7 +76,7 @@ use parrot_runtime::{
     },
     compaction::{
         CompactionPlanner, CompactionSettings, Compactor, ContextController, ContextError,
-        ContextResult, ContextStatus,
+        ContextResult, ContextStatus, StatusOffering,
     },
     interactions::{AgentAskIdentity, AgentAsks},
     plan_mode::{ModeResult, UserSessionModes},
@@ -828,6 +828,13 @@ impl ContextStatus for ScopedModeStatus {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<String>> {
         Box::pin(async move { self.context()?.observe(context, cancellation).await })
+    }
+
+    fn slots<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<StatusOffering>> {
+        Box::pin(async move { self.context()?.slots(cancellation).await })
     }
 }
 

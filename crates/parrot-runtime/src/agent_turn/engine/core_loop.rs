@@ -189,14 +189,8 @@ where
                 adapt_operation(async {
                     let mut guard = backend.state.lock().await;
                     let state = &mut *guard;
-                    let events = ContextEmitter::new(
-                        &backend.history,
-                        backend.publisher.as_ref(),
-                        &backend.broker,
-                        backend.event_id.as_ref(),
-                    );
                     backend.skills.end_turn().await;
-                    let mut selection = backend.selection.capture()?;
+                    let selection = backend.selection.capture()?;
                     backend.sessions.begin_turn().await?;
                     let mut started = backend.event();
                     let mut payload = protocol::TurnStarted {
@@ -227,33 +221,7 @@ where
                         .context
                         .ensure_epoch(&backend.prompt, cancellation)
                         .await?;
-                    loop {
-                        let snapshot = backend.snapshot(&selection)?;
-                        let definitions = snapshot.definitions().to_vec();
-                        let status = backend.status.bind(&selection);
-                        let outcome = state
-                            .context
-                            .inject_status(
-                                EpochInput {
-                                    selection: &selection.model,
-                                    tools: &definitions,
-                                    conversation: &mut state.conversation,
-                                    prompt: &backend.prompt,
-                                    sessions: &backend.sessions,
-                                    status: status.as_ref(),
-                                    events: &events,
-                                },
-                                backend.identity.depth,
-                                &selection.profile.id,
-                                cancellation,
-                            )
-                            .await?;
-                        if matches!(outcome, StatusInjection::Complete) {
-                            break;
-                        }
-                        selection = backend.selection.capture()?;
-                        tokio::task::yield_now().await;
-                    }
+                    state.request_status = Some(backend.status.bind(&selection));
                     backend.skills.begin_turn(cancellation).await?;
                     binding.bind(selection);
                     Ok(())

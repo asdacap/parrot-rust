@@ -1,7 +1,7 @@
 # Session storage ownership
 
 A session keeps its root identity, mode, preferences, and permanent agent lineage
-in `meta.json`. SQLite database format 9 stores conversation history, including
+in `meta.json`. SQLite database format 10 stores conversation history, including
 tool calls and results, context reminders, named checkpoints, compaction summaries,
 and image metadata. It has 5 application tables. Earlier database formats are not
 automatically converted.
@@ -73,20 +73,20 @@ A restored child can have usage before the root has any execution facts. Such
 sessions still recover their root ancestry from `meta.json`, without inventing a
 root execution event or usage. Missing non-root ancestors remain errors.
 
-## Conversation-owned status consumption
+## Append-only status assemblies
 
-A status message consumes one mode revision for one agent. The message and its
-consumed revision commit together, and ordinary messages and fork copies do not
-consume revisions.
+Each status steering appends one conversation system row that carries a JSON
+record of the slot hashes the assembly stands for. Assemblies never rewrite or
+drop older rows, so the provider-visible trail keeps every superseded version.
+An agent restart compares each offered slot hash against the newest record and
+appends only genuine changes, without any in-memory pending flags.
 
-Status consumption requires the expected mode and revision to remain current.
-A concurrent mode change cannot take effect during that commit. Dropping the
-caller's observation does not weaken this ordering.
-
-A failed conversation write leaves the revision pending. A committed consumption
-survives reopening and compaction without a second status message for that revision.
-Refreshing the derived `history.jsonl` happens after commit and does not determine
-whether consumption succeeded.
+Fork copies carry the assembly records they inherit, so a forked session's
+standing trail matches its visible history. A committed record survives
+reopening and compaction without a duplicate assembly for unchanged hashes.
+The durable mode revision in `meta.json` remains metadata only; it does not
+gate status writes. Refreshing the derived `history.jsonl` happens after commit
+and does not determine whether the append succeeded.
 
 JSON metadata and SQLite do not form one transaction. A mode update can persist
 before a later live-selection or recovery-snapshot update fails. Resume uses the
