@@ -321,11 +321,19 @@ async fn retained_wait_wakes_from_actual_task_notifier_and_oversized_publication
         }
     })
     .await;
-    let path = PathBuf::from(
-        reference
-            .trim_start_matches("Tool output exceeded 64 KiB and was saved to ")
-            .trim_end_matches('.'),
-    );
+    let relative = reference
+        .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
+        .expect("overflow notice must use the agent directory variable")
+        .strip_suffix('.')
+        .unwrap();
+    let names: Vec<_> = root
+        .identity()
+        .name_path
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let agent_directory = user.resources.agent_scratch(&names).unwrap();
+    let path = agent_directory.root().join(relative);
     assert!(path.starts_with(user.resources.root()));
     let filename = path.file_name().unwrap().to_string_lossy();
     assert!(filename.ends_with("-arse.dat"), "{filename}");
@@ -422,6 +430,7 @@ async fn retained_wait_wakes_from_real_child_completion_and_cleans_child_registr
 pub(super) struct NaturalExecution {
     finished: AtomicBool,
     changed: tokio::sync::Notify,
+    blob_path: Option<PathBuf>,
 }
 impl NaturalExecution {
     pub(super) fn finish(&self) {
@@ -445,7 +454,7 @@ impl NaturalExecution {
             elapsed_milliseconds: 1,
             stdout: "natural synthetic output".into(),
             stderr: String::new(),
-            blob_path: None,
+            blob_path: self.blob_path.clone(),
         }
     }
 }
@@ -498,8 +507,15 @@ pub(super) async fn start_process(
     root: &Arc<Scope<Security>>,
     name: &str,
 ) -> Arc<NaturalExecution> {
+    start_execution(root, name, Arc::new(NaturalExecution::default())).await
+}
+
+async fn start_execution(
+    root: &Arc<Scope<Security>>,
+    name: &str,
+    execution: Arc<NaturalExecution>,
+) -> Arc<NaturalExecution> {
     let owner = root.get_service::<ShellProcessOwner>().unwrap();
-    let execution = Arc::new(NaturalExecution::default());
     let launched = execution.clone();
     owner
         .start(
@@ -587,6 +603,59 @@ async fn retained_wait_uses_actual_process_completion_and_live_scoped_status() {
     assert_eq!(completion.source, InputSource::INPUT_SOURCE_PROCESS.into());
     bounded(hosted.close()).await.unwrap();
     assert!(source.active().is_empty());
+}
+
+#[tokio::test]
+async fn background_process_completion_uses_agent_variable_for_saved_output() {
+    let fixture = fixture().await;
+    let hosted = fixture.open().await.unwrap();
+    let root = fixture.root();
+    let user = fixture.user();
+    let names: Vec<_> = root
+        .identity()
+        .name_path
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let scratch = user.resources.agent_scratch(&names).unwrap();
+    let path = scratch.blob_directory().join("integrated-checks.dat");
+    std::fs::create_dir_all(scratch.blob_directory()).unwrap();
+    std::fs::write(&path, "saved process output").unwrap();
+    let execution = start_execution(
+        &root,
+        "integrated-checks",
+        Arc::new(NaturalExecution {
+            blob_path: Some(path.clone()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    execution.finish();
+    let completion = bounded(async {
+        loop {
+            let events = user.lease.events.replay().await.unwrap();
+            if let Some(completion) = events.iter().find(|event| {
+                event.has_input_admitted()
+                    && event
+                        .input_admitted()
+                        .content
+                        .starts_with("Shell process 'integrated-checks' completed.\n")
+            }) {
+                break completion.input_admitted().content.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert_eq!(
+        completion,
+        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 0.00s\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/integrated-checks.dat."
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "saved process output"
+    );
+    bounded(hosted.close()).await.unwrap();
 }
 
 #[tokio::test]

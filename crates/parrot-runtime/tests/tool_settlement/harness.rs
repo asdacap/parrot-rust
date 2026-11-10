@@ -230,7 +230,11 @@ impl Harness {
                 "scratch",
                 Arc::new(Names),
             )
-            .unwrap(),
+            .unwrap()
+            .with_path_variables(BTreeMap::from([(
+                "AGENT_DIR".into(),
+                fixture.path.display().to_string(),
+            )])),
         );
         let tools = Arc::new(
             ToolSettlement::new(ToolSettlementConfig {

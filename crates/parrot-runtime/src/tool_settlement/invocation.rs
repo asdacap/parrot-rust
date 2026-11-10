@@ -169,6 +169,7 @@ impl<S: AccessSnapshot + 'static> ToolSettlement<S> {
                                 ))
                             })?;
                 }
+                text = self.config.output_blobs.substitute_process_notice(&text);
                 let yielded = result.yielded_process.is_some();
                 let images = result
                     .image_artifacts

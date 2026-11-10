@@ -47,6 +47,75 @@ fn tool_output_budget_counts_utf8_bytes_and_collision_link_text_is_exact() {
 }
 
 #[test]
+fn configured_tool_output_notices_use_the_longest_path_variable_and_preserve_bytes() {
+    let root_dir = TempDir::new("tool-output-variables");
+    let root = root_dir.root();
+    let store =
+        ToolOutputBlobStore::for_session(&root, "agent/blobs", names(&["bold-river-arse.dat"]))
+            .unwrap()
+            .with_path_variables(std::collections::BTreeMap::from([
+                ("WORKDIR".into(), root.path().display().to_string()),
+                (
+                    "AGENT_DIR".into(),
+                    root.path().join("agent").display().to_string(),
+                ),
+            ]));
+    let text = "original output 😀";
+    assert_eq!(
+        store.persist(text, &NeverCancelled).unwrap(),
+        "Tool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/bold-river-arse.dat."
+    );
+    assert_eq!(
+        std::fs::read_to_string(store.directory().join("bold-river-arse.dat")).unwrap(),
+        text
+    );
+}
+
+#[test]
+fn process_notices_substitute_paths_without_rewriting_inline_output_or_sibling_paths() {
+    let root_dir = TempDir::new("process-notice-variables");
+    let store = ToolOutputBlobStore::for_session(&root_dir.root(), "blobs", names(&[]))
+        .unwrap()
+        .with_path_variables(std::collections::BTreeMap::from([
+            ("AGENT_DIR".into(), "/session/main".into()),
+            ("AGENT_SCRATCH_DIR".into(), "/session/main/scratch".into()),
+        ]));
+    for header in ["", "Shell process 'integrated-checks' completed.\n"] {
+        for (path, expected) in [
+            (
+                "/session/main/blobs/output.dat",
+                "$AGENT_DIR/blobs/output.dat",
+            ),
+            (
+                "/session/main/scratch/output.dat",
+                "$AGENT_SCRATCH_DIR/output.dat",
+            ),
+            (
+                "/session/main-worker/blobs/output.dat",
+                "/session/main-worker/blobs/output.dat",
+            ),
+            ("$AGENT_DIR/blobs/output.dat", "$AGENT_DIR/blobs/output.dat"),
+        ] {
+            let completion = format!("{header}Process exited with code 0 after 83.76s");
+            assert_eq!(
+                store.substitute_process_notice(&format!(
+                    "{completion}\nTool output exceeded 64 KiB and was saved to {path}."
+                )),
+                format!("{completion}\nTool output exceeded 64 KiB and was saved to {expected}.")
+            );
+        }
+    }
+    for text in [
+        "ordinary output /session/main/blobs/output.dat",
+        "Tool output exceeded 64 KiB and was saved to /session/main/blobs/output.dat.",
+        "Process exited with code 0 after 0.00s\n[stdout]\nTool output exceeded 64 KiB and was saved to /session/main/blobs/output.dat.",
+        "Process exited with code 0 after 0.00s\n[stderr]\n/session/main/blobs/output.dat",
+    ] {
+        assert_eq!(store.substitute_process_notice(text), text);
+    }
+}
+
+#[test]
 fn process_result_format_uses_exact_inline_or_blob_link_text() {
     assert_eq!(
         format_process_output(7, 1234, "out", "err", None),

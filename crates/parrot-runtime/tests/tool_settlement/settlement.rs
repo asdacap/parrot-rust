@@ -476,16 +476,43 @@ async fn utf8_output_spills_only_above_64kib_and_preserves_actual_blob_bytes() {
         if spilled {
             assert!(content.starts_with("Tool output exceeded 64 KiB and was saved to "));
             let path = content
-                .strip_prefix("Tool output exceeded 64 KiB and was saved to ")
-                .unwrap()
+                .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
+                .expect("overflow notice must use the agent directory variable")
                 .strip_suffix('.')
                 .unwrap();
-            assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+            assert_eq!(
+                std::fs::read_to_string(fixture.path.join(path)).unwrap(),
+                text
+            );
             assert!(!fixture.jsonl().contains(&text));
         } else {
             assert_eq!(terminal.content(), text);
         }
     }
+}
+
+#[tokio::test]
+async fn process_spill_notices_use_agent_variables_in_settled_results() {
+    let fixture = Fixture::new();
+    let path = fixture.path.join("scratch/native-output.dat");
+    std::fs::write(&path, "saved native process output").unwrap();
+    let mut tool = RecordingTool::new(&fixture, "process", ParallelSafety::Sequential);
+    tool.output = ToolOutput::text(format!(
+        "Process exited with code 0 after 83.76s\nTool output exceeded 64 KiB and was saved to {}.",
+        path.display()
+    ));
+    fixture.batch(vec![call("process", "process")]).await;
+    let mut harness = Harness::new(&fixture, vec![Arc::new(tool).handle()]).await;
+    harness.run(&fixture, &NeverCancelled).await.unwrap();
+    let terminal = terminals(&fixture, &["process"]).await.remove(0);
+    assert_eq!(
+        terminal.content(),
+        "Process exited with code 0 after 83.76s\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/scratch/native-output.dat."
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "saved native process output"
+    );
 }
 
 #[tokio::test]
