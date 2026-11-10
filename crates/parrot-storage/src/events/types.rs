@@ -1,29 +1,18 @@
 //! Nonserialized source repository carriers; protobuf events use generated types.
 use parrot_domain::protocol::messages::parrot::{Delivery, Event};
+use parrot_domain::values::image_artifact::ImageArtifactMetadata;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConversationPart {
     Text(String),
-    ImageArtifact {
-        artifact_id: String,
-        media_type: String,
-        display_name: String,
-    },
+    ImageArtifact { metadata: ImageArtifactMetadata },
 }
 impl ConversationPart {
     pub fn text(value: impl Into<String>) -> Self {
         Self::Text(value.into())
     }
-    pub fn image(
-        artifact_id: impl Into<String>,
-        media_type: impl Into<String>,
-        display_name: impl Into<String>,
-    ) -> Self {
-        Self::ImageArtifact {
-            artifact_id: artifact_id.into(),
-            media_type: media_type.into(),
-            display_name: display_name.into(),
-        }
+    pub fn image(metadata: ImageArtifactMetadata) -> Self {
+        Self::ImageArtifact { metadata }
     }
 }
 pub fn content(parts: &[ConversationPart]) -> String {

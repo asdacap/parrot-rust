@@ -471,10 +471,8 @@ impl ParrotService {
         let Some(wire::attachment_upload_frame::Payload::Header(header)) = first.payload else {
             return Err(invalid("the first upload frame must be a header"));
         };
-        if header.user_session_id.trim().is_empty() || header.upload_id.trim().is_empty() {
-            return Err(invalid(
-                "an upload header needs a user session id and upload id",
-            ));
+        if header.user_session_id.trim().is_empty() {
+            return Err(invalid("an upload header needs a user session id"));
         }
         let session = self.sessions.find(&header.user_session_id)?;
         let mut content = Vec::new();
@@ -515,7 +513,6 @@ impl ParrotService {
             .persist_image(
                 ImageUpload {
                     content,
-                    upload_id: header.upload_id,
                     display_name: description.display_name,
                     media_type: description.media_type,
                     byte_length: description.byte_length,
@@ -837,19 +834,23 @@ pub fn map_question(
     }
 }
 pub fn validate_upload_description(description: &wire::AttachmentUploadDescription) -> Result<()> {
-    if description.display_name.trim().is_empty()
-        || Path::new(&description.display_name)
-            .file_name()
-            .and_then(|name| name.to_str())
-            != Some(&description.display_name)
-        || description.display_name.chars().any(char::is_control)
-    {
-        return Err(invalid("an upload display name must be a basename"));
-    }
+    validate_image_display_name(&description.display_name)?;
     if description.media_type.trim().is_empty() || description.byte_length <= 0 {
         return Err(invalid(
             "an upload description needs a media type and positive byte length",
         ));
+    }
+    Ok(())
+}
+fn validate_image_display_name(display_name: &str) -> Result<()> {
+    if display_name.trim().is_empty()
+        || Path::new(display_name)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(display_name)
+        || display_name.chars().any(char::is_control)
+    {
+        return Err(invalid("an upload display name must be a basename"));
     }
     Ok(())
 }
@@ -866,11 +867,15 @@ pub async fn resolve_parts(
                 resolved.push(ConversationPart::text(text))
             }
             Some(wire::message_content_part::Content::ArtifactId(id)) => {
-                let artifact = session.resolve_image(id).await?.ok_or_else(|| {
-                    invalid(format!(
-                        "image artifact {id} does not belong to this session"
-                    ))
-                })?;
+                validate_image_display_name(&part.display_name)?;
+                let artifact = session
+                    .resolve_image(id, &part.display_name)
+                    .await?
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "image artifact {id} does not belong to this session"
+                        ))
+                    })?;
                 images += 1;
                 bytes = bytes.saturating_add(artifact.byte_length);
                 if images > artifacts::ImageLimits::SOURCE.maximum_images
@@ -880,11 +885,7 @@ pub async fn resolve_parts(
                         "the prompt image batch exceeds the supported limits",
                     ));
                 }
-                resolved.push(ConversationPart::image(
-                    artifact.artifact_id,
-                    artifact.media_type,
-                    artifact.display_name,
-                ));
+                resolved.push(ConversationPart::image(artifact));
             }
             _ => return Err(invalid("every prompt part needs text or an artifact id")),
         }

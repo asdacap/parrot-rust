@@ -1,6 +1,7 @@
 //! Agent-owned recovery state, separate from conversation and event history.
 
 use super::agent_tasks::{Task, TaskCallIdentity};
+use super::image_artifact::ImageArtifactMetadata;
 use serde::{Deserialize, Serialize};
 
 pub const AGENT_STATE_VERSION: u64 = 1;
@@ -199,14 +200,8 @@ pub struct TaskResponseReference {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExecutionInputPart {
-    Text {
-        text: String,
-    },
-    ImageArtifact {
-        artifact_id: String,
-        media_type: String,
-        display_name: String,
-    },
+    Text { text: String },
+    ImageArtifact { metadata: ImageArtifactMetadata },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

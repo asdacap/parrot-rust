@@ -7,7 +7,6 @@ use parrot_domain::{
         },
     },
     protocol::messages::parrot as wire,
-    values::identifiers::Identifier,
 };
 use parrot_host::web::router::WebClient;
 use parrot_runtime::plan_mode::ModeRegistry;
@@ -81,7 +80,6 @@ pub async fn send<R: AsyncRead + Unpin + Send>(
     cancellation
         .check()
         .map_err(|_| AttachmentError::Cancelled)?;
-    let upload_id = Identifier::event_id()?;
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let produce = async {
         let send_frame = |payload| {
@@ -93,7 +91,6 @@ pub async fn send<R: AsyncRead + Unpin + Send>(
         send_frame(wire::attachment_upload_frame::Payload::Header(
             wire::AttachmentUploadHeader {
                 user_session_id: user_session_id.into(),
-                upload_id,
                 ..Default::default()
             },
         ))
@@ -203,10 +200,11 @@ where
             ..Default::default()
         };
         for intent in parse(prompt) {
-            let content = match intent {
-                PromptAttachmentIntent::Text(text) => {
-                    wire::message_content_part::Content::Text(text)
-                }
+            let (content, display_name) = match intent {
+                PromptAttachmentIntent::Text(text) => (
+                    wire::message_content_part::Content::Text(text),
+                    String::new(),
+                ),
                 PromptAttachmentIntent::Path(path) => {
                     match self
                         .upload(
@@ -218,9 +216,10 @@ where
                         )
                         .await
                     {
-                        Ok(artifact) => {
-                            wire::message_content_part::Content::ArtifactId(artifact.artifact_id)
-                        }
+                        Ok(artifact) => (
+                            wire::message_content_part::Content::ArtifactId(artifact.artifact_id),
+                            artifact.display_name,
+                        ),
                         Err(failure) if failure.caught_by_prepare() => {
                             cancellation
                                 .check()
@@ -234,6 +233,7 @@ where
             };
             request.parts.push(wire::MessageContentPart {
                 content: Some(content),
+                display_name,
                 ..Default::default()
             });
         }

@@ -1,13 +1,14 @@
 # Session storage ownership
 
 The user-facing change moves root identity, mode state, and permanent agent
-lineage from SQLite into JSON. Database format 7 combines that change with
+lineage from SQLite into JSON. Database format 9 combines that change with
 conversation-owned context reminders, tool calls, tool results, named history
-checkpoints, and compaction summaries. It has 7 application tables instead of
-format 1's 15. The removed tables are `session_state`, `agent_lineage`,
+checkpoints, compaction summaries, and image metadata. It has 5 application tables
+instead of format 1's 15. The removed tables are `session_state`, `agent_lineage`,
 `context_reminder`, `conversation_tool_call`, `tool_execution_terminal`,
-`tool_execution_result_part`, `history_checkpoint`, and `agent_history`. There are
-no replacement tables or automatic conversions.
+`tool_execution_result_part`, `history_checkpoint`, `agent_history`,
+`image_artifact`, and `image_upload`. There are no replacement tables or automatic
+conversions.
 
 Named checkpoints come from `set_checkpoint` tool-call parts with valid title
 arguments and a completed successful result. Forking and compaction derive the
@@ -20,6 +21,35 @@ Each summary has a coverage watermark that identifies the last conversation item
 it covers. The watermark is separate from the position where the summary is stored.
 Usage history anchors use the conversation sequence, and `history.jsonl` remains a
 derived file.
+
+## Image metadata belongs to its part
+
+Each image part in `input_part` or `conversation_part` owns the inspected media
+type, byte length, dimensions, frame count, aggregate pixels, display name, and
+origin. Promotion, history forks, JSON history, and execution recovery preserve
+that metadata. Materializing conversation history uses the part's metadata and
+its image file, without a separate metadata lookup.
+
+The selected session's `artifacts` directory stores image bytes under their
+lowercase SHA-256 hash, without a filename extension. Identical bytes share one
+file even when multiple parts carry their metadata. Message admission inspects
+the local file and verifies its hash and image limits before constructing a part.
+
+Uploads have no separate identity or database row. A message image reference
+carries its content hash and display name. Admission inspects the selected
+session's file and assigns the upload origin. It does not query a registry or
+trust client-supplied dimensions, media type, or length. Upload responses and tool
+reads retain each reference's own display name and origin. Identical bytes can
+therefore appear under different names without duplicating the image file.
+
+`AttachmentUploadHeader` reserves the retired upload-ID field and tag. Repeated
+uploads deduplicate by content hash, without upload-ID conflict handling or a
+shared first-label policy. The unrelated S3 provider configuration and credential
+name `image_upload` remain unchanged.
+
+Session opening collects expired image files only when neither part table refers
+to them. File modification time supplies the age, including completed uploads
+that were never attached to a message.
 
 ## One metadata owner
 
@@ -105,7 +135,7 @@ measured performance improvement.
 
 ## Format boundary and inspection
 
-Formats 1 through 6, populated unversioned databases, and unknown formats use the
+Formats 1 through 8, populated unversioned databases, and unknown formats use the
 existing typed refusal path. Opening does not convert, reset, or delete them.
 Current and legacy filesystem roots use the same check. `parrot chat --new-session`
 selects a separate fresh session.

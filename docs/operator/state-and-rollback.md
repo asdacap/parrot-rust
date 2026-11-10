@@ -179,7 +179,7 @@ the unresolved production filesystem/security capability.
 
 ## Database formats and fresh startup
 
-New sessions use Parrot database format version `7` in SQLite, with 7 application
+New sessions use Parrot database format version `9` in SQLite, with 5 application
 tables. Root identity, mode state, and permanent agent lineage live in `meta.json`.
 Tool calls are stored as `tool_call` rows in `conversation_part`, alongside text
 and image parts. Named history checkpoints are derived from valid `set_checkpoint`
@@ -189,7 +189,7 @@ on the same record. Compaction summaries are typed conversation records, not
 ordinary model messages. Each summary has a coverage watermark separate from its
 insertion position. Usage history anchors use the conversation sequence, and
 `history.jsonl` remains a derived file. SQLite's internal tables are not part of
-the table count. Versions `1` through `6`, existing nonempty unversioned databases,
+the table count. Versions `1` through `8`, existing nonempty unversioned databases,
 and unknown format versions are unsupported. The same format check applies in
 both current and legacy filesystem roots.
 
@@ -221,6 +221,13 @@ part references retain their images. Tool results and their execution status bel
 to conversation records. Their text and image references are stored in conversation
 parts, not separate execution-result tables.
 
+Image parts own their inspected metadata in `input_part` and `conversation_part`.
+Image files are named by their SHA-256 hash in the selected session's `artifacts`
+directory. Uploads have no separate database identity. Message image references
+carry their own display names, while admission inspects local bytes for content
+metadata. Repeated bytes share one file without sharing reference labels. Session
+opening removes expired files only when neither part table references them. See [image metadata ownership](../session-storage.md#image-metadata-belongs-to-its-part).
+
 ## Session identity metadata
 
 The selected session's `meta.json` owns the stable root agent ID and name, current
@@ -238,14 +245,14 @@ A failed message projection leaves status pending. Reopening does not insert a
 second status for a consumed revision. Metadata replacement is not a transaction
 with SQLite or the recovery snapshots.
 
-To inspect the actual artifacts of a closed format-7 session, run from the source
+To inspect the actual artifacts of a closed format-9 session, run from the source
 checkout inside the development shell:
 
 ```sh
 python3 scripts/verify-session-storage /absolute/path/to/session
 ```
 
-The read-only check verifies the database format, all 7 application table names,
+The read-only check verifies the database format, all 5 application table names,
 JSON identity and lineage, and consumed status revisions.
 Add `--reused-path main/worker` to require multiple historical occupants of that
 name-based directory.
@@ -324,7 +331,7 @@ the local production-creation limitations noted above.
   service to restored agents. Old queue files remain untouched and unused;
   see [File-based work queues](#file-based-work-queues).
 
-Resuming a format-7 session requires its root snapshot. A missing root snapshot
+Resuming a format-9 session requires its root snapshot. A missing root snapshot
 fails opening instead of using root-only legacy recovery. An interrupted initial
 creation can leave canonical identity metadata without a complete recovery
 snapshot. Preserve that session and start a separate session explicitly rather

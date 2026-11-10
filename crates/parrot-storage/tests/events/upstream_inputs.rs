@@ -195,9 +195,10 @@ async fn structured_parts_and_idempotent_retry() {
     let repo = repository(&fixture);
     let parts = vec![
         ConversationPart::text("before"),
-        ConversationPart::image("artifact-1", "image/png", "pixel.png"),
+        super::Fixture::image("artifact-1", "image/png", "pixel.png"),
         ConversationPart::text("after"),
     ];
+    let expected_parts = parts.clone();
     let admitted = admit_parts(
         &repo,
         SESSION,
@@ -226,7 +227,9 @@ async fn structured_parts_and_idempotent_retry() {
     assert_eq!(retried.input.id, admitted.input.id);
     // source-assertion-line: 86
     assert_eq!(promote(&repo, Delivery::DELIVERY_STEER).await, 1);
+    assert_eq!(retried.input.parts, expected_parts);
     let conversation = single(conversation(&repo).await);
+    assert_eq!(conversation.parts, expected_parts);
     // source-assertion-line: 89
     assert_eq!(conversation.origin, ConversationOrigin::UserInput);
     // source-assertion-line: 90
@@ -244,20 +247,15 @@ async fn structured_parts_and_idempotent_retry() {
     );
     // source-assertion-line: 92
     assert!(matches!(&conversation.parts[0], ConversationPart::Text(text) if text == "before"));
-    let ConversationPart::ImageArtifact {
-        artifact_id,
-        media_type,
-        display_name,
-    } = &conversation.parts[1]
-    else {
+    let ConversationPart::ImageArtifact { metadata } = &conversation.parts[1] else {
         panic!("source image part kind");
     };
     // source-assertion-line: 93
-    assert_eq!(artifact_id, "artifact-1");
+    assert_eq!(metadata.artifact_id, "artifact-1");
     // source-assertion-line: 94
-    assert_eq!(media_type, "image/png");
+    assert_eq!(metadata.media_type, "image/png");
     // source-assertion-line: 95
-    assert_eq!(display_name, "pixel.png");
+    assert_eq!(metadata.display_name, "pixel.png");
     // source-assertion-line: 96
     assert!(matches!(&conversation.parts[2], ConversationPart::Text(text) if text == "after"));
     repo.database().close().await.unwrap();

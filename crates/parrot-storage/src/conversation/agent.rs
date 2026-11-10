@@ -276,12 +276,6 @@ impl AgentHistoryView {
     ) -> Result<Vec<ModelContent>, EventError> {
         self.repository.materialize(parts).await
     }
-    pub async fn resolve_image_artifact(
-        &self,
-        id: String,
-    ) -> Result<Option<crate::artifacts::ImageArtifactMetadata>, EventError> {
-        self.repository.resolve_image_artifact(id).await
-    }
     pub async fn conversation(&self) -> Result<Vec<ConversationItem>, EventError> {
         self.repository.conversation(self.agent.clone()).await
     }

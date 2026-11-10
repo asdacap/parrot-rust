@@ -19,6 +19,27 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Fixture(PathBuf, parrot_storage::history_files::SessionIndex);
 impl Fixture {
+    fn image(
+        artifact_id: impl Into<String>,
+        media_type: impl Into<String>,
+        display_name: impl Into<String>,
+    ) -> parrot_storage::conversation::ConversationPart {
+        let artifact_id = artifact_id.into();
+        parrot_storage::conversation::ConversationPart::image(
+            parrot_storage::artifacts::ImageArtifactMetadata {
+                sha256: artifact_id.clone(),
+                artifact_id,
+                media_type: media_type.into(),
+                display_name: display_name.into(),
+                byte_length: 70,
+                width: 24,
+                height: 12,
+                frame_count: 3,
+                aggregate_pixels: 864,
+                origin: "test".into(),
+            },
+        )
+    }
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
             "parrot-t18-{}-{}",

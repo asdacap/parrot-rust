@@ -782,8 +782,6 @@ async fn web_upload_emits_exact_native_header_mib_chunks_description_and_artifac
         match frames[0].payload.as_ref().unwrap() {
             wire::attachment_upload_frame::Payload::Header(header) => {
                 assert_eq!(header.user_session_id, "user-session-fixture");
-                assert_eq!(header.upload_id.len(), 32);
-                assert_eq!(&header.upload_id[12..13], "7");
             }
             _ => panic!("header first"),
         }

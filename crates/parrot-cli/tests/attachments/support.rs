@@ -419,7 +419,6 @@ impl HostedSession for Hosted {
                 .images
                 .persist(
                     std::io::Cursor::new(upload.content),
-                    &upload.upload_id,
                     &upload.display_name,
                     "upload",
                     Some(&upload.media_type),
@@ -433,11 +432,12 @@ impl HostedSession for Hosted {
     fn resolve_image<'a>(
         &'a self,
         id: &'a str,
+        display_name: &'a str,
     ) -> BoxFuture<'a, protocol::Result<Option<ImageArtifactMetadata>>> {
         Box::pin(async move {
             self.resources
                 .images
-                .resolve(id, &NeverCancelled)
+                .resolve(id, display_name, "upload", &NeverCancelled)
                 .await
                 .map_err(RpcError::from)
         })

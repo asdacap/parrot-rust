@@ -12,7 +12,6 @@ use parrot_domain::{
         bindings::web::parrot_web_server::ParrotWeb,
         messages::{parrot as wire, web},
     },
-    values::identifiers::Identifier,
 };
 use std::{
     collections::HashMap,
@@ -239,8 +238,6 @@ impl ParrotWeb for WebSlashService {
         let mut client = self.router.client_for(&request.user_session_id);
         let header = wire::AttachmentUploadHeader {
             user_session_id: request.user_session_id,
-            upload_id: Identifier::event_id()
-                .map_err(|error| Status::internal(error.to_string()))?,
             ..Default::default()
         };
         let description = wire::AttachmentUploadDescription {

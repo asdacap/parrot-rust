@@ -13,7 +13,7 @@ async fn long_history_listener_reconnect_image_identity_and_legacy_queue_files_s
     bounded(hosted.send(
         vec![
             ConversationPart::text("t76-long-turn-00"),
-            ConversationPart::image(&image.artifact_id, &image.media_type, &image.display_name),
+            ConversationPart::image(image.clone()),
         ],
         "t76-long-input-00".into(),
         Delivery::DELIVERY_STEER,
@@ -66,7 +66,7 @@ async fn long_history_listener_reconnect_image_identity_and_legacy_queue_files_s
     let resumed = bounded(fixture.factory.bind_opened(opened)).await.unwrap();
     let resumed_root = fixture.root();
     let resumed_user = fixture.user();
-    let resolved = bounded(resumed.resolve_image(&image.artifact_id))
+    let resolved = bounded(resumed.resolve_image(&image.artifact_id, &image.display_name))
         .await
         .unwrap();
     for index in 32..64 {

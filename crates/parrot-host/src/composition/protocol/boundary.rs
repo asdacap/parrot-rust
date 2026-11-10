@@ -20,7 +20,7 @@ use std::{path::Path, sync::Arc};
 /// Validated upload data moved into the actual session admission owner.
 pub struct ImageUpload {
     pub content: Vec<u8>,
-    pub upload_id: String,
+
     pub display_name: String,
     pub media_type: String,
     pub byte_length: i64,
@@ -50,6 +50,7 @@ pub trait HostedSession: Send + Sync {
     fn resolve_image<'a>(
         &'a self,
         id: &'a str,
+        display_name: &'a str,
     ) -> BoxFuture<'a, Result<Option<ImageArtifactMetadata>>>;
     fn pending_questions(&self) -> Result<Vec<PendingQuestion>>;
     fn reply_question(

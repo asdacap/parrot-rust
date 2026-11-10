@@ -179,6 +179,18 @@ struct Part {
     artifact_id: String,
     media_type: String,
     display_name: String,
+    #[serde(default)]
+    byte_length: i64,
+    #[serde(default)]
+    width: u32,
+    #[serde(default)]
+    height: u32,
+    #[serde(default)]
+    frame_count: u32,
+    #[serde(default)]
+    aggregate_pixels: i64,
+    #[serde(default)]
+    origin: String,
 }
 
 impl Part {
@@ -187,15 +199,30 @@ impl Part {
             "text"
                 if self.artifact_id.is_empty()
                     && self.media_type.is_empty()
-                    && self.display_name.is_empty() =>
+                    && self.display_name.is_empty()
+                    && self.byte_length == 0
+                    && self.width == 0
+                    && self.height == 0
+                    && self.frame_count == 0
+                    && self.aggregate_pixels == 0
+                    && self.origin.is_empty() =>
             {
                 Ok(ConversationPart::Text(self.text))
             }
-            "image_artifact" if self.text.is_empty() => Ok(ConversationPart::ImageArtifact {
-                artifact_id: self.artifact_id,
-                media_type: self.media_type,
-                display_name: self.display_name,
-            }),
+            "image_artifact" if self.text.is_empty() => Ok(ConversationPart::image(
+                crate::artifacts::ImageArtifactMetadata {
+                    sha256: self.artifact_id.clone(),
+                    artifact_id: self.artifact_id,
+                    media_type: self.media_type,
+                    display_name: self.display_name,
+                    byte_length: self.byte_length,
+                    width: self.width,
+                    height: self.height,
+                    frame_count: self.frame_count,
+                    aggregate_pixels: self.aggregate_pixels,
+                    origin: self.origin,
+                },
+            )),
             _ => Err(Error::invalid_data(
                 "history part cannot be preserved by the Rust conversation-part model",
             )),
@@ -369,11 +396,18 @@ mod tests {
             role: "assistant".into(),
             parts: vec![
                 ConversationPart::Text("hello 雪".into()),
-                ConversationPart::ImageArtifact {
+                ConversationPart::image(crate::artifacts::ImageArtifactMetadata {
                     artifact_id: "image-one".into(),
+                    sha256: "image-one".into(),
                     media_type: "image/png".into(),
                     display_name: "saved image".into(),
-                },
+                    byte_length: 70,
+                    width: 24,
+                    height: 12,
+                    frame_count: 3,
+                    aggregate_pixels: 864,
+                    origin: "upload".into(),
+                }),
             ],
             tool_calls: vec![ToolCall {
                 id: "call".into(),

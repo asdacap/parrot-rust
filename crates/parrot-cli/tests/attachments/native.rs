@@ -99,10 +99,16 @@ async fn prepare_pixel_dat_detects_png_and_real_native_session_stores_canonical_
     assert_eq!(prepared.parts[0].content, text("inspect "));
     let id = artifact(&prepared.parts[1]);
     assert_eq!(id, PNG_SHA256);
-    let stored = bounded(native.hosted.resources.images.resolve(id, &NeverCancelled))
-        .await
-        .unwrap()
-        .unwrap();
+    assert_eq!(prepared.parts[1].display_name, "pixel.dat");
+    let stored = bounded(native.hosted.resources.images.resolve(
+        id,
+        &prepared.parts[1].display_name,
+        "upload",
+        &NeverCancelled,
+    ))
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(stored.artifact_id, PNG_SHA256);
     assert_eq!(stored.sha256, PNG_SHA256);
     assert_eq!(stored.media_type, "image/png");
@@ -154,9 +160,15 @@ async fn prepare_preserves_text_artifact_order_and_performs_multiple_real_upload
     assert_eq!(prepared.parts.len(), 5);
     assert_eq!(prepared.parts[0].content, text("before "));
     assert_eq!(artifact(&prepared.parts[1]), PNG_SHA256);
+    assert_eq!(prepared.parts[1].display_name, "first.dat");
     assert_eq!(prepared.parts[2].content, text(" middle "));
     assert_eq!(artifact(&prepared.parts[3]), PNG_SHA256);
+    assert_eq!(prepared.parts[3].display_name, "second.dat");
     assert_eq!(prepared.parts[4].content, text(" after"));
+    assert!(prepared.parts[0].display_name.is_empty());
+    assert!(prepared.parts[2].display_name.is_empty());
+    assert!(prepared.parts[4].display_name.is_empty());
+    assert_eq!(native.image_files().len(), 1);
     assert_eq!(
         prepared.delivery.enum_value().unwrap(),
         wire::Delivery::DELIVERY_STEER
@@ -237,13 +249,12 @@ async fn later_unsupported_or_denied_reference_refuses_prompt_but_keeps_complete
         );
         assert_eq!(native.hosted.persist_calls.load(Ordering::SeqCst), 1);
         assert!(
-            bounded(
-                native
-                    .hosted
-                    .resources
-                    .images
-                    .resolve(PNG_SHA256, &NeverCancelled)
-            )
+            bounded(native.hosted.resources.images.resolve(
+                PNG_SHA256,
+                "pixel.dat",
+                "upload",
+                &NeverCancelled
+            ))
             .await
             .unwrap()
             .is_some()
@@ -341,8 +352,7 @@ async fn selected_immutable_mode_and_original_follow_read_are_forwarded_before_f
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn generated_native_frames_have_unique_headers_bounded_chunks_and_terminal_actual_description()
- {
+async fn generated_native_frames_preserve_session_bounded_chunks_and_terminal_actual_description() {
     let native = Native::new().await;
     let mut capture = native.recorder().await;
     let bytes = (0..2 * CHUNK_BYTES + 17)
@@ -363,15 +373,12 @@ async fn generated_native_frames_have_unique_headers_bounded_chunks_and_terminal
     {
         let uploads = capture.state.uploads.lock().unwrap();
         assert_eq!(uploads.len(), 2);
-        let mut ids = Vec::new();
         for frames in uploads.iter() {
             let Some(wire::attachment_upload_frame::Payload::Header(header)) = &frames[0].payload
             else {
                 panic!("first frame is not header")
             };
             assert_eq!(header.user_session_id, native.session);
-            assert!(!header.upload_id.trim().is_empty());
-            ids.push(header.upload_id.clone());
             let Some(wire::attachment_upload_frame::Payload::Description(description)) =
                 &frames.last().unwrap().payload
             else {
@@ -393,7 +400,7 @@ async fn generated_native_frames_have_unique_headers_bounded_chunks_and_terminal
             assert_eq!(content, bytes);
             assert_eq!(frames.len(), 5);
         }
-        assert_ne!(ids[0], ids[1]);
+        assert_eq!(uploads[0], uploads[1]);
     }
     // Synthetic receipt, not image validity: the separate real-native tests own
     // canonical image metadata and persistence assertions.
@@ -403,7 +410,6 @@ async fn generated_native_frames_have_unique_headers_bounded_chunks_and_terminal
 
 fn frames(
     session: &str,
-    id: &str,
     bytes: &[u8],
     media: &str,
     declared: i64,
@@ -412,7 +418,6 @@ fn frames(
     let mut frames = vec![wire::AttachmentUploadFrame {
         payload: Some(Payload::Header(wire::AttachmentUploadHeader {
             user_session_id: session.into(),
-            upload_id: id.into(),
             ..Default::default()
         })),
         ..Default::default()
@@ -473,7 +478,6 @@ async fn real_native_server_rejects_oversize_invalid_image_and_metadata_without_
     for (id, bytes, media, declared, attempts) in cases {
         let failure = bounded(native.client.upload_attachment(tokio_stream::iter(frames(
             &native.session,
-            id,
             bytes,
             media,
             declared,
@@ -496,13 +500,12 @@ async fn real_native_server_rejects_oversize_invalid_image_and_metadata_without_
             "{id} left a staged or published image"
         );
         assert!(
-            bounded(
-                native
-                    .hosted
-                    .resources
-                    .images
-                    .resolve(PNG_SHA256, &NeverCancelled)
-            )
+            bounded(native.hosted.resources.images.resolve(
+                PNG_SHA256,
+                "pixel.dat",
+                "upload",
+                &NeverCancelled
+            ))
             .await
             .unwrap()
             .is_none(),

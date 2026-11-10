@@ -41,7 +41,7 @@ fn terminal(call: &str) -> ToolExecutionTerminal {
         status: ToolExecutionStatus::Finished,
         result_parts: vec![
             ConversationPart::text("answer"),
-            ConversationPart::image("image-1", "image/png", "diagram"),
+            super::Fixture::image("image-1", "image/png", "diagram"),
         ],
     }
 }
@@ -172,7 +172,7 @@ fn settlement_preserves_image_only_empty_text_and_empty_content() {
     let tx = connection.transaction().unwrap();
     let owner = assistant(&tx, "agent");
     for (index, parts) in [
-        vec![ConversationPart::image("id", "image/webp", "image")],
+        vec![super::Fixture::image("id", "image/webp", "image")],
         vec![ConversationPart::text("")],
         vec![],
     ]
@@ -274,8 +274,8 @@ fn synthetic_requires_images_is_idempotent_and_validates_before_duplicate_lookup
     let tx = connection.transaction().unwrap();
     let assistant = assistant(&tx, "agent");
     let images = vec![
-        ConversationPart::image("one", "image/png", "first"),
-        ConversationPart::image("two", "image/jpeg", "second"),
+        super::Fixture::image("one", "image/png", "first"),
+        super::Fixture::image("two", "image/jpeg", "second"),
     ];
     let item = append_tool_synthetic(&tx, &event("e1", "agent"), assistant, &images, &clock)
         .unwrap()
@@ -291,11 +291,7 @@ fn synthetic_requires_images_is_idempotent_and_validates_before_duplicate_lookup
             &tx,
             &event("ignored", "agent"),
             assistant,
-            &[ConversationPart::image(
-                "different",
-                "image/gif",
-                "different"
-            )],
+            &[super::Fixture::image("different", "image/gif", "different")],
             &clock
         )
         .unwrap()
