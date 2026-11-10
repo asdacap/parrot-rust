@@ -25,7 +25,16 @@ fn public_traits_are_limited_to_services_and_cancellation() {
         .map(|declaration| declaration.split([':', '<', ' ']).next().unwrap())
         .collect::<Vec<_>>();
     traits.sort_unstable();
-    assert_eq!(traits, ["Cancellation", "Provider", "States", "Tools"]);
+    assert_eq!(
+        traits,
+        [
+            "Cancellation",
+            "EventPublisher",
+            "Provider",
+            "States",
+            "Tools"
+        ]
+    );
 }
 
 #[test]

@@ -251,6 +251,14 @@ pub struct PromptPublication {
     pub notice: String,
 }
 
+/// Publishes compaction lifecycle notifications independently of conversation state.
+pub trait EventPublisher: Send + Sync {
+    /// Publishes compaction start without request cancellation.
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Publishes compaction failure without request cancellation.
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>>;
+}
+
 /// Owns conversation effects, input readiness, and durable turn transitions.
 /// Mutations receive their input from the caller rather than retrieving staged input.
 /// Unsupported capabilities return explicit errors rather than inventing state.
@@ -289,17 +297,9 @@ pub trait States: Send + Sync {
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_exit_blockers")) })
     }
-    /// Publishes compaction start without request cancellation.
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.report_compaction_started")) })
-    }
     /// Refreshes raw epoch observations without rendering instructions.
     fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.sample_epoch")) })
-    }
-    /// Publishes compaction failure without request cancellation.
-    fn report_compaction_failed(&self, _message: String) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.report_compaction_failed")) })
     }
     /// Observes native status for the exact context selected by core.
     fn render_status<'a, 'c>(

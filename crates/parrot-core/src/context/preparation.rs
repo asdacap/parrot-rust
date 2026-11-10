@@ -1,7 +1,7 @@
 use crate::{
     CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration,
-    ContextReminderCheckpoint, ContextSnapshot, Error, PendingPrompt, Provider, ProviderRequest,
-    States, ToolDefinition, TurnOptions,
+    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, PendingPrompt, Provider,
+    ProviderRequest, States, ToolDefinition, TurnOptions,
     budget::TurnFlags,
     compaction::{compact_conversation, prepare_compaction},
     rendering::{render_instructions, render_template},
@@ -10,6 +10,7 @@ use crate::{
 pub(crate) async fn compact_context(
     states: &mut dyn States,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
@@ -17,8 +18,15 @@ pub(crate) async fn compact_context(
         .get_config(ConfigKey::Compaction)
         .await?
         .into_compaction()?;
-    let input =
-        prepare_compaction(states, provider, definitions, &configuration, cancellation).await?;
+    let input = prepare_compaction(
+        states,
+        provider,
+        publisher,
+        definitions,
+        &configuration,
+        cancellation,
+    )
+    .await?;
     let compacted = compact_conversation(
         &input,
         definitions,
@@ -93,6 +101,7 @@ async fn prepare_pending_prompt(
 pub(crate) async fn prepare_request(
     states: &mut dyn States,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     flags: TurnFlags,
     options: &TurnOptions,
@@ -115,7 +124,7 @@ pub(crate) async fn prepare_request(
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        instructions = compact_context(states, provider, definitions, cancellation)
+        instructions = compact_context(states, provider, publisher, definitions, cancellation)
             .await?
             .instructions;
         messages = states.read_messages().await?;
@@ -133,7 +142,7 @@ pub(crate) async fn prepare_request(
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
         if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            instructions = compact_context(states, provider, definitions, cancellation)
+            instructions = compact_context(states, provider, publisher, definitions, cancellation)
                 .await?
                 .instructions;
             messages = states.read_messages().await?;

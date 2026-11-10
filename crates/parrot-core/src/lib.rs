@@ -1,4 +1,4 @@
-//! Turn orchestration with core-owned provider, tool, and state contracts.
+//! Turn orchestration with core-owned provider, tool, state, and event contracts.
 
 pub mod budget;
 pub mod compaction;
@@ -16,6 +16,7 @@ pub async fn run(
     states: &mut dyn States,
     tools: &dyn Tools,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
@@ -29,7 +30,7 @@ pub async fn run(
         {
             return Ok(Outcome::Completed(answer));
         }
-        match run_turn(states, tools, provider, cancellation).await? {
+        match run_turn(states, tools, provider, publisher, cancellation).await? {
             Outcome::Completed(completed) => answer = completed,
             Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
         }
@@ -41,10 +42,19 @@ pub async fn run_turn(
     states: &mut dyn States,
     tools: &dyn Tools,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut budget = states.read_turn_budget()?;
-    let result = execute_turn(states, tools, provider, cancellation, &mut budget).await;
+    let result = execute_turn(
+        states,
+        tools,
+        provider,
+        publisher,
+        cancellation,
+        &mut budget,
+    )
+    .await;
     states.write_turn_budget(budget)?;
     result
 }
@@ -53,6 +63,7 @@ async fn execute_turn(
     states: &mut dyn States,
     tools: &dyn Tools,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
     budget: &mut TurnBudget,
 ) -> Result<Outcome, Error> {
@@ -85,15 +96,22 @@ async fn execute_turn(
         } else {
             &catalog.normal
         };
-        let request =
-            context::prepare_request(states, provider, definitions, flags, &options, cancellation)
-                .await?;
+        let request = context::prepare_request(
+            states,
+            provider,
+            publisher,
+            definitions,
+            flags,
+            &options,
+            cancellation,
+        )
+        .await?;
         let attempt = budget.count_request();
         let response = match provider.invoke(request, cancellation).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(states, provider, definitions, cancellation)
+                if !context::compact_context(states, provider, publisher, definitions, cancellation)
                     .await?
                     .reduced
                 {

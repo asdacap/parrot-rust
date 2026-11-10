@@ -16,6 +16,49 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     budget: &'a mut parrot_core::TurnBudget,
 }
 
+struct RuntimeEventPublisher<'a, S: AccessSnapshot, T: TurnTools<S>> {
+    backend: &'a RuntimeBackend<S, T>,
+}
+
+impl<S, T> parrot_core::EventPublisher for RuntimeEventPublisher<'_, S, T>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .report_epoch_started(&ContextEmitter {
+                    backend: self.backend,
+                })
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .fail_epoch_compaction(
+                    message,
+                    &ContextEmitter {
+                        backend: self.backend,
+                    },
+                )
+                .await
+                .map_err(Into::into)
+        })
+    }
+}
+
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S>,
@@ -259,6 +302,7 @@ where
                     &mut states,
                     &tools,
                     &provider,
+                    &RuntimeEventPublisher { backend },
                     parrot_core::CancellationToken::new(cancellation),
                 )
                 .await
@@ -453,38 +497,6 @@ where
         })
     }
 
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .report_epoch_started(&ContextEmitter {
-                    backend: self.backend,
-                })
-                .await
-                .map_err(Into::into)
-        })
-    }
-
-    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .fail_epoch_compaction(
-                    message,
-                    &ContextEmitter {
-                        backend: self.backend,
-                    },
-                )
-                .await
-                .map_err(Into::into)
-        })
-    }
     fn render_status<'a, 'c>(
         &'a self,
         context: CoreContextSnapshot,

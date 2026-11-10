@@ -5,8 +5,8 @@ use parrot_core::compaction::{
 };
 use parrot_core::{
     AgentIdentityDescription, BoxFuture, ConfigKey, ConfigValue, ContextConfiguration,
-    ContextModel, ContextSnapshot, ErrorCode, ErrorDetail, Message, ModelAliasDescription,
-    SkillCatalogEntry, States,
+    ContextModel, ContextSnapshot, ErrorCode, ErrorDetail, EventPublisher, Message,
+    ModelAliasDescription, SkillCatalogEntry, States,
 };
 use std::sync::Mutex;
 
@@ -23,11 +23,37 @@ fn native_error(stage: &str) -> Error {
 
 #[derive(Default)]
 struct Preparation {
-    events: Mutex<Vec<String>>,
     failure: Option<&'static str>,
-    fail_publication: bool,
     raw: ConversationState,
     contexts: Mutex<Vec<ContextSnapshot>>,
+}
+
+#[derive(Default)]
+struct PreparationEventPublisher {
+    events: Mutex<Vec<String>>,
+    fail_start: bool,
+    fail_publication: bool,
+}
+
+impl EventPublisher for PreparationEventPublisher {
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            if self.fail_start {
+                return Err(native_error("start"));
+            }
+            self.events.lock().unwrap().push("started".into());
+            Ok(())
+        })
+    }
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.events.lock().unwrap().push(message);
+            if self.fail_publication {
+                return Err(native_error("failed publication"));
+            }
+            Ok(())
+        })
+    }
 }
 
 impl States for Preparation {
@@ -39,16 +65,6 @@ impl States for Preparation {
                 }
                 _ => Err(Error::failed("preparation has no configured templates")),
             }
-        })
-    }
-
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            if self.failure == Some("start") {
-                return Err(native_error("start"));
-            }
-            self.events.lock().unwrap().push("started".into());
-            Ok(())
         })
     }
 
@@ -112,16 +128,6 @@ impl States for Preparation {
                 return Err(native_error("read"));
             }
             Ok(self.raw.clone())
-        })
-    }
-
-    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.events.lock().unwrap().push(message);
-            if self.fail_publication {
-                return Err(native_error("failed publication"));
-            }
-            Ok(())
         })
     }
 
@@ -264,9 +270,11 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         raw,
         ..Default::default()
     };
+    let publisher = PreparationEventPublisher::default();
     let input = finish(prepare_compaction(
         &mut preparation,
         &provider,
+        &publisher,
         &definitions,
         &configuration(),
         parrot_core::CancellationToken::uncancelled(),
@@ -310,7 +318,7 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         *preparation.contexts.lock().unwrap(),
         [ContextSnapshot::estimate(37, &configuration().context)]
     );
-    assert_eq!(*preparation.events.lock().unwrap(), ["started"]);
+    assert_eq!(*publisher.events.lock().unwrap(), ["started"]);
 }
 
 #[test]
@@ -346,9 +354,11 @@ fn preparation_preserves_incomplete_roots_and_does_not_promote_orphaned_results(
         raw,
         ..Default::default()
     };
+    let publisher = PreparationEventPublisher::default();
     let input = finish(prepare_compaction(
         &mut preparation,
         &Estimates::new(1),
+        &publisher,
         &[],
         &configuration(),
         parrot_core::CancellationToken::uncancelled(),
@@ -380,9 +390,14 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
             failure: stage == "estimate",
             ..Estimates::new(0)
         };
+        let publisher = PreparationEventPublisher {
+            fail_start: stage == "start",
+            ..Default::default()
+        };
         let outcome = finish(prepare_compaction(
             &mut preparation,
             &provider,
+            &publisher,
             &[],
             &configuration(),
             parrot_core::CancellationToken::uncancelled(),
@@ -398,11 +413,14 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         } else {
             vec!["started".into(), error.to_string()]
         };
-        assert_eq!(*preparation.events.lock().unwrap(), expected);
+        assert_eq!(*publisher.events.lock().unwrap(), expected);
     }
 
     let mut preparation = Preparation {
         failure: Some("sample"),
+        ..Default::default()
+    };
+    let publisher = PreparationEventPublisher {
         fail_publication: true,
         ..Default::default()
     };
@@ -410,6 +428,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         finish(prepare_compaction(
             &mut preparation,
             &Estimates::new(0),
+            &publisher,
             &[],
             &configuration(),
             parrot_core::CancellationToken::uncancelled()
