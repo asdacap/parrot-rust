@@ -405,11 +405,6 @@ async fn oauth_fake_browser_and_device_success_and_auth_failure_do_not_leak() {
             .await
             .unwrap();
             let log = fixture.diagnostics();
-            assert_eq!(dialog.load_failures.len(), usize::from(fail));
-            if fail {
-                assert_eq!(dialog.load_failures[0].code(), Code::Internal);
-                assert_eq!(dialog.load_failures[0].message(), "sentinel-failure");
-            }
             assert!(log.contains("oauth_start") && log.contains("oauth_complete"));
             assert!(log.contains(if fail {
                 "outcome=\"auth_failure\""
@@ -428,6 +423,12 @@ async fn oauth_fake_browser_and_device_success_and_auth_failure_do_not_leak() {
             }
             if fail {
                 assert_eq!(dialog.errors, ["sentinel-failure"]);
+                assert!(
+                    dialog
+                        .shown
+                        .iter()
+                        .all(|line| line != "stored a credential for chatgpt")
+                );
                 assert!(log.contains("error=\"auth\""));
                 assert!(!fixture.services.credentials.path().exists());
             } else {
@@ -533,9 +534,13 @@ async fn generic_oauth_failure_is_not_swallowed_as_auth_failure() {
     .unwrap_err();
     assert!(matches!(failure, SlashFailure::Command(message) if message == "sentinel-generic"));
     assert!(dialog.errors.is_empty());
-    assert_eq!(dialog.load_failures.len(), 1);
-    assert_eq!(dialog.load_failures[0].code(), Code::Internal);
-    assert_eq!(dialog.load_failures[0].message(), "sentinel-generic");
+    assert!(
+        dialog
+            .shown
+            .iter()
+            .all(|line| line != "stored a credential for chatgpt")
+    );
+    assert_eq!(dialog.loads, ["Waiting for browser authorization…"]);
     let log = fixture.diagnostics();
     for operation in ["oauth_failure", "login_failure", "interactive_failure"] {
         assert!(log.contains(operation));
@@ -629,7 +634,7 @@ async fn auth_correlation_is_unique_32_hex_and_paired_per_operation() {
 }
 
 #[tokio::test]
-async fn malformed_credentials_list_and_logout_fail_shared_load_work_not_success() {
+async fn malformed_credentials_list_and_logout_forward_failure_without_success() {
     for action in ["list", "logout"] {
         let fixture = Fixture::new(&[], None);
         std::fs::create_dir_all(fixture.services.credentials.path().parent().unwrap()).unwrap();
@@ -652,12 +657,6 @@ async fn malformed_credentials_list_and_logout_fail_shared_load_work_not_success
             matches!(failure, SlashFailure::Command(message) if message == "auth: malformed credential store")
         );
         assert_eq!(dialog.loads, ["Loading credentials…"]);
-        assert_eq!(dialog.load_failures.len(), 1);
-        assert_eq!(dialog.load_failures[0].code(), Code::Internal);
-        assert_eq!(
-            dialog.load_failures[0].message(),
-            "auth: malformed credential store"
-        );
         assert!(dialog.errors.is_empty() && dialog.shown.is_empty());
         let log = fixture.diagnostics();
         assert!(log.contains(&format!("{action}_failure")) && log.contains("interactive_failure"));

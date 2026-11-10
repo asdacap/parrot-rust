@@ -59,4 +59,5 @@ pub(crate) fn check_cancelled(cancellation: &dyn Cancellation) -> Result<(), Sla
         .map_err(|_| Status::cancelled("operation cancelled").into())
 }
 
-pub(crate) use crate::slash_sessions::{load_command, native_call as rpc};
+pub(crate) use crate::dispatch::dialog::load;
+pub(crate) use crate::slash_sessions::native_call as rpc;

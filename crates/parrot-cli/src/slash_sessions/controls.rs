@@ -4,9 +4,9 @@ use parrot_domain::{
     values::context::ContextSize,
 };
 
-use crate::dispatch::dialog::DialogOption;
+use crate::dispatch::dialog::{DialogOption, load};
 
-use super::{CommandContext, SlashCommand, SlashFailure, load_command};
+use super::{CommandContext, SlashCommand, SlashFailure};
 
 pub struct TaskLimitCommand;
 
@@ -315,7 +315,7 @@ async fn run_skills(
         return Ok(());
     };
     if action.id == "list" {
-        let listed = load_command(
+        let listed = load(
             context.dialog,
             "Loading skills…",
             context.session.list_skills(cancellation),
@@ -325,7 +325,7 @@ async fn run_skills(
         return show_inventory(context, &listed, cancellation).await;
     }
     loop {
-        let listed = load_command(
+        let listed = load(
             context.dialog,
             "Loading skills…",
             context.session.list_skills(cancellation),

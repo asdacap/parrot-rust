@@ -1,4 +1,4 @@
-use std::{fmt::Write as _, future::Future, io::Read, sync::Arc, time::Instant};
+use std::{fmt::Write as _, io::Read, sync::Arc, time::Instant};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
 use parrot_foundation::{
@@ -10,7 +10,7 @@ use parrot_storage::diagnostics::{DiagnosticEvent, DiagnosticSeverity, FileDiagn
 use tonic::{Code, Status};
 
 use crate::{
-    dispatch::dialog::{DialogOption, SlashDialog},
+    dispatch::dialog::{DialogOption, SlashDialog, load},
     slash_sessions::{CommandContext, SlashCommand, SlashFailure},
 };
 
@@ -257,7 +257,7 @@ impl AuthCommand {
                 {
                     return Ok("dismissed");
                 }
-                load_auth(
+                load(
                     dialog,
                     "Waiting for authorization…",
                     async {
@@ -280,7 +280,7 @@ impl AuthCommand {
                 {
                     return Ok("dismissed");
                 }
-                load_auth(
+                load(
                     dialog,
                     "Waiting for browser authorization…",
                     async {
@@ -319,7 +319,7 @@ impl AuthCommand {
         dialog: &mut dyn SlashDialog,
         cancellation: &dyn Cancellation,
     ) -> Result<&'static str, AuthFailure> {
-        let stored = load_auth(
+        let stored = load(
             dialog,
             "Loading credentials…",
             async {
@@ -346,7 +346,7 @@ impl AuthCommand {
         dialog: &mut dyn SlashDialog,
         cancellation: &dyn Cancellation,
     ) -> Result<&'static str, AuthFailure> {
-        let stored = load_auth(
+        let stored = load(
             dialog,
             "Loading credentials…",
             async {
@@ -548,7 +548,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                         .wait_until_idle(cancellation)
                         .await
                         .map_err(AuthFailure::from)?;
-                    let names = load_auth(
+                    let names = load(
                         context.dialog,
                         "Loading presets…",
                         async {
@@ -633,37 +633,6 @@ impl SlashCommand for AuthPresetSelectCommand {
     }
 }
 
-// Preserve the source AuthException catch boundary while the SAME shared load
-// adapter observes failure, not an Ok-wrapped operation result.
-async fn load_auth<T: Send>(
-    dialog: &mut dyn SlashDialog,
-    activity: &str,
-    work: impl Future<Output = Result<T, AuthFailure>> + Send,
-    cancellation: &dyn Cancellation,
-) -> Result<T, AuthFailure> {
-    let mut original = None;
-    let result = super::load_command(
-        dialog,
-        activity,
-        async {
-            match work.await {
-                Ok(value) => Ok(value),
-                Err(failure) => {
-                    let forwarded = failure.as_slash();
-                    original = Some(failure);
-                    Err(forwarded)
-                }
-            }
-        },
-        cancellation,
-    )
-    .await;
-    match original {
-        Some(failure) => Err(failure),
-        None => result.map_err(AuthFailure::from),
-    }
-}
-
 fn preset_usage(command: &str) -> String {
     format!("usage: {command} <name>; name must be one token without whitespace or '/'")
 }
@@ -689,15 +658,6 @@ enum AuthFailure {
     Other(SlashFailure, &'static str),
 }
 impl AuthFailure {
-    fn as_slash(&self) -> SlashFailure {
-        match self {
-            Self::Auth(message) => SlashFailure::Command(message.clone()),
-            Self::Other(SlashFailure::Rpc(status), _) => SlashFailure::Rpc(status.clone()),
-            Self::Other(SlashFailure::Command(message), _) => {
-                SlashFailure::Command(message.clone())
-            }
-        }
-    }
     fn into_slash(self) -> SlashFailure {
         match self {
             Self::Auth(message) => SlashFailure::Command(message),

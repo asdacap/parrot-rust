@@ -448,7 +448,7 @@ async fn malformed_new_credentials_are_reported_without_legacy_fallback() {
 }
 
 #[tokio::test]
-async fn auth_preset_picker_loading_failure_is_observed_then_displayed_as_auth_error() {
+async fn auth_preset_picker_displays_loading_failure_without_selecting_or_storing() {
     let fixture = Fixture::new(&[], None);
     std::fs::create_dir_all(fixture.services.presets.path().parent().unwrap()).unwrap();
     std::fs::write(fixture.services.presets.path(), "not-a-preset-directory").unwrap();
@@ -463,12 +463,6 @@ async fn auth_preset_picker_loading_failure_is_observed_then_displayed_as_auth_e
     .await
     .unwrap();
     assert_eq!(dialog.loads, ["Loading presets…"]);
-    assert_eq!(dialog.load_failures.len(), 1);
-    assert_eq!(dialog.load_failures[0].code(), Code::Internal);
-    assert_eq!(
-        dialog.load_failures[0].message(),
-        "auth: malformed credential"
-    );
     assert_eq!(dialog.errors, ["auth: malformed credential"]);
     assert!(dialog.shown.is_empty() && dialog.pickers.is_empty());
     assert!(!fixture.services.credentials.path().exists());
