@@ -225,6 +225,7 @@ pub trait States: Send + Sync {
     fn write_turn_budget(&mut self, _budget: TurnBudget) -> Result<(), Error> {
         Err(Error::unsupported("States.write_turn_budget"))
     }
+    /// Reads the session's context-usage reminder tracking state.
     fn read_context_cadence(&self) -> BoxFuture<'_, Result<ContextCadence, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_context_cadence")) })
     }
@@ -236,6 +237,7 @@ pub trait States: Send + Sync {
     fn read_history_size(&self) -> BoxFuture<'_, Result<i64, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_history_size")) })
     }
+    /// Saves updated context-usage reminder tracking state for subsequent provider requests.
     fn write_context_cadence(
         &mut self,
         _cadence: ContextCadence,
@@ -844,6 +846,10 @@ pub struct TokenCalibration {
     pub(crate) actual_input_tokens: i32,
 }
 
+/// Tracks when to emit context-usage reminders, not a time interval.
+/// Reminders follow 10-percentage-point usage bands starting at 50%.
+/// Records observed and reported bands, the model, context limit, and history size
+/// to avoid repeated reminders and handle model changes or history shrinkage.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ContextCadence {
     pub(crate) canonical_model: Option<String>,
