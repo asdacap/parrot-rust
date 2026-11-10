@@ -128,6 +128,39 @@ pub struct SkillCatalogEntry {
     pub prompt_visible: bool,
 }
 
+/// A prepared message with the information needed to record it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PendingPrompt {
+    Message(Message),
+    ContextReminder {
+        checkpoint: crate::ContextReminderCheckpoint,
+        content: String,
+        observed_percentage: i32,
+    },
+}
+
+impl PendingPrompt {
+    pub fn render_message(&self) -> Message {
+        match self {
+            Self::Message(message) => message.clone(),
+            Self::ContextReminder { content, .. } => Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.clone())],
+                ..Message::default()
+            },
+        }
+    }
+}
+
+/// A recorded prompt notice awaiting publication after cadence acknowledgement.
+#[derive(Debug, Eq, PartialEq)]
+pub struct PromptPublication {
+    pub event_id: String,
+    pub agent_session_id: String,
+    pub kind: String,
+    pub notice: String,
+}
+
 /// Prepares request content without recording conversation effects or invoking a model.
 pub trait Preparation: Send {
     /// Expands one configured prompt template from supplied string arguments.
@@ -138,16 +171,17 @@ pub trait Preparation: Send {
         &'a mut self,
         states: &'a mut dyn States,
     ) -> BoxFuture<'a, Result<String, Error>>;
-    /// Observes readiness and retains an optional steer or status prompt for fitting,
-    /// without appending or publishing it. Source-specific cadence and rendering stay native.
+    /// Returns an optional steer or status prompt and its persistence input without recording it.
+    /// Source-specific cadence and rendering stay native; core checks the request's token limits.
     fn get_pending_prompt<'a>(
         &'a mut self,
         context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<Message>, Error>>;
-    /// Acknowledges the retained prompt using the fitted or persisted context,
-    /// without appending or publishing it.
+    ) -> BoxFuture<'a, Result<Option<PendingPrompt>, Error>>;
+    /// Acknowledges the supplied prompt input using the estimated request context,
+    /// without appending or publishing the prompt.
     fn acknowledge_prompt<'a>(
         &'a mut self,
+        prompt: &'a PendingPrompt,
         context: &'a ContextSnapshot,
     ) -> BoxFuture<'a, Result<(), Error>>;
     /// Prepares ordered exit-blocker messages after accepted mutations have settled.
@@ -164,6 +198,7 @@ pub trait Preparation: Send {
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
+/// Mutations receive their input from the caller rather than retrieving staged input.
 pub trait States: Send {
     /// Reads configured literal prompts and their namespace keys, retaining native
     /// request bindings and sampling raw epoch inputs without rendering templates.
@@ -233,12 +268,19 @@ pub trait States: Send {
     /// Persists supplied steer content and applies it to the conversation.
     /// Repeated calls in the same final phase do not append or publish duplicate notices.
     fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), Error>>;
-    /// Durably appends the prompt retained by preparation idempotently, updating
-    /// conversation only when inserted and retaining its native publication receipt.
-    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>>;
-    /// Publishes the retained receipt uncancelled after preparation acknowledges it.
-    /// Publishes nothing when insertion was a duplicate.
-    fn publish_pending_prompt(&mut self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Persists the supplied prompt after core checks the request's token limits.
+    /// Updates the conversation and returns a publication receipt only on insertion.
+    /// Returns `None` for a duplicate. Does not publish the receipt.
+    fn record_pending_prompt<'a>(
+        &'a mut self,
+        prompt: &'a PendingPrompt,
+    ) -> BoxFuture<'a, Result<Option<PromptPublication>, Error>>;
+    /// Publishes the supplied receipt without cancellation.
+    /// Core calls this after [`Preparation::acknowledge_prompt`] updates prompt cadence.
+    fn publish_pending_prompt(
+        &mut self,
+        receipt: PromptPublication,
+    ) -> BoxFuture<'_, Result<(), Error>>;
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
     /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot,

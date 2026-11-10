@@ -1,6 +1,60 @@
 use super::*;
 
 #[test]
+fn core_records_prepared_prompts_without_shared_prompt_state() {
+    let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
+    let prompt = Message {
+        role: Role::System,
+        contents: vec![Content::Text("caller-owned prompt".into())],
+        ..Message::default()
+    };
+    let mut preparation = state.preparation();
+    preparation.prompts = Arc::new(Mutex::new(MemoryPromptData::default()));
+    preparation
+        .prompts()
+        .pending_prompts
+        .push_back(prompt.clone());
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+    let mut compaction = MemoryCompaction::new(None, state.summary_provider.clone());
+    let options = state.capture_options();
+    let mut budget = TurnBudget::new(state.unlimited);
+    let cancellation = state.cancellation.clone();
+    let is_cancelled = || cancellation.is_cancelled();
+    let cancelled = || cancellation.cancelled();
+
+    let result = finish(run_turn(
+        &mut state,
+        &mut parrot_core::PreparationDependencies {
+            request: &mut preparation,
+            compaction: &mut compaction.dependencies(),
+        },
+        &tools,
+        &provider,
+        &options,
+        &mut budget,
+        CancellationToken::new(&is_cancelled, &cancelled),
+    ));
+
+    assert_eq!(result, Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.recorded_prompts, [prompt.clone()]);
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        assert_eq!(
+            request
+                .messages
+                .iter()
+                .filter(|message| *message == &prompt)
+                .count(),
+            1
+        );
+    }
+    assert!(state.prompts().pending_prompts.is_empty());
+    assert_eq!(preparation.prompts().acknowledged_prompts.len(), 1);
+}
+
+#[test]
 fn pending_steer_and_status_prompts_are_fitted_without_a_context_reminder() {
     for role in [Role::User, Role::System] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);

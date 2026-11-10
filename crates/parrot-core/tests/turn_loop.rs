@@ -2,10 +2,11 @@ use parrot_core::{
     BoxFuture, CancellationToken, CompletionFeedback, Content, ContextCadence, ContextCompaction,
     ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
     ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, FinishReason,
-    InputAdmission, Message, Outcome, PendingMessage, Preparation, PromotedInput, Provider,
-    ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention,
-    SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
-    ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
+    InputAdmission, Message, Outcome, PendingMessage, PendingPrompt, Preparation, PromotedInput,
+    PromptPublication, Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill,
+    SkillContent, SkillMention, SkillReference, States, TokenCalibration, ToolCall,
+    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools,
+    TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions, run, run_turn,
 };
@@ -263,10 +264,7 @@ struct MemoryPromptData {
     cadence_writes: Vec<ContextCadence>,
     rendered_reminders: Vec<(ContextSnapshot, i32)>,
     pending_prompts: VecDeque<Message>,
-    pending_prompt: Option<Message>,
-    pending_reminder: Option<(ContextReminderCheckpoint, String, i32)>,
     acknowledged_prompts: Vec<ContextSnapshot>,
-    prompt_inserted: bool,
 }
 
 #[derive(Clone)]
@@ -668,16 +666,12 @@ impl Preparation for MemoryPreparation {
     fn get_pending_prompt<'a>(
         &'a mut self,
         context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<Message>, Error>> {
+    ) -> BoxFuture<'a, Result<Option<PendingPrompt>, Error>> {
         Box::pin(async move {
             self.step("pending_prompt")?;
-            self.prompts().pending_prompt = None;
-            self.prompts().pending_reminder = None;
-            self.prompts().prompt_inserted = false;
             let pending = self.prompts().pending_prompts.front().cloned();
             if let Some(prompt) = pending {
-                self.prompts().pending_prompt = Some(prompt.clone());
-                return Ok(Some(prompt));
+                return Ok(Some(PendingPrompt::Message(prompt)));
             }
             self.step("context_cadence")?;
             let mut cadence = self.request().context.cadence.clone();
@@ -739,43 +733,34 @@ impl Preparation for MemoryPreparation {
                 .model
                 .canonical_model
                 .clone();
-            self.prompts().pending_reminder = Some((
-                ContextReminderCheckpoint {
+            Ok(Some(PendingPrompt::ContextReminder {
+                checkpoint: ContextReminderCheckpoint {
                     canonical_model,
                     context_limit: context.context_limit,
                     percentage,
                 },
-                content.clone(),
-                context.usage_percent.unwrap_or_default(),
-            ));
-            self.prompts().pending_prompt = Some(Message {
-                role: Role::System,
-                contents: vec![Content::Text(content.clone())],
-                ..Message::default()
-            });
-            Ok(self.prompts().pending_prompt.clone())
+                content,
+                observed_percentage: context.usage_percent.unwrap_or_default(),
+            }))
         })
     }
     fn acknowledge_prompt<'a>(
         &'a mut self,
+        prompt: &'a PendingPrompt,
         context: &'a ContextSnapshot,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             self.step("acknowledge_prompt")?;
             self.prompts().acknowledged_prompts.push(context.clone());
-            if self.prompts().pending_reminder.is_some() {
+            if let PendingPrompt::ContextReminder { checkpoint, .. } = prompt {
                 let mut cadence = self.request().context.cadence.clone();
-                let (canonical_model, message_count) = {
-                    let request = self.request();
-                    (
-                        request.context.configuration.model.canonical_model.clone(),
-                        request.messages.len() as i64,
-                    )
-                };
-                cadence.acknowledge(context, &canonical_model, message_count)?;
+                let message_count = self.request().messages.len() as i64;
+                cadence.acknowledge(context, &checkpoint.canonical_model, message_count)?;
                 self.step("cadence")?;
                 self.prompts().cadence_writes.push(cadence.clone());
                 self.request().context.cadence = cadence;
+            } else {
+                self.prompts().pending_prompts.pop_front();
             }
             Ok(())
         })
@@ -1016,45 +1001,54 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
+    fn record_pending_prompt<'a>(
+        &'a mut self,
+        prompt: &'a PendingPrompt,
+    ) -> BoxFuture<'a, Result<Option<PromptPublication>, Error>> {
         Box::pin(async move {
             self.step("record_prompt")?;
-            let reminder = self.prompts().pending_reminder.clone();
-            if let Some(reminder) = reminder {
-                self.step("append_reminder")?;
-                self.reminder_appends.push(reminder.clone());
-                if !self.append_reminder {
-                    return Ok(false);
+            let kind = match prompt {
+                PendingPrompt::ContextReminder {
+                    checkpoint,
+                    content,
+                    observed_percentage,
+                } => {
+                    self.step("append_reminder")?;
+                    self.reminder_appends.push((
+                        checkpoint.clone(),
+                        content.clone(),
+                        *observed_percentage,
+                    ));
+                    if !self.append_reminder {
+                        return Ok(None);
+                    }
+                    self.prompts().checkpoint = Some(checkpoint.clone());
+                    "context_reminder"
                 }
-                self.prompts().checkpoint = Some(reminder.0);
-            } else {
-                self.prompts().pending_prompts.pop_front().unwrap();
-            }
-            let message = self.prompts().pending_prompt.clone().unwrap();
+                PendingPrompt::Message(_) => "prompt",
+            };
+            let message = prompt.render_message();
             self.recorded_prompts.push(message.clone());
             self.request().messages.push(message.clone());
             self.append_turn_message(message);
-            self.prompts().prompt_inserted = true;
-            Ok(true)
+            Ok(Some(PromptPublication {
+                event_id: "memory-prompt".into(),
+                agent_session_id: "memory-session".into(),
+                kind: kind.into(),
+                notice: "prompt recorded".into(),
+            }))
         })
     }
-    fn publish_pending_prompt(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+    fn publish_pending_prompt(
+        &mut self,
+        receipt: PromptPublication,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            let (reminder, inserted) = {
-                let mut prompts = self.prompts();
-                prompts.pending_prompt = None;
-                (
-                    prompts.pending_reminder.take().is_some(),
-                    prompts.prompt_inserted,
-                )
-            };
-            if inserted {
-                if reminder {
-                    self.reminder_publications += 1;
-                    self.step("publish_reminder")?;
-                } else {
-                    self.step("publish_prompt")?;
-                }
+            if receipt.kind == "context_reminder" {
+                self.reminder_publications += 1;
+                self.step("publish_reminder")?;
+            } else {
+                self.step("publish_prompt")?;
             }
             Ok(())
         })

@@ -81,7 +81,7 @@ pub(crate) async fn prepare_request(
     }
     if let Some(prompt) = preparation.request.get_pending_prompt(&context).await? {
         let mut candidate = messages.clone();
-        candidate.push(prompt);
+        candidate.push(prompt.render_message());
         let estimate = preparation
             .request
             .estimate_input_tokens(&instructions, definitions, &candidate)
@@ -100,7 +100,8 @@ pub(crate) async fn prepare_request(
                 .await?;
             ContextSnapshot::estimate(estimate, &configuration).ensure_input_fits()?;
         } else {
-            let acknowledged = if states.record_pending_prompt().await? {
+            let receipt = states.record_pending_prompt(&prompt).await?;
+            let acknowledged = if receipt.is_some() {
                 messages = states.read_messages().await?;
                 let estimate = preparation
                     .request
@@ -112,9 +113,11 @@ pub(crate) async fn prepare_request(
             };
             preparation
                 .request
-                .acknowledge_prompt(&acknowledged)
+                .acknowledge_prompt(&prompt, &acknowledged)
                 .await?;
-            states.publish_pending_prompt().await?;
+            if let Some(receipt) = receipt {
+                states.publish_pending_prompt(receipt).await?;
+            }
         }
     }
     let messages = states.read_messages().await?;
