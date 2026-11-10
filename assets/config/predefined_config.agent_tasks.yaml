@@ -45,8 +45,8 @@ prompt_templates:
       {children}
       Reuse supplied context and preparation results. Perform only necessary owner-level preparation not assigned elsewhere, then use set_agent_tasks to declare and manage the supplied provisional work in your own graph. On retries or restarts, inspect your existing tasks and reconcile the supplied definitions yourself.
       The provided task list is provisional, not fixed; you may change it as needed to satisfy the task’s scope and acceptance criteria.
-      Wait for its notifications. When a child task fails, resolve it with set_agent_tasks: set its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents. You cannot finish while a child task is unresolved.
-      When every child task is resolved, return only one strict JSON object with no prose or code fence: {{"result":"nonblank","verdict":"accept"}}, {{"result":"nonblank","verdict":"reject_and_halt","feedback":"nonblank"}}, or {{"result":"nonblank","verdict":"reject_and_retry","feedback":"nonblank"}}.
+      Perform inner tasks assigned to self in your current agent and record each self task's outcome and result with set_agent_tasks. Supervise dedicated workers and handle later self-assignment notifications without waiting for another setter call. When an inner task fails, resolve it with set_agent_tasks by setting its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents. You cannot finish while an inner task is unresolved. Your final JSON does not complete an inner self task.
+      When every inner task, including self tasks, is resolved, return only one strict JSON object with no prose or code fence: {{"result":"nonblank","verdict":"accept"}}, {{"result":"nonblank","verdict":"reject_and_halt","feedback":"nonblank"}}, or {{"result":"nonblank","verdict":"reject_and_retry","feedback":"nonblank"}}.
     allowed_arguments: [header, feedback, children]
     required_arguments: [header, feedback, children]
   agent-task.composite-child:
@@ -203,7 +203,7 @@ system_prompts:
 
 tools:
   set_agent_tasks:
-    description: Upsert tasks by name into your own AgentTask graph. Each task whose dependencies all succeeded runs on a retained child agent named after the task, which implements and verifies it and retries internally on rejection; a restarted task continues in that same child session. You are notified when a task succeeds, when it fails, after each of your updates, and when every task is complete. A failed task holds its dependents until you resolve it by setting its state to pending to retry it, to succeeded with a result to accept it, or to canceled. Changing a running task's state or execution definition stops it. Updating only visibility with state running preserves its execution. A canceled task also cancels every task that depends on it until it is set back to pending, and resetting a succeeded task to pending resets its dependents too. Each agent sets hidden=true on all its tasks when its nonempty graph transitions to all-succeeded-or-canceled. A task whose payload is a task array passes the full inner task list to its child prompt. The child must use set_agent_tasks to declare and manage its own graph; the runtime does not register or synchronize that list.
+    description: Upsert tasks by name into your own AgentTask graph. The scheduler assigns one ready ordinary instruction leaf to self in stable graph order. Composites, tasks with model overrides, and other admitted parallel work run on retained dedicated child agents. Self uses no child capacity; a zero extra-task budget permits one self task plus one free dedicated run per owner, including nested owners. Perform self work in your current agent and explicitly record its outcome and result with set_agent_tasks; final chat or JSON does not complete self work. Dedicated workers implement, verify, and retry internally on rejection; their strict final JSON completes their parent task, and restarts retain their child session. The accepted response describes your self assignment and active dedicated work. Recovered accepted calls replay the exact originally sealed response before arguments or artifact files are reread; use get_agent_tasks and later notifications for current state. Later self assignments arrive automatically without another setter call; existing dedicated runs remain stable. You are notified when a task succeeds, when it fails, after each of your updates, and when every task is complete. A failed task holds its dependents until you resolve it by setting its state to pending to retry it, to succeeded with a result to accept it, or to canceled. Changing a running dedicated task's state or execution definition stops its worker execution. Changing a self task invalidates its assignment but does not stop your owner conversation. Updating only visibility with state running preserves its execution. A canceled task also cancels every task that depends on it until it is set back to pending, and resetting a succeeded task to pending resets its dependents too. Each agent sets hidden=true on all its tasks when its nonempty graph transitions to all-succeeded-or-canceled. A task whose payload is a task array passes the full inner task list to its child prompt. The child must use set_agent_tasks to declare and manage its own graph; the runtime does not register or synchronize that list.
     parameters:
       type: object
       properties:
@@ -247,7 +247,7 @@ tools:
               description: Work the task must perform.
             hidden:
               type: boolean
-              description: Hide this task and its subtree from task-specific CLI views. Defaults to false. The CLI temporarily shows it while its worker is active. Each agent automatically sets this true when all tasks in its nonempty graph succeed.
+              description: Hide this task and its subtree from task-specific CLI views. Defaults to false. The CLI temporarily shows active dedicated-worker activity using the worker ID. Non-hidden self tasks stay visible without a child link. Hidden self tasks stay hidden. Each agent automatically sets this true when all tasks in its nonempty graph succeed or are canceled.
             payload:
               oneOf:
               - type: string
@@ -266,7 +266,7 @@ tools:
             model:
               type: string
               minLength: 1
-              description: Optional model selector for this task's child agent when it is first created.
+              description: Optional model selector that forces dedicated execution for this task. Selection applies when its retained child agent is first created.
             state:
               type: string
               enum:
@@ -291,7 +291,7 @@ tools:
           - acceptance_criteria
           additionalProperties: false
   get_agent_tasks:
-    description: Read your own AgentTask graph. Without a name, lists every task with its name, state, description, and hidden flag. With a name, returns that task in full, including its state, result, failure, and read-only agent_name for its retained worker, in the shape set_agent_tasks accepts plus execution metadata. Hidden tasks remain in the returned JSON. The CLI hides them from task-specific displays; live progress temporarily shows active workers and the paths to active descendants.
+    description: Read your own AgentTask graph. Without a name, lists every task with its name, state, description, hidden flag, and optional read-only assigned_to. With a name, returns that task in full, including its state, result, failure, and assignment metadata, in the shape set_agent_tasks accepts plus execution metadata. assigned_to is self or the absolute registered agent path of its dedicated worker. It is omitted for never-assigned tasks and retains the last assignee after completion until reset. Read-only agent_name remains the dedicated-worker compatibility alias. Do not send assignment metadata to set_agent_tasks. Hidden tasks remain in the returned JSON. The CLI hides them from task-specific displays; live progress temporarily shows active dedicated-worker activity and the paths to active descendants. Hidden self tasks stay hidden.
     parameters:
       type: object
       properties:

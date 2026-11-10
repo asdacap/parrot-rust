@@ -3,6 +3,9 @@
 **Existing databases are not migrated.** This build supports only its current
 SQLite format. An incompatible session fails to resume instead of being
 converted, reset, or deleted. Its database and session artifacts remain in place.
+This SQLite policy is separate from the supported
+[AgentTask snapshot migration](#agenttask-snapshot-migration), which can update
+retained recovery files without changing the database format.
 
 Use `parrot chat --new-session` to start a different local session without
 resuming or replacing the old one. Normal session creation and ownership checks
@@ -260,14 +263,14 @@ agent_tasks:
   extra_concurrent_tasks: 2
 ```
 
-The default is `2`. Each agent can run one eligible managed AgentTask without
-using this budget. Additional tasks across all agents in the same user session
-share the extra slots. Setting `0` allows one running managed task per owning
-agent, including agents that own nested task graphs. Use an unquoted integer
-between `0` and `2147483647`.
+The default is `2`. Each owner has one free dedicated AgentTask run. Additional
+dedicated runs across all owners in the same user session share the extra slots.
+Self assignments use no child capacity. Setting `0` permits one self task plus
+one free dedicated run per owner, including owners of nested graphs. Use an
+unquoted integer between `0` and `2147483647`.
 
-The limit applies only to new managed-task starts, including restarts on retained
-workers. It does not limit direct `agent_spawn` calls or the total number of
+The limit applies only to new dedicated managed-task starts, including restarts
+on retained workers. It does not limit direct `agent_spawn` calls or the total number of
 agents. Tasks without capacity stay pending and start automatically when a slot
 becomes available. Existing running tasks are not stopped, and internal retries
 keep their admission.
@@ -310,8 +313,9 @@ the local production-creation limitations noted above.
   Removing a required selector causes an error rather than a silent substitute;
   changing policy can change what resumed work is allowed to do.
 - Each owner recovers its saved graph, including results, failed/canceled states,
-  hidden flags and worker associations. An unfinished attempt continues with its
-  existing prompt identity, retry count and response-repair budget. Dependents
+  hidden flags and assignments. A current-format dedicated attempt continues with
+  its existing prompt identity, retry count and response-repair budget. A self
+  assignment remains owner work rather than launching a child. Dependents
   remain held by failed dependencies. Reopening does not automatically reset a
   terminal task; an explicit task reset is a new transition with its normal
   dependent invalidation and old-generation cancellation behavior.
@@ -346,6 +350,63 @@ reconcile the file/DB handoffs and avoid resubmitting an already admitted initia
 assignment. They do not promise exactly-once external tool effects: if a process
 dies after an effect but before its terminal settlement commits, unresolved-tool
 recovery may invoke it again. Do not treat resume as a rollback of external work.
+
+### Assignment and accepted-response recovery
+
+For each owner, the scheduler chooses one ready ordinary instruction leaf for
+`self` in stable graph order. Composites and tasks with model overrides always
+use dedicated workers. Other ready parallel work uses dedicated workers as
+capacity permits. Existing dedicated runs are not reassigned when later self
+work becomes ready. Later self handoffs arrive automatically as notifications.
+
+A self assignment must record its outcome and result through `set_agent_tasks`.
+Final chat or JSON does not complete it. A dedicated worker still completes its
+parent task through strict final JSON. A composite worker registers its
+provisional inner graph, performs and explicitly completes inner self tasks,
+supervises dedicated work, and resolves the inner graph before its parent-facing
+final JSON.
+
+Both list and detail queries expose optional read-only `assigned_to`. It is
+`self` or an absolute registered dedicated-agent path, is omitted for a task
+never assigned, and retains the last assignee until reset. `agent_name` remains
+the dedicated-worker compatibility alias. Neither field is accepted task input.
+Non-hidden self tasks stay visible without a child link. Hidden self tasks stay
+hidden. Temporary visibility applies only to active dedicated-worker activity,
+using the worker ID.
+
+New accepted updates save their rendered rich response before returning it.
+Recovery replays those exact sealed bytes before rereading call arguments or a
+mutable task artifact. Use `get_agent_tasks` and later notifications to inspect
+current state rather than treating a replay as a fresh query. Legacy count-only
+receipts cannot reconstruct historical rich-response bytes absent from their
+snapshots; their original count response remains supported.
+
+### AgentTask snapshot migration
+
+**Back up the whole session before opening it with the new binary.** AgentTask
+input artifacts still use schema version `1`. Retained recovery snapshots use
+version `2`, with strict loading support for compatible version-`1` snapshots.
+This is not a SQLite database-format migration.
+
+Safe legacy graphs migrate once. Before reassignment, migration stops and joins
+obsolete attempts and the nested work those attempts own. Terminal tasks and
+retained histories are preserved. Unfinished work can be reassigned under the
+new policy, so partial external work may repeat. Reopening a migrated graph does
+not repeat that legacy conversion.
+
+**An ambiguous legacy pending input blocks opening.** This refusal happens
+before provider execution, cancellation, claim release, or consumption of that
+input. Its original bytes and state remain intact. Preserve the session and
+resolve that exact pending input externally with compatible tooling or a
+compatible version before retrying the new binary. Do not fall back to executing
+the old attempt, discard the input, match prompt text to guess its identity, or
+bulk-clear pending inputs. There is no in-app migration repair command.
+
+An older binary may reject version-`2` snapshots even when `session.db` has not
+changed format. Do not edit version fields or attempt an in-place downgrade.
+After stopping all owners, restore a complete consistent pre-migration backup
+with its matching binary and workspace snapshot. Restoring state does not undo
+external effects. Follow the [backup checklist](#backup-and-rollback-checklist).
 
 ## File-based work queues
 
@@ -484,8 +545,10 @@ operate another process's workspace.
    Nix profile lets you select an older executable without deleting newer output;
    it does **not** restore databases or workspace files.
 4. An older binary can use its untouched old sessions after all current owners
-   have stopped. Do not open new-format sessions with an older binary. Database
-   downgrade and transaction merging are unsupported. If you restore a backup,
+   have stopped. Do not open new-format sessions with an older binary. AgentTask
+   snapshot version `2` can be incompatible even if SQLite is unchanged. Never
+   edit snapshot version fields. Database downgrade and transaction merging are
+   unsupported. If you restore a backup,
    first retain a separate snapshot of the current state for recovery. Restore
    the complete consistent backup and corresponding workspace snapshot while
    both apps are closed. Restoring discards post-backup changes, so plan recovery

@@ -22,6 +22,18 @@ fn defaults_resolve_to_profile_prompt_text() {
 }
 
 #[test]
+fn composite_payload_profile_distinguishes_inner_self_completion_from_parent_result() {
+    let (configuration, _) =
+        PromptTemplateCatalog::from_content("", &fixtures::environment()).unwrap();
+    let prompt = &configuration.runtime.profiles["agent-task-payload"].prompt;
+    assert!(prompt.contains("register the provisional inner graph with set_agent_tasks"));
+    assert!(prompt.contains("explicitly complete inner self tasks with set_agent_tasks"));
+    assert!(prompt.contains("supervise dedicated work"));
+    assert!(prompt.contains("strict parent-facing final JSON"));
+    assert!(prompt.contains("final JSON does not complete an inner self task"));
+}
+
+#[test]
 fn inline_profile_overrides_preserve_inherited_settings_and_other_prompts() {
     let environment = fixtures::environment();
     let (mut inherited, _) = PromptTemplateCatalog::from_content("", &environment).unwrap();

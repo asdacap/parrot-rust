@@ -44,6 +44,14 @@ fn composite_assignment_uses_the_same_default_precedence_without_reinterpreting_
     )));
     assert!(rendered.contains("AgentTask role: composite owner"));
     assert!(rendered.contains("Work on inner"));
+    assert!(rendered.contains("Perform inner tasks assigned to self in your current agent"));
+    assert!(rendered.contains("record each self task's outcome and result with set_agent_tasks"));
+    assert!(rendered.contains("Supervise dedicated workers"));
+    assert!(rendered.contains("including self tasks, is resolved"));
+    assert!(rendered.contains("return only one strict JSON object with no prose or code fence"));
+    for verdict in ["accept", "reject_and_halt", "reject_and_retry"] {
+        assert!(rendered.contains(&format!("\"verdict\":\"{verdict}\"")));
+    }
     assert_eq!(rendered.matches(PRECEDENCE).count(), 1);
 }
 

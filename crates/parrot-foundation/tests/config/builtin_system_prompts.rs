@@ -21,6 +21,53 @@ fn defaults_resolve_to_prompt_text() {
 }
 
 #[test]
+fn agent_task_guidance_exposes_self_completion_and_durable_assignment_queries() {
+    let (configuration, _) =
+        PromptTemplateCatalog::from_content("", &fixtures::environment()).unwrap();
+    let prompt = &configuration.system_prompts["runtime:system-context:02a-agent-tasks"];
+    for instruction in [
+        "stable graph order",
+        "one self task plus one free dedicated run per owner",
+        "explicitly record its outcome and result with set_agent_tasks",
+        "final response does not complete a self task",
+        "active dedicated worker",
+    ] {
+        assert!(prompt.contains(instruction), "{instruction}");
+    }
+    let tools = &configuration.runtime.tools;
+    let setter = &tools["set_agent_tasks"].description;
+    assert!(setter.contains("one ready ordinary instruction leaf to self"));
+    assert!(setter.contains("exact originally sealed response"));
+    assert!(setter.contains("does not stop your owner conversation"));
+    let query = &tools["get_agent_tasks"].description;
+    for instruction in [
+        "assigned_to",
+        "absolute registered agent path",
+        "last assignee",
+        "agent_name",
+    ] {
+        assert!(query.contains(instruction), "{instruction}");
+    }
+    let schema: serde_json::Value =
+        serde_json::from_str(&tools["set_agent_tasks"].parameters_json).unwrap();
+    let task = &schema["$defs"]["task"]["properties"];
+    assert!(task.get("assigned_to").is_none());
+    assert!(task.get("agent_name").is_none());
+    assert!(
+        task["model"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("forces dedicated execution")
+    );
+    assert!(
+        task["hidden"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("Hidden self tasks stay hidden")
+    );
+}
+
+#[test]
 fn inline_overrides_replace_only_the_selected_prompt() {
     let environment = fixtures::environment();
     let (mut inherited, _) = PromptTemplateCatalog::from_content("", &environment).unwrap();

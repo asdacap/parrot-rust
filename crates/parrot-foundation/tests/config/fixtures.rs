@@ -112,6 +112,16 @@ fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
         )?;
         expected.insert(id.to_owned(), spec.clone());
     }
+    // The authorized self-assignment flow supersedes only this ported text-parity case.
+    let id = "agent-task.composite";
+    let current = &actual[id];
+    let retained = expected.get_mut(id).unwrap();
+    retained.text.clone_from(&current.text);
+    parrot_foundation::template_scalar::ScalarPromptTemplateEngine::compile(
+        &current.path,
+        &current.text,
+        &current.allowed.iter().cloned().collect(),
+    )?;
     if actual != expected {
         return Err(ConfigError::invalid_data(
             "A008 fixture catalog differs from pinned source/migration descriptors".into(),

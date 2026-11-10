@@ -47,7 +47,7 @@ fn a008_native_descriptor_required_arguments_retain_source_declaration_order() {
 
 #[test]
 fn a008_retained_descriptor_order_matches_source_inventory_with_exact_ten_mappings() {
-    let expected = crate::fixtures::migrated_fixture_inventory()
+    let mut expected = crate::fixtures::migrated_fixture_inventory()
         .unwrap()
         .into_iter()
         .filter(|row| {
@@ -76,6 +76,15 @@ fn a008_retained_descriptor_order_matches_source_inventory_with_exact_ten_mappin
             && !crate::fixtures::NATIVE_MINIJINJA_IDS.contains(&row["id"].as_str().unwrap())
     });
     assert_eq!(descriptors.len(), 89);
+    let composite = expected
+        .iter_mut()
+        .find(|row| row["id"] == "agent-task.composite")
+        .unwrap();
+    composite["text"] = descriptors
+        .iter()
+        .find(|row| row["id"] == "agent-task.composite")
+        .unwrap()["text"]
+        .clone();
     assert_eq!(descriptors, expected);
 }
 

@@ -31,18 +31,49 @@ called, before returning the observation future. Scope disposal can then join it
 child and shared-resource disposal. There is no strong owner-scope back reference
 or binding hook, so arbitrary nested scopes use the same construction pattern.
 
+## Assignment and accepted responses
+
+Each owner assigns at most one ready ordinary instruction leaf to `self`, in
+stable graph order. Composites and task-level model overrides always run on
+dedicated workers. Other ready parallel work uses dedicated workers as capacity
+permits. Later self handoffs arrive automatically without another setter call;
+existing dedicated runs retain their assignments.
+
+Self work runs in the owner conversation and must explicitly record its outcome
+and result through `set_agent_tasks`. Final chat or JSON cannot complete it.
+Dedicated workers retain their strict final-JSON completion protocol. A composite
+worker registers its provisional inner graph, performs and explicitly completes
+inner self tasks, supervises dedicated work, and resolves the graph before
+returning strict parent-facing final JSON.
+
+List and detail views expose optional read-only `assigned_to`, either `self` or
+an absolute registered dedicated-agent path. Never-assigned tasks omit it;
+terminal tasks retain the last assignee until reset. `agent_name` remains the
+dedicated-worker compatibility alias. Neither field belongs to task input.
+Non-hidden self tasks remain visible without a child link. Hidden self tasks
+stay hidden. Temporary visibility is active dedicated-worker activity using its
+worker ID, not an owner link or an added progress-protocol field.
+
+New accepted tool updates seal a typed assignment snapshot and its rendered rich
+response. Recovery replays the exact sealed bytes before rereading arguments or
+mutable artifact files, even when the live graph has advanced. Queries and later
+notifications report current state. Legacy count-only receipts lack historical
+rich-response bytes and retain the original `agent-task.set-accepted` response.
+
 ## Ownership and observations
 
 - `set_tasks` synchronously admits and reserves a FIFO update, returning an
   already-started `children::Operation<()>`. Dropping an observer does not drop
   the admitted update, append/publication, spawn or execution. Join it to observe
   validation/publication errors. Consecutive calls preserve admission order even
-  when neither handle is awaited.
+  when neither handle is awaited. Tool-facing accepted updates reserve their
+  typed assignment response and seal the rendered bytes in that same FIFO
+  operation before delivery.
 - `apply_visibility_changes` is also admitted FIFO. After settlement admission it
   is a no-op, matching the source. `settle` synchronously rejects subsequent task
   updates and returns the same retained operation on repeated calls.
-- `snapshot` and `capture_detail` are asynchronous, first joining previously
-  admitted updates and then taking the same graph gate. Spawn and durable
+- `snapshot`, `capture_views` and `capture_detail` are asynchronous, first joining
+  previously admitted updates and then taking the same graph gate. Spawn and durable
   publication hold this gate; there is no externally observable intermediate
   Pending state during asynchronous construction. Reads do not wait for ongoing
   settlement executions: they can inspect the graph's canceled state while
@@ -54,8 +85,10 @@ or binding hook, so arbitrary nested scopes use the same construction pattern.
   **without** the gate across the turn. Completion merges only state/result/
   failure, preserving live visibility. A canceled/restarted run cannot overwrite
   its replacement.
-- Settlement cancels unresolved tasks, appends/publishes the final graph, cancels
-  runs, joins all admitted executions/stop records, then drains the notifier.
+- Ordinary settlement cancels unresolved tasks, appends/publishes the final graph,
+  cancels runs, joins all admitted executions/stop records, then drains the notifier.
+  An accepted receipt whose response is not yet sealed instead preserves its
+  graph through suspension so recovery can finish the response.
   Publication/spill failures remain observable operation errors; source-caught
   stop-record/final-delivery failures emit bounded typed diagnostics instead.
   Before each start, **all** finished execution handles are joined and pruned.
@@ -112,8 +145,9 @@ host's shared startup latch. Each worker execution has one recovery owner.
 
 Runner checkpoints save the original/current declaration, attempt and repair
 counters and limits, feedback, carried result, stable prompt identity and phase.
-An unfinished attempt continues with those values and its existing worker rather
-than spending a new attempt or admitting the initial assignment again. Prompt
+A current-format unfinished dedicated attempt continues with those values and
+its existing worker rather than spending a new attempt or admitting the initial
+assignment again. Prompt
 intent is saved before admission. A completed response is captured by a durable
 history reference before the worker claim is acknowledged; recovery can consume
 that result without requesting it again. The accepted outcome is saved before
@@ -137,14 +171,34 @@ outbox entries reconcile before new generations replace their work. A snapshot
 write failure is reported and blocks further graph transitions rather than
 starting unrecorded work.
 
+Recovery snapshots use version `2`; AgentTask input artifacts remain version
+`1`. Strict version-`1` snapshot compatibility supports one safe legacy conversion.
+Before reassignment, conversion stops and joins obsolete attempts and their owned
+nested work. It preserves terminal tasks and histories, but reassigned unfinished
+work can repeat partial external effects. A saved self assignment stays owner
+work and does not launch a child on recovery.
+
+Ambiguous legacy pending input blocks opening before provider execution,
+cancellation, claim release or consumption. Original pending bytes and state
+remain unchanged. Resolve the exact input externally using compatible tooling or
+a compatible version before retrying. Do not execute an old attempt as fallback,
+discard pending input, match prompt text, or bulk-clear inputs. Before opening or
+upgrading, back up the complete stopped session. Older binaries may reject
+version-`2` snapshots despite unchanged SQLite format. Do not edit version fields
+or downgrade in place. Restore the complete pre-migration backup with its matching
+binary and workspace; external effects are not rolled back. See
+[operator recovery](../../../../docs/operator/state-and-rollback.md#agenttask-snapshot-migration).
+
 ## Task-run concurrency
 
-`agent_tasks.extra_concurrent_tasks` defaults to `2` and sets extra task-run
+`agent_tasks.extra_concurrent_tasks` defaults to `2` and sets extra dedicated-run
 admissions shared across the user session. Every scheduler owner has one free
-concurrent task run, even when the setting is `0`; nested owners receive that
-same per-owner allowance. The budget counts `max(ongoing admitted runs - 1, 0)`
-per owner, not particular task identities. Internal retries retain their
-admission, and direct `agent_spawn` calls are outside this budget.
+concurrent dedicated run; nested owners receive that same per-owner allowance.
+Self consumes no child capacity, so `0` permits one self task plus one free
+dedicated run per owner. The budget counts
+`max(ongoing admitted dedicated runs - 1, 0)` per owner, not particular task
+identities. Internal retries retain their admission, and direct `agent_spawn`
+calls are outside this budget.
 
 The limit controls admission only: pending runs wait for capacity and wake
 automatically when an admission is released or the limit increases. Decreasing
@@ -166,8 +220,9 @@ state is not persisted.
 
 ## Runner and notifications
 
-Defaults come from `predefined_config.agent_tasks.yaml`: five attempts, three
-response repairs per attempt, dependency-first fork history. A rejection can
+Dedicated-run defaults come from `predefined_config.agent_tasks.yaml`, with five
+attempts, three response repairs per attempt, and dependency-first fork history.
+Self work has no automatic strict-verdict retry or repair loop. A rejection can
 replace an instruction only (never a composite), carry a replacement result, and
 append feedback. Repair attempts do not consume verdict attempts. The runner uses
 real `agent-task.*` template IDs. Context/summary bounds are 16 Ki UTF-16 units;
