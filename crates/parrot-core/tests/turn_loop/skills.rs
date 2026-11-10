@@ -121,7 +121,7 @@ fn core_queries_text_mentions_and_reads_each_selected_record_once_in_text_order(
     );
     let context = &state.recorded_input_contexts[0];
     assert_eq!(
-        context.loaded_paths,
+        state.loaded_skill_paths(),
         ["/skills/second/SKILL.md", "/skills/first/SKILL.md"]
     );
     assert!(
@@ -176,10 +176,7 @@ fn separate_inputs_use_local_offsets_and_utf16_identity_tiebreak_before_body_rea
         *state.skill_reads.lock().unwrap(),
         ["\u{10000}", "\u{e000}"]
     );
-    assert_eq!(
-        state.recorded_input_contexts[0].loaded_paths,
-        ["/earlier", "/later"]
-    );
+    assert_eq!(state.loaded_skill_paths(), ["/earlier", "/later"]);
 }
 
 #[test]
@@ -248,7 +245,7 @@ fn unavailable_and_oversized_records_produce_notices_without_loaded_paths() {
     state.add_skill("boundary", SkillContent::Text("x".repeat(8192)));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     let context = &state.recorded_input_contexts[0];
-    assert_eq!(context.loaded_paths, ["/skills/boundary/SKILL.md"]);
+    assert_eq!(state.loaded_skill_paths(), ["/skills/boundary/SKILL.md"]);
     assert!(context.content.contains("<name>&lt;bad&amp;&gt;</name>"));
     assert!(
         context
@@ -275,7 +272,7 @@ fn diagnostics_are_normalized_and_limited_in_utf16_without_splitting_unicode() {
     assert!(context.content.contains(&"😀".repeat(512)));
     assert!(!context.content.contains(&"😀".repeat(513)));
     assert!(!context.content.contains("tail"));
-    assert!(context.loaded_paths.is_empty());
+    assert!(state.loaded_skill_paths().is_empty());
 }
 
 #[test]
@@ -299,12 +296,12 @@ fn combined_budget_keeps_complete_skill_bodies_and_reports_omitted_instructions(
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     let context = &state.recorded_input_contexts[0];
     assert!(context.content.len() <= 1024 * 1024);
-    assert!(!context.loaded_paths.is_empty());
-    assert!(context.loaded_paths.len() < 150);
+    assert!(!state.loaded_skill_paths().is_empty());
+    assert!(state.loaded_skill_paths().len() < 150);
     assert!(context.content.contains("active-turn prompt budget"));
     assert_eq!(
         context.content.matches(&"x".repeat(7900)).count(),
-        context.loaded_paths.len()
+        state.loaded_skill_paths().len()
     );
     assert_eq!(state.skill_reads.lock().unwrap().len(), 150);
 }
@@ -335,7 +332,7 @@ fn combined_diagnostic_budget_reserves_space_for_an_omitted_summary() {
             .content
             .contains("diagnostics omitted by the active-turn prompt budget")
     );
-    assert!(context.loaded_paths.is_empty());
+    assert!(state.loaded_skill_paths().is_empty());
     assert!(context.content.matches("<skill-unavailable>").count() < 1200);
 }
 

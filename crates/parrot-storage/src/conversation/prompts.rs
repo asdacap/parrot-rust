@@ -21,6 +21,11 @@ fn project_system(
     )
 }
 impl ConversationRepository {
+    pub async fn read_final_phase(&self, agent: String) -> Result<bool, EventError> {
+        self.events
+            .transaction(move |tx| projection::read_latest_final_phase(tx, &agent))
+            .await
+    }
     pub async fn pending_status(&self, agent: String) -> Result<Option<PendingStatus>, EventError> {
         loop {
             let state = self

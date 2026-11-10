@@ -165,6 +165,7 @@ pub trait Tools: Send + Sync {
 pub struct PromotedInput {
     pub input_id: String,
     pub message: Message,
+    pub publication: crate::ConversationPublication,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -275,6 +276,10 @@ pub trait States: Send + Sync {
         _addition: crate::ConversationAddition,
     ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
         Box::pin(async { Err(Error::unsupported("States.add_conversation")) })
+    }
+    /// Reads the durable final-phase marker without changing the conversation.
+    fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_final_phase")) })
     }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
@@ -409,38 +414,9 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'a, Result<SkillContent, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_skill_content")) })
     }
-    /// Records supplied derived content and loaded-path facts after preparation.
-    /// Empty content records and publishes nothing.
-    fn record_input_context<'a>(
-        &'a mut self,
-        _context: &'a DerivedContext,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_input_context")) })
-    }
     /// Reads the current token calibration without choosing context or output limits.
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_token_calibration")) })
-    }
-    /// Persists supplied steer content and applies it to the conversation.
-    /// Repeated calls in the same final phase do not append or publish duplicate notices.
-    fn record_steer<'a>(&'a mut self, _content: &'a str) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_steer")) })
-    }
-    /// Persists the supplied context reminder after core checks the request's token limits.
-    /// Updates the conversation and returns a publication receipt only on insertion.
-    /// Returns `None` for a duplicate. Does not publish the receipt.
-    fn record_context_reminder<'a>(
-        &'a mut self,
-        _reminder: &'a ContextReminder,
-    ) -> BoxFuture<'a, Result<Option<ContextReminderPublication>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_context_reminder")) })
-    }
-    /// Publishes the recorded context reminder notice without cancellation.
-    fn publish_context_reminder(
-        &mut self,
-        _receipt: ContextReminderPublication,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.publish_context_reminder")) })
     }
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
@@ -462,38 +438,6 @@ pub trait States: Send + Sync {
         _result: Result<Option<crate::compaction::FittedCompaction>, Error>,
     ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async { Err(Error::unsupported("States.record_compaction")) })
-    }
-    /// Records supplied retry content after a malformed or truncated tool response.
-    fn record_retry<'a>(
-        &'a mut self,
-        _content: &'a str,
-        _attempt: i32,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_retry")) })
-    }
-    /// Durably records the assistant's tool calls and returns their correlation
-    /// for execution without preparing executable bindings or a live batch.
-    fn record_tool_calls<'a>(
-        &'a mut self,
-        _response: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_tool_calls")) })
-    }
-    /// Records the retained candidate once and all blocker messages in supplied order
-    /// before applying them to the conversation. Returns no completion decision.
-    fn record_completion_feedback(
-        &mut self,
-        _feedback: CompletionFeedback,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_completion_feedback")) })
-    }
-    /// Settles the accepted response and durably closes its turn before publication
-    /// completes, returning its answer only after the operation has finished.
-    fn complete_turn<'a>(
-        &'a mut self,
-        _response: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<String, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.complete_turn")) })
     }
 }
 
@@ -995,6 +939,8 @@ pub enum ConfigKey {
     ContextReminderTemplate,
     ContextLimitReminderTemplate,
     FinalRequestTemplate,
+    RestoredToolsTemplate,
+    InterruptedTemplate,
     TruncatedToolCallTemplate,
     InvalidToolCallTemplate,
     OptionalCliUtilitiesTemplate,

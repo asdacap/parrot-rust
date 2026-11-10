@@ -29,6 +29,14 @@ const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
         "agent-session.final-request",
     ),
     (
+        ConfigKey::RestoredToolsTemplate,
+        "agent-session.tools-restored",
+    ),
+    (
+        ConfigKey::InterruptedTemplate,
+        "agent-session.interrupted-note",
+    ),
+    (
         ConfigKey::TruncatedToolCallTemplate,
         "agent-session.truncated-tool-call",
     ),

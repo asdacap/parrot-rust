@@ -148,8 +148,6 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
 }
 struct Notices {
     runaway: String,
-    restored: String,
-    interrupted: String,
 }
 
 impl<S, T> RuntimeBackend<S, T>
@@ -196,8 +194,6 @@ where
         };
         let notices = Notices {
             runaway: render("agent-session.runaway")?,
-            restored: render("agent-session.tools-restored")?,
-            interrupted: render("agent-session.interrupted-note")?,
         };
         Ok(Arc::new(Self {
             identity: config.identity,
@@ -375,9 +371,7 @@ where
     }
     async fn promote(
         &self,
-        state: &mut State,
         admission: parrot_core::InputAdmission,
-        cancellation: &dyn Cancellation,
     ) -> Result<Vec<parrot_core::PromotedInput>, TurnError> {
         let agent = self.identity.session_id.clone();
         let ids = self.event_id.clone();
@@ -428,38 +422,19 @@ where
                 provider_content: ProviderContent::default(),
             };
             inputs.push(parrot_core::PromotedInput {
-                input_id: promotion.input.id,
+                input_id: promotion.input.id.clone(),
                 message: provider_message(&message).into(),
+                publication: parrot_core::ConversationPublication {
+                    event_id: promotion.published.id,
+                    agent_session_id: promotion.published.agent_session_id,
+                    event: parrot_core::ConversationEvent::InputPromoted {
+                        input_id: promotion.input.id,
+                        message_id: promotion.input.message_id,
+                    },
+                },
             });
-            state.conversation.add(message);
-            self.publish(promotion.published, cancellation).await?;
         }
         Ok(inputs)
-    }
-    async fn retry_notice(
-        &self,
-        state: &mut State,
-        reason: &str,
-        attempt: i32,
-        cancellation: &dyn Cancellation,
-    ) -> Result<(), TurnError> {
-        let mut event = self.event();
-        event.set_retry_notice(protocol::RetryNotice {
-            reason: reason.into(),
-            attempt,
-            ..Default::default()
-        });
-        self.history
-            .append_message(
-                event.clone(),
-                Some(ConversationMessage::text(MessageRole::System, reason)),
-                ConversationOrigin::System,
-            )
-            .await?;
-        state
-            .conversation
-            .add(text_message(MessageRole::System, reason.into()));
-        self.publish(event, cancellation).await
     }
     async fn fail(&self, message: String, body: String) -> Result<(), TurnError> {
         let mut event = self.event();
@@ -469,61 +444,6 @@ where
             ..Default::default()
         });
         self.emit(event, &NeverCancelled).await
-    }
-    async fn close_turn(
-        &self,
-        state: &mut State,
-        key: &TurnKey,
-        completion: &sessions::Completion,
-        cancellation: &dyn Cancellation,
-    ) -> Result<TurnClosure, TurnError> {
-        let totals = self.usage.capture().own.totals;
-        let mut event = self.event();
-        event.set_turn_ended(protocol::TurnEnded {
-            finish_reason: completion.finish_reason.clone(),
-            input_tokens: totals.input_tokens,
-            output_tokens: totals.output_tokens,
-            ..Default::default()
-        });
-        let message = conversation_message(completion);
-        let model = model_assistant(completion);
-        let conversation = &mut state.conversation;
-        let publisher = PublisherRef(self.publisher.as_ref());
-        let result = self
-            .history
-            .repository()
-            .events()
-            .close_turn_and_publish(
-                key.clone(),
-                event,
-                Some(message),
-                &publisher,
-                cancellation,
-                |receipt| {
-                    // This callback runs after durable commit and BEFORE publication.
-                    if receipt.closure == TurnClosure::NewlyClosed {
-                        conversation.add(model);
-                    }
-                },
-            )
-            .await;
-        let committed = match &result {
-            Ok(receipt) => Some(receipt),
-            Err(CloseTurnError::Publication { committed, .. }) => Some(committed.as_ref()),
-            _ => None,
-        };
-        if let Some(receipt) = committed {
-            self.history.refresh().await?;
-            if receipt.closure == TurnClosure::AlreadyClosed {
-                state.conversation.reload().await?;
-            }
-        }
-        match result {
-            Ok(receipt) => Ok(receipt.closure),
-            Err(CloseTurnError::AdmissionCancelled) => Err(TurnError::Cancelled),
-            Err(CloseTurnError::Repository(error)) => Err(error.into()),
-            Err(CloseTurnError::Publication { error, .. }) => Err(TurnError::Publication(error)),
-        }
     }
 }
 
@@ -628,46 +548,6 @@ fn reminder_lifecycle_error(error: ReminderError<BrokerError>) -> LifecycleError
     }
 }
 
-fn text_message(role: MessageRole, text: String) -> ModelMessage {
-    ModelMessage {
-        role,
-        contents: vec![ModelContent::Text(text)],
-        tool_calls: Vec::new(),
-        tool_call_id: String::new(),
-        provider_content: ProviderContent::default(),
-    }
-}
-fn conversation_message(completed: &sessions::Completion) -> ConversationMessage {
-    ConversationMessage {
-        origin: ConversationOrigin::Model,
-        role: MessageRole::Assistant,
-        parts: vec![ConversationPart::text(&completed.assistant_text)],
-        tool_calls: completed
-            .tool_calls
-            .iter()
-            .map(|call| parrot_storage::events::ToolCall {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                arguments_json: call.arguments_json.clone(),
-            })
-            .collect(),
-        tool_call_id: String::new(),
-        provider_content: ProviderContent {
-            provider_id: completed.provider_id.clone(),
-            content: completed.provider_content.clone(),
-        },
-    }
-}
-fn model_assistant(completed: &sessions::Completion) -> ModelMessage {
-    let message = conversation_message(completed);
-    ModelMessage {
-        role: message.role,
-        contents: vec![ModelContent::Text(completed.assistant_text.clone())],
-        tool_calls: message.tool_calls,
-        tool_call_id: message.tool_call_id,
-        provider_content: message.provider_content,
-    }
-}
 struct PublisherRef<'a>(&'a Publisher);
 impl EventPublisher for PublisherRef<'_> {
     type Event = Event;
@@ -1091,7 +971,6 @@ where
     ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
             let (result, failed_key) = core_loop::run(self, cancellation, work).await;
-            let mut state = self.state.lock().await;
             let outcome = async {
                 match result {
                     Ok(execution) => {
@@ -1112,18 +991,9 @@ where
                             self.activity
                                 .turn_finished(&key.start_event_id, "cancelled", None);
                             if !self.suspending.load(Ordering::Acquire) {
-                                let completed = sessions::Completion {
-                                    assistant_text: self.notices.interrupted.clone(),
-                                    finish_reason: "interrupted".into(),
-                                    ..Default::default()
-                                };
-                                let closure = self
-                                    .close_turn(&mut state, key, &completed, &NeverCancelled)
+                                core_loop::interrupt(self, work, key)
                                     .await
-                                    .map_err(|e| e.lifecycle_error())?;
-                                if closure == TurnClosure::NewlyClosed {
-                                    self.activity.assistant_message(&self.notices.interrupted);
-                                }
+                                    .map_err(|error| error.lifecycle_error())?;
                             }
                         }
                         Ok(Execution::canceled())

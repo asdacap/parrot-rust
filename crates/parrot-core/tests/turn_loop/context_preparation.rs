@@ -294,7 +294,13 @@ fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.reminder_appends.len(), 1);
     assert_eq!(state.reminder_appends[0].0.percentage, 50);
-    assert_eq!(state.reminder_appends[0].2, 55);
+    assert_eq!(
+        state.reminder_appends[0].2,
+        ConversationEvent::Notice {
+            kind: "context_reminder".into(),
+            notice: "Context reminder injected (55% context used)".into(),
+        }
+    );
     let request = state.request();
     let estimates = &request.estimates;
     assert_eq!(estimates[1].tokens, 630);

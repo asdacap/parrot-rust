@@ -1,6 +1,7 @@
 use crate::{
     CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration, ContextReminder,
-    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, Provider, ProviderRequest,
+    ContextReminderCheckpoint, ContextSnapshot, ConversationAddition, ConversationEvent,
+    ConversationPersistence, Error, EventPublisher, Message, Provider, ProviderRequest, Role,
     States, ToolDefinition, TurnOptions,
     budget::TurnFlags,
     compaction::{compact_conversation, prepare_compaction},
@@ -106,7 +107,18 @@ pub(crate) async fn prepare_request(
 ) -> Result<ProviderRequest, Error> {
     if flags.final_phase {
         let content = render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
-        states.record_steer(&content).await?;
+        states
+            .add_conversation(ConversationAddition {
+                messages: vec![Message::text(Role::System, content)],
+                persistence: ConversationPersistence::Phase {
+                    final_phase: true,
+                    event: ConversationEvent::Notice {
+                        kind: "final_provider_request_prompt".into(),
+                        notice: "Final provider request prompt injected".into(),
+                    },
+                },
+            })
+            .await?;
     }
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
@@ -149,8 +161,22 @@ pub(crate) async fn prepare_request(
                 .into_context()?;
             let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
             ContextSnapshot::estimate(estimate, &configuration).ensure_input_fits()?;
-        } else if let Some(receipt) = states.record_context_reminder(&reminder).await? {
-            states.publish_context_reminder(receipt).await?;
+        } else {
+            states
+                .add_conversation(ConversationAddition {
+                    messages: vec![reminder.render_message()],
+                    persistence: ConversationPersistence::Reminder {
+                        checkpoint: reminder.checkpoint,
+                        event: ConversationEvent::Notice {
+                            kind: "context_reminder".into(),
+                            notice: format!(
+                                "Context reminder injected ({}% context used)",
+                                reminder.observed_percentage
+                            ),
+                        },
+                    },
+                })
+                .await?;
         }
     }
     let messages = states.read_messages().await?;

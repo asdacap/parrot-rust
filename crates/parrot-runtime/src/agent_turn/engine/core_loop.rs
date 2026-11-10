@@ -1,11 +1,12 @@
 use super::*;
 use parrot_core::{
-    CompletionFeedback as CoreCompletionFeedback, ContextCompaction as CoreContextCompaction,
-    ContextReminder, ContextReminderPublication, ContextSnapshot as CoreContextSnapshot,
+    ContextCompaction as CoreContextCompaction, ContextSnapshot as CoreContextSnapshot,
     Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse,
     States as CoreStates, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition,
     ToolResult, ToolStatus, TurnOptions,
 };
+
+mod conversation;
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
@@ -26,6 +27,20 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn publish<'a>(
+        &'a self,
+        event: parrot_core::ConversationEvent,
+        cancellation: parrot_core::CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .emit(
+                    conversation::render_event(self.backend.event(), event),
+                    &cancellation,
+                )
+                .await
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             self.backend
@@ -62,7 +77,6 @@ where
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S>,
-    cancellation: &'a dyn Cancellation,
     captured: std::sync::Mutex<Option<CapturedTools<T::Snapshot>>>,
 }
 
@@ -223,7 +237,6 @@ where
             let tools = RuntimeTools {
                 backend,
                 binding: &binding,
-                cancellation,
                 captured: std::sync::Mutex::new(None),
             };
             let provider = RuntimeProvider {
@@ -357,6 +370,21 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn add_conversation(
+        &mut self,
+        addition: parrot_core::ConversationAddition,
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, CoreError>> {
+        adapt_operation(conversation::add_conversation(self, addition))
+    }
+    fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .history
+                .read_final_phase()
+                .await
+                .map_err(Into::into)
+        })
+    }
     fn get_config(
         &self,
         key: parrot_core::ConfigKey,
@@ -709,12 +737,7 @@ where
         &mut self,
         admission: parrot_core::InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::PromotedInput>, CoreError>> {
-        adapt_operation(async move {
-            let mut state = self.backend.state.lock().await;
-            self.backend
-                .promote(&mut state, admission, self.cancellation)
-                .await
-        })
+        adapt_operation(async move { self.backend.promote(admission).await })
     }
     fn get_skills<'a>(
         &'a self,
@@ -740,116 +763,10 @@ where
                 .map_err(TurnError::from)
         })
     }
-    fn record_input_context<'a>(
-        &'a mut self,
-        context: &'a parrot_core::DerivedContext,
-    ) -> BoxFuture<'a, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let mut state = backend.state.lock().await;
-            let cancellation = self.cancellation;
-            if !context.content.is_empty() {
-                let mut event = backend.event();
-                event.set_agent_notice(protocol::AgentNotice {
-                    kind: "skill_context".into(),
-                    ..Default::default()
-                });
-                backend
-                    .history
-                    .append_message(
-                        event.clone(),
-                        Some(ConversationMessage::text(
-                            MessageRole::User,
-                            &context.content,
-                        )),
-                        ConversationOrigin::System,
-                    )
-                    .await?;
-                state
-                    .conversation
-                    .add(text_message(MessageRole::User, context.content.clone()));
-                backend.publish(event, cancellation).await?;
-                for path in &context.loaded_paths {
-                    let mut event = backend.event();
-                    event.set_skill_loaded(protocol::SkillLoadedEvent {
-                        path: path.clone(),
-                        ..Default::default()
-                    });
-                    backend.emit(event, cancellation).await?;
-                }
-            }
-            Ok(())
-        })
-    }
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, CoreError>> {
         adapt_operation(async move {
             let state = self.backend.state.lock().await;
             Ok(state.context.budget().capture_state())
-        })
-    }
-    fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let events = ContextEmitter { backend };
-            state
-                .context
-                .inject_final_provider_request_prompt(
-                    &mut state.conversation,
-                    content,
-                    &events,
-                    self.cancellation,
-                )
-                .await?;
-            Ok(())
-        })
-    }
-    fn record_context_reminder<'a>(
-        &'a mut self,
-        reminder: &'a ContextReminder,
-    ) -> BoxFuture<'a, Result<Option<ContextReminderPublication>, CoreError>> {
-        adapt_operation(async move {
-            let mut state = self.backend.state.lock().await;
-            let state = &mut *state;
-            let published = state
-                .context
-                .append_context_reminder(
-                    &mut state.conversation,
-                    reminder.checkpoint.clone(),
-                    reminder.content.clone(),
-                    reminder.observed_percentage,
-                )
-                .await?;
-            Ok(published.map(|event| ContextReminderPublication {
-                kind: event.agent_notice().kind.clone(),
-                notice: event.agent_notice().notice.clone(),
-                event_id: event.id,
-                agent_session_id: event.agent_session_id,
-            }))
-        })
-    }
-    fn publish_context_reminder(
-        &mut self,
-        receipt: ContextReminderPublication,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let mut event = Event {
-                id: receipt.event_id,
-                agent_session_id: receipt.agent_session_id,
-                ..Event::new()
-            };
-            event.set_agent_notice(protocol::AgentNotice {
-                kind: receipt.kind,
-                notice: receipt.notice,
-                ..protocol::AgentNotice::new()
-            });
-            ContextEmitter {
-                backend: self.backend,
-            }
-            .publish(event, &NeverCancelled)
-            .await?;
-            Ok(())
         })
     }
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
@@ -931,116 +848,6 @@ where
             })
         })
     }
-    fn record_retry<'a>(
-        &'a mut self,
-        content: &'a str,
-        attempt: i32,
-    ) -> BoxFuture<'a, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let mut state = self.backend.state.lock().await;
-            self.backend
-                .retry_notice(&mut state, content, attempt, self.cancellation)
-                .await
-        })
-    }
-    fn record_tool_calls<'a>(
-        &'a mut self,
-        completed: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<ToolCallReceipt, CoreError>> {
-        adapt_operation(async move {
-            let completed: sessions::Completion = completed.clone().into();
-            let completed = &completed;
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let cancellation = self.cancellation;
-            let published = backend.event();
-            let assistant = backend
-                .history
-                .append_conversation(published.clone(), conversation_message(completed))
-                .await?;
-            state.conversation.add(model_assistant(completed));
-            backend.publish(published, cancellation).await?;
-            backend
-                .activity
-                .assistant_message(&completed.assistant_text);
-            let mut received = backend.event();
-            received.set_tool_request_received(protocol::ToolRequestReceived {
-                tool_call_count: completed.tool_calls.len() as i32,
-                ..Default::default()
-            });
-            backend.emit(received, cancellation).await?;
-            Ok(ToolCallReceipt {
-                assistant_sequence: assistant.sequence,
-            })
-        })
-    }
-    fn record_completion_feedback(
-        &mut self,
-        feedback: CoreCompletionFeedback,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let mut candidate = Some(feedback.candidate.clone());
-            let sources = std::mem::take(
-                &mut *self
-                    .binding
-                    .exit_blocker_sources
-                    .lock()
-                    .expect("completion sources poisoned"),
-            );
-            for ((source, kind), message) in sources.into_iter().zip(&feedback.messages) {
-                source
-                    .record_completion_feedback(
-                        &CompletionFeedback {
-                            kind,
-                            message: message.clone(),
-                            candidate: candidate.take(),
-                        },
-                        self.cancellation,
-                    )
-                    .await?;
-            }
-            let completed: sessions::Completion = feedback.candidate.into();
-            state.conversation.add(model_assistant(&completed));
-            backend
-                .activity
-                .assistant_message(&completed.assistant_text);
-            for message in feedback.messages {
-                state
-                    .conversation
-                    .add(text_message(MessageRole::System, message));
-            }
-            Ok(())
-        })
-    }
-    fn complete_turn<'a>(
-        &'a mut self,
-        completed: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<String, CoreError>> {
-        adapt_operation(async move {
-            let completed: sessions::Completion = completed.clone().into();
-            let completed = &completed;
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let cancellation = self.cancellation;
-            let work = self.work;
-            work.join_mutations()
-                .await
-                .map_err(|e| TurnError::Service(e.to_string()))?;
-            let key = self
-                .persistence_key
-                .as_ref()
-                .ok_or_else(|| TurnError::Service("turn start is unavailable".into()))?;
-            backend
-                .close_turn(state, key, completed, cancellation)
-                .await?;
-            Ok(completed.assistant_text.clone())
-        })
-    }
 }
 
 impl<S, T> parrot_core::Tools for RuntimeTools<'_, S, T>
@@ -1076,19 +883,6 @@ where
                 normal,
                 final_phase,
             });
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let events = ContextEmitter { backend };
-            state
-                .context
-                .restore_tool_availability(
-                    &mut state.conversation,
-                    &backend.notices.restored,
-                    &events,
-                    self.cancellation,
-                )
-                .await?;
             Ok(catalog)
         })
     }
@@ -1379,4 +1173,23 @@ mod tests {
             assert!(!translated.to_string().contains(body));
         }
     }
+}
+
+pub(super) async fn interrupt<S, T>(
+    backend: &RuntimeBackend<S, T>,
+    work: &dyn DrainWork,
+    key: &TurnKey,
+) -> Result<parrot_core::ConversationReceipt, TurnError>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    let binding = TurnBinding::new();
+    let mut budget = parrot_core::TurnBudget::new(backend.agent_limits.disable_max_turns);
+    let mut states = RuntimeStates::new(backend, &binding, &NeverCancelled, work, &mut budget);
+    states.persistence_key = Some(key.clone());
+    parrot_core::interrupt_turn(&mut states)
+        .await
+        .map_err(TurnError::Core)
 }

@@ -325,6 +325,9 @@ impl AgentHistoryView {
             .append_compaction_status(event, snapshot, content)
             .await
     }
+    pub async fn read_final_phase(&self) -> Result<bool, EventError> {
+        self.repository.read_final_phase(self.agent.clone()).await
+    }
     pub async fn pending_status(&self) -> Result<Option<PendingStatus>, EventError> {
         self.repository.pending_status(self.agent.clone()).await
     }

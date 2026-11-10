@@ -75,6 +75,22 @@ async fn execute_turn(
     let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
     budget.begin_turn();
     let catalog = tools.capture_catalog().await?;
+    if states.read_final_phase().await? {
+        let restored =
+            rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
+        states
+            .add_conversation(ConversationAddition {
+                messages: vec![Message::text(Role::System, restored)],
+                persistence: ConversationPersistence::Phase {
+                    final_phase: false,
+                    event: ConversationEvent::Notice {
+                        kind: "tool_availability_restored_prompt".into(),
+                        notice: "Tool availability restored prompt injected".into(),
+                    },
+                },
+            })
+            .await?;
+    }
     let mut compacted_oversized = false;
     let mut skills = skills::SkillPreparation::default();
     loop {
@@ -88,8 +104,34 @@ async fn execute_turn(
             InputAdmission::SteersOrNextQueued
         };
         let inputs = states.promote_input(admission).await?;
+        for input in &inputs {
+            states
+                .add_conversation(ConversationAddition {
+                    messages: vec![input.message.clone()],
+                    persistence: ConversationPersistence::Committed(input.publication.clone()),
+                })
+                .await?;
+        }
         let context = skills.prepare(states, &inputs, cancellation).await?;
-        states.record_input_context(&context).await?;
+        if !context.content.is_empty() {
+            states
+                .add_conversation(ConversationAddition {
+                    messages: vec![Message::text(Role::User, context.content)],
+                    persistence: ConversationPersistence::Append {
+                        origin: ConversationOrigin::System,
+                        event: ConversationEvent::Notice {
+                            kind: "skill_context".into(),
+                            notice: String::new(),
+                        },
+                    },
+                })
+                .await?;
+            for path in context.loaded_paths {
+                publisher
+                    .publish(ConversationEvent::SkillLoaded { path }, cancellation)
+                    .await?;
+            }
+        }
         let Some(flags) = budget.admit(options.maximum_requests) else {
             return Ok(Outcome::BudgetExhausted);
         };
@@ -128,7 +170,18 @@ async fn execute_turn(
             let content =
                 rendering::render_template(states, ConfigKey::TruncatedToolCallTemplate, &[])
                     .await?;
-            states.record_retry(&content, attempt).await?;
+            states
+                .add_conversation(ConversationAddition {
+                    messages: vec![Message::text(Role::System, &content)],
+                    persistence: ConversationPersistence::Append {
+                        origin: ConversationOrigin::System,
+                        event: ConversationEvent::Retry {
+                            reason: content,
+                            attempt,
+                        },
+                    },
+                })
+                .await?;
             continue;
         }
         if response
@@ -138,11 +191,41 @@ async fn execute_turn(
         {
             let content =
                 rendering::render_template(states, ConfigKey::InvalidToolCallTemplate, &[]).await?;
-            states.record_retry(&content, attempt).await?;
+            states
+                .add_conversation(ConversationAddition {
+                    messages: vec![Message::text(Role::System, &content)],
+                    persistence: ConversationPersistence::Append {
+                        origin: ConversationOrigin::System,
+                        event: ConversationEvent::Retry {
+                            reason: content,
+                            attempt,
+                        },
+                    },
+                })
+                .await?;
             continue;
         }
         if !response.tool_calls.is_empty() {
-            let receipt = states.record_tool_calls(&response).await?;
+            let recorded = states
+                .add_conversation(ConversationAddition {
+                    messages: vec![Message::from_response(&response)],
+                    persistence: ConversationPersistence::Append {
+                        origin: ConversationOrigin::Model,
+                        event: ConversationEvent::Message,
+                    },
+                })
+                .await?;
+            publisher
+                .publish(
+                    ConversationEvent::ToolRequestReceived {
+                        count: response.tool_calls.len() as i32,
+                    },
+                    cancellation,
+                )
+                .await?;
+            let receipt = ToolCallReceipt {
+                assistant_sequence: recorded.sequence,
+            };
             let results = tools
                 .execute(response.tool_calls.clone(), receipt, flags, cancellation)
                 .await?;
@@ -157,14 +240,44 @@ async fn execute_turn(
         }
         let messages = states.get_exit_blockers().await?;
         if messages.is_empty() {
-            return Ok(Outcome::Completed(states.complete_turn(&response).await?));
+            states
+                .add_conversation(ConversationAddition {
+                    messages: vec![Message::from_response(&response)],
+                    persistence: ConversationPersistence::CloseTurn {
+                        finish_reason: response.finish_reason.clone(),
+                    },
+                })
+                .await?;
+            return Ok(Outcome::Completed(response.assistant_text));
         }
+        let mut additions = vec![Message::from_response(&response)];
+        additions.extend(
+            messages
+                .iter()
+                .map(|message| Message::text(Role::System, message)),
+        );
         states
-            .record_completion_feedback(CompletionFeedback {
-                messages,
-                candidate: response,
+            .add_conversation(ConversationAddition {
+                messages: additions,
+                persistence: ConversationPersistence::CompletionFeedback(CompletionFeedback {
+                    messages,
+                    candidate: response,
+                }),
             })
             .await?;
         budget.restart();
     }
+}
+
+/// Records an interrupted assistant turn through the same generic conversation operation.
+pub async fn interrupt_turn(states: &mut dyn States) -> Result<ConversationReceipt, Error> {
+    let content = rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
+    states
+        .add_conversation(ConversationAddition {
+            messages: vec![Message::text(Role::Assistant, content)],
+            persistence: ConversationPersistence::CloseTurn {
+                finish_reason: FinishReason::Interrupted,
+            },
+        })
+        .await
 }

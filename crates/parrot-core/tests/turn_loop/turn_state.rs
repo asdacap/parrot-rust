@@ -273,6 +273,7 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
     let mut state = MemoryState::new([]);
     state.pending_messages.clear();
     state.fail_at = Some("render");
+    let original_turn = state.last_turn.clone();
     let message = Message {
         role: Role::User,
         contents: vec![
@@ -305,10 +306,11 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
         Ok(vec![PromotedInput {
             input_id: "promoted-input".into(),
             message: message.clone(),
+            publication: Default::default(),
         }])
     );
     assert!(state.pending_messages.is_empty());
-    assert_eq!(state.last_turn.as_ref().unwrap().messages, [message]);
+    assert_eq!(state.last_turn, original_turn);
     assert!(state.skill_lookups.lock().unwrap().is_empty());
     assert!(state.skill_reads.lock().unwrap().is_empty());
     assert!(state.request().rendered_instructions.is_empty());
@@ -354,20 +356,13 @@ fn skill_read_and_recording_failures_preserve_promoted_inputs_without_invoking_p
 }
 
 #[test]
-fn empty_derived_context_records_no_message_or_loaded_paths() {
-    let mut state = MemoryState::new([]);
-    let original = state.last_turn.clone();
-    assert_eq!(
-        finish(state.record_input_context(&DerivedContext {
-            content: String::new(),
-            loaded_paths: vec!["unused/SKILL.md".into()],
-        })),
-        Ok(())
-    );
-    assert_eq!(state.last_turn, original);
+fn input_without_skill_mentions_adds_no_derived_message_or_loaded_event() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.pending_messages.clear();
+    state.enqueue_message(Delivery::Steer, "ordinary input");
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.recorded_input_contexts.is_empty());
-    assert!(state.request().messages.is_empty());
-    assert!(state.trace.values().is_empty());
+    assert!(state.loaded_skill_paths().is_empty());
 }
 
 #[test]
@@ -390,10 +385,7 @@ fn core_loads_skill_rows_without_native_input_preparation() {
         state.recorded_input_contexts[0].content,
         "<skill>\n<name>selected</name>\n<path>/skills/selected/SKILL.md</path>\ninstructions from the skill row\n</skill>"
     );
-    assert_eq!(
-        state.recorded_input_contexts[0].loaded_paths,
-        ["/skills/selected/SKILL.md"]
-    );
+    assert_eq!(state.loaded_skill_paths(), ["/skills/selected/SKILL.md"]);
 }
 
 #[test]

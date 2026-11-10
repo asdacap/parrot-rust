@@ -1,12 +1,13 @@
 use parrot_core::{
     BoxFuture, CancellationToken, CompletionFeedback, ConfigKey, ConfigValue, Content,
-    ContextCompaction, ContextConfiguration, ContextModel, ContextReminder,
-    ContextReminderCheckpoint, ContextReminderPublication, ContextSnapshot, ConversationTurn,
-    Delivery, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
-    InputAdmission, Message, Outcome, PendingMessage, PromotedInput, PromptTemplate, Provider,
-    ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention,
-    SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
-    ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
+    ContextCompaction, ContextConfiguration, ContextModel, ContextReminderCheckpoint,
+    ContextSnapshot, ConversationAddition, ConversationEvent, ConversationOrigin,
+    ConversationPersistence, ConversationReceipt, ConversationTurn, Delivery, DerivedContext,
+    Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
+    PendingMessage, PromotedInput, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
+    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus,
+    Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions,
 };
@@ -47,10 +48,21 @@ use cancellation::CancellationSource;
 use compaction_dependencies::MemoryCompaction;
 
 struct MemoryEventPublisher {
+    events: Arc<Mutex<Vec<ConversationEvent>>>,
     compacting: Arc<AtomicBool>,
 }
 
 impl EventPublisher for MemoryEventPublisher {
+    fn publish<'a>(
+        &'a self,
+        event: ConversationEvent,
+        _: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            self.events.lock().unwrap().push(event);
+            Ok(())
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.compacting.store(true, Ordering::SeqCst);
@@ -72,6 +84,7 @@ async fn run(
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let publisher = MemoryEventPublisher {
+        events: states.events.clone(),
         compacting: states.compacting.clone(),
     };
     parrot_core::run(states, tools, provider, &publisher, cancellation).await
@@ -84,6 +97,7 @@ async fn run_turn(
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let publisher = MemoryEventPublisher {
+        events: states.events.clone(),
         compacting: states.compacting.clone(),
     };
     parrot_core::run_turn(states, tools, provider, &publisher, cancellation).await
@@ -392,6 +406,7 @@ struct MemoryPromptData {
 }
 
 struct MemoryState {
+    events: Arc<Mutex<Vec<ConversationEvent>>>,
     skill_rows: Vec<(Skill, SkillContent)>,
     steers_after_results: VecDeque<String>,
     skill_lookups: Mutex<Vec<SkillReference>>,
@@ -406,7 +421,7 @@ struct MemoryState {
     completion_feedback: Vec<CompletionFeedback>,
     final_requests: Vec<usize>,
     retries: Vec<(String, i32)>,
-    recorded_tools: Vec<ProviderResponse>,
+    recorded_tools: Vec<Message>,
     applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
     model: String,
@@ -415,7 +430,7 @@ struct MemoryState {
     include_router_metadata: bool,
     compactions: VecDeque<CompactedContext>,
     compacted_definitions: Vec<Vec<ToolDefinition>>,
-    reminder_appends: Vec<(ContextReminderCheckpoint, String, i32)>,
+    reminder_appends: Vec<(ContextReminderCheckpoint, String, ConversationEvent)>,
     append_reminder: bool,
     reminder_publications: usize,
     last_turn: Option<ConversationTurn>,
@@ -478,6 +493,7 @@ impl MemoryState {
         let compaction = Arc::new(Mutex::new(MemoryCompaction::default()));
         let compacting = Arc::new(AtomicBool::new(false));
         let mut state = Self {
+            events: Arc::default(),
             skill_rows: Vec::new(),
             steers_after_results: VecDeque::new(),
             skill_lookups: Mutex::default(),
@@ -599,6 +615,17 @@ impl MemoryState {
             },
         ));
     }
+    fn loaded_skill_paths(&self) -> Vec<String> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                ConversationEvent::SkillLoaded { path } => Some(path.clone()),
+                _ => None,
+            })
+            .collect()
+    }
     fn append_turn_message(&mut self, message: Message) {
         if message.role == Role::User {
             self.last_turn = None;
@@ -714,6 +741,118 @@ impl MemoryState {
     }
 }
 impl States for MemoryState {
+    fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn add_conversation(
+        &mut self,
+        addition: ConversationAddition,
+    ) -> BoxFuture<'_, Result<ConversationReceipt, Error>> {
+        Box::pin(async move {
+            let mut sequence = 0;
+            match &addition.persistence {
+                ConversationPersistence::Append { origin, event } => match event {
+                    ConversationEvent::Notice { kind, .. } if kind == "skill_context" => {
+                        self.step("record_input_context")?;
+                        let content = addition.messages[0]
+                            .contents
+                            .iter()
+                            .filter_map(|content| match content {
+                                Content::Text(text) => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        self.recorded_input_contexts.push(DerivedContext {
+                            content,
+                            loaded_paths: Vec::new(),
+                        });
+                    }
+                    ConversationEvent::Retry { reason, attempt } => {
+                        self.step("retry")?;
+                        self.retries.push((reason.clone(), *attempt));
+                    }
+                    ConversationEvent::Message if *origin == ConversationOrigin::Model => {
+                        self.step("record_tools")?;
+                        self.recorded_tools.extend(addition.messages.clone());
+                        let catalog = self
+                            .request()
+                            .estimates
+                            .last()
+                            .expect("estimated provider request")
+                            .definitions
+                            .iter()
+                            .map(|definition| definition.name.clone())
+                            .collect();
+                        self.recorded_catalogs.push(catalog);
+                        sequence = i64::try_from(self.recorded_tools.len()).unwrap();
+                    }
+                    _ => {}
+                },
+                ConversationPersistence::Committed(_) => {}
+                ConversationPersistence::Phase { final_phase, .. } => {
+                    if !final_phase {
+                        return Ok(ConversationReceipt::default());
+                    }
+                    self.step("final_request")?;
+                    let count = self.request().rendered_instructions.len();
+                    self.final_requests.push(count);
+                }
+                ConversationPersistence::Reminder { checkpoint, event } => {
+                    self.step("append_reminder")?;
+                    let content = addition.messages[0]
+                        .contents
+                        .iter()
+                        .filter_map(|content| match content {
+                            Content::Text(text) => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    self.reminder_appends
+                        .push((checkpoint.clone(), content, event.clone()));
+                    if !self.append_reminder {
+                        return Ok(ConversationReceipt::default());
+                    }
+                    self.prompts().checkpoint = Some(checkpoint.clone());
+                }
+                ConversationPersistence::CompletionFeedback(feedback) => {
+                    self.step("completion_feedback")?;
+                    self.completion_feedback.push(feedback.clone());
+                }
+                ConversationPersistence::CloseTurn { .. } => {
+                    self.step("complete")?;
+                }
+            }
+            for message in addition.messages {
+                if !matches!(
+                    &addition.persistence,
+                    ConversationPersistence::Committed(_)
+                        | ConversationPersistence::CloseTurn { .. }
+                        | ConversationPersistence::CompletionFeedback(_)
+                        | ConversationPersistence::Append {
+                            origin: ConversationOrigin::Model,
+                            ..
+                        }
+                ) {
+                    self.request().messages.push(message.clone());
+                }
+                if !matches!(&addition.persistence, ConversationPersistence::Phase { .. }) {
+                    self.append_turn_message(message);
+                }
+            }
+            if matches!(
+                &addition.persistence,
+                ConversationPersistence::Reminder { .. }
+            ) {
+                self.reminder_publications += 1;
+                self.step("publish_reminder")?;
+            }
+            Ok(ConversationReceipt {
+                inserted: true,
+                sequence,
+            })
+        })
+    }
+
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
         Box::pin(async move {
             match key {
@@ -1002,12 +1141,10 @@ impl States for MemoryState {
             }
             Ok(promoted
                 .into_iter()
-                .map(|(input, message)| {
-                    self.append_turn_message(message.clone());
-                    PromotedInput {
-                        input_id: input.input_id,
-                        message,
-                    }
+                .map(|(input, message)| PromotedInput {
+                    input_id: input.input_id,
+                    message,
+                    publication: Default::default(),
                 })
                 .collect())
         })
@@ -1058,79 +1195,10 @@ impl States for MemoryState {
                 .clone())
         })
     }
-    fn record_input_context<'a>(
-        &'a mut self,
-        context: &'a DerivedContext,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move {
-            if !context.content.is_empty() {
-                self.step("record_input_context")?;
-                self.recorded_input_contexts.push(context.clone());
-                let message = Message {
-                    role: Role::User,
-                    contents: vec![Content::Text(context.content.clone())],
-                    ..Message::default()
-                };
-                self.request().messages.push(message.clone());
-                self.append_turn_message(message);
-            }
-            Ok(())
-        })
-    }
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
         Box::pin(async move {
             self.trace.step("token_calibration", self.fail_at)?;
             Ok(self.request().context.calibration.clone())
-        })
-    }
-    fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move {
-            self.step("final_request")?;
-            let request_count = self.request().rendered_instructions.len();
-            self.final_requests.push(request_count);
-            let message = Message {
-                role: Role::System,
-                contents: vec![Content::Text(content.into())],
-                ..Message::default()
-            };
-            self.request().messages.push(message);
-            Ok(())
-        })
-    }
-    fn record_context_reminder<'a>(
-        &'a mut self,
-        reminder: &'a ContextReminder,
-    ) -> BoxFuture<'a, Result<Option<ContextReminderPublication>, Error>> {
-        Box::pin(async move {
-            self.step("append_reminder")?;
-            self.reminder_appends.push((
-                reminder.checkpoint.clone(),
-                reminder.content.clone(),
-                reminder.observed_percentage,
-            ));
-            if !self.append_reminder {
-                return Ok(None);
-            }
-            self.prompts().checkpoint = Some(reminder.checkpoint.clone());
-            let message = reminder.render_message();
-            self.request().messages.push(message.clone());
-            self.append_turn_message(message);
-            Ok(Some(ContextReminderPublication {
-                event_id: "memory-reminder".into(),
-                agent_session_id: "memory-session".into(),
-                kind: "context_reminder".into(),
-                notice: "context reminder recorded".into(),
-            }))
-        })
-    }
-    fn publish_context_reminder(
-        &mut self,
-        _: ContextReminderPublication,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.reminder_publications += 1;
-            self.step("publish_reminder")?;
-            Ok(())
         })
     }
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
@@ -1213,75 +1281,6 @@ impl States for MemoryState {
                 instructions: self.request().instructions.clone(),
                 reduced: self.reduced,
             })
-        })
-    }
-    fn record_retry<'a>(
-        &'a mut self,
-        content: &'a str,
-        attempt: i32,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move {
-            self.step("retry")?;
-            self.retries.push((content.into(), attempt));
-            let message = Message {
-                role: Role::System,
-                contents: vec![Content::Text(content.into())],
-                ..Message::default()
-            };
-            self.request().messages.push(message.clone());
-            self.append_turn_message(message);
-            Ok(())
-        })
-    }
-    fn record_tool_calls<'a>(
-        &'a mut self,
-        response: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>> {
-        Box::pin(async move {
-            self.step("record_tools")?;
-            self.recorded_tools.push(response.clone());
-            self.append_response(response);
-            let catalog = self
-                .request()
-                .estimates
-                .last()
-                .expect("estimated provider request")
-                .definitions
-                .iter()
-                .map(|definition| definition.name.clone())
-                .collect();
-            self.recorded_catalogs.push(catalog);
-            Ok(ToolCallReceipt {
-                assistant_sequence: i64::try_from(self.recorded_tools.len()).unwrap(),
-            })
-        })
-    }
-    fn record_completion_feedback(
-        &mut self,
-        feedback: CompletionFeedback,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.step("completion_feedback")?;
-            self.append_response(&feedback.candidate);
-            for message in &feedback.messages {
-                self.append_turn_message(Message {
-                    role: Role::System,
-                    contents: vec![Content::Text(message.clone())],
-                    ..Message::default()
-                });
-            }
-            self.completion_feedback.push(feedback);
-            Ok(())
-        })
-    }
-    fn complete_turn<'a>(
-        &'a mut self,
-        response: &'a ProviderResponse,
-    ) -> BoxFuture<'a, Result<String, Error>> {
-        Box::pin(async move {
-            self.step("complete")?;
-            self.append_response(response);
-            Ok(response.assistant_text.clone())
         })
     }
 }
@@ -2092,7 +2091,17 @@ fn core_validates_json_syntax_without_rewriting_arguments_or_provider_content() 
             "{arguments}"
         );
         assert!(states.retries.is_empty());
-        assert_eq!(states.recorded_tools, [response]);
+        assert_eq!(
+            states.recorded_tools,
+            [Message {
+                role: Role::Assistant,
+                contents: vec![Content::Text(response.assistant_text)],
+                tool_calls: response.tool_calls,
+                provider_id: response.provider_id,
+                provider_content: response.provider_content,
+                ..Message::default()
+            }]
+        );
     }
     let mut states = MemoryState::new([Reply::Response(ProviderResponse {
         assistant_text: "partial answer".into(),
@@ -2118,7 +2127,17 @@ fn unknown_finish_reasons_remain_lossless_without_triggering_truncation_retries(
     ]);
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
     assert!(states.retries.is_empty());
-    assert_eq!(states.recorded_tools, [response]);
+    assert_eq!(
+        states.recorded_tools,
+        [Message {
+            role: Role::Assistant,
+            contents: vec![Content::Text(response.assistant_text)],
+            tool_calls: response.tool_calls,
+            provider_id: response.provider_id,
+            provider_content: response.provider_content,
+            ..Message::default()
+        }]
+    );
     assert_eq!(states.tools.requests.lock().unwrap().len(), 1);
     assert_eq!(states.applied_results.len(), 1);
 }

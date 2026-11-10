@@ -1,5 +1,6 @@
 use crate::{
-    CompletionFeedback, Content, ContextReminderCheckpoint, Message, ProviderResponse, Role,
+    CompletionFeedback, Content, ContextReminderCheckpoint, FinishReason, Message,
+    ProviderResponse, Role,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -58,7 +59,7 @@ pub enum ConversationPersistence {
     },
     CompletionFeedback(CompletionFeedback),
     CloseTurn {
-        finish_reason: String,
+        finish_reason: FinishReason,
     },
 }
 
