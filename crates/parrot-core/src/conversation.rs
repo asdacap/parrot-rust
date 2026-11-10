@@ -57,6 +57,10 @@ pub enum ConversationPersistence {
         checkpoint: ContextReminderCheckpoint,
         event: ConversationEvent,
     },
+    Status {
+        checkpoint: crate::StatusCheckpoint,
+        event: ConversationEvent,
+    },
     CompletionFeedback(CompletionFeedback),
     CloseTurn {
         finish_reason: FinishReason,

@@ -164,7 +164,7 @@ pub struct ContextController {
     blobs: parrot_storage::artifacts::compaction::CompactionGroupBlobStore,
     templates: Arc<PromptTemplateCatalog>,
     budget: ProviderTokenBudget,
-    initial_status_pending: bool,
+    pub(crate) initial_status_pending: bool,
 }
 impl ContextController {
     pub fn new(
@@ -215,7 +215,7 @@ impl ContextController {
 
     pub(crate) async fn append_context_reminder(
         &self,
-        conversation: &mut AgentConversation,
+        _conversation: &mut AgentConversation,
         checkpoint: CoreContextReminderCheckpoint,
         content: String,
         observed_percentage: i32,
@@ -239,7 +239,6 @@ impl ContextController {
         {
             return Ok(None);
         }
-        conversation.add(system_model_message(content));
         Ok(Some(published))
     }
 
@@ -293,98 +292,68 @@ impl ContextController {
         )?)
     }
 
-    /// Called before promotion. The fit estimate includes actual pending input parts.
+    /// Fits and commits status through core before input promotion.
     pub async fn inject_status(
         &mut self,
-        mut input: EpochInput<'_>,
+        input: EpochInput<'_>,
         depth: i32,
         profile_id: &str,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<StatusInjection> {
         self.ensure_epoch(input.prompt, cancellation).await?;
-        if depth > 0 {
-            if self.initial_status_pending {
-                let content = self.status_for_insertion(&mut input, cancellation).await?;
-                let published = self.notice("status", "Status prompt injected".into())?;
-                self.history
-                    .append_system_prompt(published.clone(), content.clone())
-                    .await?;
-                input.conversation.add(system_model_message(content));
-                self.initial_status_pending = false;
-                input.events.publish(published, cancellation).await?;
-            }
-            return Ok(StatusInjection::Complete);
-        }
-        while let Some(pending) = self.history.pending_status().await? {
-            cancellation.check().map_err(|_| ContextError::Cancelled)?;
-            if profile_id != pending.mode {
-                return Ok(StatusInjection::RefreshSelection);
-            }
-            let content = self.status_for_insertion(&mut input, cancellation).await?;
-            let published = self.notice("status", "Status prompt injected".into())?;
-            if !self
-                .history
-                .append_status_prompt(published.clone(), pending, content.clone())
-                .await?
-            {
-                // Source refreshes the entire selection before retrying a version conflict.
-                return Ok(StatusInjection::RefreshSelection);
-            }
-            input.conversation.add(system_model_message(content));
-            input.events.publish(published, cancellation).await?;
-        }
-        Ok(StatusInjection::Complete)
-    }
-
-    async fn status_for_insertion(
-        &self,
-        input: &mut EpochInput<'_>,
-        cancellation: &dyn Cancellation,
-    ) -> ContextResult<String> {
-        let mut history = provider_messages(input.conversation);
-        for pending in self.history.inputs_for_next_promotion().await? {
-            let contents = self.history.materialize(pending.parts).await?;
-            history.push(provider_message(&ModelMessage {
-                role: MessageRole::User,
-                contents,
-                tool_calls: Vec::new(),
-                tool_call_id: String::new(),
-                provider_content: Default::default(),
-            }));
-        }
-        let instructions = input.prompt.build(input.selection, cancellation).await?;
-        let request = parrot_core::ProviderRequest {
-            instructions,
-            messages: history.into_iter().map(Into::into).collect(),
-            tools: input.tools.iter().cloned().map(Into::into).collect(),
-            ..parrot_core::ProviderRequest::default()
-        };
         let configuration = self
             .compactor
             .planner()
-            .capture_context_configuration(input.selection);
+            .capture_compaction_configuration(input.selection, None);
+        let definitions = input
+            .tools
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect::<Vec<_>>();
         let estimates = CompactionEstimates::new(&self.compactor, input.selection);
         let errors = NativeErrors::new();
+        let templates = self.templates.clone();
+        let controller = tokio::sync::Mutex::new(self);
+        let mut states = EpochStates {
+            controller: &controller,
+            conversation: input.conversation,
+            prompt: input.prompt,
+            selection: input.selection,
+            status: input.status,
+            status_request: StatusRequest {
+                depth,
+                profile_id: profile_id.into(),
+            },
+            sessions: input.sessions,
+            events: input.events,
+            configuration,
+            templates,
+            cancellation,
+            estimates: &estimates,
+            errors: &errors,
+        };
         let provider = EpochProvider {
             prompt: input.prompt,
             selection: input.selection,
             cancellation,
             estimates: &estimates,
             errors: &errors,
+            sessions: input.sessions,
+            events: input.events,
         };
-        let states = StatusStates {
-            status: input.status,
-            errors: &errors,
-        };
-        parrot_core::compaction::fit_status(
-            &request,
-            &configuration,
-            &states,
+        let outcome = parrot_core::prepare_status(
+            &mut states,
             &provider,
+            &definitions,
             parrot_core::CancellationToken::new(cancellation),
         )
         .await
-        .map_err(|error| errors.restore(error, |error| ContextError::Operation(error.message)))
+        .map_err(|error| errors.restore(error, ContextError::from))?;
+        Ok(match outcome {
+            parrot_core::StatusPreparation::Complete => StatusInjection::Complete,
+            parrot_core::StatusPreparation::RefreshSelection => StatusInjection::RefreshSelection,
+        })
     }
 
     pub async fn inject_final_provider_request_prompt(
@@ -394,19 +363,18 @@ impl ContextController {
         events: &dyn ContextEvents,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<()> {
-        let published = self.notice(
-            "final_provider_request_prompt",
-            "Final provider request prompt injected".into(),
-        )?;
-        if !self
-            .history
-            .append_final_provider_request_prompt(published.clone(), content.into())
-            .await?
-        {
-            return Ok(());
-        }
-        conversation.add(system_model_message(content.into()));
-        events.publish(published, cancellation).await
+        let errors = NativeErrors::new();
+        let mut states = ContextAdditionStates {
+            errors: &errors,
+            history: &self.history,
+            conversation,
+            events,
+            cancellation,
+        };
+        parrot_core::add_phase_prompt(&mut states, content, true)
+            .await
+            .map_err(|error| errors.restore(error, ContextError::from))?;
+        Ok(())
     }
 
     pub async fn restore_tool_availability(
@@ -416,97 +384,82 @@ impl ContextController {
         events: &dyn ContextEvents,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<bool> {
-        let published = self.notice(
-            "tool_availability_restored_prompt",
-            "Tool availability restored prompt injected".into(),
-        )?;
-        if !self
-            .history
-            .append_tool_availability_restored_prompt(published.clone(), content.into())
-            .await?
-        {
-            return Ok(false);
-        }
-        conversation.add(system_model_message(content.into()));
-        events.publish(published, cancellation).await?;
-        Ok(true)
+        let errors = NativeErrors::new();
+        let mut states = ContextAdditionStates {
+            errors: &errors,
+            history: &self.history,
+            conversation,
+            events,
+            cancellation,
+        };
+        Ok(parrot_core::add_phase_prompt(&mut states, content, false)
+            .await
+            .map_err(|error| errors.restore(error, ContextError::from))?
+            .inserted)
     }
 
     pub async fn prepare_epoch(
         &mut self,
-        mut input: EpochInput<'_>,
+        input: EpochInput<'_>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
         cancellation.check().map_err(|_| ContextError::Cancelled)?;
         self.ensure_epoch(input.prompt, cancellation).await?;
-        let mut instructions = input.prompt.build(input.selection, cancellation).await?;
-        let mut context = self.estimate(&input, &instructions)?;
         let configuration = self
             .compactor
             .planner()
-            .capture_context_configuration(input.selection);
-        let snapshot = CoreContextSnapshot::estimate(context.estimated_tokens, &configuration);
-        let mut reduced = false;
-        if snapshot.requires_compaction(
-            &self.budget.capture_state(),
-            &configuration.model.canonical_model,
-        ) {
-            let compacted = self
-                .compact_epoch(reborrow(&mut input), None, cancellation)
-                .await?;
-            instructions = compacted.instructions;
-            reduced = compacted.reduced;
-            context = self.estimate(&input, &instructions)?;
-            ensure_request_fits(&context)?;
-        }
-        let last_reminder = self.get_last_context_reminder().await?;
-        let selector = input.selection.canonical_model.selector();
-        let snapshot = CoreContextSnapshot::estimate(context.estimated_tokens, &configuration);
-        if let Some(percentage) =
-            snapshot.select_reminder_percentage(&selector, last_reminder.as_ref())
-        {
-            let reminder = self.render_reminder(&context, percentage)?;
-            let mut candidate = provider_messages(input.conversation);
-            candidate.push(Message::system(&reminder));
-            let inserted = self.compactor.planner().estimate_selected_context(
-                input.selection,
-                &instructions,
-                input.tools,
-                &candidate,
-            )?;
-            let candidate =
-                CoreContextSnapshot::estimate(inserted.estimated_tokens, &configuration);
-            if candidate.is_available() {
-                if candidate.exceeds_input_limit() || candidate.exceeds_trigger() {
-                    let compacted = self
-                        .compact_epoch(reborrow(&mut input), None, cancellation)
-                        .await?;
-                    instructions = compacted.instructions;
-                    reduced |= compacted.reduced;
-                    ensure_request_fits(&self.estimate(&input, &instructions)?)?;
-                } else {
-                    let checkpoint = CoreContextReminderCheckpoint {
-                        canonical_model: selector.clone(),
-                        context_limit: context.context_limit,
-                        percentage,
-                    };
-                    if let Some(published) = self
-                        .append_context_reminder(
-                            input.conversation,
-                            checkpoint,
-                            reminder,
-                            context.usage_percent.unwrap_or_default(),
-                        )
-                        .await?
-                    {
-                        input.events.publish(published, &Uncancelled).await?;
-                    }
-                }
-            }
-        }
+            .capture_compaction_configuration(input.selection, None);
+        let definitions = input
+            .tools
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect::<Vec<_>>();
+        let estimates = CompactionEstimates::new(&self.compactor, input.selection);
+        let errors = NativeErrors::new();
+        let templates = self.templates.clone();
+        let controller = tokio::sync::Mutex::new(self);
+        let publisher = EpochEventPublisher {
+            controller: &controller,
+            events: input.events,
+            errors: &errors,
+        };
+        let mut states = EpochStates {
+            controller: &controller,
+            conversation: input.conversation,
+            prompt: input.prompt,
+            selection: input.selection,
+            status: input.status,
+            status_request: StatusRequest::default(),
+            sessions: input.sessions,
+            events: input.events,
+            configuration,
+            templates,
+            cancellation,
+            estimates: &estimates,
+            errors: &errors,
+        };
+        let provider = EpochProvider {
+            prompt: input.prompt,
+            selection: input.selection,
+            cancellation,
+            estimates: &estimates,
+            errors: &errors,
+            sessions: input.sessions,
+            events: input.events,
+        };
+        let result = parrot_core::prepare_context_epoch(
+            &mut states,
+            &provider,
+            &publisher,
+            &definitions,
+            parrot_core::CancellationToken::new(cancellation),
+        )
+        .await
+        .map_err(|error| errors.restore(error, ContextError::from))?;
         Ok(EpochResult {
-            instructions,
-            reduced,
+            instructions: result.instructions,
+            reduced: result.reduced,
         })
     }
 
@@ -564,6 +517,8 @@ impl ContextController {
                 prompt: input.prompt,
                 selection: input.selection,
                 status: input.status,
+                status_request: StatusRequest::default(),
+                sessions: input.sessions,
                 events: input.events,
                 configuration: configuration.clone(),
                 templates,
@@ -583,6 +538,8 @@ impl ContextController {
                 cancellation,
                 estimates: &estimates,
                 errors: &errors,
+                sessions: input.sessions,
+                events: input.events,
             };
             let prepared = parrot_core::compaction::prepare_compaction(
                 &mut states,
@@ -755,50 +712,6 @@ impl ContextController {
             &provider_messages(input.conversation),
         )?)
     }
-    pub(crate) fn render_reminder(
-        &self,
-        context: &ContextSnapshot,
-        percentage: i32,
-    ) -> ContextResult<String> {
-        let mut arguments = vec![
-            ("percentage".into(), percentage.to_string().into()),
-            (
-                "estimated_tokens".into(),
-                context.estimated_tokens.to_string().into(),
-            ),
-            (
-                "context_limit".into(),
-                context.context_limit.to_string().into(),
-            ),
-            (
-                "notification_interval".into(),
-                CoreContextReminderCheckpoint::NOTIFICATION_INTERVAL
-                    .to_string()
-                    .into(),
-            ),
-            ("trigger".into(), context.trigger_percent.to_string().into()),
-        ];
-        if context.has_context_limit_override {
-            arguments.push((
-                "trigger_tokens".into(),
-                context
-                    .trigger_tokens
-                    .map_or_else(|| "unavailable".into(), |value| value.to_string())
-                    .into(),
-            ));
-        }
-        self.templates
-            .render(
-                if context.has_context_limit_override {
-                    "agent-session.context-limit-reminder"
-                } else {
-                    "agent-session.context-reminder"
-                },
-                &arguments,
-                &Uncancelled,
-            )
-            .map_err(|error| ContextError::Operation(error.to_string()))
-    }
     fn event(&self) -> ContextResult<Event> {
         Ok(Event {
             id: Identifier::event_id().map_err(ContextError::Identifier)?,
@@ -855,12 +768,58 @@ impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
     }
 }
 
+#[derive(Default)]
+struct StatusRequest {
+    depth: i32,
+    profile_id: String,
+}
+
+struct ContextAdditionStates<'a> {
+    errors: &'a NativeErrors<ContextError>,
+    history: &'a AgentHistoryView,
+    conversation: &'a mut AgentConversation,
+    events: &'a dyn ContextEvents,
+    cancellation: &'a dyn Cancellation,
+}
+
+impl parrot_core::States for ContextAdditionStates<'_> {
+    fn get_config(
+        &self,
+        _key: parrot_core::ConfigKey,
+    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, parrot_core::Error>> {
+        Box::pin(async { Err(parrot_core::Error::unsupported("States.get_config")) })
+    }
+
+    fn add_conversation(
+        &mut self,
+        addition: parrot_core::ConversationAddition,
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
+        Box::pin(async move {
+            super::add_conversation(
+                self.history,
+                self.conversation,
+                &mut false,
+                addition,
+                self.events,
+                self.cancellation,
+            )
+            .await
+            .map_err(|error| {
+                let diagnostic = describe_context_error(&error);
+                self.errors.capture(error, diagnostic)
+            })
+        })
+    }
+}
+
 struct EpochStates<'a> {
     controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
-    conversation: &'a AgentConversation,
+    conversation: &'a mut AgentConversation,
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
     status: &'a dyn ContextStatus,
+    status_request: StatusRequest,
+    sessions: &'a ProviderSessions,
     events: &'a dyn ContextEvents,
     configuration: parrot_core::CompactionConfiguration,
     templates: Arc<PromptTemplateCatalog>,
@@ -915,6 +874,159 @@ impl EpochStates<'_> {
 }
 
 impl parrot_core::States for EpochStates<'_> {
+    fn add_conversation(
+        &mut self,
+        addition: parrot_core::ConversationAddition,
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
+        Box::pin(async move {
+            let result = {
+                let mut controller = self.controller.lock().await;
+                let history = controller.history.clone();
+                super::add_conversation(
+                    &history,
+                    self.conversation,
+                    &mut controller.initial_status_pending,
+                    addition,
+                    self.events,
+                    self.cancellation,
+                )
+                .await
+            };
+            result.map_err(|error| self.capture_error(error))
+        })
+    }
+
+    fn read_status_observation(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::StatusObservation, parrot_core::Error>> {
+        Box::pin(async move {
+            let controller = self.controller.lock().await;
+            let pending = if self.status_request.depth == 0 {
+                controller
+                    .history
+                    .pending_status()
+                    .await
+                    .map_err(|error| self.capture_error(error))?
+                    .map(|pending| parrot_core::StatusCheckpoint::Mode {
+                        mode: pending.mode,
+                        version: pending.version,
+                    })
+            } else {
+                None
+            };
+            Ok(parrot_core::StatusObservation {
+                depth: self.status_request.depth,
+                profile_id: self.status_request.profile_id.clone(),
+                initial_pending: controller.initial_status_pending,
+                pending,
+            })
+        })
+    }
+
+    fn read_pending_inputs(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {
+        Box::pin(async move {
+            let history = self.controller.lock().await.history.clone();
+            let mut messages = Vec::new();
+            for pending in history
+                .inputs_for_next_promotion()
+                .await
+                .map_err(|error| self.capture_error(error))?
+            {
+                let contents = history
+                    .materialize(pending.parts)
+                    .await
+                    .map_err(|error| self.capture_error(error))?;
+                messages.push(
+                    provider_message(&ModelMessage {
+                        role: MessageRole::User,
+                        contents,
+                        tool_calls: Vec::new(),
+                        tool_call_id: String::new(),
+                        provider_content: Default::default(),
+                    })
+                    .into(),
+                );
+            }
+            Ok(messages)
+        })
+    }
+
+    fn read_messages(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {
+        Box::pin(async move {
+            Ok(self
+                .conversation
+                .messages()
+                .iter()
+                .map(provider_message)
+                .map(Into::into)
+                .collect())
+        })
+    }
+
+    fn read_token_calibration(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::TokenCalibration, parrot_core::Error>> {
+        Box::pin(async move { Ok(self.controller.lock().await.budget.capture_state()) })
+    }
+
+    fn get_last_context_reminder(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<CoreContextReminderCheckpoint>, parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .get_last_context_reminder()
+                .await
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+
+    fn record_compaction<'a>(
+        &'a mut self,
+        instructions: &'a str,
+        definitions: &'a [parrot_core::ToolDefinition],
+        result: Result<Option<parrot_core::FittedCompaction>, parrot_core::Error>,
+    ) -> BoxFuture<'a, Result<parrot_core::ContextCompaction, parrot_core::Error>> {
+        Box::pin(async move {
+            let definitions = definitions
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect::<Vec<_>>();
+            let result = result.map_err(|error| self.errors.restore(error, ContextError::from));
+            let recorded = self
+                .controller
+                .lock()
+                .await
+                .record_epoch_compaction(
+                    &mut EpochInput {
+                        selection: self.selection,
+                        tools: &definitions,
+                        conversation: self.conversation,
+                        prompt: self.prompt,
+                        sessions: self.sessions,
+                        status: self.status,
+                        events: self.events,
+                    },
+                    instructions.into(),
+                    result,
+                    self.cancellation,
+                )
+                .await;
+            recorded
+                .map(|result| parrot_core::ContextCompaction {
+                    instructions: result.instructions,
+                    reduced: result.reduced,
+                })
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+
     fn get_config(
         &self,
         key: parrot_core::ConfigKey,
@@ -1102,28 +1214,6 @@ fn reborrow<'a>(input: &'a mut EpochInput<'_>) -> EpochInput<'a> {
         events: input.events,
     }
 }
-fn ensure_request_fits(context: &ContextSnapshot) -> ContextResult<()> {
-    CoreContextSnapshot {
-        estimated_tokens: context.estimated_tokens,
-        context_limit: context.context_limit,
-        usage_percent: context.usage_percent,
-        trigger_percent: context.trigger_percent,
-        input_limit: context.input_limit,
-        trigger_tokens: context.trigger_tokens,
-        has_context_limit_override: context.has_context_limit_override,
-    }
-    .ensure_input_fits()
-    .map_err(|error| ContextError::InvalidOperation(error.message))
-}
-fn system_model_message(text: String) -> ModelMessage {
-    ModelMessage {
-        role: MessageRole::System,
-        contents: vec![ModelContent::Text(text)],
-        tool_calls: Vec::new(),
-        tool_call_id: String::new(),
-        provider_content: Default::default(),
-    }
-}
 fn provider_messages(conversation: &AgentConversation) -> Vec<Message> {
     conversation
         .messages()
@@ -1200,56 +1290,14 @@ impl Cancellation for Uncancelled {
     }
 }
 
-struct StatusStates<'a> {
-    status: &'a dyn ContextStatus,
-    errors: &'a NativeErrors<ContextError>,
-}
-
-impl parrot_core::States for StatusStates<'_> {
-    fn get_config(
-        &self,
-        _: parrot_core::ConfigKey,
-    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, parrot_core::Error>> {
-        Box::pin(async { Err(parrot_core::Error::unsupported("States.get_config")) })
-    }
-
-    fn render_status<'a, 'c>(
-        &'a self,
-        context: CoreContextSnapshot,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.status
-                .observe(
-                    &ContextSnapshot {
-                        estimated_tokens: context.estimated_tokens,
-                        context_limit: context.context_limit,
-                        usage_percent: context.usage_percent,
-                        trigger_percent: context.trigger_percent,
-                        input_limit: context.input_limit,
-                        trigger_tokens: context.trigger_tokens,
-                        has_context_limit_override: context.has_context_limit_override,
-                    },
-                    &cancellation,
-                )
-                .await
-                .map_err(|error| {
-                    let diagnostic = describe_context_error(&error);
-                    self.errors.capture(error, diagnostic)
-                })
-        })
-    }
-}
-
 struct EpochProvider<'a> {
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
     cancellation: &'a dyn Cancellation,
     estimates: &'a CompactionEstimates,
     errors: &'a NativeErrors<ContextError>,
+    sessions: &'a ProviderSessions,
+    events: &'a dyn ContextEvents,
 }
 
 impl EpochProvider<'_> {
@@ -1261,6 +1309,45 @@ impl EpochProvider<'_> {
 }
 
 impl parrot_core::Provider for EpochProvider<'_> {
+    fn estimate_tokens(
+        &self,
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        self.estimates
+            .estimate_tokens(messages)
+            .map_err(|error| self.capture_error(error))
+    }
+
+    fn estimate_summary_tokens(
+        &self,
+        preceding: &str,
+        tokens: i64,
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        self.estimates
+            .estimate_summary_tokens(preceding, tokens, messages)
+            .map_err(|error| self.capture_error(error))
+    }
+
+    fn summarize<'a, 'c>(
+        &'a self,
+        request: parrot_core::ProviderRequest,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            let provider = CompactionProvider::new(
+                self.estimates,
+                self.sessions,
+                ContextObserver(self.events),
+                self.errors,
+            );
+            parrot_core::Provider::summarize(&provider, request, cancellation).await
+        })
+    }
+
     fn read_model_aliases(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, parrot_core::Error>> {

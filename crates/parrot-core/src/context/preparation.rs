@@ -42,7 +42,7 @@ pub(crate) async fn compact_context(
         .await
 }
 
-async fn prepare_context_reminder(
+pub(crate) async fn prepare_context_reminder(
     states: &mut dyn States,
     context: &ContextSnapshot,
     configuration: &ContextConfiguration,

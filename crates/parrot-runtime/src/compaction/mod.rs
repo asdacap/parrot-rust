@@ -4,10 +4,12 @@ mod execution;
 pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
 pub(crate) use execution::{CompactionEstimates, SummaryProviderAdapter};
 mod context;
+mod conversation;
 pub use context::{
     ContextCompactionResult, ContextController, ContextError, ContextEvents, ContextResult,
     ContextStatus, EpochInput, EpochResult, StatusInjection, provider_message,
 };
+pub(crate) use conversation::add_conversation;
 mod planning;
 
 pub use budget::ProviderTokenBudget;

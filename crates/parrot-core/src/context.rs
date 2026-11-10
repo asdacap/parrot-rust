@@ -3,7 +3,7 @@ use crate::{
     TokenCalibration,
 };
 mod preparation;
-pub(crate) use preparation::{compact_context, prepare_request};
+pub(crate) use preparation::{compact_context, prepare_context_reminder, prepare_request};
 
 use crate::{Error, ErrorCode, ErrorKind};
 use std::fmt;

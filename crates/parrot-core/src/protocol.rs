@@ -281,6 +281,14 @@ pub trait States: Send + Sync {
     fn read_final_phase(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_final_phase")) })
     }
+    /// Reads current status revisions and the bound profile without choosing insertion.
+    fn read_status_observation(&self) -> BoxFuture<'_, Result<crate::StatusObservation, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_status_observation")) })
+    }
+    /// Reads materialized pending input without admitting it to the conversation.
+    fn read_pending_inputs(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_pending_inputs")) })
+    }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
     /// Loads the provider-request budget that core updates during one turn, not a token budget.

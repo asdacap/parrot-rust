@@ -139,6 +139,106 @@ async fn core_template_failure_retains_native_prompt_error_and_terminal_publicat
 }
 
 #[tokio::test]
+async fn mode_change_during_status_fitting_requires_refresh_without_publishing_stale_status() {
+    struct SwitchingStatus {
+        metadata: SessionIndex,
+        switched: AtomicBool,
+    }
+    impl ContextStatus for SwitchingStatus {
+        fn observe<'a>(
+            &'a self,
+            _: &'a ContextSnapshot,
+            _: &'a dyn Cancellation,
+        ) -> BoxFuture<'a, ContextResult<String>> {
+            Box::pin(async move {
+                if !self.switched.swap(true, Ordering::SeqCst) {
+                    self.metadata.update_mode("next").await.unwrap();
+                }
+                Ok("stale fitted status".into())
+            })
+        }
+    }
+
+    let fixture = Fixture::with_identity("agent", "initial");
+    let history = fixture.history();
+    user(&history, "existing").await;
+    let provider = Scripted::default();
+    let selection = provider.selection(10000);
+    let sessions = ProviderSessions::new();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let before = conversation.messages().to_vec();
+    let prompt = EpochPrompt::default();
+    let status = SwitchingStatus {
+        metadata: Fixture::metadata(&fixture.path),
+        switched: AtomicBool::new(false),
+    };
+    let events = Events::new(history.clone());
+    let mut controller = fixture.controller(history.clone(), 90);
+
+    assert_eq!(
+        controller
+            .inject_status(
+                EpochInput {
+                    selection: &selection,
+                    tools: &[],
+                    conversation: &mut conversation,
+                    prompt: &prompt.prompt,
+                    sessions: &sessions,
+                    status: &status,
+                    events: &events,
+                },
+                0,
+                "initial",
+                &NeverCancelled,
+            )
+            .await
+            .unwrap(),
+        StatusInjection::RefreshSelection
+    );
+    assert_eq!(conversation.messages(), before);
+    assert!(events.published.lock().unwrap().is_empty());
+    let pending = history.pending_status().await.unwrap().unwrap();
+    assert_eq!((pending.mode.as_str(), pending.version), ("next", 1));
+
+    let status = Status::default();
+    assert_eq!(
+        controller
+            .inject_status(
+                EpochInput {
+                    selection: &selection,
+                    tools: &[],
+                    conversation: &mut conversation,
+                    prompt: &prompt.prompt,
+                    sessions: &sessions,
+                    status: &status,
+                    events: &events,
+                },
+                0,
+                "next",
+                &NeverCancelled,
+            )
+            .await
+            .unwrap(),
+        StatusInjection::Complete
+    );
+    assert_eq!(conversation.messages().len(), before.len() + 1);
+    assert_eq!(
+        conversation.messages().last().unwrap().content(),
+        status.fitted
+    );
+    assert!(history.pending_status().await.unwrap().is_none());
+    assert_eq!(events.published.lock().unwrap().len(), 1);
+    sessions.close().await.unwrap();
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn pending_and_initial_status_fit_actual_next_promotion_before_commit_once() {
     for depth in [0, 1] {
         let fixture = Fixture::with_identity("agent", "mode");

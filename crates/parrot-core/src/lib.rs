@@ -3,15 +3,21 @@
 pub mod budget;
 pub mod compaction;
 mod context;
+mod context_additions;
+mod context_epoch;
 mod conversation;
 mod protocol;
 pub mod rendering;
 mod skills;
+mod status;
 pub mod template;
 pub use context::*;
+pub use context_additions::*;
+pub use context_epoch::*;
 pub use conversation::*;
 pub use protocol::*;
 pub use skills::{SkillMention, parse_skill_mentions};
+pub use status::*;
 
 /// Drains ready turns using state-backed settings and the invocation budget.
 pub async fn run(
