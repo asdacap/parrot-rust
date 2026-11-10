@@ -9,7 +9,7 @@ pub(crate) use core_templates::{get_prompt_template_id, resolve_prompt_template_
 mod rendering;
 mod session;
 pub use rendering::{
-    render_agent_identity, render_agents_files, render_model_prompt, render_skill_catalog_entries,
+    render_agent_identity, render_agents_files, render_skill_catalog_entries,
     render_standing_instruction, render_system_prompt_sections,
 };
 pub use session::SessionPrompt;

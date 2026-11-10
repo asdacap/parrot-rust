@@ -20,8 +20,8 @@ pub async fn prepare_compaction(
 ) -> Result<CompactionInput, Error> {
     publisher.report_compaction_started().await?;
     let outcome: Result<CompactionInput, Error> = async {
-        states.sample_epoch().await?;
-        let instructions = crate::rendering::render_instructions(states, provider).await?;
+        publisher.on_epoch_started().await?;
+        let instructions = crate::rendering::render_instructions(states).await?;
         let raw = states.read_conversation_state().await?;
         let base_watermark = raw.summary.as_ref().map_or(0, |summary| summary.watermark);
         let groups = assemble_groups(&raw);

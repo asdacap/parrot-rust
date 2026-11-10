@@ -21,7 +21,7 @@ pub async fn prepare_context_epoch(
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let mut instructions = render_instructions(states, provider).await?;
+    let mut instructions = render_instructions(states).await?;
     let mut messages = states.read_messages().await?;
     let mut configuration = states
         .get_config(ConfigKey::Context)

@@ -87,14 +87,6 @@ pub struct CompletionFeedback {
 /// Invokes models using the core protocol while owning transport and stream cleanup.
 /// Unsupported invocation and estimation capabilities return explicit errors.
 pub trait Provider: Send + Sync {
-    /// Reads alias definitions and resolved usage without formatting their descriptions.
-    fn read_model_aliases(&self) -> BoxFuture<'_, Result<Vec<ModelAliasDescription>, Error>> {
-        Box::pin(async { Err(Error::unsupported("Provider.read_model_aliases")) })
-    }
-    /// Reads the selected model profile's literal system prompt.
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async { Err(Error::unsupported("Provider.read_model_system_prompt")) })
-    }
     /// Estimates exactly the supplied request using model-specific token costs.
     fn estimate_input_tokens(
         &self,
@@ -201,14 +193,6 @@ pub struct AgentIdentityDescription {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelAliasDescription {
-    pub name: String,
-    pub model: String,
-    pub usage: String,
-    pub model_usage: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SkillCatalogEntry {
     pub name: String,
     pub description: String,
@@ -245,6 +229,8 @@ pub trait EventPublisher: Send + Sync {
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("EventPublisher.publish")) })
     }
+    /// Begins a prompt epoch before instructions are read, awaiting native refresh hooks.
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction start without request cancellation.
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction failure without request cancellation.
@@ -297,10 +283,6 @@ pub trait States: Send + Sync {
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_exit_blockers")) })
     }
-    /// Refreshes raw epoch observations without rendering instructions.
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.sample_epoch")) })
-    }
     /// Observes native status for the exact context selected by core.
     fn render_status<'a, 'c>(
         &'a self,
@@ -335,9 +317,9 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.report_compaction_progress")) })
     }
 
-    /// Reads configured literal prompts, including selected alias augmentation, and their
-    /// namespace keys. Retains native request bindings and samples raw epoch inputs
-    /// without rendering templates.
+    /// Reads native system-prompt sections and their namespace keys.
+    /// Retains native request bindings and samples epoch inputs without rendering
+    /// core-owned templates.
     fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_system_prompts")) })
     }
@@ -926,7 +908,6 @@ pub enum ConfigKey {
     Compaction,
     SystemPromptBindings,
     AgentsFileTemplate,
-    ModelAliasesTemplate,
     AgentIdentityTemplate,
     StandingInstructionTemplate,
     SkillCatalogTemplate,

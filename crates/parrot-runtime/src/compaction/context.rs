@@ -305,9 +305,6 @@ impl ContextController {
             errors: &errors,
         };
         let provider = EpochProvider {
-            prompt: input.prompt,
-            selection: input.selection,
-            cancellation,
             estimates: &estimates,
             errors: &errors,
             sessions: input.sessions,
@@ -392,7 +389,9 @@ impl ContextController {
         let controller = tokio::sync::Mutex::new(self);
         let publisher = EpochEventPublisher {
             controller: &controller,
+            prompt: input.prompt,
             events: input.events,
+            cancellation,
             errors: &errors,
         };
         let mut states = EpochStates {
@@ -411,9 +410,6 @@ impl ContextController {
             errors: &errors,
         };
         let provider = EpochProvider {
-            prompt: input.prompt,
-            selection: input.selection,
-            cancellation,
             estimates: &estimates,
             errors: &errors,
             sessions: input.sessions,
@@ -479,7 +475,9 @@ impl ContextController {
             let controller = tokio::sync::Mutex::new(&mut *self);
             let publisher = EpochEventPublisher {
                 controller: &controller,
+                prompt: input.prompt,
                 events: input.events,
+                cancellation,
                 errors: &errors,
             };
             let mut states = EpochStates {
@@ -504,9 +502,6 @@ impl ContextController {
                 &errors,
             );
             let preparation_provider = EpochProvider {
-                prompt: input.prompt,
-                selection: input.selection,
-                cancellation,
                 estimates: &estimates,
                 errors: &errors,
                 sessions: input.sessions,
@@ -703,11 +698,25 @@ impl ContextController {
 
 struct EpochEventPublisher<'a> {
     controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
+    prompt: &'a SessionPrompt,
     events: &'a dyn ContextEvents,
+    cancellation: &'a dyn Cancellation,
     errors: &'a NativeErrors<ContextError>,
 }
 
 impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.prompt
+                .sample_epoch(self.cancellation)
+                .await
+                .map_err(|error| {
+                    let error = ContextError::from(error);
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
         Box::pin(async move {
             self.controller
@@ -1027,14 +1036,6 @@ impl parrot_core::States for EpochStates<'_> {
             }
         })
     }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .sample_epoch(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
     fn read_conversation_state(
         &self,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationState, parrot_core::Error>> {
@@ -1262,9 +1263,6 @@ impl Cancellation for Uncancelled {
 }
 
 struct EpochProvider<'a> {
-    prompt: &'a SessionPrompt,
-    selection: &'a ResolvedModelSelection,
-    cancellation: &'a dyn Cancellation,
     estimates: &'a CompactionEstimates,
     errors: &'a NativeErrors<ContextError>,
     sessions: &'a ProviderSessions,
@@ -1316,28 +1314,6 @@ impl parrot_core::Provider for EpochProvider<'_> {
                 self.errors,
             );
             parrot_core::Provider::summarize(&provider, request, cancellation).await
-        })
-    }
-
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_model_aliases(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_model_system_prompt(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<String>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_model_system_prompt(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
         })
     }
 

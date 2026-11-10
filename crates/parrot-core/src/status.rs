@@ -51,7 +51,7 @@ pub async fn prepare_status(
             }
             checkpoint
         };
-        let instructions = render_instructions(states, provider).await?;
+        let instructions = render_instructions(states).await?;
         let mut messages = states.read_messages().await?;
         messages.extend(states.read_pending_inputs().await?);
         let configuration = states

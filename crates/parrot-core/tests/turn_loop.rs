@@ -63,6 +63,9 @@ impl EventPublisher for MemoryEventPublisher {
             Ok(())
         })
     }
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
+    }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.compacting.store(true, Ordering::SeqCst);
@@ -255,8 +258,6 @@ impl Tools for MemoryTools {
 
 #[derive(Clone)]
 struct MemoryProvider {
-    model_aliases: Vec<parrot_core::ModelAliasDescription>,
-    model_system_prompt: Option<String>,
     trace: Trace,
     replies: Arc<Mutex<VecDeque<Reply>>>,
     fail_at: Arc<Mutex<Option<&'static str>>>,
@@ -267,14 +268,6 @@ struct MemoryProvider {
     cancellation: Arc<CancellationSource>,
 }
 impl Provider for MemoryProvider {
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
-        Box::pin(async move { Ok(self.model_aliases.clone()) })
-    }
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async move { Ok(self.model_system_prompt.clone()) })
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -550,8 +543,6 @@ impl MemoryState {
                 flags: Arc::default(),
             },
             provider: MemoryProvider {
-                model_aliases: Vec::new(),
-                model_system_prompt: None,
                 trace,
                 replies: Arc::new(Mutex::new(replies.into_iter().collect())),
                 fail_at: Arc::default(),
@@ -918,7 +909,6 @@ impl States for MemoryState {
                         "title",
                         "instruction",
                         "skills",
-                        "aliases",
                         "depth",
                         "session_id",
                         "parent_session_id",
@@ -970,9 +960,6 @@ impl States for MemoryState {
             self.step("exit_blockers")?;
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
         })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
     }
     fn render_status<'a, 'c>(
         &'a self,
@@ -1932,14 +1919,6 @@ fn tools_and_provider_operate_without_states() {
 
 struct EchoProvider(MemoryProvider);
 impl Provider for EchoProvider {
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
-        self.0.read_model_aliases()
-    }
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        self.0.read_model_system_prompt()
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,

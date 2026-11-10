@@ -18,6 +18,7 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
 
 struct RuntimeEventPublisher<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
+    cancellation: &'a dyn Cancellation,
 }
 
 impl<S, T> parrot_core::EventPublisher for RuntimeEventPublisher<'_, S, T>
@@ -38,6 +39,15 @@ where
                     &cancellation,
                 )
                 .await
+        })
+    }
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .sample_epoch(self.cancellation)
+                .await
+                .map_err(Into::into)
         })
     }
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
@@ -82,7 +92,6 @@ struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
 struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S>,
-    cancellation: &'a dyn Cancellation,
 }
 
 struct CapturedTools<T> {
@@ -241,7 +250,6 @@ where
             let provider = RuntimeProvider {
                 backend,
                 binding: &binding,
-                cancellation,
             };
             let result = async {
                 adapt_operation(async {
@@ -316,7 +324,10 @@ where
                     &mut states,
                     &tools,
                     &provider,
-                    &RuntimeEventPublisher { backend },
+                    &RuntimeEventPublisher {
+                        backend,
+                        cancellation,
+                    },
                     parrot_core::CancellationToken::new(cancellation),
                 )
                 .await
@@ -461,15 +472,6 @@ where
                 .await
                 .context
                 .get_last_context_reminder()
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .sample_epoch(self.cancellation)
                 .await
                 .map_err(Into::into)
         })
@@ -971,30 +973,6 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            self.backend
-                .prompt
-                .read_model_aliases(&selection.model, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            self.backend
-                .prompt
-                .read_model_system_prompt(&selection.model, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,

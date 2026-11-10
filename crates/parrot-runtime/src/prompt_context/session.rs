@@ -1,5 +1,5 @@
 use super::{PromptError, PromptResult, SystemPrompt};
-use parrot_core::{AgentIdentityDescription, ModelAliasDescription, SkillCatalogEntry};
+use parrot_core::{AgentIdentityDescription, SkillCatalogEntry};
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
 use serde_json::Value;
@@ -118,29 +118,6 @@ impl SessionPrompt {
             .await?
             .prompt
             .read_template_arguments(source_key))
-    }
-
-    pub async fn read_model_aliases(
-        &self,
-        selection: &ResolvedModelSelection,
-        cancellation: &dyn Cancellation,
-    ) -> PromptResult<Vec<ModelAliasDescription>> {
-        self.lock(cancellation)
-            .await?
-            .prompt
-            .read_model_aliases(selection)
-    }
-
-    pub async fn read_model_system_prompt(
-        &self,
-        selection: &ResolvedModelSelection,
-        cancellation: &dyn Cancellation,
-    ) -> PromptResult<Option<String>> {
-        Ok(self
-            .lock(cancellation)
-            .await?
-            .prompt
-            .read_model_system_prompt(selection))
     }
 
     pub async fn read_skill_catalog(

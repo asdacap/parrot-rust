@@ -1,12 +1,12 @@
 use super::{
     AgentIdentityDescription, PromptError, PromptResult, SystemPrompt, SystemPromptProvider,
 };
-use parrot_core::ModelAliasDescription;
 use parrot_domain::values::config::ModelProfiles;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::routing::aliases::{
     ModelRouter, ModelRoutingSnapshot, ResolvedModelSelection,
 };
+use serde_json::json;
 use std::sync::Arc;
 
 pub struct ModelPromptProvider {
@@ -41,6 +41,14 @@ impl SystemPromptProvider for ModelPromptProvider {
     }
 }
 
+#[derive(Clone)]
+struct ModelAliasDescription {
+    name: String,
+    model: String,
+    usage: String,
+    model_usage: Option<String>,
+}
+
 struct ModelPrompt {
     profiles: ModelProfiles,
     router: Arc<ModelRouter>,
@@ -48,7 +56,7 @@ struct ModelPrompt {
     alias_section: Option<(Arc<ModelRoutingSnapshot>, Vec<ModelAliasDescription>)>,
 }
 impl ModelPrompt {
-    fn read_aliases(
+    fn resolve_aliases(
         &self,
         snapshot: &Arc<ModelRoutingSnapshot>,
     ) -> PromptResult<Vec<ModelAliasDescription>> {
@@ -80,10 +88,8 @@ impl ModelPrompt {
         }
         Ok(aliases)
     }
-}
-impl SystemPrompt for ModelPrompt {
-    fn renew_epoch(&mut self) {}
-    fn read_model_aliases(
+
+    fn read_aliases(
         &mut self,
         selection: &ResolvedModelSelection,
     ) -> PromptResult<Vec<ModelAliasDescription>> {
@@ -93,8 +99,8 @@ impl SystemPrompt for ModelPrompt {
             .as_ref()
             .is_some_and(|(previous, _)| Arc::ptr_eq(previous, snapshot))
         {
-            let text = self.read_aliases(snapshot)?;
-            self.alias_section = Some((snapshot.clone(), text));
+            let aliases = self.resolve_aliases(snapshot)?;
+            self.alias_section = Some((snapshot.clone(), aliases));
         }
         Ok(self
             .alias_section
@@ -102,24 +108,83 @@ impl SystemPrompt for ModelPrompt {
             .map(|(_, aliases)| aliases.clone())
             .unwrap_or_default())
     }
+
+    fn render_prompt(
+        &self,
+        aliases: &[ModelAliasDescription],
+        guidance: &Option<String>,
+    ) -> PromptResult<String> {
+        let template = self
+            .templates
+            .get_template("context.model-aliases")
+            .map_err(|error| PromptError::Template(error.to_string()))?;
+        let aliases = aliases
+            .iter()
+            .filter(|alias| !alias.model.is_empty())
+            .map(|alias| {
+                let usage = match alias
+                    .model_usage
+                    .as_deref()
+                    .filter(|usage| !usage.is_empty())
+                {
+                    None => alias.usage.clone(),
+                    Some(usage) if alias.usage.is_empty() => usage.to_owned(),
+                    Some(usage) => format!("{}\n{usage}", alias.usage),
+                };
+                json!({"name": alias.name, "model": alias.model, "usage": usage})
+            })
+            .collect::<Vec<_>>();
+        let alias_section = if aliases.is_empty() {
+            String::new()
+        } else {
+            template
+                .render(
+                    &[("aliases".into(), aliases.into())],
+                    parrot_core::CancellationToken::uncancelled(),
+                )
+                .map_err(PromptError::from)?
+        };
+        Ok([Some(alias_section.as_str()), guidance.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"))
+    }
+}
+impl SystemPrompt for ModelPrompt {
+    fn renew_epoch(&mut self) {}
     fn read_system_prompts(
         &mut self,
         selection: &ResolvedModelSelection,
     ) -> PromptResult<Vec<(String, String)>> {
-        Ok(selection
+        let aliases = self.read_aliases(selection)?;
+        let guidance = self
+            .profiles
+            .resolve(&selection.canonical_model.selector())
+            .system_prompt;
+        let model_section = if aliases.is_empty() && guidance.is_none() {
+            String::new()
+        } else {
+            self.render_prompt(&aliases, &guidance)?
+        };
+        let augmentation = selection
             .alias
             .as_ref()
-            .and_then(|alias| alias.augment_system_prompt.clone())
-            .map(|content| ("runtime:system-context:10-model-prompt".into(), content))
+            .and_then(|alias| alias.augment_system_prompt.as_deref());
+        let content = [Some(model_section.as_str()), augmentation]
             .into_iter()
-            .collect())
-    }
-    fn read_model_system_prompt(&self, selection: &ResolvedModelSelection) -> Option<String> {
-        self.profiles
-            .resolve(&selection.canonical_model.selector())
-            .system_prompt
-    }
-    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
-        (source_key == "runtime:system-context:10-model-prompt").then_some(self.templates.as_ref())
+            .flatten()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if content.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Ok(vec![(
+                "runtime:system-context:10-model-prompt".into(),
+                content,
+            )])
+        }
     }
 }
