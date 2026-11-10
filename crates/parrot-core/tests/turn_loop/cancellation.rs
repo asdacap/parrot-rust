@@ -118,7 +118,7 @@ fn cancellation_during_catalog_capture_stops_before_the_first_request_iteration(
     assert!(state.admissions.is_empty());
     assert!(provider.requests.lock().unwrap().is_empty());
     assert!(state.recorded_tools.is_empty());
-    assert!(state.completion_feedback.is_empty());
+    assert!(state.completion_blocker_feedback.is_empty());
 }
 
 struct JoiningTools {

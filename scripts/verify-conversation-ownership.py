@@ -16,7 +16,7 @@ SPECIALIZED = {
     "publish_context_reminder",
     "record_retry",
     "record_tool_calls",
-    "record_completion_feedback",
+    "record_completion_blocker_feedback",
     "record_tool_results",
     "complete_turn",
 }

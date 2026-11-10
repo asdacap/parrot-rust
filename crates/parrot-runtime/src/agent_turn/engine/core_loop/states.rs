@@ -93,7 +93,7 @@ where
                         )
                         .await;
                 }
-                ConversationPersistence::CompletionFeedback(feedback) => {
+                ConversationPersistence::CompletionBlockerFeedback(feedback) => {
                     let mut candidate = Some(feedback.candidate);
                     let sources = std::mem::take(
                         &mut *self
@@ -104,8 +104,8 @@ where
                     );
                     for ((source, kind), message) in sources.into_iter().zip(feedback.messages) {
                         source
-                            .record_completion_feedback(
-                                &CompletionFeedback {
+                            .record_completion_blocker_feedback(
+                                &CompletionBlockerFeedback {
                                     kind,
                                     message,
                                     candidate: candidate.take(),
@@ -318,19 +318,19 @@ where
             for source in self.completion_sources {
                 if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
                     blockers.push(reminder);
-                    sources.push((source.clone(), CompletionFeedbackKind::PendingAsks));
+                    sources.push((source.clone(), CompletionBlockerFeedbackKind::PendingAsks));
                 }
             }
             for source in self.completion_sources {
                 if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
                     blockers.push(reminder);
-                    sources.push((source.clone(), CompletionFeedbackKind::ActiveWork));
+                    sources.push((source.clone(), CompletionBlockerFeedbackKind::ActiveWork));
                 }
             }
             for source in self.completion_sources {
                 if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
                     blockers.push(reminder);
-                    sources.push((source.clone(), CompletionFeedbackKind::ExitReminders));
+                    sources.push((source.clone(), CompletionBlockerFeedbackKind::ExitReminders));
                 }
             }
             *self

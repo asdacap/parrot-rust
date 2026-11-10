@@ -2,7 +2,7 @@
 use super::{blockers::ActiveWorkReminder, exit_reminders::ExitReminders};
 use crate::{
     agent_turn::services::{
-        CompletionFeedback, CompletionFeedbackKind, CompletionStateSource, TurnError,
+        CompletionBlockerFeedback, CompletionBlockerFeedbackKind, CompletionStateSource, TurnError,
     },
     event_broker::{BrokerError, EventBroker},
     interactions::AgentAsks,
@@ -68,20 +68,20 @@ where
                 .map_err(|error| TurnError::Service(error.to_string()))
         })
     }
-    fn record_completion_feedback<'a>(
+    fn record_completion_blocker_feedback<'a>(
         &'a self,
-        feedback: &'a CompletionFeedback,
+        feedback: &'a CompletionBlockerFeedback,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
             let (kind, text) = match feedback.kind {
-                CompletionFeedbackKind::PendingAsks => {
+                CompletionBlockerFeedbackKind::PendingAsks => {
                     ("pending_ask_reminder", "Retrying with pending ask reminder")
                 }
-                CompletionFeedbackKind::ActiveWork => {
+                CompletionBlockerFeedbackKind::ActiveWork => {
                     ("active_work_reminder", "Active work reminder injected")
                 }
-                CompletionFeedbackKind::ExitReminders => {
+                CompletionBlockerFeedbackKind::ExitReminders => {
                     ("exit_reminder", "Exit reminder injected")
                 }
             };

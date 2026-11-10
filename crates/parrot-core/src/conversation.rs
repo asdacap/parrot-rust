@@ -1,6 +1,6 @@
 use crate::{
-    CompletionFeedback, Content, ContextReminderCheckpoint, ConversationState, Error, FinishReason,
-    Message, ProviderResponse, Role, States,
+    CompletionBlockerFeedback, Content, ContextReminderCheckpoint, ConversationState, Error,
+    FinishReason, Message, ProviderResponse, Role, States,
 };
 
 /// Assembles summary, durable tail, checkpoints, and the current provider-visible messages.
@@ -78,7 +78,7 @@ pub enum ConversationPersistence {
         standing: crate::StatusStanding,
         event: ConversationEvent,
     },
-    CompletionFeedback(CompletionFeedback),
+    CompletionBlockerFeedback(CompletionBlockerFeedback),
     ToolResult {
         assistant_sequence: i64,
         result: crate::ToolResult,
