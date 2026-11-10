@@ -1191,11 +1191,11 @@ impl States for MemoryState {
             Ok(self.request().messages.clone())
         })
     }
-    fn read_conversation_state(
+    fn read_conversation_history(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, Error>> {
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, Error>> {
         Box::pin(async move {
-            self.trace.step("conversation_state", self.fail_at)?;
+            self.trace.step("conversation_history", self.fail_at)?;
             let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
                 (
                     plan.groups
@@ -1225,9 +1225,8 @@ impl States for MemoryState {
                     }
                 })
                 .collect();
-            Ok(parrot_core::compaction::ConversationState {
+            Ok(parrot_core::ConversationHistory {
                 history,
-                messages: self.request().messages.clone(),
                 ..Default::default()
             })
         })

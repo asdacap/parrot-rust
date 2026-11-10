@@ -112,12 +112,27 @@ impl States for Preparation {
         Box::pin(async { Ok(Vec::new()) })
     }
 
-    fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
+    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+        Box::pin(async move {
+            if self.failure == Some("messages") {
+                return Err(native_error("messages"));
+            }
+            Ok(self.raw.messages.clone())
+        })
+    }
+
+    fn read_conversation_history(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, Error>> {
         Box::pin(async move {
             if self.failure == Some("read") {
                 return Err(native_error("read"));
             }
-            Ok(self.raw.clone())
+            Ok(parrot_core::ConversationHistory {
+                summary: self.raw.summary.clone(),
+                history: self.raw.history.clone(),
+                checkpoint_sequences: self.raw.checkpoint_sequences.clone(),
+            })
         })
     }
 
@@ -368,6 +383,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         "sample",
         "instructions",
         "read",
+        "messages",
         "estimate",
         "status",
         "cancel",

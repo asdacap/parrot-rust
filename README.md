@@ -86,11 +86,12 @@ The core specifies and implements:
   composition, and skill-context size limits.
 
 For core-selected automatic compaction and oversized recovery,
-`States::read_conversation_state` returns one raw summary and its durable tail,
-stored tool ownership, active checkpoint sequences, and current in-memory messages.
-The durable facts are captured in one transaction. The tail starts after the
-summary watermark, not at the beginning of the archive. Current messages remain
-separate because they can include transient notices.
+core's `read_conversation_state` combines `States::read_conversation_history`
+with `States::read_provider_messages`. The history read captures the summary,
+its durable tail, stored tool ownership, and active checkpoint sequences in one
+transaction. The tail starts after the summary watermark, not at the beginning
+of the archive. Current messages remain separate because they can include
+transient notices.
 
 Core's `prepare_compaction` samples instructions, excludes old compaction-status
 rows, assembles causal groups from stored ownership, derives completeness and

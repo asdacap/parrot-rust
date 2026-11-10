@@ -1,7 +1,19 @@
 use crate::{
-    CompletionFeedback, Content, ContextReminderCheckpoint, FinishReason, Message,
-    ProviderResponse, Role,
+    CompletionFeedback, Content, ContextReminderCheckpoint, ConversationState, Error, FinishReason,
+    Message, ProviderResponse, Role, States,
 };
+
+/// Combines a coherent durable history snapshot with the current provider-visible messages.
+pub async fn read_conversation_state(states: &dyn States) -> Result<ConversationState, Error> {
+    let history = states.read_conversation_history().await?;
+    let messages = states.read_provider_messages().await?;
+    Ok(ConversationState {
+        summary: history.summary,
+        history: history.history,
+        checkpoint_sequences: history.checkpoint_sequences,
+        messages,
+    })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConversationOrigin {

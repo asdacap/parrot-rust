@@ -423,12 +423,10 @@ pub trait States: Send + Sync {
     fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_provider_messages")) })
     }
-    /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot,
-    /// plus current messages, without sampling prompts or preparing compaction input.
-    fn read_conversation_state(
-        &self,
-    ) -> BoxFuture<'_, Result<crate::compaction::ConversationState, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
+    /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot.
+    /// Materializes stored messages without combining them with the live conversation.
+    fn read_conversation_history(&self) -> BoxFuture<'_, Result<ConversationHistory, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_conversation_history")) })
     }
     /// Persists the fitted compaction with the supplied sampled instructions and tools,
     /// awaiting terminal lifecycle effects on success or failure.
@@ -833,6 +831,15 @@ pub struct CompactionHistoryGroup {
     pub end_watermark: i64,
     pub has_checkpoint_before: bool,
     pub is_complete: bool,
+}
+
+/// Captures durable history facts from one storage snapshot.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ConversationHistory {
+    pub summary: Option<ConversationSummary>,
+    /// Contains the chronological durable tail after the captured summary watermark.
+    pub history: Vec<ConversationHistoryItem>,
+    pub checkpoint_sequences: Vec<i64>,
 }
 
 /// Captures durable history facts and the independent current provider-visible view.

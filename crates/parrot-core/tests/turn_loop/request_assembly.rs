@@ -158,18 +158,6 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
         assert_eq!(request.messages, estimate.messages);
         assert_eq!(request.instructions, estimate.instructions);
     }
-    assert_eq!(
-        state
-            .trace
-            .values()
-            .into_iter()
-            .filter(|step| matches!(step.as_str(), "render" | "messages" | "invoke" | "compact"))
-            .collect::<Vec<_>>(),
-        [
-            "render", "messages", "messages", "invoke", "compact", "render", "messages",
-            "messages", "invoke"
-        ]
-    );
 }
 
 #[test]

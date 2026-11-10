@@ -813,14 +813,14 @@ where
                 .collect())
         })
     }
-    fn read_conversation_state(
+    fn read_conversation_history(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::compaction::ConversationState, CoreError>> {
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, CoreError>> {
         adapt_operation(async move {
             let state = self.backend.state.lock().await;
             state
                 .context
-                .read_conversation_state(&state.conversation)
+                .read_conversation_history(&state.conversation)
                 .await
                 .map_err(Into::into)
         })

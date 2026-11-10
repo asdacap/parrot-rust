@@ -10,7 +10,7 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
     let state = MemoryState::new([]);
     state.request().messages = vec![compaction_support::message("saved conversation")];
     let provider = state.summary_provider.clone();
-    let input = retain_owned(finish(state.read_conversation_state()).unwrap());
+    let input = retain_owned(finish(parrot_core::read_conversation_state(&state)).unwrap());
     drop(state);
 
     assert_eq!(
@@ -174,14 +174,14 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
 
 #[test]
 fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
-    for stage in ["conversation_state", "estimate", "status"] {
+    for stage in ["conversation_history", "estimate", "status"] {
         let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
         state.compaction_plan = Some(compaction_support::plan(&["saved group", "tail"]));
         let provider = compaction_support::Provider::default();
         let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
         let error = Error::failed(stage);
         match stage {
-            "conversation_state" => state.fail_at = Some(stage),
+            "conversation_history" => state.fail_at = Some(stage),
             "estimate" => compaction.effects.context_failure = Some((1, error.clone())),
             "status" => compaction.status.failure = Some((1, error.clone())),
             _ => unreachable!(),

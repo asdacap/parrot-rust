@@ -585,10 +585,10 @@ impl ContextController {
         &mut self.blobs
     }
 
-    pub(crate) async fn read_conversation_state(
+    pub(crate) async fn read_conversation_history(
         &self,
         conversation: &AgentConversation,
-    ) -> ContextResult<parrot_core::compaction::ConversationState> {
+    ) -> ContextResult<parrot_core::ConversationHistory> {
         let state = self.history.read_conversation_state().await?;
         let mut history = Vec::with_capacity(state.items.len());
         for item in state.items {
@@ -599,7 +599,7 @@ impl ContextController {
                 message: provider_message(&conversation.materialize(item.item).await?).into(),
             });
         }
-        Ok(parrot_core::compaction::ConversationState {
+        Ok(parrot_core::ConversationHistory {
             summary: state
                 .snapshot
                 .map(|snapshot| parrot_core::compaction::ConversationSummary {
@@ -608,10 +608,6 @@ impl ContextController {
                 }),
             history,
             checkpoint_sequences: state.checkpoint_sequences,
-            messages: provider_messages(conversation)
-                .into_iter()
-                .map(Into::into)
-                .collect(),
         })
     }
 
@@ -1032,14 +1028,14 @@ impl parrot_core::States for EpochStates<'_> {
             }
         })
     }
-    fn read_conversation_state(
+    fn read_conversation_history(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationState, parrot_core::Error>> {
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, parrot_core::Error>> {
         Box::pin(async move {
             self.controller
                 .lock()
                 .await
-                .read_conversation_state(self.conversation)
+                .read_conversation_history(self.conversation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })
