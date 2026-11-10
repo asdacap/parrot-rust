@@ -55,17 +55,9 @@ pub async fn run_turn(
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
-    let mut budget = states.read_turn_budget()?;
-    let result = execute_turn(
-        states,
-        tools,
-        provider,
-        publisher,
-        cancellation,
-        &mut budget,
-    )
-    .await;
-    states.write_turn_budget(budget)?;
+    let mut state = states.get_agent_state().await?;
+    let result = execute_turn(states, tools, provider, publisher, cancellation, &mut state).await;
+    states.set_agent_state(state).await?;
     result
 }
 
@@ -75,15 +67,15 @@ async fn execute_turn(
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
-    budget: &mut TurnBudget,
+    state: &mut AgentState,
 ) -> Result<Outcome, Error> {
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
     let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
-    budget.begin_turn();
+    state.begin_turn();
     let catalog = tools.capture_catalog().await?;
-    if states.read_final_phase_marker().await? {
+    if state.final_phase {
         let restored =
             rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
         add_phase_prompt(states, &restored, false).await?;
@@ -129,7 +121,7 @@ async fn execute_turn(
                     .await?;
             }
         }
-        let Some(flags) = budget.admit(options.maximum_requests) else {
+        let Some(flags) = state.admit(options.maximum_requests) else {
             return Ok(Outcome::BudgetExhausted);
         };
         let definitions = if flags.final_phase {
@@ -147,7 +139,7 @@ async fn execute_turn(
             cancellation,
         )
         .await?;
-        let attempt = budget.count_request();
+        let attempt = state.count_request();
         let response = match provider.invoke(request, cancellation).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
@@ -232,7 +224,7 @@ async fn execute_turn(
                 cancellation,
             )
             .await?;
-            if flags.final_phase && !budget.try_extend_settlement() {
+            if flags.final_phase && !state.try_extend_settlement() {
                 return Ok(Outcome::BudgetExhausted);
             }
             continue;
@@ -264,7 +256,7 @@ async fn execute_turn(
                 }),
             })
             .await?;
-        budget.restart();
+        state.restart();
     }
 }
 

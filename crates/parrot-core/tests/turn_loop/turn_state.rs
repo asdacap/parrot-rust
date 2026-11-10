@@ -130,7 +130,7 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish(run_turn(
@@ -217,7 +217,7 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish(run_turn(
@@ -249,7 +249,7 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish(run_turn(
