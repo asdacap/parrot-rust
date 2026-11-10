@@ -307,10 +307,6 @@ pub trait States: Send + Sync {
     fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_system_prompts")) })
     }
-    /// Reads namespace keys and configured template catalog keys without expansion.
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_prompt_templates")) })
-    }
     /// Reads literal template arguments for the supplied registered source.
     fn read_template_arguments<'a>(
         &'a self,
@@ -973,18 +969,118 @@ pub struct CompactionConfiguration {
 }
 
 /// Selects a typed runtime configuration value without an additional service contract.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ConfigKey {
     Turn,
     Context,
     Compaction,
-    PromptTemplate(String),
+    SystemPromptBindings,
+    AgentsFileTemplate,
+    ModelAliasesTemplate,
+    AgentIdentityTemplate,
+    StandingInstructionTemplate,
+    SkillCatalogTemplate,
+    SkillUnavailableTemplate,
+    SkillSelectedTemplate,
+    SkillTooLargeTemplate,
+    ContextReminderTemplate,
+    ContextLimitReminderTemplate,
+    FinalRequestTemplate,
+    TruncatedToolCallTemplate,
+    InvalidToolCallTemplate,
+    OptionalCliUtilitiesTemplate,
+    ExpectedCliUtilitiesTemplate,
+    PlatformTemplate,
+    WorkingDirectoryTemplate,
+    GitRepositoryTemplate,
+    SubagentsTemplate,
+    AgentPathEnvironmentTemplate,
+    AgentScratchTemplate,
+    AgentHistoryTemplate,
+}
+
+const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
+    (ConfigKey::AgentsFileTemplate, "context.agents-file"),
+    (ConfigKey::ModelAliasesTemplate, "context.model-aliases"),
+    (ConfigKey::AgentIdentityTemplate, "system.agent-identity"),
+    (
+        ConfigKey::StandingInstructionTemplate,
+        "context.standing-instruction",
+    ),
+    (ConfigKey::SkillCatalogTemplate, "context.skills"),
+    (
+        ConfigKey::SkillUnavailableTemplate,
+        "context.skill-unavailable",
+    ),
+    (ConfigKey::SkillSelectedTemplate, "context.skill-selected"),
+    (ConfigKey::SkillTooLargeTemplate, "context.skill-too-large"),
+    (
+        ConfigKey::ContextReminderTemplate,
+        "agent-session.context-reminder",
+    ),
+    (
+        ConfigKey::ContextLimitReminderTemplate,
+        "agent-session.context-limit-reminder",
+    ),
+    (
+        ConfigKey::FinalRequestTemplate,
+        "agent-session.final-request",
+    ),
+    (
+        ConfigKey::TruncatedToolCallTemplate,
+        "agent-session.truncated-tool-call",
+    ),
+    (
+        ConfigKey::InvalidToolCallTemplate,
+        "agent-session.invalid-tool-call",
+    ),
+    (
+        ConfigKey::OptionalCliUtilitiesTemplate,
+        "context.optional-cli-utilities",
+    ),
+    (
+        ConfigKey::ExpectedCliUtilitiesTemplate,
+        "context.expected-cli-utilities",
+    ),
+    (ConfigKey::PlatformTemplate, "context.platform"),
+    (
+        ConfigKey::WorkingDirectoryTemplate,
+        "system.working-directory",
+    ),
+    (ConfigKey::GitRepositoryTemplate, "context.git-repository"),
+    (ConfigKey::SubagentsTemplate, "context.subagents"),
+    (
+        ConfigKey::AgentPathEnvironmentTemplate,
+        "context.agent-path-environment",
+    ),
+    (ConfigKey::AgentScratchTemplate, "context.agent-scratch"),
+    (ConfigKey::AgentHistoryTemplate, "context.agent-history"),
+];
+
+impl ConfigKey {
+    pub fn get_prompt_template_id(self) -> Option<&'static str> {
+        PROMPT_TEMPLATE_CONFIG_KEYS
+            .iter()
+            .find_map(|(key, id)| (*key == self).then_some(*id))
+    }
+    pub fn from_prompt_template_id(id: &str) -> Result<Self, Error> {
+        PROMPT_TEMPLATE_CONFIG_KEYS
+            .iter()
+            .find_map(|(key, candidate)| (*candidate == id).then_some(*key))
+            .ok_or_else(|| {
+                Error::template(format!(
+                    "prompt_templates.{id} is not an enumerated core prompt template"
+                ))
+            })
+    }
 }
 
 pub enum ConfigValue {
     Turn(TurnOptions),
     Context(ContextConfiguration),
     Compaction(CompactionConfiguration),
+    /// Ordered namespace keys and their explicitly enumerated template configuration keys.
+    SystemPromptBindings(Vec<(String, ConfigKey)>),
     PromptTemplate(Arc<PromptTemplate>),
 }
 
@@ -1005,6 +1101,14 @@ impl ConfigValue {
         match self {
             Self::Compaction(value) => Ok(value),
             _ => Err(Error::failed("expected compaction configuration")),
+        }
+    }
+    pub fn into_system_prompt_bindings(self) -> Result<Vec<(String, ConfigKey)>, Error> {
+        match self {
+            Self::SystemPromptBindings(value) => Ok(value),
+            _ => Err(Error::failed(
+                "expected system prompt bindings configuration",
+            )),
         }
     }
     pub fn into_prompt_template(self) -> Result<Arc<PromptTemplate>, Error> {

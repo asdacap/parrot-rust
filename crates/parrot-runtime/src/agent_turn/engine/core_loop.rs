@@ -403,10 +403,20 @@ where
                             .capture_compaction_configuration(&selection.model, None),
                     ))
                 }
-                ConfigKey::PromptTemplate(id) => self
+                ConfigKey::SystemPromptBindings => self
+                    .backend
+                    .prompt
+                    .read_core_prompt_bindings(self.cancellation)
+                    .await
+                    .map(ConfigValue::SystemPromptBindings)
+                    .map_err(ContextError::from)
+                    .map_err(Into::into),
+                key => self
                     .backend
                     .templates
-                    .get_template(&id)
+                    .get_template(key.get_prompt_template_id().ok_or_else(|| {
+                        TurnError::Service("unsupported template configuration key".into())
+                    })?)
                     .map(ConfigValue::PromptTemplate)
                     .map_err(|error| {
                         TurnError::Prompt(crate::prompt_context::PromptError::Template(
@@ -623,16 +633,6 @@ where
             backend
                 .prompt
                 .read_system_prompts(&selection.model, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_prompt_templates(self.cancellation)
                 .await
                 .map_err(ContextError::from)
                 .map_err(Into::into)

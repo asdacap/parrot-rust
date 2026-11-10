@@ -71,9 +71,9 @@ async fn prepare_pending_prompt(
                 .map_or_else(|| "unavailable".into(), |value| value.to_string())
                 .into(),
         ));
-        "agent-session.context-limit-reminder"
+        ConfigKey::ContextLimitReminderTemplate
     } else {
-        "agent-session.context-reminder"
+        ConfigKey::ContextReminderTemplate
     };
     let content = render_template(states, key, &arguments).await?;
     Ok(Some(PendingPrompt::ContextReminder {
@@ -112,7 +112,7 @@ pub(crate) async fn prepare_request(
     cancellation: CancellationToken<'_>,
 ) -> Result<ProviderRequest, Error> {
     if flags.final_phase {
-        let content = render_template(states, "agent-session.final-request", &[]).await?;
+        let content = render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
         states.record_steer(&content).await?;
     }
     if cancellation.is_cancelled() {

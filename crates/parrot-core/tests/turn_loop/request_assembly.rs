@@ -239,12 +239,22 @@ fn context_preparation_and_message_read_errors_stop_before_provider_invocation()
 }
 
 #[test]
+fn prompt_template_configuration_errors_stop_before_provider_invocation() {
+    let mut state = MemoryState::new([Reply::final_response("not invoked")]);
+    state.fail_at = Some("prompt_templates");
+
+    assert_eq!(state.run(), Err(Error::failed("prompt_templates")));
+    assert!(state.provider.requests.lock().unwrap().is_empty());
+    assert!(state.tools.requests.lock().unwrap().is_empty());
+}
+
+#[test]
 fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_templates() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.request().instructions = "raw system instructions".into();
     state.prompt_templates = vec![
-        ("memory:00-list".into(), "configured.list".into()),
-        ("memory:10-scalar".into(), "configured.scalar".into()),
+        ("memory:00-list".into(), ConfigKey::AgentScratchTemplate),
+        ("memory:10-scalar".into(), ConfigKey::AgentHistoryTemplate),
     ];
     state.template_arguments.insert(
         "memory:00-list".into(),
@@ -259,13 +269,16 @@ fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_tem
     );
     state
         .template_engines
-        .insert("configured.list".into(), "minijinja".into());
+        .insert("context.agent-scratch".into(), "minijinja".into());
     state.skill_templates.lock().unwrap().extend([
         (
-            "configured.list".into(),
+            "context.agent-scratch".into(),
             "{{ title }}{% for item in items %}[{{ item }}]{% endfor %}".into(),
         ),
-        ("configured.scalar".into(), "configured {content}".into()),
+        (
+            "context.agent-history".into(),
+            "configured {content}".into(),
+        ),
     ]);
     let tools = state.tools.clone();
     let provider = state.provider.clone();

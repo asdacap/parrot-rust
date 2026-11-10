@@ -114,7 +114,7 @@ async fn execute_turn(
         compacted_oversized = false;
         if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
             let content =
-                rendering::render_template(states, "agent-session.truncated-tool-call", &[])
+                rendering::render_template(states, ConfigKey::TruncatedToolCallTemplate, &[])
                     .await?;
             states.record_retry(&content, attempt).await?;
             continue;
@@ -125,7 +125,7 @@ async fn execute_turn(
             .any(|call| serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err())
         {
             let content =
-                rendering::render_template(states, "agent-session.invalid-tool-call", &[]).await?;
+                rendering::render_template(states, ConfigKey::InvalidToolCallTemplate, &[]).await?;
             states.record_retry(&content, attempt).await?;
             continue;
         }

@@ -72,6 +72,21 @@ impl SessionPrompt {
             .read_prompt_templates())
     }
 
+    pub async fn read_core_prompt_bindings(
+        &self,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<(String, parrot_core::ConfigKey)>> {
+        self.read_prompt_templates(cancellation)
+            .await?
+            .into_iter()
+            .map(|(source, id)| {
+                parrot_core::ConfigKey::from_prompt_template_id(&id)
+                    .map(|key| (source, key))
+                    .map_err(Into::into)
+            })
+            .collect()
+    }
+
     pub async fn read_agents_files(
         &self,
         cancellation: &dyn Cancellation,
