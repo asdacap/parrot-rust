@@ -582,8 +582,14 @@ impl ContextController {
         let errors = NativeErrors::new();
         let templates = self.templates.clone();
         let (prepared, result) = {
+            let controller = tokio::sync::Mutex::new(&mut *self);
+            let publisher = EpochEventPublisher {
+                controller: &controller,
+                events: input.events,
+                errors: &errors,
+            };
             let mut states = EpochStates {
-                controller: tokio::sync::Mutex::new(&mut *self),
+                controller: &controller,
                 conversation: input.conversation,
                 prompt: input.prompt,
                 selection: input.selection,
@@ -605,6 +611,7 @@ impl ContextController {
             let prepared = parrot_core::compaction::prepare_compaction(
                 &mut states,
                 &provider,
+                &publisher,
                 &definitions,
                 &configuration,
             )
@@ -836,8 +843,46 @@ impl ContextController {
     }
 }
 
+struct EpochEventPublisher<'a> {
+    controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
+    events: &'a dyn ContextEvents,
+    errors: &'a NativeErrors<ContextError>,
+}
+
+impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .report_epoch_started(self.events)
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
+    fn report_compaction_failed(
+        &self,
+        message: String,
+    ) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .fail_epoch_compaction(message, self.events)
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
+}
+
 struct EpochStates<'a> {
-    controller: tokio::sync::Mutex<&'a mut ContextController>,
+    controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
     conversation: &'a AgentConversation,
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
@@ -916,33 +961,10 @@ impl parrot_core::States for EpochStates<'_> {
             }
         })
     }
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
-        Box::pin(async move {
-            self.controller
-                .lock()
-                .await
-                .report_epoch_started(self.events)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
     fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
         Box::pin(async move {
             self.prompt
                 .sample_epoch(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-    fn report_compaction_failed(
-        &self,
-        message: String,
-    ) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
-        Box::pin(async move {
-            self.controller
-                .lock()
-                .await
-                .fail_epoch_compaction(message, self.events)
                 .await
                 .map_err(|error| self.capture_error(error))
         })

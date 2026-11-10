@@ -2,13 +2,13 @@ use parrot_core::{
     BoxFuture, CancellationToken, CompletionFeedback, ConfigKey, ConfigValue, Content,
     ContextCadence, ContextCompaction, ContextConfiguration, ContextModel,
     ContextReminderCheckpoint, ContextSnapshot, ConversationTurn, Delivery, DerivedContext, Error,
-    ErrorCode, ErrorKind, FinishReason, InputAdmission, Message, Outcome, PendingMessage,
-    PendingPrompt, PromotedInput, PromptPublication, PromptTemplate, Provider, ProviderRequest,
-    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States,
-    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage,
-    ToolResult, ToolStatus, Tools, TurnOptions,
+    ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
+    PendingMessage, PendingPrompt, PromotedInput, PromptPublication, PromptTemplate, Provider,
+    ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention,
+    SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
+    ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
-    parse_skill_mentions, run, run_turn,
+    parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -43,6 +43,47 @@ mod compaction_support;
 
 use cancellation::CancellationSource;
 use compaction_dependencies::MemoryCompaction;
+
+struct MemoryEventPublisher {
+    compacting: Arc<AtomicBool>,
+}
+
+impl EventPublisher for MemoryEventPublisher {
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.compacting.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+    fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.compacting.store(false, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+
+async fn run(
+    states: &mut MemoryState,
+    tools: &dyn Tools,
+    provider: &dyn Provider,
+) -> Result<Outcome, Error> {
+    let publisher = MemoryEventPublisher {
+        compacting: states.compacting.clone(),
+    };
+    parrot_core::run(states, tools, provider, &publisher).await
+}
+
+async fn run_turn(
+    states: &mut MemoryState,
+    tools: &dyn Tools,
+    provider: &dyn Provider,
+) -> Result<Outcome, Error> {
+    let publisher = MemoryEventPublisher {
+        compacting: states.compacting.clone(),
+    };
+    parrot_core::run_turn(states, tools, provider, &publisher).await
+}
 
 struct ThreadWake(thread::Thread);
 impl Wake for ThreadWake {
@@ -791,20 +832,8 @@ impl States for MemoryState {
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
         })
     }
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.compacting.store(true, Ordering::SeqCst);
-            Ok(())
-        })
-    }
     fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Ok(()) })
-    }
-    fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.compacting.store(false, Ordering::SeqCst);
-            Ok(())
-        })
     }
     fn render_status<'a, 'c>(
         &'a self,

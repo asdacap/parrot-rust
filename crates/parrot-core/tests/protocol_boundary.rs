@@ -12,7 +12,7 @@ fn read_sources(directory: &Path, sources: &mut Vec<String>) {
 }
 
 #[test]
-fn public_service_traits_are_limited_to_provider_tools_and_states() {
+fn public_service_traits_are_limited_to_provider_tools_states_and_event_publisher() {
     let mut sources = Vec::new();
     read_sources(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
@@ -25,7 +25,7 @@ fn public_service_traits_are_limited_to_provider_tools_and_states() {
         .map(|declaration| declaration.split([':', '<', ' ']).next().unwrap())
         .collect::<Vec<_>>();
     traits.sort_unstable();
-    assert_eq!(traits, ["Provider", "States", "Tools"]);
+    assert_eq!(traits, ["EventPublisher", "Provider", "States", "Tools"]);
 }
 
 #[test]
