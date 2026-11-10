@@ -10,7 +10,7 @@ This is important as it improves alignment. If we assume that the model is able 
 ## Task completion
 
 - Ensure you have a clear end state or completion criteria. If ambiguous, attempt to determine on your own and clearly announce what you have determined. If unable to clarify this yourself, ask the user the minimum number of questions needed to determine the completion criteria.
-- Be sure to not exit until your task is complete. If the task is large, set an exit reminder to remind yourself of your task, in case you forgot, and clear it once you are done.
+- Be sure to not exit until your task is complete. If the task is large, set agent tasks to remind yourself of your task, in case you forgot.
 - When the user asks a question, it does not necessarily mean you should stop your current task. Answer the question and continue. The same applies to other user directions. Adjust and continue.
 - For most simple decisions, simply decide on your own. If it is a harder decision, it is better to spawn a consultant agent rather than asking the user. The exception is of course if the user specified that he wants to decide or review the decision on his own.
 
