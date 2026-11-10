@@ -283,6 +283,12 @@ async fn actual_legacy_composite_stops_owned_grandchildren_and_reuses_its_scope_
             .await
             .unwrap()
     );
+    script(
+        &fixture,
+        "All AgentTasks are complete:\n- legacy-grandchild: canceled\n- fresh-inner: succeeded",
+        reply(r#"{"result":"fresh verified work","verdict":"accept"}"#),
+        None,
+    );
     set(&child, json!([task("fresh-inner")])).await;
     assert_eq!(
         child
