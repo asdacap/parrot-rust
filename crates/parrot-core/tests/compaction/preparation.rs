@@ -31,8 +31,15 @@ struct Preparation {
 }
 
 impl States for Preparation {
-    fn get_config(&self, _: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
-        Box::pin(async { Err(Error::failed("preparation has no configured templates")) })
+    fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
+        Box::pin(async move {
+            match key {
+                ConfigKey::SystemPromptBindings => {
+                    Ok(ConfigValue::SystemPromptBindings(Vec::new()))
+                }
+                _ => Err(Error::failed("preparation has no configured templates")),
+            }
+        })
     }
 
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
@@ -67,10 +74,6 @@ impl States for Preparation {
                 "sampled instructions".into(),
             )])
         })
-    }
-
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
     }
 
     fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
