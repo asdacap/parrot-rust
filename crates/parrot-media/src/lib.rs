@@ -1,22 +1,86 @@
+//! Dependency-neutral structural inspection of PNG, JPEG, GIF, and WebP bytes.
+//!
+//! Inspection reads only caller-provided bytes and never performs I/O. Callers
+//! remain responsible for enforcing their own bounded read limits, upload
+//! limits, and error translation into their own error types.
+
 use std::fmt;
 
-pub const HEADER_LENGTH: usize = 12;
+/// Length of the RIFF/WebP header prefix; other formats start earlier.
+const HEADER_LENGTH: usize = 12;
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const JPEG_SIGNATURE: &[u8] = b"\xff\xd8\xff";
 const INVALID: &str = "The image content is invalid or unsupported.";
 const TRUNCATED: &str = "The image content is truncated or invalid.";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+type Result<T> = std::result::Result<T, ImageInspectionError>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ImageInspection {
     pub media_type: &'static str,
-    pub width: i32,
-    pub height: i32,
-    pub frame_count: i32,
+    pub width: u32,
+    pub height: u32,
+    pub frame_count: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ImageInspectionError(&'static str);
+
+impl ImageInspection {
+    /// Length of the RIFF/WebP header prefix; other formats start earlier.
+    pub const HEADER_LENGTH: usize = HEADER_LENGTH;
+
+    /// Detects the media type from the format signature of an image prefix.
+    pub fn detect_media_type(header: &[u8]) -> Option<&'static str> {
+        if header.starts_with(PNG_SIGNATURE) {
+            Some("image/png")
+        } else if header.starts_with(JPEG_SIGNATURE) {
+            Some("image/jpeg")
+        } else if header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a") {
+            Some("image/gif")
+        } else if header.len() >= HEADER_LENGTH
+            && header.starts_with(b"RIFF")
+            && &header[8..12] == b"WEBP"
+        {
+            Some("image/webp")
+        } else {
+            None
+        }
+    }
+
+    /// Inspects image bytes, rejecting unknown, truncated, or structurally
+    /// invalid content.
+    pub fn inspect(data: &[u8]) -> Result<Self> {
+        match Self::detect_media_type(data) {
+            Some("image/png") => inspect_png(data),
+            Some("image/jpeg") => inspect_jpeg(data),
+            Some("image/gif") => inspect_gif(data),
+            Some("image/webp") => inspect_webp(data),
+            _ => Err(ImageInspectionError(INVALID)),
+        }
+    }
+
+    fn create(media_type: &'static str, width: i32, height: i32, frame_count: i32) -> Result<Self> {
+        if width > 0 && height > 0 && frame_count > 0 {
+            Ok(Self {
+                media_type,
+                width: width as u32,
+                height: height as u32,
+                frame_count: frame_count as u32,
+            })
+        } else {
+            Err(ImageInspectionError(INVALID))
+        }
+    }
+}
+
+impl ImageInspectionError {
+    /// The single-line message describing why the image was rejected.
+    pub const fn message(&self) -> &'static str {
+        self.0
+    }
+}
 
 impl fmt::Display for ImageInspectionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -25,53 +89,6 @@ impl fmt::Display for ImageInspectionError {
 }
 
 impl std::error::Error for ImageInspectionError {}
-
-type Result<T> = std::result::Result<T, ImageInspectionError>;
-
-pub fn detect_media_type(header: &[u8]) -> Option<&'static str> {
-    if header.starts_with(PNG_SIGNATURE) {
-        Some("image/png")
-    } else if header.starts_with(JPEG_SIGNATURE) {
-        Some("image/jpeg")
-    } else if header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if header.len() >= HEADER_LENGTH
-        && header.starts_with(b"RIFF")
-        && &header[8..12] == b"WEBP"
-    {
-        Some("image/webp")
-    } else {
-        None
-    }
-}
-
-pub fn inspect(data: &[u8]) -> Result<ImageInspection> {
-    match detect_media_type(data) {
-        Some("image/png") => inspect_png(data),
-        Some("image/jpeg") => inspect_jpeg(data),
-        Some("image/gif") => inspect_gif(data),
-        Some("image/webp") => inspect_webp(data),
-        _ => Err(ImageInspectionError(INVALID)),
-    }
-}
-
-fn create(
-    media_type: &'static str,
-    width: i32,
-    height: i32,
-    frame_count: i32,
-) -> Result<ImageInspection> {
-    if width > 0 && height > 0 && frame_count > 0 {
-        Ok(ImageInspection {
-            media_type,
-            width,
-            height,
-            frame_count,
-        })
-    } else {
-        Err(ImageInspectionError(INVALID))
-    }
-}
 
 fn read(data: &[u8], offset: u64, length: u64) -> Result<&[u8]> {
     let end = offset
@@ -128,7 +145,7 @@ fn inspect_png(data: &[u8]) -> Result<ImageInspection> {
             b"acTL" => frame_count = be_u32(body, 0)? as i32,
             b"IDAT" => has_image_data = true,
             b"IEND" => {
-                return create(
+                return ImageInspection::create(
                     "image/png",
                     width,
                     height,
@@ -157,7 +174,7 @@ fn inspect_jpeg(data: &[u8]) -> Result<ImageInspection> {
                 offset += 1;
                 continue;
             }
-            0xd9 => return create("image/jpeg", width, height, 1),
+            0xd9 => return ImageInspection::create("image/jpeg", width, height, 1),
             0x01 | 0xd0..=0xd7 => {
                 offset += 2;
                 continue;
@@ -205,7 +222,7 @@ fn inspect_gif(data: &[u8]) -> Result<ImageInspection> {
     let mut offset = 13 + gif_color_table_length(screen[4]);
     loop {
         match read(data, offset, 1)?[0] {
-            0x3b => return create("image/gif", width, height, frame_count),
+            0x3b => return ImageInspection::create("image/gif", width, height, frame_count),
             0x21 => offset = skip_gif_sub_blocks(data, offset + 2)?,
             0x2c => {
                 let descriptor = read(data, offset + 1, 9)?;
@@ -305,7 +322,7 @@ fn inspect_webp(data: &[u8]) -> Result<ImageInspection> {
         }
         offset += 8 + size + (size & 1);
     }
-    create(
+    ImageInspection::create(
         "image/webp",
         width,
         height,

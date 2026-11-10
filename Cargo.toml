@@ -4,6 +4,7 @@ members = [
     "crates/parrot-core",
     "crates/parrot-domain",
     "crates/parrot-foundation",
+    "crates/parrot-media",
     "crates/parrot-storage",
     "crates/parrot-provider",
     "crates/parrot-runtime",

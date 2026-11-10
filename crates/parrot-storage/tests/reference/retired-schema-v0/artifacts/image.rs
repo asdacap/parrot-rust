@@ -756,15 +756,19 @@ fn signed_png_and_apng_high_bit_fields_are_rejected() {
     let mut negative_width = PIXEL.to_vec();
     negative_width[16..20].copy_from_slice(&i32::MIN.to_be_bytes());
     assert_eq!(
-        ImageInspection::inspect(&negative_width).unwrap_err().kind,
-        ErrorKind::InvalidData
+        ImageInspection::inspect(&negative_width)
+            .unwrap_err()
+            .message(),
+        "The image content is invalid or unsupported."
     );
 
     let mut negative_height = PIXEL.to_vec();
     negative_height[20..24].copy_from_slice(&i32::MIN.to_be_bytes());
     assert_eq!(
-        ImageInspection::inspect(&negative_height).unwrap_err().kind,
-        ErrorKind::InvalidData
+        ImageInspection::inspect(&negative_height)
+            .unwrap_err()
+            .message(),
+        "The image content is invalid or unsupported."
     );
 
     let mut negative_frame_count = PIXEL.to_vec();
@@ -787,13 +791,17 @@ fn signed_png_and_apng_high_bit_fields_are_rejected() {
             0,
             0,
             0,
+            0,
+            0,
+            0,
+            0,
         ],
     );
     assert_eq!(
         ImageInspection::inspect(&negative_frame_count)
             .unwrap_err()
-            .kind,
-        ErrorKind::InvalidData
+            .message(),
+        "The image content is invalid or unsupported."
     );
 }
 
@@ -802,7 +810,9 @@ fn media_detection_and_parser_reject_truncated_images() {
     assert_eq!(ImageInspection::detect_media_type(PIXEL), Some("image/png"));
     assert_eq!(ImageInspection::detect_media_type(INVALID), None);
     assert_eq!(
-        ImageInspection::inspect(&PIXEL[..12]).unwrap_err().kind,
-        ErrorKind::InvalidData
+        ImageInspection::inspect(&PIXEL[..12])
+            .unwrap_err()
+            .message(),
+        "The image content is truncated or invalid."
     );
 }
