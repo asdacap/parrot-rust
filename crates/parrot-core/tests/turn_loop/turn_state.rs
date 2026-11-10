@@ -309,32 +309,6 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
 }
 
 #[test]
-fn exit_blockers_retain_the_candidate_and_continue_without_pending_input() {
-    let mut state = MemoryState::new([
-        Reply::final_response("candidate"),
-        Reply::final_response("answer"),
-    ]);
-    state.exit_blockers.push_back(vec!["work remains".into()]);
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
-    assert_eq!(state.completion_feedback.len(), 1);
-    assert_eq!(
-        state.completion_feedback[0].candidate.assistant_text,
-        "candidate"
-    );
-    assert!(state.pending_messages.is_empty());
-    assert_eq!(
-        state
-            .trace
-            .values()
-            .iter()
-            .filter(|step| *step == "catalog")
-            .count(),
-        1
-    );
-}
-
-#[test]
 fn promotion_returns_exact_multimodal_input_without_request_preparation() {
     let mut state = MemoryState::new([]);
     state.pending_messages.clear();

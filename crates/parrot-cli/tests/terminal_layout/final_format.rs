@@ -191,32 +191,24 @@ fn matches_yamldotnet_double_quoted_escape_rules() {
 }
 
 #[test]
-fn quotes_source_boolean_null_number_and_bounded_date_key_families() {
+fn quotes_mapping_keys_without_classifying_their_contents() {
     for key in [
         "",
+        "ordinary",
         "null",
-        "NULL",
-        "yes",
-        "No",
-        "ON",
-        "off",
-        "~",
-        "<<",
         "true",
-        " false ",
         "+1.2e3",
-        ".5",
         "2024-02-29",
-        "2024-01",
-        "1/2",
-        "1/2/2024",
-        "12:30",
-        "2024-01-01T12:30:45.123Z",
+        "2024-02-30",
         "January 2, 2024",
-        "2 Jan 2024",
     ] {
         let source = format!("{{{}:1}}", serde_json::to_string(key).unwrap());
         let expected = format!("{}: 1", serde_json::to_string(key).unwrap());
+        assert_eq!(
+            ToolYamlFormatter::try_format(&source).unwrap().as_deref(),
+            Some(expected.as_str()),
+            "{key}"
+        );
         assert_eq!(
             ToolYamlFormatter::format(&source).unwrap(),
             expected,

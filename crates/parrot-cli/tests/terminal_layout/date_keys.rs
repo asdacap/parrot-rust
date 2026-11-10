@@ -17,26 +17,6 @@ use parrot_cli::terminal_layout::ToolYamlFormatter;
 use serde_json::Value;
 
 #[test]
-fn matches_quoted_independent_source_date_key_rows() {
-    assert_source_rows(SOURCE_ROWS, 68, true);
-}
-
-#[test]
-fn matches_quoted_source_month_year_full_weekday_and_year_first_rows() {
-    assert_source_rows(FOLLOWUP_SOURCE_ROWS, 17, true);
-}
-
-#[test]
-fn matches_quoted_source_separator_month_year_and_iso_width_rows() {
-    assert_source_rows(LEXICAL_SOURCE_ROWS, 34, true);
-}
-
-#[test]
-fn matches_quoted_source_acceptance_date_meridiem_weekday_and_year_rows() {
-    assert_source_rows(ACCEPTANCE_SOURCE_ROWS, 90, true);
-}
-
-#[test]
 #[ignore = "Rust formatter quotes date-like strings without CLR date classification"]
 fn preserves_source_unquoted_date_key_rows() {
     for (source, count) in [

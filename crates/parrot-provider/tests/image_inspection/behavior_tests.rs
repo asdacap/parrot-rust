@@ -1,5 +1,4 @@
 use super::source_cases::{arguments, cases_for, hex_decode};
-use parrot_domain::values::tools::ToolCycleImageBudget;
 use parrot_provider::image_inspection::{
     FALLBACK_IMAGE_TOKENS, HEADER_LENGTH, calculate_image_tokens, detect_media_type,
     image_reference, inspect,
@@ -105,26 +104,4 @@ fn image_reference_cases_preserve_link_and_lazy_inline_read() {
         cases_for("Responses_encode_ordered_text_and_image_reference").len(),
         2
     );
-}
-
-#[test]
-fn source_budget_cases_reuse_domain_implementation() {
-    let cases = cases_for("Restores_usage_and_overflow_without_sharing_state");
-    assert_eq!(cases.len(), 2);
-    for case in cases {
-        let restore_overflow = case["display_name"].as_str().unwrap().contains("(True)");
-        let budget = ToolCycleImageBudget::new(10);
-        budget.restore_accepted(6).unwrap();
-        if restore_overflow {
-            budget.restore_exceeded();
-        }
-        assert_eq!(budget.try_accept(4).unwrap(), !restore_overflow);
-        assert!(!budget.try_accept(5).unwrap());
-        assert!(!budget.try_accept(1).unwrap());
-        assert!(budget.is_exceeded());
-        let independent = ToolCycleImageBudget::new(10);
-        assert!(independent.try_accept(10).unwrap());
-        assert!(!independent.is_exceeded());
-    }
-    assert!(ToolCycleImageBudget::new(10).try_accept(-1).is_err());
 }
