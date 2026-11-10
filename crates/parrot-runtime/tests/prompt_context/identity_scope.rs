@@ -64,6 +64,54 @@ fn scope_ordinal_teens_and_repeated_whitespace_are_source_literal_rules() {
     );
 }
 #[test]
+fn system_prompt_reads_include_live_standing_instructions() {
+    let instruction = StandingInstruction::new(templates(
+        "prompt_templates:\n  context.standing-instruction:\n    template: 'standing [{instruction}]'\n",
+    ));
+    let mut main = instruction.materialize(&identity()).unwrap();
+    let mut child = instruction.materialize(&identity()).unwrap();
+    let selection = selection();
+    assert!(main.read_system_prompts(&selection).unwrap().is_empty());
+    for text in ["literal {instruction}\nkeep bytes", "updated"] {
+        instruction.update(text);
+        let expected = vec![(instruction.key().into(), format!("standing [{text}]"))];
+        assert_eq!(main.read_system_prompts(&selection).unwrap(), expected);
+        child.renew_epoch();
+        assert_eq!(child.read_system_prompts(&selection).unwrap(), expected);
+        assert_eq!(main.build(&selection).unwrap(), expected[0].1);
+    }
+    instruction.update("");
+    assert!(main.read_system_prompts(&selection).unwrap().is_empty());
+    assert!(child.read_system_prompts(&selection).unwrap().is_empty());
+}
+
+#[test]
+fn system_prompt_reads_include_agent_identity_and_scope() {
+    let provider = SessionIdentityPromptProvider::new(templates(
+        "prompt_templates:\n  system.agent-identity:\n    template: 'agent {agent_name} in {session_id} at depth {depth}'\n",
+    ));
+    for (depth, expected) in [
+        (0, "Review only."),
+        (1, "agent worker in session at depth 1\n\nReview only."),
+    ] {
+        let mut prompt = provider
+            .materialize(&AgentIdentityDescription {
+                agent_name: "worker".into(),
+                session_id: "session".into(),
+                depth,
+                scope_text: "Review only.".into(),
+                ..identity()
+            })
+            .unwrap();
+        assert_eq!(
+            prompt.read_system_prompts(&selection()).unwrap(),
+            [(provider.key().into(), expected.into())],
+        );
+        assert_eq!(prompt.build(&selection()).unwrap(), expected);
+    }
+}
+
+#[test]
 fn standing_instruction_updates_are_shared_across_prompt_materializations_and_epochs() {
     let instruction = StandingInstruction::new(templates(""));
     let mut main = instruction.materialize(&identity()).unwrap();

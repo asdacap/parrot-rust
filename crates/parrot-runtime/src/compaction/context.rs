@@ -1150,55 +1150,10 @@ impl parrot_core::States for EpochStates<'_> {
                 .map_err(|error| self.capture_error(error))
         })
     }
-    fn capture_system_prompt_sections(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, parrot_core::Error>> {
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, parrot_core::Error>> {
         Box::pin(async move {
             self.prompt
-                .read_system_prompts(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_agents_files(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_agents_files(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, parrot_core::Error>>
-    {
-        Box::pin(async move {
-            self.prompt
-                .read_agent_identity(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_standing_instruction(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_skill_catalog(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_skill_catalog(self.cancellation)
+                .build(self.selection, self.cancellation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })

@@ -422,9 +422,7 @@ where
         })
     }
 
-    fn capture_system_prompt_sections(
-        &mut self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
+    fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
             {
@@ -439,52 +437,13 @@ where
                     .await?;
             }
             self.prompt
-                .read_system_prompts(&selection.model, self.cancellation)
+                .build(&selection.model, self.cancellation)
                 .await
                 .map_err(ContextError::from)
                 .map_err(Into::into)
         })
     }
-    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
-        adapt_operation(async move {
-            self.prompt
-                .read_agents_files(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_agent_identity(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, CoreError>> {
-        adapt_operation(async move {
-            self.prompt
-                .read_agent_identity(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, CoreError>> {
-        adapt_operation(async move {
-            self.prompt
-                .read_standing_instruction(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_skill_catalog(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, CoreError>> {
-        adapt_operation(async move {
-            self.prompt
-                .read_skill_catalog(self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
+
     fn read_tool_recovery(&self) -> BoxFuture<'_, Result<parrot_core::ToolRecovery, CoreError>> {
         adapt_operation(async move {
             self.state

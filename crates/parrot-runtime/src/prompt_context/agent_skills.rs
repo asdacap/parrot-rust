@@ -1,15 +1,16 @@
+use super::SkillCatalogEntry;
 use super::{
     AgentIdentityDescription, PromptError, PromptResult, SkillCatalog, SkillMetadata,
     SkillSnapshot, SystemPrompt, SystemPromptProvider, normalize_skill_match_path,
     normalize_skill_path, render_skill_catalog_entries,
 };
-use parrot_core::SkillCatalogEntry;
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation, OperationError},
     filesystem::{AuthorizedReadService, FileReadErrorKind, LinkPolicy, ReadRequest},
     security::SecurityProvider,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::routing::aliases::ResolvedModelSelection;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 
@@ -78,7 +79,7 @@ where
         let entries = self.read_catalog(cancellation).await?;
         render_skill_catalog_entries(&entries, &self.templates).map(|(_, text)| text)
     }
-    pub async fn read_catalog(
+    async fn read_catalog(
         &mut self,
         cancellation: &dyn Cancellation,
     ) -> PromptResult<Vec<SkillCatalogEntry>> {
@@ -278,10 +279,11 @@ impl<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Securi
             Ok(())
         })
     }
-    fn read_skill_catalog_live<'a>(
+    fn read_system_prompts_live<'a>(
         &'a mut self,
+        _selection: &'a ResolvedModelSelection,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<Vec<SkillCatalogEntry>>> {
+    ) -> BoxFuture<'a, PromptResult<Vec<(String, String)>>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| PromptError::Cancelled)?;
             let mut skills = tokio::select! {
@@ -290,11 +292,22 @@ impl<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Securi
                 skills = self.skills.lock() => skills,
             };
             cancellation.check().map_err(|_| PromptError::Cancelled)?;
-            skills.read_catalog(cancellation).await
+            let entries = skills.read_catalog(cancellation).await?;
+            if entries.is_empty() {
+                return Ok(Vec::new());
+            }
+            Ok(vec![render_skill_catalog_entries(
+                &entries,
+                &self.templates,
+            )?])
         })
     }
-    fn read_skill_catalog(&self) -> PromptResult<Vec<SkillCatalogEntry>> {
-        self.catalog_view
+    fn read_system_prompts(
+        &mut self,
+        _selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        let entries = self
+            .catalog_view
             .read()
             .expect("skill catalog view lock poisoned")
             .clone()
@@ -302,9 +315,13 @@ impl<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Securi
                 PromptError::Context(
                     "The skill catalogue has not been sampled for this epoch.".into(),
                 )
-            })
-    }
-    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
-        (source_key == "runtime:system-context:09b-skills").then_some(self.templates.as_ref())
+            })?;
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(vec![render_skill_catalog_entries(
+            &entries,
+            &self.templates,
+        )?])
     }
 }

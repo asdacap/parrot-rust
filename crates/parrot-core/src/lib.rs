@@ -7,7 +7,7 @@ mod context_additions;
 mod context_epoch;
 mod conversation;
 mod protocol;
-pub mod rendering;
+mod rendering;
 mod skills;
 mod status;
 pub mod template;
