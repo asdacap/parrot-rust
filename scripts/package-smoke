@@ -23,7 +23,7 @@ resources="$prefix/share/parrot"
 [[ $(cat "$resources/target") == "$target" ]]
 for required in config/predefined_config.runtime.yaml config/predefined_config.system_prompts.minijinja.yaml \
   skills/domain-modeling/SKILL.md proto/parrot.proto proto/web.proto native/parrot-pty-attach.c \
-  web/index.html SOURCE-ATTRIBUTION.md PACKAGING.md licenses/cargo/cargo-notices.json licenses/web/npm-notices.json \
+  web/index.html THIRD_PARTY_NOTICES.md PACKAGING.md licenses/cargo/cargo-notices.json licenses/web/npm-notices.json \
   licenses/rust/COPYRIGHT licenses/rust/LICENSE-APACHE licenses/rust/LICENSE-MIT licenses/UNICODE-LICENSE.txt; do
   [[ -s "$resources/$required" ]] || { printf 'missing package resource: %s\n' "$required" >&2; exit 1; }
 done
