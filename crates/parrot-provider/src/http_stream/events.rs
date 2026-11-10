@@ -66,7 +66,7 @@ impl HttpEventStream {
             self.stage = 3;
             let (endpoint, body, headers) =
                 self.request.take().expect("HTTP request consumed once");
-            match open_stream(
+            let response = open_stream(
                 &*self.transport,
                 endpoint,
                 body,
@@ -75,19 +75,11 @@ impl HttpEventStream {
                 self.counter.clone(),
                 cancellation,
             )
-            .await
-            {
-                Ok(response) => {
-                    self.stage = 2;
-                    self.turn_state = response.turn_state().map(str::to_owned);
-                    self.body = Some(SseStream::new(response.content, MAX_EVENT_BYTES as i32));
-                    return Ok(Some(HttpStreamEvent::ResponseHeadersReceived));
-                }
-                Err(error) => {
-                    self.stage = 3;
-                    return Err(error);
-                }
-            }
+            .await?;
+            self.stage = 2;
+            self.turn_state = response.turn_state().map(str::to_owned);
+            self.body = Some(SseStream::new(response.content, MAX_EVENT_BYTES as i32));
+            return Ok(Some(HttpStreamEvent::ResponseHeadersReceived));
         }
         if self.stage == 3 {
             return Ok(None);

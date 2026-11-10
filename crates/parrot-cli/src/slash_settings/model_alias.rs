@@ -10,7 +10,7 @@ use crate::{
     slash_sessions::{CommandContext, SlashCommand, SlashFailure},
 };
 
-use super::{load_command, model_wizard::ModelWizard, rpc};
+use super::{load, model_wizard::ModelWizard, rpc};
 
 pub async fn resolve(
     client: &WebClient,
@@ -88,7 +88,7 @@ impl ModelAliasCommand {
         cancellation: &dyn Cancellation,
     ) -> Result<(), SlashFailure> {
         let mut client = self.client.clone();
-        let listed = load_command(
+        let listed = load(
             dialog,
             "Loading aliases…",
             rpc(
@@ -127,7 +127,7 @@ impl ModelAliasCommand {
             return Ok(());
         };
         if selected.id == "/provider-defaults" {
-            let defaults = load_command(
+            let defaults = load(
                 dialog,
                 "Loading provider defaults…",
                 rpc(
@@ -164,7 +164,7 @@ impl ModelAliasCommand {
             else {
                 return Ok(());
             };
-            let applied = load_command(
+            let applied = load(
                 dialog,
                 "Applying provider defaults…",
                 rpc(

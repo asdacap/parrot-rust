@@ -1,6 +1,7 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::responses::ResponsesEvent;
 use parrot_provider::responses_websocket::*;
+use parrot_provider::sessions::Error as ProviderError;
 use std::sync::{Arc, Mutex};
 
 struct Cancel(bool);
@@ -59,6 +60,9 @@ impl WebSocketAttemptObserver for Observer {
             WebSocketAttemptOutcome::Completed => "completed".into(),
             WebSocketAttemptOutcome::Disposed => "disposed".into(),
             WebSocketAttemptOutcome::Failed(error) => format!("failed:{error:?}"),
+            WebSocketAttemptOutcome::CredentialsFailed(error) => {
+                format!("credentials-failed:{error:?}")
+            }
         });
     }
 }
@@ -67,7 +71,7 @@ impl HeaderSource for Auth {
     fn headers<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Headers, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Headers, ProviderError>> {
         self.0.push("auth");
         Box::pin(async { Ok(Vec::new()) })
     }
@@ -162,7 +166,7 @@ impl HttpEvents for Empty {
     fn next<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
         Box::pin(async { Ok(None) })
     }
     fn take_turn_state(&mut self) -> Option<String> {
@@ -174,7 +178,7 @@ impl HttpFallback for Http {
         &'a self,
         _: String,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
         self.0.push("http-original");
         Box::pin(async { Ok(Box::new(Empty) as Box<dyn HttpEvents>) })
     }
@@ -183,7 +187,7 @@ impl HttpFallback for Http {
         _: Vec<u8>,
         _: String,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
         self.0.push("http-prepared");
         Box::pin(async { Ok(Box::new(Empty) as Box<dyn HttpEvents>) })
     }
@@ -369,9 +373,9 @@ async fn precancel_and_prepare_failure_do_not_start_attempts() {
         assert_eq!(
             call.next(&Cancel(cancelled)).await.unwrap_err(),
             if cancelled {
-                WebSocketError::Cancelled
+                ProviderError::Cancelled
             } else {
-                WebSocketError::InvalidRequest("bad".into())
+                ProviderError::Socket(WebSocketError::InvalidRequest("bad".into()))
             }
         );
         drop(call);
@@ -417,7 +421,9 @@ async fn connect_failure_finishes_raw_after_prepare_and_auth() {
         .with_websocket_observer(Arc::new(Observer(trace.clone())));
     assert!(matches!(
         call.next(&Cancel(false)).await,
-        Err(WebSocketError::TransportFailure { .. })
+        Err(ProviderError::Socket(
+            WebSocketError::TransportFailure { .. }
+        ))
     ));
     drop(call);
     assert_source_observer("websocket-connect-failure-raw-trace", 0, &trace.values());
@@ -495,7 +501,9 @@ async fn partial_close_counts_received_bytes_and_raw_close_before_failure() {
         .with_websocket_observer(Arc::new(Observer(trace.clone())));
     assert!(matches!(
         call.next(&Cancel(false)).await,
-        Err(WebSocketError::TransportFailure { .. })
+        Err(ProviderError::Socket(
+            WebSocketError::TransportFailure { .. }
+        ))
     ));
     drop(call);
     assert_source_observer("partial-message-close-byte-and-status", 0, &trace.values());
@@ -562,7 +570,7 @@ async fn configured_limit_precedes_request_counter_and_message_limit_falls_back_
         if configured {
             assert_eq!(
                 result.unwrap_err(),
-                WebSocketError::RequestTooLarge { maximum: 1 }
+                ProviderError::Socket(WebSocketError::RequestTooLarge { maximum: 1 })
             );
         } else {
             assert!(matches!(result.unwrap(), Some(SessionEvent::Retry { .. })));
@@ -665,7 +673,7 @@ async fn eager_precancel_preserves_existing_connection_path() {
     let mut call = session.call(request(), &http).unwrap();
     assert_eq!(
         call.next(&Cancel(true)).await,
-        Err(WebSocketError::Cancelled)
+        Err(ProviderError::Cancelled)
     );
     drop(call);
     assert_eq!(trace.values(), ["auth", "connect"]);

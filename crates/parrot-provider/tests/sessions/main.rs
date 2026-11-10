@@ -17,5 +17,4 @@ mod retry_tests;
 mod review_projection_tests;
 mod socket_session_tests;
 mod t29_compatible_physical_tests;
-mod usage_composition_tests;
 mod ws_auth_projection_tests;

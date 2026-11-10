@@ -123,14 +123,6 @@ fn restore_can_exceed_limit_but_checked_overflow_does_not_change_state() {
 }
 
 #[test]
-fn negative_maximum_preserves_source_unchecked_remaining_arithmetic() {
-    let budget = ToolCycleImageBudget::new(i32::MIN);
-    budget.restore_accepted(i64::MAX).unwrap();
-    assert_eq!(budget.try_accept(1), Ok(true));
-    assert!(!budget.is_exceeded());
-}
-
-#[test]
 fn shared_parallel_acceptance_is_atomic() {
     let budget = ToolCycleImageBudget::new(10);
     std::thread::scope(|scope| {

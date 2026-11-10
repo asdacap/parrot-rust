@@ -17,68 +17,8 @@ macro_rules! source_case {
 }
 
 source_case!(
-    terminal_layout_word_677bbef68cb8,
-    "terminal.layout.word.677bbef68cb8"
-);
-source_case!(
-    terminal_layout_word_5445ca258c6d,
-    "terminal.layout.word.5445ca258c6d"
-);
-source_case!(
-    terminal_layout_word_1de98e84129a,
-    "terminal.layout.word.1de98e84129a"
-);
-source_case!(
-    terminal_layout_word_a4d5775dcc48,
-    "terminal.layout.word.a4d5775dcc48"
-);
-source_case!(
-    terminal_layout_word_9898fb632c9f,
-    "terminal.layout.word.9898fb632c9f"
-);
-source_case!(
-    terminal_layout_word_2063991d7380,
-    "terminal.layout.word.2063991d7380"
-);
-source_case!(
-    terminal_layout_word_3dc019a52906,
-    "terminal.layout.word.3dc019a52906"
-);
-source_case!(
-    terminal_layout_grapheme_582e9f87df67,
-    "terminal.layout.grapheme.582e9f87df67"
-);
-source_case!(
-    terminal_layout_grapheme_96919b058a6e,
-    "terminal.layout.grapheme.96919b058a6e"
-);
-source_case!(
-    terminal_layout_grapheme_ac2e0711a568,
-    "terminal.layout.grapheme.ac2e0711a568"
-);
-source_case!(
     terminal_layout_grapheme_a36679a9b6dc,
     "terminal.layout.grapheme.a36679a9b6dc"
-);
-source_case!(
-    terminal_unicode_category_113ce,
-    "terminal.unicode-category.113ce"
-);
-source_case!(
-    terminal_unicode_category_113d0,
-    "terminal.unicode-category.113d0"
-);
-source_case!(
-    terminal_unicode_category_1612f,
-    "terminal.unicode-category.1612f"
-);
-source_case!(
-    terminal_unicode_category_1e5ee,
-    "terminal.unicode-category.1e5ee"
-);
-source_case!(
-    terminal_unicode_category_1e5ef,
-    "terminal.unicode-category.1e5ef"
 );
 source_case!(terminal_layout_hard_break, "terminal.layout.hard-break");
 source_case!(

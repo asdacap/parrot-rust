@@ -3,6 +3,7 @@ use super::transport::ExchangeState;
 use super::{
     Headers, ResponsesWebSocket, SocketState, WebSocketClient, WebSocketError, WebSocketRequest,
 };
+use crate::provider_error::Error;
 use crate::responses::{ResponsesCompletion, ResponsesError, ResponsesEvent};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use serde_json::value::RawValue;
@@ -14,7 +15,7 @@ pub trait HeaderSource: Send + Sync {
     fn headers<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Headers, WebSocketError>>;
+    ) -> BoxFuture<'a, Result<Headers, Error>>;
 }
 
 /// The provider's HTTP implementation remains responsible for HTTP parsing and policy.
@@ -23,9 +24,9 @@ pub trait HttpFallback: Send + Sync {
         &'a self,
         _turn_state: String,
         _cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>> {
         Box::pin(async {
-            Err(WebSocketError::InvalidOperation(
+            Err(Error::InvalidOperation(
                 "HTTP fallback does not support unprepared requests.".into(),
             ))
         })
@@ -36,18 +37,18 @@ pub trait HttpFallback: Send + Sync {
         body: Vec<u8>,
         turn_state: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>>;
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>>;
 }
 pub trait HttpEvents: Send {
     fn next<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, WebSocketError>>;
+    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, Error>>;
     /// Override to preserve HTTP lifecycle markers, advancing only one event per pull.
     fn next_event<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<SessionEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<SessionEvent>, Error>> {
         Box::pin(async move {
             self.next(cancellation)
                 .await
@@ -63,6 +64,16 @@ pub enum SessionEvent {
     HttpResponseHeadersReceived,
     Response(ResponsesEvent),
     Retry { attempt: u32, reason: String },
+}
+
+enum AttemptFailure {
+    Socket(WebSocketError),
+    Credentials(Error),
+}
+impl From<WebSocketError> for AttemptFailure {
+    fn from(error: WebSocketError) -> Self {
+        Self::Socket(error)
+    }
 }
 
 struct CompletedResponse {
@@ -266,14 +277,14 @@ impl<'a> SessionCall<'a> {
     pub async fn next(
         &mut self,
         cancellation: &dyn Cancellation,
-    ) -> Result<Option<SessionEvent>, WebSocketError> {
+    ) -> Result<Option<SessionEvent>, Error> {
         if self.done {
             return Ok(None);
         }
         if !self.started {
             if self.prepare_request.is_some() && cancellation.is_cancelled() {
                 self.done = true;
-                return Err(WebSocketError::Cancelled);
+                return Err(Error::Cancelled);
             }
             self.started = true;
             if !self.session.http_only && self.request.is_none() {
@@ -282,7 +293,7 @@ impl<'a> SessionCall<'a> {
                     Ok(request) => self.prepare(request),
                     Err(error) => {
                         self.done = true;
-                        return Err(error);
+                        return Err(error.into());
                     }
                 }
             }
@@ -307,13 +318,13 @@ impl<'a> SessionCall<'a> {
                 self.done = true;
                 Ok(None)
             }
-            Err(error) => self.failure(error),
+            Err(error) => self.failure(error, cancellation),
         }
     }
     async fn next_http(
         &mut self,
         cancellation: &dyn Cancellation,
-    ) -> Result<Option<SessionEvent>, WebSocketError> {
+    ) -> Result<Option<SessionEvent>, Error> {
         if self.http_events.is_none() {
             let turn_state = self.session.turn_state.clone().unwrap_or_default();
             let opened = if self.use_original_http {
@@ -351,7 +362,7 @@ impl<'a> SessionCall<'a> {
     async fn next_websocket(
         &mut self,
         cancellation: &dyn Cancellation,
-    ) -> Result<Option<ResponsesEvent>, WebSocketError> {
+    ) -> Result<Option<ResponsesEvent>, AttemptFailure> {
         if self.exchange.is_none() {
             self.attempt_active = true;
             self.attempt_observer = self.observer.as_ref().map(|observer| observer.start());
@@ -362,7 +373,12 @@ impl<'a> SessionCall<'a> {
                 .is_some_and(|connection| connection.state() == SocketState::Open)
             {
                 self.session.poison();
-                let headers = self.session.headers.headers(cancellation).await?;
+                let headers = self
+                    .session
+                    .headers
+                    .headers(cancellation)
+                    .await
+                    .map_err(AttemptFailure::Credentials)?;
                 let connection = self.session.client.connect(&headers, cancellation).await?;
                 let state = connection
                     .response_headers()
@@ -402,9 +418,27 @@ impl<'a> SessionCall<'a> {
             .next_observed(state, cancellation, &mut self.attempt_observer)
             .await;
         self.session.capture_turn_state(state.turn_state.take());
-        result
+        result.map_err(AttemptFailure::Socket)
     }
-    fn failure(&mut self, error: WebSocketError) -> Result<Option<SessionEvent>, WebSocketError> {
+    fn failure(
+        &mut self,
+        error: AttemptFailure,
+        cancellation: &dyn Cancellation,
+    ) -> Result<Option<SessionEvent>, Error> {
+        let error = match error {
+            AttemptFailure::Socket(error) => error,
+            AttemptFailure::Credentials(error) => {
+                self.finish_attempt(WebSocketAttemptOutcome::CredentialsFailed(&error));
+                self.exchange = None;
+                self.session.completed = None;
+                self.session.poison();
+                if self.visible {
+                    self.session.http_only = true;
+                }
+                self.done = true;
+                return Err(error.wrap_websocket_transport());
+            }
+        };
         self.finish_attempt(WebSocketAttemptOutcome::Failed(&error));
         let full_reason = match &error {
             WebSocketError::Response(ResponsesError::ProviderResponse { error_code, .. })
@@ -449,6 +483,9 @@ impl<'a> SessionCall<'a> {
             self.session.http_only = true;
         }
         self.done = true;
+        if error == WebSocketError::Cancelled && cancellation.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         Err(match error {
             error @ (WebSocketError::Socket { .. }
             | WebSocketError::Wire(_)
@@ -462,7 +499,8 @@ impl<'a> SessionCall<'a> {
                 cause: Box::new(error),
             },
             error => error,
-        })
+        }
+        .into())
     }
     fn store_completion(&mut self, completion: &ResponsesCompletion) {
         self.session.completed =

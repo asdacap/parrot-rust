@@ -139,34 +139,19 @@ where
     F: FnOnce(&Transaction<'_>) -> Result<T> + Send + 'static,
 {
     let ticket = database
-        .admit(key, cancellation, move |transaction| {
-            operation(transaction).map_err(rollback)
-        })
+        .admit_with_error(key, cancellation, operation)
         .map_err(|error| match error {
             AdmissionError::Cancelled => Error::cancelled(),
-            AdmissionError::Rejected(error) => database_error(error),
+            AdmissionError::Rejected(error) => error,
         })?;
-    let outcome = ticket.into_completion().await.map_err(database_error)?;
+    let outcome = ticket.into_completion().await?;
     let receipt = outcome.into_value();
     Ok(receipt.into_output())
 }
 
-fn rollback(error: Error) -> DatabaseError {
-    DatabaseError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
-}
-
-fn database_error(error: DatabaseError) -> Error {
-    match error {
-        DatabaseError::Sqlite(rusqlite::Error::ToSqlConversionFailure(error)) => {
-            match error.downcast::<Error>() {
-                Ok(error) => *error,
-                Err(error) => {
-                    let sqlite = rusqlite::Error::ToSqlConversionFailure(error);
-                    Error::new(ErrorKind::Database, sqlite.to_string()).with_source(sqlite)
-                }
-            }
-        }
-        error => Error::new(ErrorKind::Database, error.to_string()).with_source(error),
+impl From<DatabaseError> for Error {
+    fn from(error: DatabaseError) -> Self {
+        Self::new(ErrorKind::Database, error.to_string()).with_source(error)
     }
 }
 

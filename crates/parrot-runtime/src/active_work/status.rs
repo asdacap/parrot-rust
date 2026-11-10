@@ -587,18 +587,10 @@ impl crate::compaction::ContextStatus for BoundContextStatus {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, crate::compaction::ContextResult<String>> {
         Box::pin(async move {
-            self.runtime
-                .observe_fitted(
-                    &self.query,
-                    &self.profile_prompt,
-                    |text| {
-                        estimate(text)
-                            .map_err(|error| StatusError::caused_by(error.to_string(), error))
-                    },
-                    cancellation,
-                )
-                .await
-                .map_err(context_error)
+            parrot_core::compaction::fit_status(estimate, |context| async move {
+                self.observe(&context, cancellation).await
+            })
+            .await
         })
     }
 }
@@ -606,14 +598,6 @@ fn context_error(error: OperationError<StatusError>) -> crate::compaction::Conte
     use crate::compaction::ContextError;
     match error {
         OperationError::Cancelled => ContextError::Cancelled,
-        OperationError::Failed(mut error) => {
-            if let Some(source) = error.source.take() {
-                match source.downcast::<ContextError>() {
-                    Ok(original) => return *original,
-                    Err(source) => error.source = Some(source),
-                }
-            }
-            ContextError::Operation(error.to_string())
-        }
+        OperationError::Failed(error) => ContextError::Operation(error.to_string()),
     }
 }

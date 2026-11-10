@@ -47,20 +47,7 @@ impl From<parrot_domain::values::accounting::UsageOverflow> for EventError {
     }
 }
 impl From<DatabaseError> for EventError {
-    fn from(e: DatabaseError) -> Self {
-        match e {
-            DatabaseError::Sqlite(rusqlite::Error::ToSqlConversionFailure(error)) => {
-                match error.downcast::<EventError>() {
-                    Ok(error) => *error,
-                    Err(error) => Self::Database(DatabaseError::Sqlite(
-                        rusqlite::Error::ToSqlConversionFailure(error),
-                    )),
-                }
-            }
-            error => Self::Database(error),
-        }
+    fn from(error: DatabaseError) -> Self {
+        Self::Database(error)
     }
-}
-pub(super) fn rollback(error: EventError) -> DatabaseError {
-    DatabaseError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
 }

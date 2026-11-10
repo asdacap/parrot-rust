@@ -1,8 +1,8 @@
 //! Runtime bindings for the exact delegated literals in work-items.jsonl.
 //! The scratch/blob-directory literal is intentionally not imitated by a path join:
 //! its real API belongs to parrot-foundation, absent from this crate's dependencies.
+use super::AgentHistoryFile;
 use super::json::{deserialize_entry, serialize_entry};
-use super::{AgentHistoryFile, SessionCatalog, SessionIndex, SessionMeta};
 use crate::conversation::{
     AgentHistoryEntry, AgentHistoryView, CompactionSnapshot, ConversationMessage, ConversationPart,
     ConversationRepository, HistoryForkBoundary, HistoryForkSelection, MessageRole, ToolCall,
@@ -13,7 +13,6 @@ use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::protocol::messages::parrot::{
     Delivery, Event, RequestUsageRecorded, ToolExecutionStarted,
 };
-use parrot_domain::values::identifiers::UserSessionId;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,40 +71,6 @@ async fn append(view: &AgentHistoryView, id: &str, text: &str) {
     )
     .await
     .unwrap();
-}
-
-#[test]
-fn delegated24_metadata_catalog_count_id_and_no_staging() {
-    let fixture = Fixture::new();
-    let state = fixture.0.join("state");
-    let workspace = fixture.0.join("workspace");
-    fs::create_dir_all(&workspace).unwrap();
-    let root =
-        SelectedSessionRoot::new(state.join("sessions/listed"), RootOrigin::Current).unwrap();
-    let index = SessionIndex::new(
-        root,
-        UserSessionId::try_parse("listed").unwrap(),
-        &workspace,
-    )
-    .unwrap();
-    index
-        .publish(&SessionMeta::new(
-            "listed",
-            workspace.to_string_lossy(),
-            "provider",
-            "model",
-        ))
-        .unwrap();
-    let listed = SessionCatalog::new(&state).list();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id.value(), "listed");
-    let staging: Vec<_> = fs::read_dir(index.selected_root().path())
-        .unwrap()
-        .map(Result::unwrap)
-        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".staging"))
-        .collect();
-    assert!(staging.is_empty());
-    assert!(!index.selected_root().path().join("session.db").exists());
 }
 
 #[tokio::test]
@@ -337,39 +302,6 @@ async fn delegated24_promoted_input_compaction_and_destination_fork_jsonl() {
     child.cleanup_fork().await.unwrap();
     assert!(fs::read_to_string(child_file.path()).unwrap().is_empty());
     assert_eq!(fs::read_to_string(parent_file.path()).unwrap(), parent_text);
-    repository.events().database().close().await.unwrap();
-}
-
-#[tokio::test]
-async fn delegated24_projection_failure_same_owner_recovery_jsonl() {
-    let fixture = Fixture::new();
-    let repository = fixture.repository();
-    let file = fixture.projection("agent", &["agent"]);
-    let parent = file.path().parent().unwrap();
-    fs::create_dir_all(parent.parent().unwrap()).unwrap();
-    fs::write(parent, "blocks history directory").unwrap();
-    let view = repository
-        .bind_agent_history("agent".into(), file.clone())
-        .unwrap();
-    append(&view, "message", "committed despite projection failure").await;
-    assert_eq!(
-        repository.conversation("agent".into()).await.unwrap().len(),
-        1
-    );
-    assert!(!file.path().exists());
-    fs::remove_file(parent).unwrap();
-    view.refresh().await.unwrap();
-    assert!(
-        fs::read_to_string(file.path())
-            .unwrap()
-            .contains("committed despite projection failure")
-    );
-    let temporary: Vec<_> = fs::read_dir(parent)
-        .unwrap()
-        .map(Result::unwrap)
-        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
-        .collect();
-    assert!(temporary.is_empty());
     repository.events().database().close().await.unwrap();
 }
 

@@ -3,7 +3,7 @@ use crate::sessions::{
     Error,
     provider::{ApiKeySource, OAuthAccess, OAuthTokenSource},
 };
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError, OwnedWork};
+use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OwnedWork};
 use parrot_foundation::oauth::{
     self, ApiKeyEnvironment, AuthError, CredentialStorage, OAuthClient,
 };
@@ -77,12 +77,6 @@ impl OwnedWork for FoundationCredentials {
     }
 }
 
-fn auth_error(error: OperationError<AuthError>) -> Error {
-    match error {
-        OperationError::Cancelled => Error::Cancelled,
-        OperationError::Failed(error) => Error::Authentication(error),
-    }
-}
 struct ApiKeyAdapter(oauth::StoredApiKeySource);
 impl ApiKeySource for ApiKeyAdapter {
     fn api_key<'a>(
@@ -94,7 +88,7 @@ impl ApiKeySource for ApiKeyAdapter {
                 .api_key(cancellation)
                 .await
                 .map(|key| key.value().to_owned())
-                .map_err(auth_error)
+                .map_err(Error::from)
         })
     }
     fn has_credential<'a>(
@@ -105,7 +99,7 @@ impl ApiKeySource for ApiKeyAdapter {
             self.0
                 .has_credential(cancellation)
                 .await
-                .map_err(auth_error)
+                .map_err(Error::from)
         })
     }
 }
@@ -130,7 +124,7 @@ impl OAuthTokenSource for OAuthAdapter {
                     access_token: access.access_token.value().to_owned(),
                     account_id: access.account_id.unwrap_or_default(),
                 })
-                .map_err(auth_error)
+                .map_err(Error::from)
         })
     }
     fn has_credential<'a>(
@@ -141,7 +135,7 @@ impl OAuthTokenSource for OAuthAdapter {
             self.0
                 .has_credential(cancellation)
                 .await
-                .map_err(auth_error)
+                .map_err(Error::from)
         })
     }
 }

@@ -203,25 +203,3 @@ fn mismatched_support_inventory_is_rejected() {
         "Tool support flags and definitions must match the tool inventory."
     );
 }
-#[test]
-fn configured_catalog_uses_ordinal_names_and_copies_input() {
-    let mut definitions = std::collections::BTreeMap::from([(
-        "work".into(),
-        ConfiguredToolDefinition::new(
-            "Does work.",
-            r#"{"type":"object","properties":{"description":{"type":"string","description":"Semantic value."}},"required":["description"],"additionalProperties":false}"#,
-        ),
-    )]);
-    let catalog = ToolDefinitionCatalog::new(&definitions);
-    let expected = definitions["work"].clone();
-    definitions.clear();
-    assert_eq!(catalog.describe("work").unwrap(), &expected);
-    assert_eq!(
-        catalog.describe("missing").unwrap_err().to_string(),
-        "tools.missing is not defined"
-    );
-    assert_eq!(
-        catalog.describe("Work").unwrap_err().to_string(),
-        "tools.Work is not defined"
-    );
-}

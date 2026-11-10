@@ -23,7 +23,7 @@ use crate::{
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -318,11 +318,9 @@ impl Core {
             Some(responses_websocket::DEFAULT_IDLE_TIMEOUT),
             self.options.maximum_request_bytes,
         )?;
-        let original_error = Arc::new(Mutex::new(None));
         let headers = Arc::new(SessionHeaders {
             core: self.clone(),
             session_id: id.clone(),
-            original_error: original_error.clone(),
         });
         let session =
             responses_websocket::Session::new(&self.id, headers, client, self.disable_websocket);
@@ -331,7 +329,6 @@ impl Core {
             Arc::new(Factory {
                 core: self.clone(),
                 session_id: id,
-                original_error,
             }),
         )))
     }
@@ -774,32 +771,18 @@ impl Provider for ChatGptProvider {
 struct SessionHeaders {
     core: Arc<Core>,
     session_id: String,
-    original_error: Arc<Mutex<Option<Error>>>,
 }
 impl HeaderSource for SessionHeaders {
     fn headers<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<responses_websocket::Headers, WebSocketError>> {
-        Box::pin(async move {
-            self.core
-                .headers(Some(&self.session_id), cancellation)
-                .await
-                .map_err(|error| {
-                    let projected = WebSocketError::InvalidOperation(error.to_string());
-                    *self
-                        .original_error
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner()) = Some(error);
-                    projected
-                })
-        })
+    ) -> BoxFuture<'a, Result<responses_websocket::Headers, Error>> {
+        Box::pin(self.core.headers(Some(&self.session_id), cancellation))
     }
 }
 struct Factory {
     core: Arc<Core>,
     session_id: String,
-    original_error: Arc<Mutex<Option<Error>>>,
 }
 impl ResponseCallFactory for Factory {
     fn prepare(
@@ -813,7 +796,6 @@ impl ResponseCallFactory for Factory {
                 .as_ref()
                 .map(|factory| factory.start(&request))
         });
-        let http_error = self.original_error.clone();
         let core = self.core.clone();
         let websocket_request = request.clone();
         Ok(ResponsePrepared {
@@ -827,10 +809,8 @@ impl ResponseCallFactory for Factory {
                 core: self.core.clone(),
                 session_id: self.session_id.clone(),
                 original_request: request,
-                http_error: http_error.clone(),
                 trace,
             }),
-            http_error,
         })
     }
 }
@@ -838,7 +818,6 @@ struct Fallback {
     core: Arc<Core>,
     session_id: String,
     original_request: Request,
-    http_error: Arc<Mutex<Option<Error>>>,
     trace: Option<Arc<CallTrace>>,
 }
 impl HttpFallback for Fallback {
@@ -846,7 +825,7 @@ impl HttpFallback for Fallback {
         &'a self,
         turn_state: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>> {
         self.open(Vec::new(), turn_state, cancellation)
     }
     fn open<'a>(
@@ -854,9 +833,9 @@ impl HttpFallback for Fallback {
         _body: Vec<u8>,
         turn_state: String,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>> {
         Box::pin(async move {
-            match self
+            let driver = self
                 .core
                 .open_http(
                     self.original_request.clone(),
@@ -865,21 +844,8 @@ impl HttpFallback for Fallback {
                     cancellation,
                     self.trace.clone(),
                 )
-                .await
-            {
-                Ok(driver) => Ok(
-                    Box::new(HttpEventsBridge::new(driver, self.http_error.clone()))
-                        as Box<dyn HttpEvents>,
-                ),
-                Err(error) => {
-                    let projected = WebSocketError::InvalidOperation(error.to_string());
-                    *self
-                        .http_error
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner()) = Some(error);
-                    Err(projected)
-                }
-            }
+                .await?;
+            Ok(Box::new(HttpEventsBridge::new(driver)) as Box<dyn HttpEvents>)
         })
     }
 }

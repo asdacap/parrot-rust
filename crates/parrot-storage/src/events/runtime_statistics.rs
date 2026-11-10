@@ -55,13 +55,12 @@ impl EventRepository {
                     let event = event.clone();
                     let context = context.clone();
                     let ticket = database
-                        .admit((), &NeverCancelled, move |tx| {
+                        .admit_with_error((), &NeverCancelled, move |tx| {
                             statistics::append_usage_fact(tx, &event, context.timestamp.as_ref())
-                                .map_err(error::rollback)
                         })
                         .map_err(|error| -> StatisticsError {
                             Box::new(match error {
-                                AdmissionError::Rejected(error) => EventError::from(error),
+                                AdmissionError::Rejected(error) => error,
                                 AdmissionError::Cancelled => {
                                     unreachable!("uncancelled completed append")
                                 }
@@ -73,9 +72,7 @@ impl EventRepository {
                         Ok(ticket
                             .into_completion()
                             .await
-                            .map_err(|error| -> StatisticsError {
-                                Box::new(EventError::from(error))
-                            })?
+                            .map_err(|error| -> StatisticsError { Box::new(error) })?
                             .into_value()
                             .into_output())
                     })
