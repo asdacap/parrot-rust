@@ -4,7 +4,7 @@ use super::{
         DrainBackend, DrainPass, DrainWork, Execution, ExecutionResultReference, ExecutionStatus,
         LifecycleError,
     },
-    provider_call::{self, OutputWriter, ProviderActivity, ProviderCall, ProviderUsage},
+    provider_call::{self, ProviderUsage},
     services::*,
     tool_conversation::ToolConversation,
     usage::SessionUsageRecorder,
@@ -509,24 +509,6 @@ impl EventPublisher for PublisherRef<'_> {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), OperationError<BrokerError>>> {
         self.0.publish_transient(event, cancellation)
-    }
-}
-struct OutputBridge<'a>(&'a dyn SessionOutput);
-impl OutputWriter for OutputBridge<'_> {
-    fn append<'a>(&'a self, text: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
-        self.0.append(text)
-    }
-}
-struct ActivityBridge<'a>(&'a dyn SessionActivity);
-impl ProviderActivity for ActivityBridge<'_> {
-    fn begin_provider_request(&self) {
-        self.0.begin_provider_request();
-    }
-    fn observe_provider_event(&self, event: &sessions::Event) {
-        self.0.observe_provider_event(event);
-    }
-    fn finish_provider_request(&self) {
-        self.0.finish_provider_request();
     }
 }
 #[derive(Clone, Copy)]

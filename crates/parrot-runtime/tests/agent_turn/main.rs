@@ -1,6 +1,5 @@
 mod engine;
 mod lifecycle;
-mod provider_call;
 mod usage;
 
 use parrot_runtime::agent_turn::budget::TurnBudget;

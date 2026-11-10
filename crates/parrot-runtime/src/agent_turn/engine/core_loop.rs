@@ -10,15 +10,11 @@ mod conversation;
 mod events;
 use events::RuntimeEventPublisher;
 mod provider;
+use provider::RuntimeProvider;
 mod states;
 use states::RuntimeStates;
 mod tools;
 use tools::RuntimeTools;
-
-struct RuntimeProvider<'a, S: AccessSnapshot + 'static, T: ToolFactory<S> + ?Sized> {
-    backend: &'a RuntimeBackend<S, T>,
-    binding: &'a TurnBinding<S>,
-}
 
 struct CapturedTools<T> {
     normal: T,
@@ -191,10 +187,6 @@ where
                 interrupted_result: &backend.notices.interrupted_result,
                 captured: std::sync::Mutex::new(None),
             };
-            let provider = RuntimeProvider {
-                backend,
-                binding: &binding,
-            };
             let result = async {
                 adapt_operation(async {
                     let mut guard = backend.state.lock().await;
@@ -269,6 +261,23 @@ where
                     Ok(())
                 })
                 .await?;
+                let provider = RuntimeProvider {
+                    model: binding.capture_selection().map_err(CoreError::from)?.model,
+                    sessions: &backend.sessions,
+                    history: &backend.history,
+                    publisher: backend.publisher.as_ref(),
+                    event_id: backend.event_id.as_ref(),
+                    output: backend.output.as_ref(),
+                    activity: backend.activity.as_ref(),
+                    compactor: &backend.compactor,
+                    state: &backend.state,
+                    events: ContextEmitter::new(
+                        &backend.history,
+                        backend.publisher.as_ref(),
+                        &backend.broker,
+                        backend.event_id.as_ref(),
+                    ),
+                };
                 parrot_core::run_turn(
                     &mut states,
                     &tools,

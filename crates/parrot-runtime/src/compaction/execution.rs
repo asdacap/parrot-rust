@@ -13,7 +13,7 @@ use parrot_domain::{
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{
     routing::{aliases::ResolvedModelSelection, registry::ProviderModel},
-    sessions::{self, Content, Event, Message, ProviderSessions, Request, Role, Tool},
+    sessions::{self, Content, Event, Message, ProviderSessions, Role, Tool},
 };
 use parrot_storage::artifacts::compaction::{self as artifact, CompactionGroupBlobStore};
 use std::{fmt, sync::Arc};
@@ -477,7 +477,8 @@ pub(crate) fn progress_event(progress: CompactionProgress) -> CompactionProgress
 
 pub(crate) struct CompactionProvider<'a, O, E> {
     estimates: &'a CompactionEstimates,
-    collector: SummaryProviderAdapter<'a, O>,
+    sessions: &'a ProviderSessions,
+    observer: O,
     errors: &'a NativeErrors<E>,
 }
 
@@ -490,7 +491,8 @@ impl<'a, O, E> CompactionProvider<'a, O, E> {
     ) -> Self {
         Self {
             estimates,
-            collector: SummaryProviderAdapter::new(estimates.selected.clone(), sessions, observer),
+            sessions,
+            observer,
             errors,
         }
     }
@@ -543,99 +545,82 @@ impl<O: CompactionObserver, E: From<CompactionError> + Send> parrot_core::Provid
         'c: 'a,
     {
         Box::pin(async move {
-            self.collector
-                .summarize_native(request, cancellation)
-                .await
-                .map_err(|error| {
-                    let diagnostic = describe_error(&error);
-                    self.errors.capture(error.into(), diagnostic)
-                })
+            let result: Result<_, CompactionError> = async {
+                cancellation
+                    .check()
+                    .map_err(|_| CompactionError::Cancelled)?;
+                let session = self
+                    .sessions
+                    .get(self.estimates.selected.provider.clone())
+                    .await?;
+                let mut stream = session.call(request.into())?;
+                let result = async {
+                    let mut summary = SummaryText::default();
+                    while let Some(event) = stream.next(&cancellation).await? {
+                        summary.observe(&event)?;
+                        if matches!(event.base_event(), Event::Retry { .. }) {
+                            self.observer.observe(&event, &cancellation).await?;
+                        }
+                    }
+                    Ok(summary.finish())
+                }
+                .await;
+                stream.close().await?;
+                result
+            }
+            .await;
+            result.map_err(|error| {
+                let diagnostic = describe_error(&error);
+                self.errors.capture(error.into(), diagnostic)
+            })
         })
     }
 }
 
-pub(crate) struct SummaryProviderAdapter<'a, O> {
-    selected: ProviderModel,
-    sessions: &'a ProviderSessions,
-    observer: O,
+#[derive(Default)]
+pub(crate) struct SummaryText {
+    summary: Option<String>,
+    completion_details: Option<String>,
+    reasoning_bytes: usize,
 }
 
-impl<'a, O> SummaryProviderAdapter<'a, O> {
-    pub(crate) fn new(
-        selected: ProviderModel,
-        sessions: &'a ProviderSessions,
-        observer: O,
-    ) -> Self {
-        Self {
-            selected,
-            sessions,
-            observer,
+impl SummaryText {
+    pub(crate) fn observe(&mut self, event: &Event) -> Result<(), CompactionError> {
+        if self.summary.is_some() {
+            return Err(CompactionError::InvalidOperation(
+                "The compaction provider emitted an event after completion.".into(),
+            ));
         }
-    }
-}
-
-impl<O: CompactionObserver> SummaryProviderAdapter<'_, O> {
-    pub(crate) async fn summarize_native(
-        &self,
-        request: ProviderRequest,
-        cancellation: CancellationToken<'_>,
-    ) -> Result<SummaryResponse, CompactionError> {
-        self.collect(request.into(), cancellation).await
-    }
-
-    async fn collect(
-        &self,
-        request: Request,
-        cancellation: CancellationToken<'_>,
-    ) -> Result<SummaryResponse, CompactionError> {
-        cancellation
-            .check()
-            .map_err(|_| CompactionError::Cancelled)?;
-        let session = self.sessions.get(self.selected.provider.clone()).await?;
-        let mut stream = session.call(request)?;
-        let result = async {
-            let mut summary = None;
-            let mut completion_details = None;
-            let mut reasoning_bytes = 0;
-            while let Some(event) = stream.next(&cancellation).await? {
-                if summary.is_some() {
-                    return Err(CompactionError::InvalidOperation(
-                        "The compaction provider emitted an event after completion.".into(),
-                    ));
-                }
-                match event.base_event() {
-                    Event::Retry { .. } => self.observer.observe(&event, &cancellation).await?,
-                    Event::Completed(completion) if !completion.assistant_text.is_empty() => {
-                        summary = Some(completion.assistant_text.clone());
-                    }
-                    Event::Completed(completion) => {
-                        completion_details = Some(format!(
-                            "The compaction provider completed with empty assistant text (finish reason: {:?}; assistant text length: {} UTF-8 bytes; provider input tokens: {}; provider output tokens: {}).",
-                            completion.finish_reason,
-                            completion.assistant_text.len(),
-                            completion.input_tokens,
-                            completion.output_tokens,
-                        ));
-                    }
-                    Event::ReasoningDelta { text, .. } => reasoning_bytes += text.len(),
-                    _ => {}
-                }
+        match event.base_event() {
+            Event::Completed(completion) if !completion.assistant_text.is_empty() => {
+                self.summary = Some(completion.assistant_text.clone());
             }
-            Ok(match summary {
-                Some(summary) => SummaryResponse::Summary(summary),
-                None => SummaryResponse::NoSummary(format!(
-                    "{} Reasoning delta length: {reasoning_bytes} UTF-8 bytes.",
-                    completion_details.unwrap_or_else(|| {
-                        "The compaction provider stream ended without a Completed event.".into()
-                    }),
-                )),
-            })
+            Event::Completed(completion) => {
+                self.completion_details = Some(format!(
+                    "The compaction provider completed with empty assistant text (finish reason: {:?}; assistant text length: {} UTF-8 bytes; provider input tokens: {}; provider output tokens: {}).",
+                    completion.finish_reason,
+                    completion.assistant_text.len(),
+                    completion.input_tokens,
+                    completion.output_tokens,
+                ));
+            }
+            Event::ReasoningDelta { text, .. } => self.reasoning_bytes += text.len(),
+            _ => {}
         }
-        .await;
-        // Like await-foreach disposal, close even on cancellation, observer or
-        // protocol failure; the session pool itself remains caller-owned.
-        stream.close().await?;
-        result
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> SummaryResponse {
+        match self.summary {
+            Some(summary) => SummaryResponse::Summary(summary),
+            None => SummaryResponse::NoSummary(format!(
+                "{} Reasoning delta length: {} UTF-8 bytes.",
+                self.completion_details.unwrap_or_else(|| {
+                    "The compaction provider stream ended without a Completed event.".into()
+                }),
+                self.reasoning_bytes,
+            )),
+        }
     }
 }
 
