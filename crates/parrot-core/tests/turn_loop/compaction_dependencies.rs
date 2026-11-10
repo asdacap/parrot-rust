@@ -174,14 +174,22 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
 
 #[test]
 fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
-    for stage in ["conversation_history", "estimate", "status"] {
+    for stage in [
+        "conversation_summary",
+        "conversation_tail",
+        "checkpoint_sequences",
+        "estimate",
+        "status",
+    ] {
         let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
         state.compaction_plan = Some(compaction_support::plan(&["saved group", "tail"]));
         let provider = compaction_support::Provider::default();
         let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
         let error = Error::failed(stage);
         match stage {
-            "conversation_history" => state.fail_at = Some(stage),
+            "conversation_summary" | "conversation_tail" | "checkpoint_sequences" => {
+                state.fail_at = Some(stage);
+            }
             "estimate" => compaction.effects.context_failure = Some((1, error.clone())),
             "status" => compaction.status.failure = Some((1, error.clone())),
             _ => unreachable!(),

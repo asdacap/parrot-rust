@@ -3,14 +3,17 @@ use crate::{
     Message, ProviderResponse, Role, States,
 };
 
-/// Combines a coherent durable history snapshot with the current provider-visible messages.
+/// Assembles summary, durable tail, checkpoints, and the current provider-visible messages.
 pub async fn read_conversation_state(states: &dyn States) -> Result<ConversationState, Error> {
-    let history = states.read_conversation_history().await?;
+    let summary = states.read_conversation_summary().await?;
+    let watermark = summary.as_ref().map_or(0, |summary| summary.watermark);
+    let history = states.read_conversation_tail(watermark).await?;
+    let checkpoint_sequences = states.read_checkpoint_sequences().await?;
     let messages = states.read_provider_messages().await?;
     Ok(ConversationState {
-        summary: history.summary,
-        history: history.history,
-        checkpoint_sequences: history.checkpoint_sequences,
+        summary,
+        history,
+        checkpoint_sequences,
         messages,
     })
 }

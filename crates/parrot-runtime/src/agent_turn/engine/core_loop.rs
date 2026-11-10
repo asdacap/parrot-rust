@@ -813,14 +813,41 @@ where
                 .collect())
         })
     }
-    fn read_conversation_history(
+    fn read_conversation_summary(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, CoreError>> {
+    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .read_conversation_summary()
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn read_conversation_tail(
+        &self,
+        after: i64,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, CoreError>> {
         adapt_operation(async move {
             let state = self.backend.state.lock().await;
             state
                 .context
-                .read_conversation_history(&state.conversation)
+                .read_conversation_tail(&state.conversation, after)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .read_checkpoint_sequences()
                 .await
                 .map_err(Into::into)
         })

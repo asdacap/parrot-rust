@@ -423,10 +423,23 @@ pub trait States: Send + Sync {
     fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_provider_messages")) })
     }
-    /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot.
-    /// Materializes stored messages without combining them with the live conversation.
-    fn read_conversation_history(&self) -> BoxFuture<'_, Result<ConversationHistory, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_conversation_history")) })
+    /// Reads the latest stored summary and its compaction watermark.
+    fn read_conversation_summary(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<ConversationSummary>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_conversation_summary")) })
+    }
+    /// Reads the chronological durable tail after the supplied watermark.
+    /// Retains stored ownership and status metadata and materializes message contents.
+    fn read_conversation_tail(
+        &self,
+        _after: i64,
+    ) -> BoxFuture<'_, Result<Vec<ConversationHistoryItem>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_conversation_tail")) })
+    }
+    /// Reads active checkpoint assistant sequences after the current summary watermark.
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_checkpoint_sequences")) })
     }
     /// Persists the fitted compaction with the supplied sampled instructions and tools,
     /// awaiting terminal lifecycle effects on success or failure.
@@ -831,15 +844,6 @@ pub struct CompactionHistoryGroup {
     pub end_watermark: i64,
     pub has_checkpoint_before: bool,
     pub is_complete: bool,
-}
-
-/// Captures durable history facts from one storage snapshot.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ConversationHistory {
-    pub summary: Option<ConversationSummary>,
-    /// Contains the chronological durable tail after the captured summary watermark.
-    pub history: Vec<ConversationHistoryItem>,
-    pub checkpoint_sequences: Vec<i64>,
 }
 
 /// Captures durable history facts and the independent current provider-visible view.

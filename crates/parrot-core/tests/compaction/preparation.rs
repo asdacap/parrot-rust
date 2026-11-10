@@ -121,18 +121,41 @@ impl States for Preparation {
         })
     }
 
-    fn read_conversation_history(
+    fn read_conversation_summary(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, Error>> {
+    ) -> BoxFuture<'_, Result<Option<ConversationSummary>, Error>> {
         Box::pin(async move {
-            if self.failure == Some("read") {
-                return Err(native_error("read"));
+            if self.failure == Some("summary") {
+                return Err(native_error("summary"));
             }
-            Ok(parrot_core::ConversationHistory {
-                summary: self.raw.summary.clone(),
-                history: self.raw.history.clone(),
-                checkpoint_sequences: self.raw.checkpoint_sequences.clone(),
-            })
+            Ok(self.raw.summary.clone())
+        })
+    }
+
+    fn read_conversation_tail(
+        &self,
+        after: i64,
+    ) -> BoxFuture<'_, Result<Vec<ConversationHistoryItem>, Error>> {
+        Box::pin(async move {
+            if self.failure == Some("tail") {
+                return Err(native_error("tail"));
+            }
+            Ok(self
+                .raw
+                .history
+                .iter()
+                .filter(|item| item.sequence > after)
+                .cloned()
+                .collect())
+        })
+    }
+
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
+        Box::pin(async move {
+            if self.failure == Some("checkpoints") {
+                return Err(native_error("checkpoints"));
+            }
+            Ok(self.raw.checkpoint_sequences.clone())
         })
     }
 
@@ -257,6 +280,7 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
             watermark: 10,
         }),
         history: vec![
+            item(9, message("already summarized"), None),
             item(11, assistant.clone(), None),
             status_item,
             item(13, message("intervening user"), None),
@@ -382,7 +406,9 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         "start",
         "sample",
         "instructions",
-        "read",
+        "summary",
+        "tail",
+        "checkpoints",
         "messages",
         "estimate",
         "status",

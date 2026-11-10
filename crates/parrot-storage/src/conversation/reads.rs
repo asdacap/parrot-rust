@@ -142,7 +142,48 @@ pub fn read_compaction_tail(
     read_selected(tx, agent, watermark, true)
 }
 
+fn read_durable_tail(
+    tx: &Transaction<'_>,
+    agent: &str,
+    watermark: i64,
+) -> Result<Vec<ConversationHistoryItem>, EventError> {
+    let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.sequence > ?2 ORDER BY item.sequence;")?;
+    let mut rows = read.query(params![agent, watermark])?;
+    let mut items = Vec::new();
+    while let Some(row) = rows.next()? {
+        let sequence = row.get(0)?;
+        items.push(ConversationHistoryItem {
+            item: read_message(
+                tx,
+                sequence,
+                &row.get::<_, String>(1)?,
+                &row.get::<_, String>(2)?,
+                row.get(3)?,
+                row.get(5)?,
+                ProviderContent {
+                    provider_id: row.get(6)?,
+                    content: row.get(7)?,
+                },
+            )?,
+            tool_owner_sequence: row.get(8)?,
+            is_compaction_status: row.get(4)?,
+        });
+    }
+    Ok(items)
+}
+
 impl ConversationRepository {
+    /// Reads a flat durable tail with stored ownership and status metadata.
+    pub async fn read_conversation_tail(
+        &self,
+        agent: String,
+        after: i64,
+    ) -> Result<Vec<ConversationHistoryItem>, EventError> {
+        self.events
+            .transaction(move |tx| read_durable_tail(tx, &agent, after))
+            .await
+    }
+
     /// Captures a summary and its flat durable tail with stored ownership and checkpoint facts.
     pub async fn read_conversation_state(
         &self,
@@ -152,29 +193,14 @@ impl ConversationRepository {
             .transaction(move |tx| {
                 let snapshot = super::compaction::read_snapshot(tx, &agent)?;
                 let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
-                let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.sequence > ?2 ORDER BY item.sequence;")?;
-                let mut rows = read.query(params![agent, watermark])?;
-                let mut items = Vec::new();
-                while let Some(row) = rows.next()? {
-                    let sequence = row.get(0)?;
-                    items.push(ConversationHistoryItem {
-                        item: read_message(
-                            tx,
-                            sequence,
-                            &row.get::<_, String>(1)?,
-                            &row.get::<_, String>(2)?,
-                            row.get(3)?,
-                            row.get(5)?,
-                            ProviderContent {
-                                provider_id: row.get(6)?,
-                                content: row.get(7)?,
-                            },
-                        )?,
-                        tool_owner_sequence: row.get(8)?,
-                        is_compaction_status: row.get(4)?,
-                    });
-                }
-                let checkpoint_sequences = super::forks::read_checkpoints(tx, &agent)?.into_iter().filter(|checkpoint| checkpoint.assistant_sequence > watermark).map(|checkpoint| checkpoint.assistant_sequence).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+                let items = read_durable_tail(tx, &agent, watermark)?;
+                let checkpoint_sequences = super::forks::read_checkpoints(tx, &agent)?
+                    .into_iter()
+                    .filter(|checkpoint| checkpoint.assistant_sequence > watermark)
+                    .map(|checkpoint| checkpoint.assistant_sequence)
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
                 Ok(ConversationHistorySnapshot {
                     snapshot,
                     items,

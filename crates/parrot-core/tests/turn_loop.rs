@@ -1191,11 +1191,26 @@ impl States for MemoryState {
             Ok(self.request().messages.clone())
         })
     }
-    fn read_conversation_history(
+    fn read_conversation_summary(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, Error>> {
+    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, Error>> {
         Box::pin(async move {
-            self.trace.step("conversation_history", self.fail_at)?;
+            self.trace.step("conversation_summary", self.fail_at)?;
+            Ok(None)
+        })
+    }
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
+        Box::pin(async move {
+            self.trace.step("checkpoint_sequences", self.fail_at)?;
+            Ok(Vec::new())
+        })
+    }
+    fn read_conversation_tail(
+        &self,
+        after: i64,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, Error>> {
+        Box::pin(async move {
+            self.trace.step("conversation_tail", self.fail_at)?;
             let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
                 (
                     plan.groups
@@ -1224,11 +1239,9 @@ impl States for MemoryState {
                         message,
                     }
                 })
+                .filter(|item| item.sequence > after)
                 .collect();
-            Ok(parrot_core::ConversationHistory {
-                history,
-                ..Default::default()
-            })
+            Ok(history)
         })
     }
     fn finalize_compaction<'a>(

@@ -585,30 +585,49 @@ impl ContextController {
         &mut self.blobs
     }
 
-    pub(crate) async fn read_conversation_history(
+    pub(crate) async fn read_conversation_summary(
+        &self,
+    ) -> ContextResult<Option<parrot_core::ConversationSummary>> {
+        let snapshot = self
+            .history
+            .repository()
+            .compaction(self.history.agent_session_id().into())
+            .await?;
+        Ok(snapshot.map(|snapshot| parrot_core::ConversationSummary {
+            content: snapshot.summary,
+            watermark: snapshot.watermark,
+        }))
+    }
+
+    pub(crate) async fn read_conversation_tail(
         &self,
         conversation: &AgentConversation,
-    ) -> ContextResult<parrot_core::ConversationHistory> {
-        let state = self.history.read_conversation_state().await?;
-        let mut history = Vec::with_capacity(state.items.len());
-        for item in state.items {
-            history.push(parrot_core::compaction::ConversationHistoryItem {
+        after: i64,
+    ) -> ContextResult<Vec<parrot_core::ConversationHistoryItem>> {
+        let items = self
+            .history
+            .repository()
+            .read_conversation_tail(self.history.agent_session_id().into(), after)
+            .await?;
+        let mut history = Vec::with_capacity(items.len());
+        for item in items {
+            history.push(parrot_core::ConversationHistoryItem {
                 sequence: item.item.sequence,
                 tool_owner_sequence: item.tool_owner_sequence,
                 is_compaction_status: item.is_compaction_status,
                 message: provider_message(&conversation.materialize(item.item).await?).into(),
             });
         }
-        Ok(parrot_core::ConversationHistory {
-            summary: state
-                .snapshot
-                .map(|snapshot| parrot_core::compaction::ConversationSummary {
-                    content: snapshot.summary,
-                    watermark: snapshot.watermark,
-                }),
-            history,
-            checkpoint_sequences: state.checkpoint_sequences,
-        })
+        Ok(history)
+    }
+
+    pub(crate) async fn read_checkpoint_sequences(&self) -> ContextResult<Vec<i64>> {
+        Ok(self
+            .history
+            .active_checkpoint_assistant_sequences()
+            .await?
+            .into_iter()
+            .collect())
     }
 
     async fn apply_compaction(
@@ -1028,14 +1047,37 @@ impl parrot_core::States for EpochStates<'_> {
             }
         })
     }
-    fn read_conversation_history(
+    fn read_conversation_summary(
         &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationHistory, parrot_core::Error>> {
+    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, parrot_core::Error>> {
         Box::pin(async move {
             self.controller
                 .lock()
                 .await
-                .read_conversation_history(self.conversation)
+                .read_conversation_summary()
+                .await
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+    fn read_conversation_tail(
+        &self,
+        after: i64,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .read_conversation_tail(self.conversation, after)
+                .await
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .read_checkpoint_sequences()
                 .await
                 .map_err(|error| self.capture_error(error))
         })

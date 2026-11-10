@@ -8,7 +8,7 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Samples instructions and assembles compaction input from one raw conversation snapshot.
+/// Samples instructions and assembles compaction input from raw conversation reads.
 /// Preparation errors publish failure after a successful start, before returning.
 pub async fn prepare_compaction(
     states: &mut dyn States,
