@@ -4,12 +4,12 @@ use super::execution::{
     progress_event,
 };
 use super::{
-    CompactionError, CompactionObserver, CompactionResult, Compactor, ContextCadence, ContextSize,
-    ContextSnapshot, PlanningError, ProviderTokenBudget,
+    CompactionError, CompactionObserver, CompactionResult, Compactor, ContextSize, ContextSnapshot,
+    PlanningError, ProviderTokenBudget,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_core::{
-    ContextCadence as CoreContextCadence, ContextConfiguration as CoreContextConfiguration,
+    ContextConfiguration as CoreContextConfiguration,
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
     ContextSnapshot as CoreContextSnapshot,
 };
@@ -22,7 +22,7 @@ use parrot_domain::{
         AgentNotice, CompactionFailed, CompactionFinished, CompactionPhase,
         CompactionProgressEvent, CompactionStarted, Event,
     },
-    values::{context::ContextCadenceError, identifiers::Identifier},
+    values::identifiers::Identifier,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{
@@ -40,7 +40,6 @@ pub enum ContextError {
     Compaction(CompactionError),
     History(EventError),
     Prompt(PromptError),
-    Cadence(ContextCadenceError),
     Identifier(std::io::Error),
     InvalidOperation(String),
     Argument(String),
@@ -61,7 +60,6 @@ impl fmt::Display for ContextError {
             Self::Compaction(error) => error.fmt(f),
             Self::History(error) => error.fmt(f),
             Self::Prompt(error) => error.fmt(f),
-            Self::Cadence(error) => error.fmt(f),
             Self::Identifier(error) => error.fmt(f),
             Self::InvalidOperation(message)
             | Self::Argument(message)
@@ -100,11 +98,6 @@ impl From<parrot_core::compaction::CompactionFailure> for ContextError {
             }
             failure => Self::Compaction(failure.into()),
         }
-    }
-}
-impl From<ContextCadenceError> for ContextError {
-    fn from(error: ContextCadenceError) -> Self {
-        Self::Cadence(error)
     }
 }
 pub type ContextResult<T> = Result<T, ContextError>;
@@ -184,7 +177,6 @@ pub struct ContextController {
     blobs: parrot_storage::artifacts::compaction::CompactionGroupBlobStore,
     templates: Arc<PromptTemplateCatalog>,
     budget: ProviderTokenBudget,
-    cadence: ContextCadence,
     initial_status_pending: bool,
 }
 impl ContextController {
@@ -200,7 +192,6 @@ impl ContextController {
             blobs,
             templates,
             budget: ProviderTokenBudget::default(),
-            cadence: ContextCadence::new(),
             initial_status_pending: true,
         }
     }
@@ -223,15 +214,7 @@ impl ContextController {
             .capture_context_configuration(selection)
     }
 
-    pub(crate) fn capture_context_cadence(&self) -> CoreContextCadence {
-        self.cadence.capture_state()
-    }
-
-    pub(crate) fn write_context_cadence(&mut self, cadence: CoreContextCadence) {
-        self.cadence.apply_state(cadence);
-    }
-
-    pub(crate) async fn read_context_checkpoint(
+    pub(crate) async fn get_last_context_reminder(
         &self,
     ) -> ContextResult<Option<CoreContextReminderCheckpoint>> {
         Ok(self.history.latest_context_reminder().await?.map(|value| {
@@ -468,20 +451,11 @@ impl ContextController {
             context = self.estimate(&input, &instructions)?;
             ensure_request_fits(&context)?;
         }
-        if !self.cadence.is_restored() {
-            self.cadence
-                .restore(self.history.latest_context_reminder().await?.map(|value| {
-                    parrot_domain::values::context::ContextReminderCheckpoint {
-                        canonical_model: value.canonical_model,
-                        context_limit: value.context_limit,
-                        percentage: value.percentage,
-                    }
-                }));
-        }
+        let last_reminder = self.get_last_context_reminder().await?;
         let selector = input.selection.canonical_model.selector();
+        let snapshot = CoreContextSnapshot::estimate(context.estimated_tokens, &configuration);
         if let Some(percentage) =
-            self.cadence
-                .observe(&context, &selector, input.conversation.len() as i64)?
+            snapshot.select_reminder_percentage(&selector, last_reminder.as_ref())
         {
             let reminder = self.render_reminder(&context, percentage)?;
             let mut candidate = provider_messages(input.conversation);
@@ -517,19 +491,7 @@ impl ContextController {
                         )
                         .await?
                     {
-                        let persisted = self.estimate(&input, &instructions)?;
-                        self.cadence.acknowledge(
-                            &persisted,
-                            &selector,
-                            input.conversation.len() as i64,
-                        )?;
                         input.events.publish(published, &Uncancelled).await?;
-                    } else {
-                        self.cadence.acknowledge(
-                            &inserted,
-                            &selector,
-                            input.conversation.len() as i64,
-                        )?;
                     }
                 }
             }
@@ -747,12 +709,6 @@ impl ContextController {
             reduced = true;
             self.budget.reset();
             input.conversation.reload().await?;
-            let persisted = self.estimate(input, &instructions)?;
-            self.cadence.acknowledge(
-                &persisted,
-                &input.selection.canonical_model.selector(),
-                input.conversation.len() as i64,
-            )?;
             input
                 .events
                 .publish_committed(Committed::after_commit(published), &Uncancelled)
@@ -793,7 +749,9 @@ impl ContextController {
             ),
             (
                 "notification_interval".into(),
-                ContextCadence::NOTIFICATION_INTERVAL.to_string().into(),
+                CoreContextReminderCheckpoint::NOTIFICATION_INTERVAL
+                    .to_string()
+                    .into(),
             ),
             ("trigger".into(), context.trigger_percent.to_string().into()),
         ];

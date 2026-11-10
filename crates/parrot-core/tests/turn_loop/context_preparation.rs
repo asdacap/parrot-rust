@@ -1,6 +1,67 @@
 use super::*;
 
 #[test]
+fn context_reminder_is_selected_from_the_last_stored_reminder() {
+    for (last_percentage, estimated_tokens, expected) in [
+        (None, 490, None),
+        (None, 550, Some(50)),
+        (Some(50), 590, None),
+        (Some(50), 610, Some(60)),
+        (Some(60), 550, None),
+    ] {
+        let mut state = MemoryState::new([Reply::final_response("answer")]);
+        state.prime_context(estimated_tokens);
+        state.prompts().checkpoint = last_percentage.map(|percentage| ContextReminderCheckpoint {
+            canonical_model: "memory/model".into(),
+            context_limit: 1000,
+            percentage,
+        });
+
+        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+        assert_eq!(
+            state
+                .reminder_appends
+                .first()
+                .map(|(checkpoint, _, _)| checkpoint.percentage),
+            expected,
+            "last reminder {last_percentage:?}, estimated tokens {estimated_tokens}",
+        );
+    }
+}
+
+#[test]
+fn stored_context_reminders_are_not_repeated_on_tool_followups_or_later_turns() {
+    let mut state = MemoryState::new([
+        Reply::tools("call"),
+        Reply::final_response("first answer"),
+        Reply::final_response("second answer"),
+    ]);
+    state.prime_context(550);
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("first answer".into())));
+    state.enqueue_message(Delivery::Queue, "another question");
+    assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
+
+    assert_eq!(state.reminder_appends.len(), 1);
+    assert_eq!(state.reminder_publications, 1);
+    let requests = state.provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    for request in requests.iter() {
+        assert_eq!(
+            request
+                .messages
+                .iter()
+                .filter(|message| {
+                    message.role == Role::System
+                        && message.contents == [Content::Text("configured reminder".into())]
+                })
+                .count(),
+            1,
+        );
+    }
+}
+
+#[test]
 fn core_records_native_pending_prompts_once() {
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     let prompt = Message {
@@ -192,11 +253,11 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
             .unwrap()
             < trace.iter().position(|step| step == "render").unwrap()
     );
-    assert_eq!(trace.iter().filter(|step| *step == "checkpoint").count(), 1);
+    assert_eq!(trace.iter().filter(|step| *step == "checkpoint").count(), 2);
 }
 
 #[test]
-fn raw_and_calibrated_triggers_compact_before_checkpoint_restore_and_use_returned_epoch() {
+fn raw_and_calibrated_triggers_compact_before_reminder_lookup_and_use_returned_epoch() {
     for calibrated in [false, true] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
         state.request().context.configuration.model.context_window = 1000;
@@ -226,14 +287,6 @@ fn raw_and_calibrated_triggers_compact_before_checkpoint_restore_and_use_returne
         }];
         let mut compacted_state = state.request().context.clone();
         compacted_state.calibration.reset();
-        compacted_state
-            .cadence
-            .acknowledge(
-                &ContextSnapshot::estimate(100, &compacted_state.configuration),
-                "memory/model",
-                messages.len() as i64,
-            )
-            .unwrap();
         state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
         state.summary_provider =
             compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
@@ -275,7 +328,7 @@ fn raw_and_calibrated_triggers_compact_before_checkpoint_restore_and_use_returne
 }
 
 #[test]
-fn separate_context_reads_use_compaction_configuration_calibration_and_cadence() {
+fn separate_context_reads_use_compaction_configuration_and_calibration() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.request().context.configuration.model.context_window = 1000;
     state
@@ -294,16 +347,6 @@ fn separate_context_reads_use_compaction_configuration_calibration_and_cadence()
     compacted.configuration.model.context_window = 2000;
     compacted.configuration.model.maximum_output_tokens = 200;
     compacted.calibration.reset();
-    compacted.cadence.restore(None);
-    compacted
-        .cadence
-        .acknowledge(
-            &ContextSnapshot::estimate(100, &compacted.configuration),
-            "memory/model",
-            1,
-        )
-        .unwrap();
-    let cadence = compacted.cadence.clone();
     state.compactions.push_back(CompactedContext {
         instructions: "compacted instructions".into(),
         messages: vec![Message {
@@ -317,8 +360,7 @@ fn separate_context_reads_use_compaction_configuration_calibration_and_cadence()
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.compacted_definitions.len(), 1);
-    assert_eq!(state.prompts().cadence_writes, [cadence]);
-    assert!(!state.trace.values().iter().any(|step| step == "checkpoint"));
+    assert!(state.trace.values().iter().any(|step| step == "checkpoint"));
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         200
@@ -397,7 +439,6 @@ fn post_compaction_raw_input_failure_precedes_checkpoint_or_provider_effects() {
         "The compacted conversation exceeds the selected model input limit."
     );
     assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(state.prompts().cadence_writes.is_empty());
     assert!(!state.trace.values().iter().any(|step| step == "checkpoint"));
 }
 
@@ -421,25 +462,10 @@ fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage
         requests[0].messages.last().unwrap().contents,
         [Content::Text("configured reminder".into())]
     );
-    let trace = state.trace.values();
-    assert!(
-        trace
-            .iter()
-            .position(|step| step == "append_reminder")
-            .unwrap()
-            < trace.iter().rposition(|step| step == "cadence").unwrap()
-    );
-    assert!(
-        trace.iter().rposition(|step| step == "cadence").unwrap()
-            < trace
-                .iter()
-                .position(|step| step == "publish_reminder")
-                .unwrap()
-    );
 }
 
 #[test]
-fn duplicate_reminder_acknowledges_candidate_tokens_with_unchanged_history_without_publication() {
+fn duplicate_reminder_does_not_change_history_or_publish() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.prime_context(490);
     state.append_reminder = false;
@@ -448,23 +474,6 @@ fn duplicate_reminder_acknowledges_candidate_tokens_with_unchanged_history_witho
     assert_eq!(state.reminder_appends.len(), 1);
     assert_eq!(state.request().messages.len(), 1);
     assert_eq!(state.reminder_publications, 0);
-    let mut cadence = state.request().context.cadence.clone();
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(690, &state.request().context.configuration),
-            "memory/model",
-            1
-        ),
-        Ok(None)
-    );
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(700, &state.request().context.configuration),
-            "memory/model",
-            2
-        ),
-        Ok(Some(70))
-    );
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].messages,
         state.request().messages
@@ -472,68 +481,37 @@ fn duplicate_reminder_acknowledges_candidate_tokens_with_unchanged_history_witho
 }
 
 #[test]
-fn cadence_is_acknowledged_before_failed_reminder_publication_and_provider_is_not_entered() {
-    let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.prime_context(490);
+fn stored_reminder_prevents_a_duplicate_after_publication_failure() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.prime_context(550);
     state.fail_at = Some("publish_reminder");
-    state.request().estimate_script = [550, 630, 630].into();
     assert_eq!(state.run(), Err(Error::failed("publish_reminder")));
     assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert_eq!(state.reminder_publications, 1);
-    assert_eq!(state.request().messages.len(), 2);
     assert_eq!(state.prompts().checkpoint.as_ref().unwrap().percentage, 50);
-    let mut cadence = state.request().context.cadence.clone();
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(690, &state.request().context.configuration),
-            "memory/model",
-            2
-        ),
-        Ok(None)
-    );
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(700, &state.request().context.configuration),
-            "memory/model",
-            3
-        ),
-        Ok(Some(70))
-    );
-    let trace = state.trace.values();
-    assert_eq!(trace.last().unwrap(), "publish_reminder");
-    assert!(trace.iter().rposition(|step| step == "cadence").unwrap() < trace.len() - 1);
+
+    state.fail_at = None;
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.reminder_appends.len(), 1);
+    assert_eq!(state.reminder_publications, 1);
 }
 
 #[test]
-fn cadence_observation_is_saved_before_reminder_rendering_can_fail() {
-    let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.prime_context(490);
-    state.request().estimated_input_tokens = 550;
+fn reminder_rendering_failure_does_not_suppress_a_retry() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.prime_context(550);
     state.fail_at = Some("reminder");
     assert_eq!(state.run(), Err(Error::failed("reminder")));
     assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(state.reminder_appends.is_empty());
-    let mut cadence = state.request().context.cadence.clone();
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(590, &state.request().context.configuration),
-            "memory/model",
-            1
-        ),
-        Ok(None)
-    );
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(600, &state.request().context.configuration),
-            "memory/model",
-            2
-        ),
-        Ok(Some(60))
-    );
+    assert!(state.prompts().checkpoint.is_none());
+
+    state.fail_at = None;
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.reminder_appends.len(), 1);
+    assert_eq!(state.reminder_publications, 1);
 }
 
 #[test]
-fn crossing_reminder_candidate_compacts_without_append_or_a_second_cadence_observation() {
+fn crossing_reminder_candidate_compacts_without_appending_the_reminder() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.prime_context(490);
     state.request().estimate_script = [550, 910, 100, 100].into();
@@ -542,15 +520,7 @@ fn crossing_reminder_candidate_compacts_without_append_or_a_second_cadence_obser
         contents: vec![Content::Text("compacted".into())],
         ..Message::default()
     }];
-    let mut compacted_state = state.request().context.clone();
-    compacted_state
-        .cadence
-        .acknowledge(
-            &ContextSnapshot::estimate(100, &compacted_state.configuration),
-            "memory/model",
-            1,
-        )
-        .unwrap();
+    let compacted_state = state.request().context.clone();
     state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
     state.summary_provider =
         compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
@@ -565,7 +535,6 @@ fn crossing_reminder_candidate_compacts_without_append_or_a_second_cadence_obser
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.reminder_appends.is_empty());
     assert_eq!(state.reminder_publications, 0);
-    assert_eq!(state.prompts().cadence_writes.len(), 1);
     assert_eq!(state.request().rendered_instructions.len(), 1);
     assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
     let compacted = state.recorded_compactions[0]
@@ -600,10 +569,8 @@ fn context_primitive_failures_stop_at_the_effect_without_invoking_provider_or_to
     for stage in [
         "context_configuration",
         "token_calibration",
-        "context_cadence",
         "estimate",
         "checkpoint",
-        "cadence",
         "final_request",
     ] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
@@ -619,49 +586,19 @@ fn context_primitive_failures_stop_at_the_effect_without_invoking_provider_or_to
 }
 
 #[test]
-fn reminder_append_failure_keeps_observed_band_without_acknowledging_or_publishing_candidate() {
-    let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.prime_context(490);
+fn reminder_append_failure_does_not_suppress_a_retry() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.prime_context(550);
     state.fail_at = Some("append_reminder");
-    state.request().estimate_script = [550, 630].into();
     assert_eq!(state.run(), Err(Error::failed("append_reminder")));
     assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(state.reminder_appends.is_empty());
     assert!(state.prompts().checkpoint.is_none());
-    assert_eq!(state.request().messages.len(), 1);
     assert_eq!(state.reminder_publications, 0);
-    let mut cadence = state.request().context.cadence.clone();
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(590, &state.request().context.configuration),
-            "memory/model",
-            1
-        ),
-        Ok(None)
-    );
-    assert_eq!(
-        cadence.observe(
-            &ContextSnapshot::estimate(600, &state.request().context.configuration),
-            "memory/model",
-            2
-        ),
-        Ok(Some(60))
-    );
-}
 
-#[test]
-fn restored_cadence_is_saved_even_when_the_observation_is_invalid() {
-    let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.request().context.configuration.model.canonical_model = " \t".into();
-    let error = state.run().unwrap_err();
-    assert_eq!(error.code, ErrorCode::Unexpected);
-    assert_eq!(
-        error.message,
-        "canonical model must not be empty or whitespace"
-    );
-    assert!(state.request().context.cadence.is_restored());
-    assert_eq!(state.prompts().cadence_writes.len(), 1);
-    assert!(state.provider.requests.lock().unwrap().is_empty());
+    state.fail_at = None;
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.reminder_appends.len(), 1);
+    assert_eq!(state.reminder_publications, 1);
 }
 
 #[test]

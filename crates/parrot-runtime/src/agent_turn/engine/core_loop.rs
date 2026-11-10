@@ -374,20 +374,7 @@ where
         *self.budget = budget;
         Ok(())
     }
-    fn read_context_cadence(
-        &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ContextCadence, CoreError>> {
-        adapt_operation(async move {
-            Ok(self
-                .backend
-                .state
-                .lock()
-                .await
-                .context
-                .capture_context_cadence())
-        })
-    }
-    fn read_context_checkpoint(
+    fn get_last_context_reminder(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ContextReminderCheckpoint>, CoreError>> {
         adapt_operation(async move {
@@ -396,28 +383,9 @@ where
                 .lock()
                 .await
                 .context
-                .read_context_checkpoint()
+                .get_last_context_reminder()
                 .await
                 .map_err(Into::into)
-        })
-    }
-    fn read_history_size(&self) -> BoxFuture<'_, Result<i64, CoreError>> {
-        adapt_operation(
-            async move { Ok(self.backend.state.lock().await.conversation.len() as i64) },
-        )
-    }
-    fn write_context_cadence(
-        &mut self,
-        cadence: parrot_core::ContextCadence,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .write_context_cadence(cadence);
-            Ok(())
         })
     }
     fn read_pending_prompt(

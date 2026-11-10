@@ -201,6 +201,62 @@ async fn pending_and_initial_status_fit_actual_next_promotion_before_commit_once
 }
 
 #[tokio::test]
+async fn reminders_use_stored_checkpoints_across_controller_restarts() {
+    let fixture = Fixture::new();
+    let history = fixture.history();
+    user(&history, "word ".repeat(5500)).await;
+    let provider = Scripted::default();
+    let selection = provider.selection(10000);
+    let sessions = ProviderSessions::new();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let mut prompt = EpochPrompt::default();
+    let status = Status::default();
+    let events = Events::new(history.clone());
+
+    for (additional_text, percentage, count) in [(0, 50, 1), (0, 50, 1), (1000, 60, 2)] {
+        if additional_text > 0 {
+            user(&history, "next ".repeat(additional_text)).await;
+            conversation.reload().await.unwrap();
+        }
+        let mut controller = fixture.controller(history.clone(), 90);
+        let prepared = controller
+            .prepare_epoch(
+                input(
+                    &selection,
+                    &mut conversation,
+                    &mut prompt,
+                    &sessions,
+                    &status,
+                    &events,
+                ),
+                &NeverCancelled,
+            )
+            .await
+            .unwrap();
+        assert!(!prepared.reduced);
+        assert_eq!(
+            history
+                .latest_context_reminder()
+                .await
+                .unwrap()
+                .unwrap()
+                .percentage,
+            percentage
+        );
+        assert_eq!(reminder_count(&history).await, count);
+    }
+    assert!(provider.requests.lock().unwrap().is_empty());
+    sessions.close().await.unwrap();
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn candidate_reminder_that_crosses_trigger_compacts_instead_of_persisting_crossing() {
     let fixture = Fixture::new();
     let history = fixture.history();

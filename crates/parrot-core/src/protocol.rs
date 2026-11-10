@@ -200,7 +200,7 @@ impl PendingPrompt {
     }
 }
 
-/// A recorded prompt notice awaiting publication after cadence acknowledgement.
+/// A recorded prompt notice awaiting publication after prompt acknowledgement.
 #[derive(Debug, Eq, PartialEq)]
 pub struct PromptPublication {
     pub event_id: String,
@@ -225,30 +225,17 @@ pub trait States: Send + Sync {
     fn write_turn_budget(&mut self, _budget: TurnBudget) -> Result<(), Error> {
         Err(Error::unsupported("States.write_turn_budget"))
     }
-    /// Reads the session's context-usage reminder tracking state.
-    fn read_context_cadence(&self) -> BoxFuture<'_, Result<ContextCadence, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_context_cadence")) })
-    }
-    fn read_context_checkpoint(
+    /// Reads the last stored context reminder in the current compaction epoch.
+    fn get_last_context_reminder(
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_context_checkpoint")) })
-    }
-    fn read_history_size(&self) -> BoxFuture<'_, Result<i64, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_history_size")) })
-    }
-    /// Saves updated context-usage reminder tracking state for subsequent provider requests.
-    fn write_context_cadence(
-        &mut self,
-        _cadence: ContextCadence,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.write_context_cadence")) })
+        Box::pin(async { Err(Error::unsupported("States.get_last_context_reminder")) })
     }
     /// Reads an optional native prompt without choosing or rendering context reminders.
     fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_pending_prompt")) })
     }
-    /// Acknowledges a supplied native prompt without changing context reminder cadence.
+    /// Acknowledges a supplied native prompt without changing context reminders.
     fn acknowledge_pending_prompt<'a>(
         &'a mut self,
         _prompt: &'a PendingPrompt,
@@ -421,7 +408,7 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.record_pending_prompt")) })
     }
     /// Publishes the supplied receipt without cancellation.
-    /// Core calls this after acknowledging prompt cadence.
+    /// Core calls this after acknowledging the recorded prompt.
     fn publish_pending_prompt(
         &mut self,
         _receipt: PromptPublication,
@@ -844,23 +831,6 @@ pub struct TokenCalibration {
     pub(crate) selector: Option<String>,
     pub(crate) estimated_input_tokens: i64,
     pub(crate) actual_input_tokens: i32,
-}
-
-/// Tracks when to emit context-usage reminders, not a time interval.
-/// Reminders follow 10-percentage-point usage bands starting at 50%.
-/// Records observed and reported bands, the model, context limit, and history size
-/// to avoid repeated reminders and handle model changes or history shrinkage.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ContextCadence {
-    pub(crate) canonical_model: Option<String>,
-    pub(crate) context_window: Option<i32>,
-    pub(crate) effective_history_size: i64,
-    pub(crate) observed_band: i32,
-    pub(crate) reported_band: i32,
-    pub(crate) suppress_next_increase: bool,
-    pub(crate) initialized: bool,
-    pub(crate) checkpoint: Option<ContextReminderCheckpoint>,
-    pub(crate) restored: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

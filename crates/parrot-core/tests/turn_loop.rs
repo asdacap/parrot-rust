@@ -1,12 +1,12 @@
 use parrot_core::{
     BoxFuture, CancellationToken, CompletionFeedback, ConfigKey, ConfigValue, Content,
-    ContextCadence, ContextCompaction, ContextConfiguration, ContextModel,
-    ContextReminderCheckpoint, ContextSnapshot, ConversationTurn, Delivery, DerivedContext, Error,
-    ErrorCode, ErrorKind, FinishReason, InputAdmission, Message, Outcome, PendingMessage,
-    PendingPrompt, PromotedInput, PromptPublication, PromptTemplate, Provider, ProviderRequest,
-    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States,
-    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage,
-    ToolResult, ToolStatus, Tools, TurnOptions,
+    ContextCompaction, ContextConfiguration, ContextModel, ContextReminderCheckpoint,
+    ContextSnapshot, ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind,
+    FinishReason, InputAdmission, Message, Outcome, PendingMessage, PendingPrompt, PromotedInput,
+    PromptPublication, PromptTemplate, Provider, ProviderRequest, ProviderResponse, Reasoning,
+    Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration, ToolCall,
+    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools,
+    TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions, run, run_turn,
 };
@@ -309,7 +309,6 @@ struct InputEstimate {
 struct MemoryContext {
     configuration: ContextConfiguration,
     calibration: TokenCalibration,
-    cadence: ContextCadence,
 }
 
 struct CompactedContext {
@@ -334,7 +333,6 @@ struct MemoryRequestData {
 struct MemoryPromptData {
     exit_blockers: VecDeque<Vec<String>>,
     checkpoint: Option<ContextReminderCheckpoint>,
-    cadence_writes: Vec<ContextCadence>,
     pending_prompts: VecDeque<Message>,
     acknowledged_prompts: Vec<ContextSnapshot>,
 }
@@ -417,7 +415,6 @@ impl MemoryState {
                     context_limit: None,
                 },
                 calibration: TokenCalibration::default(),
-                cadence: ContextCadence::new(),
             },
             instructions: "core request".into(),
             messages: Vec::new(),
@@ -594,18 +591,7 @@ impl MemoryState {
             contents: vec![Content::Text("question".into())],
             ..Message::default()
         }];
-        request.context.cadence.restore(None);
-        let configuration = request.context.configuration.clone();
-        let message_count = request.messages.len() as i64;
-        request
-            .context
-            .cadence
-            .observe(
-                &ContextSnapshot::estimate(estimate, &configuration),
-                &configuration.model.canonical_model,
-                message_count,
-            )
-            .unwrap();
+        request.estimated_input_tokens = estimate;
     }
     fn capture_catalogs(&self) -> Vec<Vec<String>> {
         self.provider
@@ -740,32 +726,12 @@ impl States for MemoryState {
         self.budget = budget;
         Ok(())
     }
-    fn read_context_cadence(&self) -> BoxFuture<'_, Result<ContextCadence, Error>> {
-        Box::pin(async move {
-            self.trace.step("context_cadence", self.fail_at)?;
-            Ok(self.request().context.cadence.clone())
-        })
-    }
-    fn read_context_checkpoint(
+    fn get_last_context_reminder(
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
         Box::pin(async move {
             self.trace.step("checkpoint", self.fail_at)?;
             Ok(self.prompts().checkpoint.clone())
-        })
-    }
-    fn read_history_size(&self) -> BoxFuture<'_, Result<i64, Error>> {
-        Box::pin(async move { Ok(self.request().messages.len() as i64) })
-    }
-    fn write_context_cadence(
-        &mut self,
-        cadence: ContextCadence,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.step("cadence")?;
-            self.prompts().cadence_writes.push(cadence.clone());
-            self.request().context.cadence = cadence;
-            Ok(())
         })
     }
     fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
@@ -1221,6 +1187,7 @@ impl States for MemoryState {
                 self.request().instructions = compacted.instructions;
                 self.request().messages = compacted.messages;
                 self.request().context = compacted.state;
+                self.prompts().checkpoint = None;
                 return Ok(ContextCompaction {
                     instructions: self.request().instructions.clone(),
                     reduced: compacted.reduced,
@@ -1319,9 +1286,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "token_calibration",
             "estimate",
             "pending_prompt",
-            "context_cadence",
             "checkpoint",
-            "cadence",
             "messages",
             "context_configuration",
             "token_calibration",
@@ -1338,8 +1303,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "token_calibration",
             "estimate",
             "pending_prompt",
-            "context_cadence",
-            "cadence",
+            "checkpoint",
             "messages",
             "context_configuration",
             "token_calibration",

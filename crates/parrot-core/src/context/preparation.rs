@@ -32,14 +32,11 @@ async fn prepare_pending_prompt(
     if let Some(prompt) = states.read_pending_prompt().await? {
         return Ok(Some(PendingPrompt::Message(prompt)));
     }
-    let mut cadence = states.read_context_cadence().await?;
-    if !cadence.is_restored() {
-        cadence.restore(states.read_context_checkpoint().await?);
-    }
+    let last_reminder = states.get_last_context_reminder().await?;
     let canonical_model = &configuration.model.canonical_model;
-    let observation = cadence.observe(context, canonical_model, states.read_history_size().await?);
-    states.write_context_cadence(cadence).await?;
-    let Some(percentage) = observation? else {
+    let Some(percentage) =
+        context.select_reminder_percentage(canonical_model, last_reminder.as_ref())
+    else {
         return Ok(None);
     };
     let mut arguments = vec![
@@ -54,7 +51,7 @@ async fn prepare_pending_prompt(
         ),
         (
             "notification_interval".into(),
-            crate::ContextCadence::NOTIFICATION_INTERVAL
+            ContextReminderCheckpoint::NOTIFICATION_INTERVAL
                 .to_string()
                 .into(),
         ),
@@ -82,24 +79,6 @@ async fn prepare_pending_prompt(
         content,
         observed_percentage: context.usage_percent.unwrap_or_default(),
     }))
-}
-
-async fn acknowledge_prompt(
-    states: &mut dyn States,
-    prompt: &PendingPrompt,
-    context: &ContextSnapshot,
-) -> Result<(), Error> {
-    states.acknowledge_pending_prompt(prompt, context).await?;
-    if let PendingPrompt::ContextReminder { checkpoint, .. } = prompt {
-        let mut cadence = states.read_context_cadence().await?;
-        cadence.acknowledge(
-            context,
-            &checkpoint.canonical_model,
-            states.read_history_size().await?,
-        )?;
-        states.write_context_cadence(cadence).await?;
-    }
-    Ok(())
 }
 
 pub(crate) async fn prepare_request(
@@ -165,7 +144,9 @@ pub(crate) async fn prepare_request(
             } else {
                 inserted
             };
-            acknowledge_prompt(states, &prompt, &acknowledged).await?;
+            states
+                .acknowledge_pending_prompt(&prompt, &acknowledged)
+                .await?;
             if let Some(receipt) = receipt {
                 states.publish_pending_prompt(receipt).await?;
             }

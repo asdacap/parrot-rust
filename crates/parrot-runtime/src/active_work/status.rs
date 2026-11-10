@@ -1,12 +1,13 @@
 //! Source-ordered, independently sampled runtime status sections.
 
+use parrot_core::ContextReminderCheckpoint;
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError},
     values::{
         accounting::{
             AgentSessionStatisticsSnapshot, AgentUsageKey, AgentUsageSnapshot, AgentUsageTotals,
         },
-        context::{ContextCadence, ContextSnapshot},
+        context::ContextSnapshot,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -350,7 +351,7 @@ impl StatusProvider for ContextStatusProvider {
             let mut model = json!({
                 "available": snapshot.is_available(), "estimated_tokens": format_tokens(snapshot.estimated_tokens),
                 "context_limit": format_tokens(i64::from(snapshot.context_limit)),
-                "cadence": ContextCadence::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
+                "cadence": ContextReminderCheckpoint::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
             }).as_object().unwrap().clone();
             if let Some(usage) = snapshot.usage_percent {
                 model.insert("usage".into(), usage.to_string().into());

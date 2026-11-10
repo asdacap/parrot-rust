@@ -1,4 +1,5 @@
 use super::{Compaction, Failure, FailureKind, SessionServices, input};
+use parrot_core::ContextReminderCheckpoint;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
@@ -6,7 +7,7 @@ use parrot_domain::{
         tools::{ParallelSafety, Tool},
     },
     values::{
-        context::{ContextCadence, ContextSize, ContextSnapshot},
+        context::{ContextSize, ContextSnapshot},
         progress::ProgressUpdate,
         tools::ConfiguredToolDefinition,
     },
@@ -311,7 +312,7 @@ impl<S: SessionServices> SessionTool<S> {
                     ("context_limit".into(), context.context_limit.into()),
                     (
                         "notification_interval".into(),
-                        ContextCadence::NOTIFICATION_INTERVAL.into(),
+                        ContextReminderCheckpoint::NOTIFICATION_INTERVAL.into(),
                     ),
                     ("trigger".into(), context.trigger_percent.into()),
                     (
