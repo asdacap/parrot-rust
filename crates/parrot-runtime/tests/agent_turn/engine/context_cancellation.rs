@@ -57,6 +57,18 @@ async fn awaited_actual_epoch_prompt_cancellation_closes_interrupted_without_pro
     assert!(trace.values().iter().any(|entry| entry == "epoch-start"));
     assert!(!trace.values().iter().any(|entry| entry == "epoch-done"));
     assert!(!trace.values().iter().any(|entry| entry == "skills-begin"));
+    let interrupted = templates()
+        .render("agent-session.interrupted-note", &[], &NeverCancelled)
+        .unwrap();
+    let activity = runtime.activity.live.tracker().capture();
+    assert_eq!(
+        activity
+            .recent
+            .iter()
+            .filter(|entry| entry.content == interrupted)
+            .count(),
+        1
+    );
     runtime.close().await;
 }
 struct FailingEpochPrompt;

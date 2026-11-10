@@ -36,7 +36,7 @@ pub(crate) async fn add_conversation(
         .iter()
         .filter_map(|part| match part {
             Content::Text(text) => Some(text.as_str()),
-            Content::Image { .. } => None,
+            Content::Image { .. } | Content::Artifact(_) => None,
         })
         .collect::<String>();
     let (inserted, published) = match addition.persistence {
@@ -102,7 +102,7 @@ pub(crate) async fn add_conversation(
     };
     if inserted {
         for message in addition.messages {
-            conversation.add(materialize_message(message));
+            conversation.add(materialize_message(history, message).await?);
         }
         if publish_uncancelled {
             events.publish(published, &NeverCancelled).await?;
@@ -135,33 +135,56 @@ fn notice(history: &AgentHistoryView, event: ConversationEvent) -> ContextResult
     Ok(published)
 }
 
-pub(crate) fn materialize_message(message: Message) -> ModelMessage {
-    ModelMessage {
+pub(crate) async fn materialize_message(
+    history: &AgentHistoryView,
+    message: Message,
+) -> ContextResult<ModelMessage> {
+    let mut contents = Vec::new();
+    for content in message.contents {
+        match content {
+            Content::Text(text) => contents.push(ModelContent::Text(text)),
+            Content::Image {
+                path,
+                media_type,
+                width,
+                height,
+                ..
+            } => contents.push(ModelContent::ImageFile {
+                path: path.into(),
+                media_type,
+                width,
+                height,
+            }),
+            Content::Artifact(image) => {
+                contents.extend(
+                    history
+                        .materialize(vec![parrot_storage::events::ConversationPart::image(
+                            parrot_storage::artifacts::ImageArtifactMetadata {
+                                artifact_id: image.artifact_id,
+                                sha256: image.sha256,
+                                media_type: image.media_type,
+                                byte_length: image.byte_length,
+                                width: image.width,
+                                height: image.height,
+                                frame_count: image.frame_count,
+                                aggregate_pixels: image.aggregate_pixels,
+                                display_name: image.display_name,
+                                origin: image.origin,
+                            },
+                        )])
+                        .await?,
+                );
+            }
+        }
+    }
+    Ok(ModelMessage {
         role: match message.role {
             Role::System => MessageRole::System,
             Role::User => MessageRole::User,
             Role::Assistant => MessageRole::Assistant,
             Role::Tool => MessageRole::Tool,
         },
-        contents: message
-            .contents
-            .into_iter()
-            .map(|content| match content {
-                Content::Text(text) => ModelContent::Text(text),
-                Content::Image {
-                    path,
-                    media_type,
-                    width,
-                    height,
-                    ..
-                } => ModelContent::ImageFile {
-                    path: path.into(),
-                    media_type,
-                    width,
-                    height,
-                },
-            })
-            .collect(),
+        contents,
         tool_calls: message
             .tool_calls
             .into_iter()
@@ -176,5 +199,5 @@ pub(crate) fn materialize_message(message: Message) -> ModelMessage {
             provider_id: message.provider_id,
             content: message.provider_content,
         },
-    }
+    })
 }

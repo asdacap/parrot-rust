@@ -2,8 +2,7 @@ use super::*;
 use parrot_core::{
     ContextCompaction as CoreContextCompaction, ContextSnapshot as CoreContextSnapshot,
     Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse,
-    States as CoreStates, TokenCalibration, ToolCallReceipt, ToolCatalog, ToolDefinition,
-    TurnOptions,
+    States as CoreStates, TokenCalibration, ToolCatalog, ToolDefinition, TurnOptions,
 };
 
 mod conversation;
@@ -1116,6 +1115,29 @@ where
     }
 }
 
+pub(super) async fn interrupt<S, T>(
+    backend: &RuntimeBackend<S, T>,
+    work: &dyn DrainWork,
+    key: &TurnKey,
+) -> Result<(), TurnError>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    let binding = TurnBinding::new();
+    let mut budget = parrot_core::TurnBudget::new(backend.agent_limits.disable_max_turns);
+    let mut states = RuntimeStates::new(backend, &binding, &NeverCancelled, work, &mut budget);
+    states.persistence_key = Some(key.clone());
+    if let Some(message) = parrot_core::interrupt_turn(&mut states)
+        .await
+        .map_err(TurnError::Core)?
+    {
+        backend.activity.assistant_message(&message);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1179,23 +1201,4 @@ mod tests {
             assert!(!translated.to_string().contains(body));
         }
     }
-}
-
-pub(super) async fn interrupt<S, T>(
-    backend: &RuntimeBackend<S, T>,
-    work: &dyn DrainWork,
-    key: &TurnKey,
-) -> Result<parrot_core::ConversationReceipt, TurnError>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
-    let binding = TurnBinding::new();
-    let mut budget = parrot_core::TurnBudget::new(backend.agent_limits.disable_max_turns);
-    let mut states = RuntimeStates::new(backend, &binding, &NeverCancelled, work, &mut budget);
-    states.persistence_key = Some(key.clone());
-    parrot_core::interrupt_turn(&mut states)
-        .await
-        .map_err(TurnError::Core)
 }

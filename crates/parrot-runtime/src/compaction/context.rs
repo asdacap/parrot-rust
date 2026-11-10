@@ -213,35 +213,6 @@ impl ContextController {
         }))
     }
 
-    pub(crate) async fn append_context_reminder(
-        &self,
-        _conversation: &mut AgentConversation,
-        checkpoint: CoreContextReminderCheckpoint,
-        content: String,
-        observed_percentage: i32,
-    ) -> ContextResult<Option<Event>> {
-        let published = self.notice(
-            "context_reminder",
-            format!("Context reminder injected ({observed_percentage}% context used)"),
-        )?;
-        if !self
-            .history
-            .append_context_reminder(
-                published.clone(),
-                parrot_storage::conversation::ContextReminderCheckpoint {
-                    canonical_model: checkpoint.canonical_model,
-                    context_limit: checkpoint.context_limit,
-                    percentage: checkpoint.percentage,
-                },
-                content.clone(),
-            )
-            .await?
-        {
-            return Ok(None);
-        }
-        Ok(Some(published))
-    }
-
     pub async fn ensure_epoch(
         &mut self,
         prompt: &SessionPrompt,

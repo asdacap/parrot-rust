@@ -212,6 +212,14 @@ impl ToolSettlement {
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let mut message = Message::text(Role::Tool, execution.result.text.clone());
+            message.contents.extend(
+                execution
+                    .result
+                    .images
+                    .iter()
+                    .cloned()
+                    .map(Content::Artifact),
+            );
             message.tool_call_id = execution.result.call_id.clone();
             states
                 .add_conversation(ConversationAddition {

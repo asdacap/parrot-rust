@@ -235,16 +235,7 @@ impl ContextReminder {
     }
 }
 
-/// A recorded context reminder notice awaiting publication.
-#[derive(Debug, Eq, PartialEq)]
-pub struct ContextReminderPublication {
-    pub event_id: String,
-    pub agent_session_id: String,
-    pub kind: String,
-    pub notice: String,
-}
-
-/// Publishes compaction lifecycle notifications independently of conversation state.
+/// Publishes core-selected notifications independently of conversation state.
 pub trait EventPublisher: Send + Sync {
     /// Records and publishes the supplied event without adding conversation content.
     fn publish<'a>(
@@ -265,7 +256,7 @@ pub trait EventPublisher: Send + Sync {
 /// Unsupported capabilities return explicit errors rather than inventing state.
 pub trait States: Send + Sync {
     /// Commits the supplied messages, updates the live conversation on insertion, then publishes.
-    /// Storage conditions control deduplication only. Core supplies every message and its timing.
+    /// Storage metadata selects the atomic write. Core supplies every message and its timing.
     fn add_conversation(
         &mut self,
         _addition: crate::ConversationAddition,
@@ -394,7 +385,7 @@ pub trait States: Send + Sync {
     }
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and returning the promoted content explicitly.
-    /// Does not discover skills or prepare prompts.
+    /// Returns commit receipts without adding messages, publishing, or preparing prompts.
     fn promote_input(
         &mut self,
         _admission: InputAdmission,
@@ -475,6 +466,7 @@ pub enum Role {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Content {
     Text(String),
+    /// Durable image metadata that state materializes before provider-visible reads.
     Artifact(ToolImage),
     Image {
         path: String,

@@ -19,7 +19,7 @@ use parrot_storage::{
         ToolExecutionTerminal,
     },
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 pub struct ToolConversation {
     settlement: ToolSettlement,
@@ -238,22 +238,37 @@ impl ToolBacking {
     async fn read_recovery(&self) -> Result<ToolRecovery, TurnError> {
         let messages = self.history.conversation_after(self.watermark).await?;
         let through = messages.last().map_or(self.watermark, |item| item.sequence);
+        let assistants = messages
+            .into_iter()
+            .filter(|item| {
+                item.message.role == MessageRole::Assistant && !item.message.tool_calls.is_empty()
+            })
+            .collect::<Vec<_>>();
+        let terminals = self
+            .history
+            .tool_terminals_of_calls(
+                assistants
+                    .iter()
+                    .flat_map(|assistant| {
+                        assistant
+                            .message
+                            .tool_calls
+                            .iter()
+                            .map(|call| call.id.clone())
+                    })
+                    .collect(),
+            )
+            .await?
+            .into_iter()
+            .map(|terminal| (terminal.tool_call_id.clone(), terminal))
+            .collect::<HashMap<_, _>>();
         let mut batches = Vec::new();
-        for assistant in messages.into_iter().filter(|item| {
-            item.message.role == MessageRole::Assistant && !item.message.tool_calls.is_empty()
-        }) {
-            let results = self
-                .history
-                .tool_terminals_of_calls(
-                    assistant
-                        .message
-                        .tool_calls
-                        .iter()
-                        .map(|call| call.id.clone())
-                        .collect(),
-                )
-                .await?
-                .into_iter()
+        for assistant in assistants {
+            let results = assistant
+                .message
+                .tool_calls
+                .iter()
+                .filter_map(|call| terminals.get(&call.id).cloned())
                 .map(|terminal| {
                     let text = parrot_storage::events::content(&terminal.result_parts);
                     ToolResult {
@@ -353,23 +368,7 @@ impl ToolBacking {
                                 "tool settlement requires artifact-backed images".into(),
                             )),
                         })
-                        .collect::<Result<Vec<_>, _>>()?
-                        .into_iter()
-                        .chain(result.images.iter().map(|image| {
-                            ConversationPart::image(ImageArtifactMetadata {
-                                artifact_id: image.artifact_id.clone(),
-                                sha256: image.sha256.clone(),
-                                media_type: image.media_type.clone(),
-                                byte_length: image.byte_length,
-                                width: image.width,
-                                height: image.height,
-                                frame_count: image.frame_count,
-                                aggregate_pixels: image.aggregate_pixels,
-                                display_name: image.display_name.clone(),
-                                origin: image.origin.clone(),
-                            })
-                        }))
-                        .collect(),
+                        .collect::<Result<Vec<_>, _>>()?,
                 };
                 let mut event = self.event();
                 if !recovered {

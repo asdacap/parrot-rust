@@ -39,9 +39,7 @@ use parrot_provider::{
     sessions::{self, ProviderSessions},
 };
 use parrot_storage::{
-    conversation::{
-        AgentConversation, AgentHistoryView, ConversationReadView, ModelContent, ModelMessage,
-    },
+    conversation::{AgentConversation, AgentHistoryView, ConversationReadView, ModelMessage},
     events::{
         Admission, CloseTurnError, ConversationMessage, ConversationOrigin, ConversationPart,
         EventError, MessageRole, NeverCancelled, ProviderContent, TurnClosure, TurnKey,

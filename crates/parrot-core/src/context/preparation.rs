@@ -1,11 +1,10 @@
 use crate::{
     CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration, ContextReminder,
-    ContextReminderCheckpoint, ContextSnapshot, ConversationAddition, ConversationEvent,
-    ConversationPersistence, Error, EventPublisher, Message, Provider, ProviderRequest, Role,
+    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, Provider, ProviderRequest,
     States, ToolDefinition, TurnOptions,
     budget::TurnFlags,
     compaction::{compact_conversation, prepare_compaction},
-    rendering::{render_instructions, render_template},
+    rendering::render_template,
 };
 
 pub(crate) async fn compact_context(
@@ -107,78 +106,12 @@ pub(crate) async fn prepare_request(
 ) -> Result<ProviderRequest, Error> {
     if flags.final_phase {
         let content = render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
-        states
-            .add_conversation(ConversationAddition {
-                messages: vec![Message::text(Role::System, content)],
-                persistence: ConversationPersistence::Phase {
-                    final_phase: true,
-                    event: ConversationEvent::Notice {
-                        kind: "final_provider_request_prompt".into(),
-                        notice: "Final provider request prompt injected".into(),
-                    },
-                },
-            })
-            .await?;
+        crate::add_phase_prompt(states, &content, true).await?;
     }
-    if cancellation.is_cancelled() {
-        return Err(Error::cancelled());
-    }
-    let mut instructions = render_instructions(states, provider).await?;
-    let mut messages = states.read_messages().await?;
-    let mut configuration = states
-        .get_config(ConfigKey::Context)
-        .await?
-        .into_context()?;
-    let calibration = states.read_token_calibration().await?;
-    let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-    let mut context = ContextSnapshot::estimate(estimate, &configuration);
-    if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        instructions = compact_context(states, provider, publisher, definitions, cancellation)
+    let instructions =
+        crate::prepare_context_epoch(states, provider, publisher, definitions, cancellation)
             .await?
             .instructions;
-        messages = states.read_messages().await?;
-        configuration = states
-            .get_config(ConfigKey::Context)
-            .await?
-            .into_context()?;
-        let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-        context = ContextSnapshot::estimate(estimate, &configuration);
-        context.ensure_input_fits()?;
-    }
-    if let Some(reminder) = prepare_context_reminder(states, &context, &configuration).await? {
-        let mut candidate = messages.clone();
-        candidate.push(reminder.render_message());
-        let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
-        let inserted = ContextSnapshot::estimate(estimate, &configuration);
-        if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            instructions = compact_context(states, provider, publisher, definitions, cancellation)
-                .await?
-                .instructions;
-            messages = states.read_messages().await?;
-            configuration = states
-                .get_config(ConfigKey::Context)
-                .await?
-                .into_context()?;
-            let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-            ContextSnapshot::estimate(estimate, &configuration).ensure_input_fits()?;
-        } else {
-            states
-                .add_conversation(ConversationAddition {
-                    messages: vec![reminder.render_message()],
-                    persistence: ConversationPersistence::Reminder {
-                        checkpoint: reminder.checkpoint,
-                        event: ConversationEvent::Notice {
-                            kind: "context_reminder".into(),
-                            notice: format!(
-                                "Context reminder injected ({}% context used)",
-                                reminder.observed_percentage
-                            ),
-                        },
-                    },
-                })
-                .await?;
-        }
-    }
     let messages = states.read_messages().await?;
     let configuration = states
         .get_config(ConfigKey::Context)

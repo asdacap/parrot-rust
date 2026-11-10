@@ -86,18 +86,7 @@ async fn execute_turn(
     if states.read_final_phase().await? {
         let restored =
             rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
-        states
-            .add_conversation(ConversationAddition {
-                messages: vec![Message::text(Role::System, restored)],
-                persistence: ConversationPersistence::Phase {
-                    final_phase: false,
-                    event: ConversationEvent::Notice {
-                        kind: "tool_availability_restored_prompt".into(),
-                        notice: "Tool availability restored prompt injected".into(),
-                    },
-                },
-            })
-            .await?;
+        add_phase_prompt(states, &restored, false).await?;
     }
     let mut compacted_oversized = false;
     let mut skills = skills::SkillPreparation::default();
@@ -280,14 +269,15 @@ async fn execute_turn(
 }
 
 /// Records an interrupted assistant turn through the same generic conversation operation.
-pub async fn interrupt_turn(states: &mut dyn States) -> Result<ConversationReceipt, Error> {
+pub async fn interrupt_turn(states: &mut dyn States) -> Result<Option<String>, Error> {
     let content = rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
-    states
+    let receipt = states
         .add_conversation(ConversationAddition {
-            messages: vec![Message::text(Role::Assistant, content)],
+            messages: vec![Message::text(Role::Assistant, &content)],
             persistence: ConversationPersistence::CloseTurn {
                 finish_reason: FinishReason::Interrupted,
             },
         })
-        .await
+        .await?;
+    Ok(receipt.inserted.then_some(content))
 }

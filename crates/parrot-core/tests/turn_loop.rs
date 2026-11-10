@@ -6,9 +6,8 @@ use parrot_core::{
     Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
     PendingMessage, PromotedInput, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
     Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolExecutionResult, ToolImage, ToolResult, ToolStatus,
-
-    Tools, TurnOptions,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
+    ToolExecutionResult, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions,
 };
@@ -799,7 +798,9 @@ impl States for MemoryState {
                     self.applied_results.push(result.result.clone());
                 }
                 ConversationPersistence::ToolImages { .. } => {}
-                ConversationPersistence::Status { .. } => return Err(Error::unsupported("memory status persistence")),
+                ConversationPersistence::Status { .. } => {
+                    return Err(Error::unsupported("memory status persistence"));
+                }
                 ConversationPersistence::Committed(_) => {}
                 ConversationPersistence::Phase { final_phase, .. } => {
                     if !final_phase {

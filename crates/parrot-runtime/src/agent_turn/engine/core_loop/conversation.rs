@@ -77,6 +77,20 @@ fn render_record(
             .iter()
             .map(|content| match content {
                 parrot_core::Content::Text(text) => Ok(ConversationPart::text(text)),
+                parrot_core::Content::Artifact(image) => Ok(ConversationPart::image(
+                    parrot_storage::artifacts::ImageArtifactMetadata {
+                        artifact_id: image.artifact_id.clone(),
+                        sha256: image.sha256.clone(),
+                        media_type: image.media_type.clone(),
+                        byte_length: image.byte_length,
+                        width: image.width,
+                        height: image.height,
+                        frame_count: image.frame_count,
+                        aggregate_pixels: image.aggregate_pixels,
+                        display_name: image.display_name.clone(),
+                        origin: image.origin.clone(),
+                    },
+                )),
                 parrot_core::Content::Image { .. } => Err(TurnError::Service(
                     "file images must be admitted as input before they are recorded".into(),
                 )),
@@ -99,45 +113,6 @@ fn render_record(
     })
 }
 
-fn render_live(message: Message) -> ModelMessage {
-    ModelMessage {
-        role: render_role(message.role),
-        contents: message
-            .contents
-            .into_iter()
-            .map(|content| match content {
-                parrot_core::Content::Text(text) => ModelContent::Text(text),
-                parrot_core::Content::Image {
-                    path,
-                    media_type,
-                    width,
-                    height,
-                    ..
-                } => ModelContent::ImageFile {
-                    path: path.into(),
-                    media_type,
-                    width,
-                    height,
-                },
-            })
-            .collect(),
-        tool_calls: message
-            .tool_calls
-            .into_iter()
-            .map(|call| parrot_storage::events::ToolCall {
-                id: call.id,
-                name: call.name,
-                arguments_json: call.arguments_json,
-            })
-            .collect(),
-        tool_call_id: message.tool_call_id,
-        provider_content: ProviderContent {
-            provider_id: message.provider_id,
-            content: message.provider_content,
-        },
-    }
-}
-
 pub(super) async fn add_conversation<S, T>(
     states: &mut RuntimeStates<'_, S, T>,
     addition: ConversationAddition,
@@ -147,14 +122,6 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
-    let uncancelled_publication = matches!(
-        &addition.persistence,
-        ConversationPersistence::Reminder { .. }
-    );
-    let context_publication = matches!(
-        &addition.persistence,
-        ConversationPersistence::Phase { .. } | ConversationPersistence::Reminder { .. }
-    );
     let backend = states.backend;
     let mut guard = backend.state.lock().await;
     let state = &mut *guard;
@@ -187,58 +154,35 @@ where
             );
             publications.push(event);
         }
-        ConversationPersistence::Phase { final_phase, event } => {
-            let event = render_event(backend.event(), event);
-            let content = addition.messages[0]
-                .contents
-                .iter()
-                .filter_map(|part| match part {
-                    parrot_core::Content::Text(text) => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect();
-            let inserted = if final_phase {
-                backend
-                    .history
-                    .append_final_provider_request_prompt(event.clone(), content)
-                    .await?
-            } else {
-                backend
-                    .history
-                    .append_tool_availability_restored_prompt(event.clone(), content)
-                    .await?
-            };
-            if !inserted {
-                return Ok(ConversationReceipt::default());
-            }
-            publications.push(event);
+        persistence @ (ConversationPersistence::Phase { .. }
+        | ConversationPersistence::Reminder { .. }
+        | ConversationPersistence::Status { .. }) => {
+            return crate::compaction::add_conversation(
+                &backend.history,
+                &mut state.conversation,
+                &mut state.context.initial_status_pending,
+                ConversationAddition {
+                    messages: addition.messages,
+                    persistence,
+                },
+                &ContextEmitter { backend },
+                cancellation,
+            )
+            .await
+            .map_err(Into::into);
         }
-        ConversationPersistence::Reminder { checkpoint, event } => {
-            let event = render_event(backend.event(), event);
-            let content = addition.messages[0]
-                .contents
-                .iter()
-                .filter_map(|part| match part {
-                    parrot_core::Content::Text(text) => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect();
-            if !backend
-                .history
-                .append_context_reminder(
-                    event.clone(),
-                    parrot_storage::conversation::ContextReminderCheckpoint {
-                        canonical_model: checkpoint.canonical_model,
-                        context_limit: checkpoint.context_limit,
-                        percentage: checkpoint.percentage,
+        persistence @ (ConversationPersistence::ToolResult { .. }
+        | ConversationPersistence::ToolImages { .. }) => {
+            return state
+                .tool_conversation
+                .add_conversation(
+                    &mut state.conversation,
+                    ConversationAddition {
+                        messages: addition.messages,
+                        persistence,
                     },
-                    content,
                 )
-                .await?
-            {
-                return Ok(ConversationReceipt::default());
-            }
-            publications.push(event);
+                .await;
         }
         ConversationPersistence::CompletionFeedback(feedback) => {
             let mut candidate = Some(feedback.candidate);
@@ -286,7 +230,10 @@ where
                 ..Default::default()
             });
             let record = render_record(&addition.messages[0], ConversationOrigin::Model)?;
-            let live: Vec<_> = addition.messages.into_iter().map(render_live).collect();
+            let mut live = Vec::new();
+            for message in addition.messages {
+                live.push(crate::compaction::materialize_message(&backend.history, message).await?);
+            }
             let result = backend
                 .history
                 .repository()
@@ -340,21 +287,12 @@ where
                 .collect();
             backend.activity.assistant_message(&text);
         }
-        state.conversation.add(render_live(message));
+        state
+            .conversation
+            .add(crate::compaction::materialize_message(&backend.history, message).await?);
     }
     for event in publications {
-        let publication_cancellation: &dyn Cancellation = if uncancelled_publication {
-            &NeverCancelled
-        } else {
-            cancellation
-        };
-        if context_publication {
-            ContextEmitter { backend }
-                .publish(event, publication_cancellation)
-                .await?;
-        } else {
-            backend.publish(event, publication_cancellation).await?;
-        }
+        backend.publish(event, cancellation).await?;
     }
     Ok(ConversationReceipt {
         inserted: true,

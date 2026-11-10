@@ -257,12 +257,24 @@ status bindings, sampled epoch inputs, and the drain's request budget. Provider 
 model-specific token estimates, model invocation, and private summary calls. Core owns
 reminder rendering and cadence decisions, while State stores cadence and durable
 checkpoints. Turn and standalone compaction both use State, Provider, and EventPublisher rather than
-separate preparation, status, summary, or compaction-effect contracts. Core records
-the derived skill context through `States::record_input_context` before request-budget
-admission. Nonempty
-selected skill context follows its input. The placement fixture supplies raw
-records and proves core preparation, per-turn body-read deduplication, exact
-body/steer/new-turn history, and content-free event/path ordering.
+separate preparation, status, summary, or compaction-effect contracts.
+
+Core constructs conversation messages and explicitly calls `States::add_conversation`.
+This includes promoted input, skill context, status, final-phase and restored-tool prompts,
+retries, assistant responses, completion feedback, tool results, synthetic image messages,
+and interruption responses. The generic addition carries complete messages and the storage
+metadata needed for atomic admission, deduplication, tool correlation, or turn closure.
+Native adapters persist the supplied messages, apply successful insertions to the live
+conversation, and then publish. They do not choose message content or insertion timing.
+Compaction synchronizes the authoritative committed snapshot rather than appending a message.
+
+`Tools::capture_catalog` only captures tools. Core executes and settles each returned tool
+chunk before requesting the next one. Recovery uses the same core settlement rules and
+configured crash templates. Nonempty skill context follows its input before request-budget
+admission. The placement fixture checks per-turn body-read deduplication, exact
+body/steer/new-turn history, and content-free event/path ordering. Run
+`python3 scripts/verify-conversation-ownership.py` to check that native additions remain
+inside generic mutation implementations and that specialized State append hooks stay removed.
 
 The lifecycle owns its drain independently of unary observers. FIFO reservations
 include predecessor callbacks; cancelled reservations retain position. Incoming
