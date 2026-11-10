@@ -299,50 +299,9 @@ impl<B: DrainBackend> AgentSession<B> {
         claim: &'a TaskResultClaim,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
         Box::pin(async move {
-            let _gate = self.inner.checkpoint_gate.lock().await;
-            let store = self.inner.recovery.as_ref().ok_or_else(|| {
-                LifecycleError::Failed("claimed execution requires an agent state store".into())
-            })?;
-            let snapshot = store
-                .load()
-                .await
-                .map_err(recovery::storage_error)?
-                .ok_or_else(|| {
-                    LifecycleError::Failed("agent recovery snapshot is not initialized".into())
-                })?;
-            if snapshot.owner_session_id != reference.worker_session_id
-                || reference.initial_message_id != claim.claim_id
+            if self.clear_claimed_result(reference, claim).await?
+                && self.inner.backend.has_pending_inputs().await?
             {
-                return Err(LifecycleError::Failed(
-                    "task response reference belongs to another worker or claim".into(),
-                ));
-            }
-            let Some(mut current) = snapshot.execution else {
-                return Ok(());
-            };
-            if current.execution_id != reference.execution_id {
-                return Ok(());
-            }
-            if current.initial_message_id != reference.initial_message_id
-                || current.terminal.as_ref() != Some(&reference.terminal)
-                || current
-                    .result_claim
-                    .as_ref()
-                    .is_some_and(|current| current != claim)
-            {
-                return Err(LifecycleError::Failed(
-                    "task response acknowledgment conflicts with the saved execution".into(),
-                ));
-            }
-            if current.result_claim.is_some() {
-                current.result_claim = None;
-                store
-                    .update(AgentStateUpdate::Execution(Some(current)))
-                    .await
-                    .map_err(recovery::storage_error)?;
-            }
-            drop(_gate);
-            if self.inner.backend.has_pending_inputs().await? {
                 let accepting = {
                     let state = self.inner.state.lock().expect("session poisoned");
                     !self.inner.suspending.load(Ordering::Acquire) && self.accepting(&state).is_ok()
@@ -352,6 +311,97 @@ impl<B: DrainBackend> AgentSession<B> {
                 }
             }
             Ok(())
+        })
+    }
+    /// Releases a retired task result without waking unrelated pending input.
+    pub fn acknowledge_retired_result<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        Box::pin(async move {
+            if !self.clear_claimed_result(reference, claim).await? {
+                return Ok(());
+            }
+            let _gate = self.inner.checkpoint_gate.lock().await;
+            let Some(mut current) = self.execution_checkpoint().await? else {
+                return Ok(());
+            };
+            if current.execution_id == reference.execution_id
+                && current.parent_notification.is_some()
+            {
+                current.parent_notification = None;
+                self.inner
+                    .recovery
+                    .as_ref()
+                    .expect("retired execution store")
+                    .update(AgentStateUpdate::Execution(Some(current)))
+                    .await
+                    .map_err(recovery::storage_error)?;
+            }
+            Ok(())
+        })
+    }
+    async fn clear_claimed_result(
+        &self,
+        reference: &TaskResponseReference,
+        claim: &TaskResultClaim,
+    ) -> Result<bool, LifecycleError> {
+        let _gate = self.inner.checkpoint_gate.lock().await;
+        let store = self.inner.recovery.as_ref().ok_or_else(|| {
+            LifecycleError::Failed("claimed execution requires an agent state store".into())
+        })?;
+        let snapshot = store
+            .load()
+            .await
+            .map_err(recovery::storage_error)?
+            .ok_or_else(|| {
+                LifecycleError::Failed("agent recovery snapshot is not initialized".into())
+            })?;
+        if snapshot.owner_session_id != reference.worker_session_id
+            || reference.initial_message_id != claim.claim_id
+        {
+            return Err(LifecycleError::Failed(
+                "task response reference belongs to another worker or claim".into(),
+            ));
+        }
+        let Some(mut current) = snapshot.execution else {
+            return Ok(false);
+        };
+        if current.execution_id != reference.execution_id {
+            return Ok(false);
+        }
+        if current.initial_message_id != reference.initial_message_id
+            || current.terminal.as_ref() != Some(&reference.terminal)
+            || current
+                .result_claim
+                .as_ref()
+                .is_some_and(|current| current != claim)
+        {
+            return Err(LifecycleError::Failed(
+                "task response acknowledgment conflicts with the saved execution".into(),
+            ));
+        }
+        if current.result_claim.is_some() {
+            current.result_claim = None;
+            store
+                .update(AgentStateUpdate::Execution(Some(current)))
+                .await
+                .map_err(recovery::storage_error)?;
+        }
+        Ok(true)
+    }
+    /// Cancels only the pending input for a known notification, preserving its history.
+    pub fn cancel_recorded_notification<'a>(
+        &'a self,
+        message_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), LifecycleError>> {
+        Box::pin(async move {
+            self.inner
+                .backend
+                .cancel_execution_input(message_id)
+                .await
+                .map(|_| ())
         })
     }
 

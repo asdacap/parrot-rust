@@ -1,3 +1,6 @@
+#[path = "migration.rs"]
+mod migration;
+
 use super::{
     ForkHistoryMode, SchedulerConfig, TaskDiagnostic, TaskRunner, TaskSession,
     apply_visibility_changes,
@@ -33,8 +36,9 @@ use parrot_domain::{
         agent_state::{
             AcceptedTaskCall, AgentStateUpdate, DedicatedTaskExecutionSnapshot,
             ForkBoundarySnapshot, NotificationCheckpoint, SelectionSnapshot, TaskEntrySnapshot,
-            TaskExecutionSnapshot, TaskForkModeSnapshot, TaskGraphSnapshot,
-            TaskNotificationSnapshot, TaskOwnerAssignmentReference, TaskResultClaim,
+            TaskExecutionSnapshot, TaskForkModeSnapshot, TaskGraphMigrationSnapshot,
+            TaskGraphSnapshot, TaskMigrationDisposition, TaskNotificationSnapshot,
+            TaskOwnerAssignmentReference, TaskResponseReference, TaskResultClaim,
             TaskRunnerCheckpoint, TaskStopCheckpoint,
         },
         agent_tasks::{
@@ -74,6 +78,7 @@ enum TaskExecution<S: RestrictableAccessSnapshot + 'static> {
     Unassigned,
     Owner { generation_id: String },
     Dedicated(Box<DedicatedExecution<S>>),
+    RetiringLegacy(Box<DedicatedExecution<S>>),
 }
 struct DedicatedExecution<S: RestrictableAccessSnapshot + 'static> {
     worker_session_id: Option<String>,
@@ -94,6 +99,7 @@ struct Run {
     ready: Arc<Readiness>,
 }
 struct State<S: RestrictableAccessSnapshot + 'static> {
+    migration: TaskGraphMigrationSnapshot,
     entries: Vec<Entry<S>>,
     recovery_prepared: bool,
     waiting_for_capacity: bool,
@@ -287,6 +293,15 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let mut entries = Vec::new();
         let mut owner_running = false;
         for entry in saved.tasks.entries {
+            let retiring = matches!(
+                &entry.execution,
+                TaskExecutionSnapshot::RetiringLegacy { .. }
+            );
+            if retiring && saved.tasks.migration == TaskGraphMigrationSnapshot::Current {
+                return Err(ChildError::registry(
+                    "retiring task has no migration intent",
+                ));
+            }
             let execution = match entry.execution {
                 TaskExecutionSnapshot::Unassigned => {
                     if entry.task.state == ExecutionStatus::Running {
@@ -305,7 +320,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     owner_running |= entry.task.state == ExecutionStatus::Running;
                     TaskExecution::Owner { generation_id }
                 }
-                TaskExecutionSnapshot::Dedicated { worker } => {
+                TaskExecutionSnapshot::Dedicated { worker }
+                | TaskExecutionSnapshot::RetiringLegacy { worker } => {
                     if entry.task.state == ExecutionStatus::Running && worker.runner.is_none() {
                         return Err(ChildError::registry(
                             "running task has no saved runner checkpoint",
@@ -357,7 +373,12 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                             ));
                         }
                     }
-                    TaskExecution::Dedicated(Box::new(DedicatedExecution::restore(*worker)))
+                    let worker = Box::new(DedicatedExecution::restore(*worker));
+                    if retiring {
+                        TaskExecution::RetiringLegacy(worker)
+                    } else {
+                        TaskExecution::Dedicated(worker)
+                    }
                 }
             };
             entries.push(Entry {
@@ -390,7 +411,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 execution,
             });
         }
-        let fresh = entries.is_empty() && saved.tasks.notifications.is_empty();
+        let fresh = entries.is_empty()
+            && saved.tasks.notifications.is_empty()
+            && saved.tasks.migration == TaskGraphMigrationSnapshot::Current;
         let stop = Arc::new(Signal::new());
         let lifetime = Arc::new(RunCancellation {
             lifetime: config.lifetime.clone(),
@@ -405,6 +428,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             stop,
             lifetime,
             gate: tokio::sync::Mutex::new(State {
+                migration: saved.tasks.migration,
                 entries,
                 recovery_prepared: fresh,
                 waiting_for_capacity: false,
@@ -440,6 +464,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     pub async fn prepare_recovery(&self) -> ChildResult<()> {
         let mut state = self.gate.lock().await;
         self.ensure_healthy(&state)?;
+        if state.migration != TaskGraphMigrationSnapshot::Current {
+            return Err(ChildError::registry(
+                "legacy task migration must complete before recovery",
+            ));
+        }
         if state.recovery_prepared {
             return Ok(());
         }
@@ -607,6 +636,11 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             scheduler.owner()?;
             let mut state = scheduler.gate.lock().await;
             scheduler.ensure_healthy(&state)?;
+            if state.migration != TaskGraphMigrationSnapshot::Current {
+                return Err(ChildError::registry(
+                    "legacy task migration must complete before updates",
+                ));
+            }
             if let UpdateOrigin::Tool(identity) = &origin {
                 if let Some(count) = Self::find_receipt(&state, identity)? {
                     return Ok(count);
@@ -1049,6 +1083,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         Ok(())
     }
     async fn reconcile(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<bool> {
+        if state.migration != TaskGraphMigrationSnapshot::Current {
+            return Ok(false);
+        }
         let mut changed = false;
         for index in 0..state.entries.len() {
             if (state.entries[index].owns_attempt() || state.entries[index].owns_self())
@@ -1789,6 +1826,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     async fn save_graph(&self, state: &mut State<S>) -> ChildResult<()> {
         self.ensure_healthy(state)?;
         let snapshot = TaskGraphSnapshot {
+            migration: state.migration.clone(),
             entries: state.entries.iter().map(Entry::snapshot).collect(),
             revision: state.revision,
             complete: state.complete,
@@ -1827,7 +1865,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let mut state = self.gate.lock().await;
         self.ensure_healthy(&state)?;
         for entry in &mut state.entries {
-            let TaskExecution::Dedicated(worker) = &mut entry.execution else {
+            let (TaskExecution::Dedicated(worker) | TaskExecution::RetiringLegacy(worker)) =
+                &mut entry.execution
+            else {
                 continue;
             };
             if worker.scope.is_some() {
@@ -1852,7 +1892,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 worker.scope = Some(scope);
             }
         }
-        self.save_graph(&mut state).await
+        Ok(())
     }
     /// Returns worker identities whose execution recovery belongs to this graph.
     pub async fn claimed_worker_ids(&self) -> Vec<String> {
@@ -1865,7 +1905,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 let Some(worker) = entry.capture_worker() else {
                     return false;
                 };
-                entry.task.state == ExecutionStatus::Running
+                matches!(entry.execution, TaskExecution::RetiringLegacy(_))
+                    || entry.task.state == ExecutionStatus::Running
                     || worker.pending_stop.is_some()
                     || (entry.task.state == ExecutionStatus::Pending
                         && (worker.runner.is_some()
@@ -1898,9 +1939,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     return Err(shutting_down());
                 }
                 state.execution_active = true;
-                scheduler.reconcile(&mut state).await?;
+                let changed = scheduler.reconcile(&mut state).await?;
                 scheduler.notify_completion(&mut state)?;
-                scheduler.save_graph(&mut state).await?;
+                if changed {
+                    scheduler.publish(&mut state).await?;
+                } else {
+                    scheduler.save_graph(&mut state).await?;
+                }
                 scheduler.kick_stops(&mut state)?;
             }
             loop {
@@ -1959,6 +2004,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 .borrow_worker_mut()
                 .recovered_stop_admission
                 .take();
+            let retiring = matches!(
+                state.entries[index].execution,
+                TaskExecution::RetiringLegacy(_)
+            );
             let scheduler = self.clone();
             let ready = Arc::new(Readiness::default());
             state.reservations.retain(|ready| !ready.is_ready());
@@ -2024,7 +2073,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         }
                         scheduler.save_graph(&mut state).await?;
                     }
-                    if matching
+                    if !retiring
+                        && matching
                         && saved
                             .as_ref()
                             .is_some_and(|saved| saved.result_claim.as_ref() == Some(&claim))
@@ -2035,6 +2085,36 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         worker.acknowledge_result(&reference, &claim).await?;
                     }
                     ready.finish(Ok(()));
+                    if retiring {
+                        if matching {
+                            let current = worker.capture_execution().await?.ok_or_else(|| {
+                                ChildError::registry("retired execution disappeared")
+                            })?;
+                            let reference = TaskResponseReference {
+                                worker_session_id: stop.worker_session_id.clone(),
+                                initial_message_id: current.initial_message_id,
+                                execution_id: current.execution_id,
+                                terminal: current.terminal.ok_or_else(|| {
+                                    ChildError::registry("retired execution has no terminal")
+                                })?,
+                            };
+                            worker
+                                .acknowledge_retired_result(&reference, &claim)
+                                .await?;
+                            scheduler
+                                .config
+                                .owner_session
+                                .cancel_notification(&format!("{}.parent", reference.execution_id))
+                                .await?;
+                        }
+                        worker.cancel_notification(&stop.notice_message_id).await?;
+                        scheduler
+                            .acknowledge_notification(&stop.notice_message_id, Ok(()))
+                            .await?;
+                        drop(lease);
+                        slot.changed.notify_waiters();
+                        return Ok(());
+                    }
                     if !matching {
                         scheduler
                             .acknowledge_notification(&stop.notice_message_id, Ok(()))
@@ -2101,7 +2181,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     }
     fn kick_notifications(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<()> {
         self.ensure_healthy(state)?;
-        if state.suspended {
+        if state.suspended || state.migration != TaskGraphMigrationSnapshot::Current {
             return Ok(());
         }
         for value in state.notifications.clone() {
@@ -2313,13 +2393,17 @@ impl<S: RestrictableAccessSnapshot + 'static> DedicatedExecution<S> {
 impl<S: RestrictableAccessSnapshot + 'static> Entry<S> {
     fn capture_worker(&self) -> Option<&DedicatedExecution<S>> {
         match &self.execution {
-            TaskExecution::Dedicated(worker) => Some(worker),
+            TaskExecution::Dedicated(worker) | TaskExecution::RetiringLegacy(worker) => {
+                Some(worker)
+            }
             TaskExecution::Unassigned | TaskExecution::Owner { .. } => None,
         }
     }
     fn capture_worker_mut(&mut self) -> Option<&mut DedicatedExecution<S>> {
         match &mut self.execution {
-            TaskExecution::Dedicated(worker) => Some(worker),
+            TaskExecution::Dedicated(worker) | TaskExecution::RetiringLegacy(worker) => {
+                Some(worker)
+            }
             TaskExecution::Unassigned | TaskExecution::Owner { .. } => None,
         }
     }
@@ -2345,7 +2429,7 @@ impl<S: RestrictableAccessSnapshot + 'static> Entry<S> {
     fn capture_assignee(&self) -> Option<TaskAssignee> {
         match &self.execution {
             TaskExecution::Owner { .. } => Some(TaskAssignee::Owner),
-            TaskExecution::Dedicated(worker) => {
+            TaskExecution::Dedicated(worker) | TaskExecution::RetiringLegacy(worker) => {
                 worker.scope.as_ref().map(|scope| TaskAssignee::Dedicated {
                     agent_path: format!("/{}", scope.identity().name_path.join("/")),
                 })
@@ -2387,6 +2471,9 @@ impl<S: RestrictableAccessSnapshot + 'static> Entry<S> {
                     generation_id: generation_id.clone(),
                 },
                 TaskExecution::Dedicated(worker) => TaskExecutionSnapshot::Dedicated {
+                    worker: Box::new(worker.snapshot()),
+                },
+                TaskExecution::RetiringLegacy(worker) => TaskExecutionSnapshot::RetiringLegacy {
                     worker: Box::new(worker.snapshot()),
                 },
             },

@@ -105,6 +105,27 @@ async fn pending_peek_is_read_only_prioritizes_steers_and_retains_queue_sequence
         Delivery::DELIVERY_STEER,
     )
     .await;
+    assert_eq!(
+        repository
+            .capture_pending_input_ids("agent".into())
+            .await
+            .unwrap(),
+        vec!["queue-one", "queue-two", "steer-one", "steer-two"]
+    );
+    assert_eq!(
+        repository
+            .capture_pending_input_ids("other".into())
+            .await
+            .unwrap(),
+        vec!["other-steer"]
+    );
+    assert!(
+        repository
+            .capture_pending_input_ids("absent".into())
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let before = repository.replay().await.unwrap();
     for _ in 0..3 {
         assert_eq!(
@@ -156,6 +177,13 @@ async fn pending_peek_is_read_only_prioritizes_steers_and_retains_queue_sequence
         })
         .await
         .unwrap();
+    assert_eq!(
+        repository
+            .capture_pending_input_ids("agent".into())
+            .await
+            .unwrap(),
+        vec!["queue-one", "queue-two"]
+    );
     assert_eq!(promoted.len(), 1);
     assert_eq!(promoted[0].input, second_steer.input);
     assert_eq!(

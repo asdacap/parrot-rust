@@ -7,6 +7,7 @@ mod harness;
 mod history;
 mod initial_admission;
 mod interleavings;
+mod legacy_migration;
 mod limits;
 mod notifications;
 mod owner_validation;

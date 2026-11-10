@@ -729,6 +729,19 @@ async fn missing_graph_worker_binding_adopts_retained_scope_without_construction
     let scheduler = restored.get_service::<Scheduler>().unwrap();
     scheduler.resolve_workers().await.unwrap();
     assert_eq!(scheduler.claimed_worker_ids().await, [worker_id.clone()]);
+    assert_eq!(
+        restored
+            .agent_state()
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .tasks
+            .entries[0]
+            .borrow_worker()
+            .worker_session_id,
+        None
+    );
     assert_eq!(second.registry.snapshot_scopes().len(), 2);
     assert_eq!(requests(&second.provider, "a").len(), 1);
     bounded(scheduler.activate_executions().join())
@@ -738,6 +751,20 @@ async fn missing_graph_worker_binding_adopts_retained_scope_without_construction
     assert_eq!(
         second.factory.get("a").history.agent_session_id(),
         worker_id
+    );
+    assert_eq!(
+        restored
+            .agent_state()
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .tasks
+            .entries[0]
+            .borrow_worker()
+            .worker_session_id
+            .as_deref(),
+        Some(worker_id.as_str())
     );
     let prompt_id = restored
         .agent_state()

@@ -1,3 +1,4 @@
+mod legacy;
 mod observer;
 
 use parrot_domain::contracts::agent_state::{AgentStateErrorKind, AgentStateStore};
@@ -126,6 +127,7 @@ fn snapshot() -> AgentStateSnapshot {
         session_id: "child-session-1".into(),
     });
     snapshot.tasks = TaskGraphSnapshot {
+        migration: TaskGraphMigrationSnapshot::Current,
         entries: [
             ExecutionStatus::Pending,
             ExecutionStatus::Running,

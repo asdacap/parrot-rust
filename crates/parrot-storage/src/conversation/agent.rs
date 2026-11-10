@@ -252,6 +252,12 @@ impl AgentHistoryView {
             .inputs_for_next_promotion(self.agent.clone())
             .await
     }
+    pub async fn capture_pending_input_ids(&self) -> Result<Vec<String>, EventError> {
+        self.repository
+            .events
+            .capture_pending_input_ids(self.agent.clone())
+            .await
+    }
     pub async fn has_pending_inputs(&self) -> Result<bool, EventError> {
         self.repository
             .events

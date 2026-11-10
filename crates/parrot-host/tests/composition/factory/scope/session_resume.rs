@@ -79,6 +79,29 @@ async fn set(scope: &Arc<Scope<Security>>, tasks: Value) {
     .unwrap();
 }
 
+fn dedicated(mut task: Value) -> Value {
+    if task.get("model").is_none() {
+        task["model"] = "local/model".into();
+    }
+    task
+}
+
+/// Borrows dedicated execution metadata in worker recovery fixtures.
+trait SavedTaskExecution {
+    fn borrow_worker(&self) -> &parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot;
+}
+
+impl SavedTaskExecution for parrot_domain::values::agent_state::TaskEntrySnapshot {
+    fn borrow_worker(&self) -> &parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot {
+        match &self.execution {
+            parrot_domain::values::agent_state::TaskExecutionSnapshot::Dedicated { worker } => {
+                worker
+            }
+            _ => panic!("expected dedicated task snapshot"),
+        }
+    }
+}
+
 fn task(name: &str) -> Value {
     json!({"name": name, "description": format!("Do {name}"), "payload": "durable instruction", "acceptance_criteria": "verified"})
 }
@@ -183,7 +206,11 @@ async fn actual_task_limit_live_increase_wakes_pending_and_decrease_does_not_pre
     }
     set(
         &root,
-        json!([task("live-a"), task("live-b"), task("live-c")]),
+        json!([
+            dedicated(task("live-a")),
+            dedicated(task("live-b")),
+            dedicated(task("live-c"))
+        ]),
     )
     .await;
     wait_task_request(&fixture, "live-a").await;
@@ -249,12 +276,20 @@ async fn actual_task_budget_is_shared_by_owners_but_isolated_between_user_sessio
             Some(gate.clone()),
         );
     }
-    set(&first_root, json!([task("shared-a"), task("shared-b")])).await;
+    set(
+        &first_root,
+        json!([dedicated(task("shared-a")), dedicated(task("shared-b"))]),
+    )
+    .await;
     wait_task_request(&fixture, "shared-a").await;
     wait_task_request(&fixture, "shared-b").await;
     let child = spawn(&fixture, &first_root, "direct-child").await;
     assert!(!child.session().is_active());
-    set(&child, json!([task("shared-c"), task("shared-d")])).await;
+    set(
+        &child,
+        json!([dedicated(task("shared-c")), dedicated(task("shared-d"))]),
+    )
+    .await;
     wait_task_request(&fixture, "shared-c").await;
     assert_eq!(
         child.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
@@ -267,7 +302,7 @@ async fn actual_task_budget_is_shared_by_owners_but_isolated_between_user_sessio
     let second_root = fixture.root();
     set(
         &second_root,
-        json!([task("isolated-a"), task("isolated-b")]),
+        json!([dedicated(task("isolated-a")), dedicated(task("isolated-b"))]),
     )
     .await;
     wait_task_request(&fixture, "isolated-a").await;
@@ -349,13 +384,17 @@ async fn actual_zero_budget_allows_nested_task_owners_to_make_progress() {
             None,
         );
     }
-    set(&root, json!([task("parent"), task("root-next")])).await;
+    set(
+        &root,
+        json!([dedicated(task("parent")), dedicated(task("root-next"))]),
+    )
+    .await;
     wait_task_request(&fixture, "parent").await;
     let parent = root.children().resolve("parent").unwrap();
-    set(&parent, json!([task("nested")])).await;
+    set(&parent, json!([dedicated(task("nested"))])).await;
     wait_task_request(&fixture, "nested").await;
     let nested = parent.children().resolve("nested").unwrap();
-    set(&nested, json!([task("leaf")])).await;
+    set(&nested, json!([dedicated(task("leaf"))])).await;
     wait_tasks(&nested, |tasks| {
         tasks[0].state == ExecutionStatus::Succeeded
     })
@@ -418,10 +457,21 @@ async fn actual_recovery_counts_later_owners_before_admitting_earlier_pending_wo
             Some(Arc::new(Semaphore::new(0))),
         );
     }
-    set(&later, json!([task("restored-b"), task("restored-c")])).await;
+    set(
+        &later,
+        json!([dedicated(task("restored-b")), dedicated(task("restored-c"))]),
+    )
+    .await;
     wait_task_request(&fixture, "restored-b").await;
     wait_task_request(&fixture, "restored-c").await;
-    set(&root, json!([task("restored-a"), task("fresh-pending")])).await;
+    set(
+        &root,
+        json!([
+            dedicated(task("restored-a")),
+            dedicated(task("fresh-pending"))
+        ]),
+    )
+    .await;
     wait_task_request(&fixture, "restored-a").await;
     assert_eq!(
         root.get_service::<Scheduler>().unwrap().snapshot().await[1].state,
@@ -458,8 +508,11 @@ async fn actual_recovery_counts_later_owners_before_admitting_earlier_pending_wo
     ] {
         let current = scope.agent_state().load().await.unwrap().unwrap().tasks;
         for (current, saved) in current.entries.iter().zip(&saved.entries) {
-            assert_eq!(current.worker_session_id, saved.worker_session_id);
-            assert_eq!(current.runner, saved.runner);
+            assert_eq!(
+                current.borrow_worker().worker_session_id,
+                saved.borrow_worker().worker_session_id
+            );
+            assert_eq!(current.borrow_worker().runner, saved.borrow_worker().runner);
         }
     }
     assert_eq!(
@@ -738,10 +791,10 @@ async fn actual_failed_dependency_and_canceled_task_reopen_until_explicit_reset(
     let fixture = fixture().await;
     let hosted = bounded(fixture.open()).await.unwrap();
     let root = fixture.root();
-    let mut failed = task("failed-dependency");
+    let mut failed = dedicated(task("failed-dependency"));
     failed["state"] = "failed".into();
     failed["failure"] = "retained failure".into();
-    let mut dependent = task("blocked-dependent");
+    let mut dependent = dedicated(task("blocked-dependent"));
     dependent["dependencies"] = json!(["failed-dependency"]);
     let mut canceled = task("explicitly-canceled");
     canceled["state"] = "canceled".into();
@@ -791,7 +844,11 @@ async fn actual_failed_dependency_and_canceled_task_reopen_until_explicit_reset(
             None,
         );
     }
-    set(&restored_root, json!([task("failed-dependency")])).await;
+    set(
+        &restored_root,
+        json!([dedicated(task("failed-dependency"))]),
+    )
+    .await;
     wait_tasks(&restored_root, |tasks| {
         tasks[0].state == ExecutionStatus::Succeeded && tasks[1].state == ExecutionStatus::Succeeded
     })
@@ -883,9 +940,9 @@ async fn actual_running_task_reopens_same_retry_prompt_attempt_and_execution_bef
         reply(r#"{"result":"unused","verdict":"accept"}"#),
         Some(held),
     );
-    let mut dependent = task("dependent");
+    let mut dependent = dedicated(task("dependent"));
     dependent["dependencies"] = json!(["durable-task"]);
-    set(&root, json!([task("durable-task"), dependent])).await;
+    set(&root, json!([dedicated(task("durable-task")), dependent])).await;
     bounded(async {
         while !fixture.scripts.lock().unwrap().is_empty() {
             tokio::task::yield_now().await;
@@ -893,7 +950,11 @@ async fn actual_running_task_reopens_same_retry_prompt_attempt_and_execution_bef
     })
     .await;
     let before = root.agent_state().load().await.unwrap().unwrap();
-    let attempt = before.tasks.entries[0].runner.clone().unwrap();
+    let attempt = before.tasks.entries[0]
+        .borrow_worker()
+        .runner
+        .clone()
+        .unwrap();
     assert_eq!(attempt.attempt, 2);
     assert_eq!(attempt.feedback, ["fix"]);
     let worker = root.children().resolve("durable-task").unwrap();
@@ -915,6 +976,7 @@ async fn actual_running_task_reopens_same_retry_prompt_attempt_and_execution_bef
             .unwrap()
             .tasks
             .entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap(),
@@ -945,7 +1007,14 @@ async fn actual_running_task_reopens_same_retry_prompt_attempt_and_execution_bef
         "storage preparation must keep provider activation closed"
     );
     let saved = restored_root.agent_state().load().await.unwrap().unwrap();
-    assert_eq!(saved.tasks.entries[0].runner.as_ref().unwrap(), &attempt);
+    assert_eq!(
+        saved.tasks.entries[0]
+            .borrow_worker()
+            .runner
+            .as_ref()
+            .unwrap(),
+        &attempt
+    );
     let restored_execution = restored_worker
         .agent_state()
         .load()
@@ -1232,7 +1301,7 @@ async fn actual_close_joins_admitted_task_worker_construction_and_reopens_pendin
     let gate = Arc::new(TurnBarrier::default());
     fixture.observations.lock().unwrap().construction = Some(("constructing".into(), gate.clone()));
     let tasks = TaskArtifactParserAdapter
-        .parse_task_set(&json!([task("constructing")]).to_string())
+        .parse_task_set(&json!([dedicated(task("constructing"))]).to_string())
         .unwrap();
     let update = root
         .get_service::<Scheduler>()
@@ -1285,11 +1354,13 @@ async fn actual_close_joins_admitted_task_worker_construction_and_reopens_pendin
             .unwrap()
             .tasks
             .entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
             .generation_id,
         saved.tasks.entries[0]
+            .borrow_worker()
             .runner
             .as_ref()
             .unwrap()
@@ -1310,7 +1381,7 @@ async fn actual_nested_running_graphs_suspend_together_and_reopen_without_duplic
         reply(r#"{"result":"outer","verdict":"accept"}"#),
         Some(Arc::new(Semaphore::new(0))),
     );
-    set(&root, json!([task("outer")])).await;
+    set(&root, json!([dedicated(task("outer"))])).await;
     bounded(async {
         while !fixture.scripts.lock().unwrap().is_empty() {
             tokio::task::yield_now().await;
@@ -1324,7 +1395,7 @@ async fn actual_nested_running_graphs_suspend_together_and_reopen_without_duplic
         reply(r#"{"result":"inner","verdict":"accept"}"#),
         Some(Arc::new(Semaphore::new(0))),
     );
-    set(&outer, json!([task("inner")])).await;
+    set(&outer, json!([dedicated(task("inner"))])).await;
     bounded(async {
         while !fixture.scripts.lock().unwrap().is_empty() {
             tokio::task::yield_now().await;
@@ -1443,7 +1514,11 @@ async fn actual_nested_running_graphs_suspend_together_and_reopen_without_duplic
     .await;
     let events = fixture.user().lease.events.replay().await.unwrap();
     let completed = restored_root.agent_state().load().await.unwrap().unwrap();
-    let runner = completed.tasks.entries[0].runner.as_ref().unwrap();
+    let runner = completed.tasks.entries[0]
+        .borrow_worker()
+        .runner
+        .as_ref()
+        .unwrap();
     assert_eq!(runner.attempt, 1);
     assert_eq!(runner.repair_attempt, 0);
     for execution in [&outer_execution, &inner_execution] {
@@ -1791,3 +1866,6 @@ async fn actual_fresh_store_normalizes_blank_mode_before_initializing_canonical_
         std::fs::remove_dir_all(&fixture.root).unwrap();
     }
 }
+
+#[path = "legacy_task_migration.rs"]
+mod legacy_task_migration;

@@ -1674,6 +1674,28 @@ impl<B: DrainBackend> AgentSession<B> {
         self.close().await
     }
 
+    /// Closes an unactivated session without changing its durable recovery intent.
+    pub async fn close_unactivated(&self) -> Result<(), LifecycleError> {
+        {
+            let mut state = self.inner.state.lock().expect("session poisoned");
+            reap_tasks(&mut state);
+            if self.inner.activation.is_active()
+                || self.inner.suspending.load(Ordering::Acquire)
+                || state.started
+                || state.drain.is_some()
+                || state.execution_stop.is_some()
+                || !state.scheduled.is_empty()
+                || !state.tasks.is_empty()
+            {
+                return Err(LifecycleError::Failed(
+                    "read-only recovery cleanup requires an unactivated session without live execution ownership".into(),
+                ));
+            }
+            state.disposing = true;
+        }
+        self.close().await
+    }
+
     pub fn close_handle(&self) -> OperationHandle<()> {
         let mut state = self.inner.state.lock().expect("session poisoned");
         if let Some(closed) = &state.closed {

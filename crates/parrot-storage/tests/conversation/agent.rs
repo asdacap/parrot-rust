@@ -343,6 +343,10 @@ async fn bound_pending_peek_preserves_raw_image_parts_without_materializing_or_p
     assert!(history.conversation().await.unwrap().is_empty());
     assert_eq!(repo.events().replay().await.unwrap().len(), 1);
     assert!(history.has_pending_inputs().await.unwrap());
+    assert_eq!(
+        history.capture_pending_input_ids().await.unwrap(),
+        vec!["message"]
+    );
     repo.events().database().close().await.unwrap();
 }
 

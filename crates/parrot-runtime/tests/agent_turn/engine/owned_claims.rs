@@ -579,3 +579,124 @@ async fn suspended_claim_preflight_settles_readiness_without_reserving_a_drain()
     assert!(provider.requests.lock().unwrap().is_empty());
     runtime.close().await;
 }
+
+#[tokio::test]
+async fn retirement_acknowledgement_preserves_unrelated_input_without_reserving_a_wake() {
+    let fixture = Fixture::new();
+    let store = fixture.recovery_store().await;
+    let claim = TaskResultClaim {
+        owner_session_id: "owner".into(),
+        claim_id: "task-prompt".into(),
+    };
+    let provider = Scripted::new(vec![
+        Step::complete("task answer"),
+        Step::complete("unrelated answer"),
+    ]);
+    let runtime = fixture
+        .recovered_runtime(
+            provider.clone(),
+            store.clone(),
+            Arc::new(RecoveryParent::default()),
+        )
+        .await;
+    let execution = runtime
+        .session
+        .enqueue_claimed_execution(
+            vec![ConversationPart::text("task question")],
+            "task-prompt".into(),
+            claim.clone(),
+            Arc::new(NeverCancelled),
+        )
+        .unwrap();
+    bounded(execution.join()).await.unwrap();
+    let reference = runtime
+        .session
+        .capture_claimed_result("task-prompt", &claim)
+        .await
+        .unwrap();
+    runtime
+        .session
+        .record(
+            vec![ConversationPart::text("unrelated queued input")],
+            "unrelated".into(),
+            protocol::Delivery::DELIVERY_QUEUE,
+            Arc::new(NeverCancelled),
+        )
+        .await
+        .unwrap();
+    runtime
+        .session
+        .acknowledge_retired_result(&reference, &claim)
+        .await
+        .unwrap();
+    assert!(runtime.session.is_idle());
+    assert!(runtime.session.has_recovery_work().await.unwrap());
+    assert_eq!(
+        store
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .execution
+            .unwrap()
+            .result_claim,
+        None
+    );
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        bounded(runtime.session.recover().join()).await.unwrap(),
+        Execution::succeeded("unrelated answer")
+    );
+    assert_eq!(provider.requests.lock().unwrap().len(), 2);
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn retiring_notification_cancellation_preserves_other_pending_input_and_history() {
+    let fixture = Fixture::new();
+    let store = fixture.recovery_store().await;
+    let provider = Scripted::new(vec![Step::complete("unrelated answer")]);
+    let runtime = fixture
+        .recovered_runtime(provider.clone(), store, Arc::new(RecoveryParent::default()))
+        .await;
+    for (id, text) in [
+        ("old-stop", "obsolete stop notification"),
+        ("unrelated", "unrelated queued input"),
+    ] {
+        runtime
+            .session
+            .record(
+                vec![ConversationPart::text(text)],
+                id.into(),
+                protocol::Delivery::DELIVERY_QUEUE,
+                Arc::new(NeverCancelled),
+            )
+            .await
+            .unwrap();
+    }
+    runtime
+        .session
+        .cancel_recorded_notification("old-stop")
+        .await
+        .unwrap();
+    assert!(runtime.session.is_idle());
+    assert!(runtime.session.has_recovery_work().await.unwrap());
+    bounded(runtime.session.recover().join()).await.unwrap();
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0]
+                .messages
+                .iter()
+                .any(|message| message.content().contains("unrelated queued input"))
+        );
+        assert!(
+            !requests[0]
+                .messages
+                .iter()
+                .any(|message| message.content().contains("obsolete stop notification"))
+        );
+    }
+    runtime.close().await;
+}

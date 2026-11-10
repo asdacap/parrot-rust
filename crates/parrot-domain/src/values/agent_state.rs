@@ -67,6 +67,8 @@ pub struct RetainedChild {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskGraphSnapshot {
+    #[serde(default)]
+    pub migration: TaskGraphMigrationSnapshot,
     pub entries: Vec<TaskEntrySnapshot>,
     pub revision: u64,
     pub complete: bool,
@@ -74,6 +76,54 @@ pub struct TaskGraphSnapshot {
     pub completion_notification: Option<NotificationCheckpoint>,
     pub notifications: Vec<TaskNotificationSnapshot>,
     pub accepted_calls: Vec<AcceptedTaskCall>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TaskGraphMigrationSnapshot {
+    #[default]
+    Current,
+    Pending,
+    Retiring {
+        disposition: TaskMigrationDisposition,
+        excluded_session_ids: Vec<String>,
+    },
+}
+
+impl<'de> Deserialize<'de> for TaskGraphMigrationSnapshot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Snapshot {
+            Current {},
+            Pending {},
+            Retiring {
+                disposition: TaskMigrationDisposition,
+                excluded_session_ids: Vec<String>,
+            },
+        }
+        Ok(match Snapshot::deserialize(deserializer)? {
+            Snapshot::Current {} => Self::Current,
+            Snapshot::Pending {} => Self::Pending,
+            Snapshot::Retiring {
+                disposition,
+                excluded_session_ids,
+            } => Self::Retiring {
+                disposition,
+                excluded_session_ids,
+            },
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskMigrationDisposition {
+    Reassign,
+    CancelObsolete,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -102,6 +152,9 @@ pub enum TaskExecutionSnapshot {
         generation_id: String,
     },
     Dedicated {
+        worker: Box<DedicatedTaskExecutionSnapshot>,
+    },
+    RetiringLegacy {
         worker: Box<DedicatedTaskExecutionSnapshot>,
     },
 }

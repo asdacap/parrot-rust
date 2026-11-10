@@ -82,6 +82,15 @@ pub fn pending(
         })
         .collect()
 }
+pub fn capture_pending_input_ids(
+    tx: &Transaction<'_>,
+    agent: &str,
+) -> Result<Vec<String>, EventError> {
+    let mut read = tx.prepare("SELECT message_id FROM input WHERE agent_session = ?1 AND status = 'pending' ORDER BY sequence")?;
+    Ok(read
+        .query_map([agent], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?)
+}
 pub fn has_pending(tx: &Transaction<'_>, agent: &str) -> Result<bool, EventError> {
     Ok(tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM input WHERE agent_session = ?1 AND status = 'pending')",

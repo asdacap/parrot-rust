@@ -305,6 +305,7 @@ pub struct RecordingSession {
     pub calls: Mutex<Vec<DeliveryCall>>,
     pub send_failures: AtomicUsize,
     pub ack_failures: AtomicUsize,
+    pub retired_ack_gate: Mutex<Option<Arc<Gate>>>,
     pub record_gate: Mutex<Option<Arc<Gate>>>,
     pub enqueue_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub changed: tokio::sync::Notify,
@@ -316,6 +317,7 @@ impl RecordingSession {
             calls: Mutex::new(vec![]),
             send_failures: AtomicUsize::new(0),
             ack_failures: AtomicUsize::new(0),
+            retired_ack_gate: Mutex::new(None),
             record_gate: Mutex::new(None),
             enqueue_hook: Mutex::new(None),
             changed: tokio::sync::Notify::new(),
@@ -410,6 +412,38 @@ impl TaskSession for RecordingSession {
             }
             self.actual.acknowledge_result(reference, claim).await
         })
+    }
+    fn acknowledge_retired_result<'a>(
+        &'a self,
+        reference: &'a parrot_domain::values::agent_state::TaskResponseReference,
+        claim: &'a parrot_domain::values::agent_state::TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            let gate = self.retired_ack_gate.lock().unwrap().take();
+            if let Some(gate) = gate {
+                gate.wait(&parrot_storage::events::NeverCancelled)
+                    .await
+                    .unwrap();
+            }
+            if self
+                .ack_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(ChildError::failure(
+                    "io",
+                    "claim acknowledgement write failed",
+                ));
+            }
+            self.actual
+                .acknowledge_retired_result(reference, claim)
+                .await
+        })
+    }
+    fn cancel_notification<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ChildResult<()>> {
+        self.actual.cancel_notification(message_id)
     }
     fn restore_response<'a>(
         &'a self,
@@ -604,9 +638,10 @@ impl SavedTaskExecution for parrot_domain::values::agent_state::TaskEntrySnapsho
         &mut self,
     ) -> &mut parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot {
         match &mut self.execution {
-            parrot_domain::values::agent_state::TaskExecutionSnapshot::Dedicated { worker } => {
-                worker
-            }
+            parrot_domain::values::agent_state::TaskExecutionSnapshot::Dedicated { worker }
+            | parrot_domain::values::agent_state::TaskExecutionSnapshot::RetiringLegacy {
+                worker,
+            } => worker,
             _ => panic!("expected dedicated task snapshot"),
         }
     }
@@ -614,9 +649,10 @@ impl SavedTaskExecution for parrot_domain::values::agent_state::TaskEntrySnapsho
         &self,
     ) -> Option<&parrot_domain::values::agent_state::DedicatedTaskExecutionSnapshot> {
         match &self.execution {
-            parrot_domain::values::agent_state::TaskExecutionSnapshot::Dedicated { worker } => {
-                Some(worker)
-            }
+            parrot_domain::values::agent_state::TaskExecutionSnapshot::Dedicated { worker }
+            | parrot_domain::values::agent_state::TaskExecutionSnapshot::RetiringLegacy {
+                worker,
+            } => Some(worker),
             _ => None,
         }
     }

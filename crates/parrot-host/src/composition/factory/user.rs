@@ -12,6 +12,7 @@ use parrot_domain::{
     protocol::messages::parrot as wire,
     values::{
         accounting::RetainedAgentBudget,
+        agent_state::{TaskGraphMigrationSnapshot, TaskMigrationDisposition},
         context::ContextSize,
         identifiers::Identifier,
         lineage::{AgentDirectoryLineage, AgentLineageRecord},
@@ -613,18 +614,18 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             .await
             .map_err(internal)?;
         let states = Arc::new(AgentStateFiles::new(lease.selected_root().clone()));
-        let saved_root = states
+        let root_state = states
             .open(&identity.name_path, &identity.session.session_id)
             .await
-            .map_err(internal)?
-            .load()
-            .await
             .map_err(internal)?;
+        let saved_root = root_state.load().await.map_err(internal)?;
         if initialization.resumed && saved_root.is_none() {
             return Err(internal("root agent state is missing"));
         }
         if saved_root.as_ref().is_some_and(|saved| {
-            !saved.descriptor.local_scope.is_empty()
+            saved.descriptor.name != identity.session.name
+                || saved.descriptor.parent_session_id.is_some()
+                || !saved.descriptor.local_scope.is_empty()
                 || saved.descriptor.completion_delivery
                     != parrot_domain::values::agent_state::CompletionDeliverySnapshot::Automatic
         }) {
@@ -673,6 +674,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         let mut cleanup_registry = None;
         let mut cleanup_scope = None;
         let mut cleanup_core = None;
+        let mut migration_blocked = false;
         let initialized = async {
             let source = config.source.create(services.clone())?;
             let histories = Arc::new(Histories {
@@ -711,10 +713,14 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                     config.materializer.as_ref(),
                 )
                 .map_err(invalid)?;
-            let agent_state = registry
-                .prepare_state(&identity, &selection, "", CompletionDelivery::Automatic)
-                .await
-                .map_err(internal)?;
+            let agent_state = if initialization.resumed {
+                root_state
+            } else {
+                registry
+                    .prepare_state(&identity, &selection, "", CompletionDelivery::Automatic)
+                    .await
+                    .map_err(internal)?
+            };
             let cell = Arc::new(SelectionCell::new(selection, PolicyLineage::root()));
             let parent = parrot_runtime::children::ParentScope::<S>::completion(
                 identity.clone(),
@@ -782,7 +788,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             let weak = Arc::downgrade(&core);
             core.mutations
                 .spawn(move || Self::complete_unowned_turns(weak, events, drain_state))?;
-            core.activate_recovery().await?;
+            core.activate_recovery(&mut migration_blocked).await?;
             Ok(core)
         }
         .await;
@@ -792,7 +798,12 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 core.mutations.stop();
             }
             if let Some(registry) = &cleanup_registry {
-                joined &= suspend_registry(registry).await.is_ok();
+                let cleanup = if migration_blocked {
+                    close_blocked_recovery(registry).await
+                } else {
+                    suspend_registry(registry).await
+                };
+                joined &= cleanup.is_ok();
             }
             if let Some(scope) = &cleanup_scope {
                 if !cleanup_registry
@@ -816,11 +827,14 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 joined &= core.mutations.join().await.is_ok();
             }
             services.broker.complete();
-            *settled_on_error &= joined;
+            *settled_on_error = (*settled_on_error || migration_blocked) && joined;
         }
         initialized
     }
-    async fn activate_recovery(self: &Arc<Self>) -> protocol::Result<()> {
+    async fn activate_recovery(
+        self: &Arc<Self>,
+        migration_blocked: &mut bool,
+    ) -> protocol::Result<()> {
         let scopes = self.registry.snapshot_scopes();
         let schedulers = scopes
             .iter()
@@ -833,10 +847,13 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         for scheduler in &schedulers {
             scheduler.resolve_workers().await.map_err(internal)?;
         }
+        let migration_exclusions = self
+            .migrate_legacy_tasks(&scopes, &schedulers, migration_blocked)
+            .await?;
         for scheduler in &schedulers {
             scheduler.prepare_recovery().await.map_err(internal)?;
         }
-        let mut claimed = HashSet::new();
+        let mut claimed = migration_exclusions.clone();
         for scheduler in &schedulers {
             claimed.extend(scheduler.claimed_worker_ids().await);
         }
@@ -850,7 +867,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 .await
                 .map_err(internal)?;
         }
-        claimed.clear();
+        claimed = migration_exclusions;
         for scheduler in &schedulers {
             claimed.extend(scheduler.claimed_worker_ids().await);
         }
@@ -874,6 +891,151 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 .map_err(internal)?;
         }
         Ok(())
+    }
+    async fn migrate_legacy_tasks(
+        &self,
+        scopes: &[Arc<Scope<S>>],
+        schedulers: &[Arc<RuntimeTaskScheduler<S>>],
+        migration_blocked: &mut bool,
+    ) -> protocol::Result<HashSet<String>> {
+        let indices = scopes
+            .iter()
+            .enumerate()
+            .map(|(index, scope)| (scope.identity().session.session_id.clone(), index))
+            .collect::<HashMap<_, _>>();
+        let mut migrations = Vec::with_capacity(scopes.len());
+        let mut owned = HashMap::<String, Vec<String>>::new();
+        let mut obsolete = HashSet::new();
+        for (scope, scheduler) in scopes.iter().zip(schedulers) {
+            let migration = scheduler.capture_migration().await;
+            if migration != TaskGraphMigrationSnapshot::Current {
+                let workers = scheduler.capture_owned_workers().await.map_err(internal)?;
+                obsolete.extend(workers.iter().cloned());
+                owned.insert(scope.identity().session.session_id.clone(), workers);
+            }
+            if let TaskGraphMigrationSnapshot::Retiring {
+                disposition,
+                excluded_session_ids,
+            } = &migration
+            {
+                obsolete.extend(excluded_session_ids.iter().cloned());
+                if *disposition == TaskMigrationDisposition::CancelObsolete {
+                    obsolete.insert(scope.identity().session.session_id.clone());
+                }
+            }
+            migrations.push(migration);
+        }
+        let mut frontier = obsolete.iter().cloned().collect::<Vec<_>>();
+        while let Some(id) = frontier.pop() {
+            let index = *indices
+                .get(&id)
+                .ok_or_else(|| internal("legacy migration worker is not retained"))?;
+            let workers = match owned.get(&id) {
+                Some(workers) => workers.clone(),
+                None => {
+                    let workers = schedulers[index]
+                        .capture_owned_workers()
+                        .await
+                        .map_err(internal)?;
+                    owned.insert(id, workers.clone());
+                    workers
+                }
+            };
+            for worker in workers {
+                if obsolete.insert(worker.clone()) {
+                    frontier.push(worker);
+                }
+            }
+        }
+        let mut known_inputs = HashMap::<String, HashSet<String>>::new();
+        for scheduler in schedulers {
+            for (session_id, message_id) in scheduler.capture_migration_notices().await {
+                known_inputs
+                    .entry(session_id)
+                    .or_default()
+                    .insert(message_id);
+            }
+        }
+        for id in &obsolete {
+            let scope = &scopes[indices[id]];
+            let saved = scope
+                .agent_state()
+                .load()
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| internal("legacy worker state is missing"))?;
+            if let Some(execution) = saved.execution {
+                known_inputs
+                    .entry(id.clone())
+                    .or_default()
+                    .insert(execution.initial_message_id);
+                known_inputs
+                    .entry(scope.identity().session.parent_session_id.clone())
+                    .or_default()
+                    .insert(format!("{}.parent", execution.execution_id));
+            }
+        }
+        for id in &obsolete {
+            if let Some(message_id) = schedulers[indices[id]]
+                .find_ambiguous_migration_input(known_inputs.entry(id.clone()).or_default())
+                .await
+                .map_err(internal)?
+            {
+                *migration_blocked = true;
+                return Err(RpcError::new(
+                    RpcCode::FailedPrecondition,
+                    format!(
+                        "legacy task migration blocked for /{}: pending input {message_id} has no provable task ownership; resolve the pending input before reopening",
+                        scopes[indices[id]].identity().name_path.join("/")
+                    ),
+                ));
+            }
+        }
+        let root = self.main.lock().expect("user main poisoned").scope.clone();
+        self.registry
+            .prepare_state(
+                root.identity(),
+                &root.selection().current().map_err(internal)?,
+                "",
+                CompletionDelivery::Automatic,
+            )
+            .await
+            .map_err(internal)?;
+        let mut retiring = Vec::new();
+        let mut exclusions = HashSet::new();
+        for (index, scope) in scopes.iter().enumerate() {
+            let id = &scope.identity().session.session_id;
+            if migrations[index] == TaskGraphMigrationSnapshot::Current && !obsolete.contains(id) {
+                continue;
+            }
+            let disposition = if obsolete.contains(id) {
+                TaskMigrationDisposition::CancelObsolete
+            } else {
+                TaskMigrationDisposition::Reassign
+            };
+            let mut excluded = owned.get(id).cloned().unwrap_or_default();
+            if disposition == TaskMigrationDisposition::CancelObsolete {
+                excluded.push(id.clone());
+            }
+            if let TaskGraphMigrationSnapshot::Retiring {
+                excluded_session_ids,
+                ..
+            } = &migrations[index]
+            {
+                excluded.extend(excluded_session_ids.iter().cloned());
+            }
+            exclusions.extend(excluded.iter().cloned());
+            schedulers[index]
+                .prepare_migration(disposition, excluded)
+                .await
+                .map_err(internal)?;
+            retiring.push(index);
+        }
+        retiring.sort_by_key(|index| std::cmp::Reverse(scopes[*index].identity().session.depth));
+        for index in retiring {
+            schedulers[index].retire_legacy().await.map_err(internal)?;
+        }
+        Ok(exclusions)
     }
     async fn reserve_recovery(
         self: &Arc<Self>,
@@ -1176,6 +1338,51 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         *closed = Some(result.clone());
         result
     }
+}
+
+async fn close_blocked_recovery<S: RestrictableAccessSnapshot + 'static>(
+    registry: &Arc<AgentRegistry<S>>,
+) -> protocol::Result<()> {
+    registry
+        .freeze_admissions()
+        .join()
+        .await
+        .map_err(internal)?;
+    let scopes = registry.snapshot_scopes();
+    let schedulers = scopes
+        .iter()
+        .map(|scope| {
+            scope
+                .get_service::<RuntimeTaskScheduler<S>>()
+                .map_err(internal)
+        })
+        .collect::<protocol::Result<Vec<_>>>()?;
+    let freezes = schedulers
+        .iter()
+        .map(|scheduler| scheduler.freeze_for_suspension())
+        .collect::<Vec<_>>();
+    let mut failure = None;
+    for freeze in freezes {
+        if let Err(error) = freeze.join().await {
+            failure.get_or_insert_with(|| internal(error));
+        }
+    }
+    for scope in scopes {
+        let session = scope.get_service::<RuntimeSession<S>>().map_err(internal)?;
+        if let Err(error) = session.close_unactivated().await {
+            failure.get_or_insert_with(|| internal(error));
+        }
+    }
+    let suspensions = schedulers
+        .iter()
+        .map(|scheduler| scheduler.suspend())
+        .collect::<Vec<_>>();
+    for suspension in suspensions {
+        if let Err(error) = suspension.join().await {
+            failure.get_or_insert_with(|| internal(error));
+        }
+    }
+    failure.map_or(Ok(()), Err)
 }
 
 async fn suspend_registry<S: RestrictableAccessSnapshot + 'static>(

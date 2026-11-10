@@ -61,6 +61,14 @@ pub trait TaskSession: Send + Sync {
         reference: &'a TaskResponseReference,
         claim: &'a TaskResultClaim,
     ) -> BoxFuture<'a, ChildResult<()>>;
+    /// Releases a retiring result without waking pending conversation input.
+    fn acknowledge_retired_result<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>>;
+    /// Cancels a known pending notification without removing conversation history.
+    fn cancel_notification<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ChildResult<()>>;
     /// Restores a saved exact result independently of the worker's latest execution.
     fn restore_response<'a>(
         &'a self,
@@ -191,6 +199,26 @@ impl<B: DrainBackend> TaskSession for TaskSessionAdapter<B> {
         Box::pin(async move {
             self.session
                 .acknowledge_claimed_result(reference, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn acknowledge_retired_result<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .acknowledge_retired_result(reference, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn cancel_notification<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .cancel_recorded_notification(message_id)
                 .await
                 .map_err(Into::into)
         })

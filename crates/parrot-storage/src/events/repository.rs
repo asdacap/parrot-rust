@@ -89,6 +89,13 @@ impl EventRepository {
         self.transaction(move |tx| inputs::existing(tx, &agent, &message))
             .await
     }
+    pub async fn capture_pending_input_ids(
+        &self,
+        agent: String,
+    ) -> Result<Vec<String>, EventError> {
+        self.transaction(move |tx| inputs::capture_pending_input_ids(tx, &agent))
+            .await
+    }
     pub async fn has_pending_inputs(&self, agent: String) -> Result<bool, EventError> {
         self.transaction(move |tx| inputs::has_pending(tx, &agent))
             .await

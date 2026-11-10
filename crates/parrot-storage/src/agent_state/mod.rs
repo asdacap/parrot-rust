@@ -1,6 +1,7 @@
 //! Agent-local recovery snapshots. One shared store belongs to each agent scope.
 
 mod files;
+mod legacy;
 
 use files::AgentStateDirectory;
 use parrot_domain::{
@@ -151,16 +152,18 @@ impl State {
             schema_version: u64,
         }
         let version: Version = serde_json::from_slice(&bytes).map_err(corrupt)?;
-        if version.schema_version != AGENT_STATE_VERSION {
-            return Err(AgentStateError::new(
-                AgentStateErrorKind::UnsupportedVersion,
-                format!(
-                    "unsupported agent snapshot version {}",
-                    version.schema_version
-                ),
-            ));
-        }
-        let snapshot = serde_json::from_slice(&bytes).map_err(corrupt)?;
+        let snapshot = match version.schema_version {
+            1 => serde_json::from_slice::<legacy::LegacyAgentStateSnapshot>(&bytes)
+                .map_err(corrupt)?
+                .normalize(),
+            AGENT_STATE_VERSION => serde_json::from_slice(&bytes).map_err(corrupt)?,
+            version => {
+                return Err(AgentStateError::new(
+                    AgentStateErrorKind::UnsupportedVersion,
+                    format!("unsupported agent snapshot version {version}"),
+                ));
+            }
+        };
         self.validate(&snapshot)?;
         Ok(Some(snapshot))
     }

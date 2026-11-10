@@ -1164,6 +1164,28 @@ impl<S: RestrictableAccessSnapshot + 'static> TaskSession for ScopedTaskSession<
                 .map_err(Into::into)
         })
     }
+    fn acknowledge_retired_result<'a>(
+        &'a self,
+        reference: &'a parrot_domain::values::agent_state::TaskResponseReference,
+        claim: &'a parrot_domain::values::agent_state::TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.link
+                .session()?
+                .acknowledge_retired_result(reference, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn cancel_notification<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.link
+                .session()?
+                .cancel_recorded_notification(message_id)
+                .await
+                .map_err(Into::into)
+        })
+    }
     fn restore_response<'a>(
         &'a self,
         reference: &'a parrot_domain::values::agent_state::TaskResponseReference,
