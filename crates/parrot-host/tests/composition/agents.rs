@@ -398,7 +398,7 @@ mod fixture {
         }
     }
 
-    type Backend = RuntimeBackend<Security, dyn ToolFactory<Security>>;
+    type Backend = RuntimeBackend<Security, RetainedFactory>;
     type WaitTool = AgentTool<ScopedAgentRuntime<Security>, ModelRouter>;
     fn definition(name: &str) -> ConfiguredToolDefinition {
         use parrot_foundation::config::{

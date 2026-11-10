@@ -307,3 +307,7 @@ impl<'a, T: Send + 'a> InvocationBatch<'a, T> {
             .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/tool_settlement/unit.rs"]
+mod tests;

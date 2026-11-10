@@ -136,7 +136,7 @@ async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
         .await;
         harness.restore(&fixture).await.unwrap();
         harness.restore(&fixture).await.unwrap();
-        let messages = harness.conversation.messages();
+        let messages = harness.runtime_state.get_mut().conversation.messages();
         assert!(
             messages
                 .iter()

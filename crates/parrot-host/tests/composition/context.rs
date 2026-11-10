@@ -1,5 +1,5 @@
 //! The pre-existing T47 fixtures construct actual SQLite history, ContextController,
-//! ToolSettlement and RuntimeBackend. Their fake provider has no network/credentials.
+//! native tool execution and RuntimeBackend. Their fake provider has no network/credentials.
 #[allow(dead_code, unused_imports)]
 #[path = "../../../parrot-runtime/tests/tool_settlement/fixture.rs"]
 mod fixture;

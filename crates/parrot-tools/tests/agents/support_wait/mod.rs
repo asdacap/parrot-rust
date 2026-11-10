@@ -1,5 +1,5 @@
 //! Test-only composition: real SQLite/JSONL, RuntimeBackend, AgentSession,
-//! ToolSettlement and WaitService. This is not the production P08 adapter.
+//! native tool execution and WaitService. This is not the production P08 adapter.
 use std::{
     collections::{BTreeMap, VecDeque},
     future::Future,
@@ -378,7 +378,7 @@ impl SelectionSource<Security> for Selection {
     }
 }
 
-pub(super) type Backend = RuntimeBackend<Security, dyn ToolFactory<Security>>;
+pub(super) type Backend = RuntimeBackend<Security, Factory>;
 
 /// A caller-bound test bridge for precisely the Wait operation. Other operations
 /// deliberately fail if used; no canned successful runtime results are supplied.
@@ -507,7 +507,7 @@ fn wait_tool(bridge: Arc<WaitBridge>) -> WaitTool {
 
 /// Only the associated-type conversion is test-local; ordinary Tool execution,
 /// Started/Finished events, terminal commit and conversation projection use the
-/// actual runtime ToolSettlement implementation.
+/// actual runtime Tools implementation.
 struct RetainedTool {
     metadata: ToolMetadata,
     tool: WaitTool,
@@ -570,7 +570,7 @@ impl Tool for RetainedTool {
         })
     }
 }
-struct Factory(Arc<RetainedTool>);
+pub(super) struct Factory(Arc<RetainedTool>);
 impl ToolFactory<Security> for Factory {
     fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
         Ok(ToolInventory {
