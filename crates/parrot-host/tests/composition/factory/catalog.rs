@@ -39,7 +39,7 @@ mod fixture_support {
         },
         values::{
             activity::{AgentSessionActivitySnapshot, DrainState},
-            agent_tasks::Task,
+            agent_tasks::{Task, TaskSetResponse, TaskView},
             context::{ContextSize, ContextSnapshot},
         },
     };
@@ -689,7 +689,7 @@ mod fixture_support {
             &'a self,
             identity: &'a parrot_domain::values::agent_tasks::TaskCallIdentity,
             cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<Option<usize>, ToolFailure>> {
+        ) -> BoxFuture<'a, OperationResult<Option<TaskSetResponse>, ToolFailure>> {
             Box::pin(async move {
                 cancelled(cancellation)?;
                 let state = self.state.lock().unwrap();
@@ -699,14 +699,17 @@ mod fixture_support {
                     .filter(|(sequence, call_id)| {
                         *sequence == identity.assistant_sequence && *call_id == identity.call_id
                     })
-                    .map(|_| state.tasks.len()))
+                    .map(|_| TaskSetResponse {
+                        accepted_count: state.tasks.len(),
+                        text: format!("accepted {} tasks", state.tasks.len()),
+                    }))
             })
         }
         fn update<'a>(
             &'a self,
             update: TaskUpdate<Selection>,
             cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<TaskSnapshot, ToolFailure>> {
+        ) -> BoxFuture<'a, OperationResult<TaskSetResponse, ToolFailure>> {
             Box::pin(async move {
                 cancelled(cancellation)?;
                 self.record(
@@ -721,9 +724,9 @@ mod fixture_support {
                     update.history_boundary.assistant_sequence,
                     update.history_boundary.call_id,
                 ));
-                Ok(TaskSnapshot {
-                    tasks: state.tasks.clone(),
-                    detail: None,
+                Ok(TaskSetResponse {
+                    accepted_count: state.tasks.len(),
+                    text: format!("accepted {} tasks", state.tasks.len()),
                 })
             })
         }
@@ -738,9 +741,18 @@ mod fixture_support {
                     .map(|task| TaskDetail {
                         task: task.clone(),
                         agent_name: Some("catalog-worker".into()),
+                        assigned_to: None,
                     });
                 Ok(TaskSnapshot {
-                    tasks: state.tasks.clone(),
+                    tasks: state
+                        .tasks
+                        .iter()
+                        .cloned()
+                        .map(|task| TaskView {
+                            task,
+                            assigned_to: None,
+                        })
+                        .collect(),
                     detail,
                 })
             })
@@ -1114,7 +1126,6 @@ mod fixture_binding {
                 catalog::TaskQueueServices {
                     tasks: shared.clone(),
                     filesystem: shared.clone(),
-                    templates: templates.clone(),
                 },
                 &definitions,
             )

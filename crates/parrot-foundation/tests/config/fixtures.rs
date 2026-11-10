@@ -49,6 +49,8 @@ pub const CONSOLIDATED_IDS: [&str; 2] = [
     "compact-context-tool.result",
 ];
 
+pub const NATIVE_MINIJINJA_IDS: [&str; 1] = ["agent-task.set-assigned"];
+
 pub const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
     "agent-session.child-question",
     "agent-session.pending-child-question-reminder",
@@ -86,7 +88,7 @@ fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
         !CONSOLIDATED_SOURCE_IDS.contains(&id.as_str())
             && !AGENT_COMMUNICATION_SOURCE_IDS.contains(&id.as_str())
     });
-    for id in CONSOLIDATED_IDS {
+    for id in CONSOLIDATED_IDS.into_iter().chain(NATIVE_MINIJINJA_IDS) {
         let spec = actual.get(id).ok_or_else(|| {
             ConfigError::invalid_data(format!("consolidated template {id} is missing"))
         })?;

@@ -160,27 +160,11 @@ async fn set_tasks(fixture: &Fixture, root: &Arc<Scope<Security>>, tasks: Value)
     let controller = root
         .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
         .unwrap();
-    let templates = fixture.user().templates.clone();
-    let render = Arc::new(move |count: usize| {
-        templates
-            .render(
-                "agent-task.set-accepted",
-                &[("count".into(), count.to_string().into())],
-                &NeverCancelled,
-            )
-            .map_err(|e| {
-                parrot_tools::tasks_queues::ToolFailure::new(
-                    parrot_tools::tasks_queues::FailureKind::Other,
-                    e.to_string(),
-                )
-            })
-    });
     let tool = TaskTool::new(
         TaskToolKind::Set,
         &catalog::configured_definitions(&fixture.configuration),
         controller,
         Arc::new(Files::<SharedSecurity<Security>>(PhantomData)),
-        render,
     )
     .unwrap();
     let turn = root.selection().capture().unwrap();
@@ -343,7 +327,7 @@ async fn retained_wait_wakes_from_actual_task_notifier_and_oversized_publication
         snapshot
             .tasks
             .iter()
-            .all(|task| task.state == ExecutionStatus::Canceled)
+            .all(|view| view.task.state == ExecutionStatus::Canceled)
     );
     bounded(hosted.close()).await.unwrap();
 }

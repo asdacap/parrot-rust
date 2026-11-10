@@ -515,6 +515,8 @@ pub struct GraphFaults {
     pub fail_ack: std::sync::atomic::AtomicBool,
     pub fail_response: std::sync::atomic::AtomicBool,
     pub fail_stopped: std::sync::atomic::AtomicBool,
+    pub fail_seal: std::sync::atomic::AtomicBool,
+    pub seal_gate: Mutex<Option<Arc<Gate>>>,
 }
 pub struct GraphState {
     inner: Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>,
@@ -585,6 +587,22 @@ impl parrot_domain::contracts::agent_state::AgentStateStore for GraphState {
             if let (true, parrot_domain::values::agent_state::AgentStateUpdate::Tasks(next)) =
                 (selected, &value)
             {
+                if next.accepted_calls.iter().any(|call| {
+                    matches!(
+                        call.receipt,
+                        parrot_domain::values::agent_state::TaskCallReceipt::Accepted { .. }
+                    )
+                }) {
+                    let gate = self.faults.seal_gate.lock().unwrap().take();
+                    if let Some(gate) = gate {
+                        gate.wait(&parrot_storage::events::NeverCancelled)
+                            .await
+                            .unwrap();
+                    }
+                    if self.faults.fail_seal.swap(false, Ordering::SeqCst) {
+                        return Err(failure());
+                    }
+                }
                 let old = self.inner.load().await?.unwrap();
                 if next.entries.iter().any(|entry| {
                     entry

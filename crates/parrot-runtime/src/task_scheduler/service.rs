@@ -1,5 +1,7 @@
 #[path = "migration.rs"]
 mod migration;
+#[path = "receipts.rs"]
+mod receipts;
 
 use super::{
     ForkHistoryMode, SchedulerConfig, TaskDiagnostic, TaskRunner, TaskSession,
@@ -35,14 +37,15 @@ use parrot_domain::{
     values::{
         agent_state::{
             AcceptedTaskCall, AgentStateUpdate, DedicatedTaskExecutionSnapshot,
-            ForkBoundarySnapshot, NotificationCheckpoint, SelectionSnapshot, TaskEntrySnapshot,
-            TaskExecutionSnapshot, TaskForkModeSnapshot, TaskGraphMigrationSnapshot,
-            TaskGraphSnapshot, TaskMigrationDisposition, TaskNotificationSnapshot,
-            TaskOwnerAssignmentReference, TaskResponseReference, TaskResultClaim,
-            TaskRunnerCheckpoint, TaskStopCheckpoint,
+            ForkBoundarySnapshot, NotificationCheckpoint, SelectionSnapshot, TaskCallReceipt,
+            TaskEntrySnapshot, TaskExecutionSnapshot, TaskForkModeSnapshot,
+            TaskGraphMigrationSnapshot, TaskGraphSnapshot, TaskMigrationDisposition,
+            TaskNotificationSnapshot, TaskOwnerAssignmentReference, TaskResponseReference,
+            TaskResultClaim, TaskRunnerCheckpoint, TaskStopCheckpoint,
         },
         agent_tasks::{
-            ExecutionStatus, Task, TaskAssignee, TaskCallIdentity, TaskPayload, TaskView,
+            ExecutionStatus, Task, TaskAssignee, TaskCallIdentity, TaskPayload, TaskSetResponse,
+            TaskView,
         },
         identifiers::Identifier,
     },
@@ -290,6 +293,23 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 ));
             }
         }
+        let preparing = saved
+            .tasks
+            .accepted_calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| matches!(call.receipt, TaskCallReceipt::Preparing { .. }))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if preparing.len() > 1
+            || preparing
+                .first()
+                .is_some_and(|index| *index + 1 != saved.tasks.accepted_calls.len())
+        {
+            return Err(ChildError::registry(
+                "unsealed task receipt must be the unique last accepted call",
+            ));
+        }
         let mut entries = Vec::new();
         let mut owner_running = false;
         for entry in saved.tasks.entries {
@@ -526,6 +546,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 {
                     continue;
                 }
+                if let Err(error) = scheduler.seal_preparing(&mut state).await {
+                    scheduler.failure_diagnostic("capacity", &error);
+                    if state.persistence_failure.is_some() {
+                        return Err(error);
+                    }
+                    continue;
+                }
                 let result: ChildResult<()> = async {
                     if scheduler.reconcile(&mut state).await? {
                         scheduler.notify_completion(&mut state)?;
@@ -589,32 +616,60 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         selection: TurnSelection<S>,
         boundary: HistoryForkBoundary,
         identity: TaskCallIdentity,
-    ) -> ChildResult<Operation<usize>> {
-        self.set_tasks_origin(tasks, selection, boundary, UpdateOrigin::Tool(identity))
+    ) -> ChildResult<Operation<TaskSetResponse>> {
+        let update =
+            self.set_tasks_origin(tasks, selection, boundary, UpdateOrigin::Tool(identity))?;
+        Ok(Operation::start(async move {
+            update
+                .join()
+                .await?
+                .ok_or_else(|| ChildError::registry("tool update has no accepted response"))
+        }))
     }
-    pub async fn lookup_accepted(&self, identity: &TaskCallIdentity) -> ChildResult<Option<usize>> {
-        self.admitted().await;
-        let state = self.gate.lock().await;
-        self.ensure_healthy(&state)?;
-        Self::find_receipt(&state, identity)
-    }
-    fn find_receipt(state: &State<S>, identity: &TaskCallIdentity) -> ChildResult<Option<usize>> {
-        if state.accepted_calls.first().is_some_and(|receipt| {
-            identity.assistant_sequence < receipt.identity.assistant_sequence
-        }) {
-            return Err(ChildError::registry(
-                "task update call belongs to an older settled assistant batch",
+    pub async fn lookup_accepted(
+        self: &Arc<Self>,
+        identity: &TaskCallIdentity,
+    ) -> ChildResult<Option<TaskSetResponse>> {
+        let operation = {
+            let mut admission = self.admission.lock().expect("task admission poisoned");
+            if admission.settlement.is_some() || admission.freeze.is_some() {
+                return Err(shutting_down());
+            }
+            let previous = admission.tail.clone();
+            let scheduler = self.clone();
+            let identity = identity.clone();
+            let operation = Operation::start(async move {
+                if let Some(previous) = previous {
+                    let _ = previous.join().await;
+                }
+                scheduler.owner()?;
+                let mut state = scheduler.gate.lock().await;
+                scheduler.ensure_healthy(&state)?;
+                if let Some(receipt) = Self::find_receipt(&state, &identity)? {
+                    if !matches!(receipt, TaskCallReceipt::Preparing { .. }) {
+                        return scheduler.restore_response(receipt).map(Some);
+                    }
+                }
+                let preparing = Self::has_preparing(&state);
+                scheduler.seal_preparing(&mut state).await?;
+                if preparing && state.execution_active {
+                    scheduler.reconcile(&mut state).await?;
+                    scheduler.notify_completion(&mut state)?;
+                    scheduler.publish(&mut state).await?;
+                    scheduler.kick_stops(&mut state)?;
+                    scheduler.kick_notifications(&mut state)?;
+                }
+                Self::find_receipt(&state, &identity)?
+                    .map(|receipt| scheduler.restore_response(receipt))
+                    .transpose()
+            });
+            let tail = operation.clone();
+            admission.tail = Some(Operation::start(
+                async move { tail.join().await.map(|_| ()) },
             ));
-        }
-        state
-            .accepted_calls
-            .iter()
-            .find(|receipt| receipt.identity == *identity)
-            .map(|receipt| {
-                usize::try_from(receipt.accepted_count)
-                    .map_err(|_| ChildError::registry("accepted task count exceeds this platform"))
-            })
-            .transpose()
+            operation
+        };
+        operation.join().await
     }
     fn set_tasks_origin(
         self: &Arc<Self>,
@@ -622,7 +677,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         selection: TurnSelection<S>,
         boundary: HistoryForkBoundary,
         origin: UpdateOrigin,
-    ) -> ChildResult<Operation<usize>> {
+    ) -> ChildResult<Operation<Option<TaskSetResponse>>> {
         let mut admission = self.admission.lock().expect("task admission poisoned");
         if admission.settlement.is_some() || admission.freeze.is_some() {
             return Err(shutting_down());
@@ -642,8 +697,16 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 ));
             }
             if let UpdateOrigin::Tool(identity) = &origin {
-                if let Some(count) = Self::find_receipt(&state, identity)? {
-                    return Ok(count);
+                if let Some(receipt) = Self::find_receipt(&state, identity)? {
+                    if !matches!(receipt, TaskCallReceipt::Preparing { .. }) {
+                        return scheduler.restore_response(receipt).map(Some);
+                    }
+                }
+            }
+            scheduler.seal_preparing(&mut state).await?;
+            if let UpdateOrigin::Tool(identity) = &origin {
+                if let Some(receipt) = Self::find_receipt(&state, identity)? {
+                    return scheduler.restore_response(receipt).map(Some);
                 }
             }
             let count = tasks.len();
@@ -694,16 +757,19 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     });
                 }
             }
-            if let UpdateOrigin::Tool(identity) = origin {
+            if let UpdateOrigin::Tool(identity) = &origin {
                 state.accepted_calls.retain(|receipt| {
                     receipt.identity.assistant_sequence == identity.assistant_sequence
                 });
                 state.accepted_calls.push(AcceptedTaskCall {
-                    identity,
-                    accepted_count: count as u64,
+                    identity: identity.clone(),
+                    receipt: TaskCallReceipt::Preparing {
+                        accepted_count: count as u64,
+                    },
                 });
             }
             scheduler.save_graph(&mut state).await?;
+            scheduler.seal_preparing(&mut state).await?;
             scheduler.reconcile(&mut state).await?;
             let changed: Vec<_> = state
                 .entries
@@ -733,7 +799,15 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 scheduler.kick_notifications(&mut state),
                 |error| scheduler.failure_diagnostic("delivery", error),
             );
-            result.map(|()| count)
+            result?;
+            match origin {
+                UpdateOrigin::Tool(identity) => scheduler
+                    .restore_response(
+                        Self::find_receipt(&state, &identity)?.expect("newly sealed response"),
+                    )
+                    .map(Some),
+                UpdateOrigin::Direct => Ok(None),
+            }
         });
         let tail = operation.clone();
         admission.tail = Some(Operation::start(
@@ -818,6 +892,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             scheduler.owner()?;
             let mut state = scheduler.gate.lock().await;
             scheduler.ensure_healthy(&state)?;
+            scheduler.seal_preparing(&mut state).await?;
             let mut changed = false;
             for before in previous {
                 let Some(after) = incoming.iter().find(|task| task.name == before.name) else {
@@ -937,6 +1012,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             }
             if let Some(previous) = previous {
                 let _ = previous.join().await;
+            }
+            let preparing = {
+                let state = scheduler.gate.lock().await;
+                Self::has_preparing(&state)
+            };
+            if preparing {
+                return scheduler.suspend().join().await;
             }
             scheduler.capacity_stop.cancel();
             let mut result = scheduler.join_capacity_observer().await;
@@ -1099,7 +1181,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             }
         }
         self.ensure_healthy(state)?;
-        if state.settling || state.suspended || !state.execution_active {
+        if state.settling
+            || state.suspended
+            || (!state.execution_active && !Self::has_preparing(state))
+        {
             return Ok(changed);
         }
         if !state.entries.iter().any(Entry::owns_self) {
@@ -1213,22 +1298,24 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 ],
             )?);
         }
-        self.enqueue(
-            state,
-            "agent-task.notification-assigned-self",
-            &[
-                ("name", &task.name),
-                ("description", &task.description),
-                ("instruction", instruction),
-                ("acceptance_criteria", &task.acceptance_criteria),
-                ("dependencies", &dependencies),
-            ],
-            true,
-        )?
-        .owner_assignment = Some(TaskOwnerAssignmentReference {
-            task_name: task.name.clone(),
-            generation_id: generation_id.clone(),
-        });
+        if !Self::has_preparing(state) {
+            self.enqueue(
+                state,
+                "agent-task.notification-assigned-self",
+                &[
+                    ("name", &task.name),
+                    ("description", &task.description),
+                    ("instruction", instruction),
+                    ("acceptance_criteria", &task.acceptance_criteria),
+                    ("dependencies", &dependencies),
+                ],
+                true,
+            )?
+            .owner_assignment = Some(TaskOwnerAssignmentReference {
+                task_name: task.name.clone(),
+                generation_id: generation_id.clone(),
+            });
+        }
         let entry = &mut state.entries[index];
         entry.execution = TaskExecution::Owner { generation_id };
         entry.task.state = ExecutionStatus::Running;
@@ -1323,6 +1410,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         state.entries[index].task.result = None;
         state.entries[index].task.failure = None;
         self.save_graph(state).await?;
+        if Self::has_preparing(state) {
+            state.entries[index].borrow_worker_mut().reserved_admission = Some(admission);
+            return Ok(true);
+        }
         let checkpoint = state.entries[index]
             .borrow_worker()
             .runner
@@ -1513,8 +1604,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         outcome: Task,
         run: &Run,
     ) -> ChildResult<()> {
+        let sealed = self.seal_preparing(state).await;
+        state.entries[index].borrow_worker_mut().run = None;
+        sealed?;
         let entry = &mut state.entries[index];
-        entry.borrow_worker_mut().run = None;
         entry.task.state = outcome.state;
         entry.task.result = outcome.result.clone();
         entry.task.failure = outcome.failure.clone();
@@ -1938,6 +2031,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 if state.suspended || state.settling {
                     return Err(shutting_down());
                 }
+                scheduler.seal_preparing(&mut state).await?;
                 state.execution_active = true;
                 let changed = scheduler.reconcile(&mut state).await?;
                 scheduler.notify_completion(&mut state)?;
@@ -1973,6 +2067,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             if state.suspended {
                 return Err(shutting_down());
             }
+            scheduler.seal_preparing(&mut state).await?;
             state.notifications_active = true;
             scheduler.kick_notifications(&mut state)
         })
@@ -2181,7 +2276,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     }
     fn kick_notifications(self: &Arc<Self>, state: &mut State<S>) -> ChildResult<()> {
         self.ensure_healthy(state)?;
-        if state.suspended || state.migration != TaskGraphMigrationSnapshot::Current {
+        if state.suspended
+            || state.migration != TaskGraphMigrationSnapshot::Current
+            || Self::has_preparing(state)
+        {
             return Ok(());
         }
         for value in state.notifications.clone() {
@@ -2265,7 +2363,9 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             if state.suspended {
                 return Err(ChildError::Cancelled);
             }
-            let current = find(state, &assignment.task_name).is_some_and(|index| {
+            let current = state.notifications.iter().any(|notice| notice.message_id == value.message_id)
+                && !Self::has_preparing(state)
+                && find(state, &assignment.task_name).is_some_and(|index| {
                 effective(state, index) == ExecutionStatus::Running
                     && matches!(&state.entries[index].execution, TaskExecution::Owner { generation_id } if *generation_id == assignment.generation_id)
             });
@@ -2306,6 +2406,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             return Ok(());
         }
         self.ensure_healthy(&state)?;
+        if Self::has_preparing(&state) && (state.suspended || state.settling) {
+            return Ok(());
+        }
+        self.seal_preparing(&mut state).await?;
         state.notifications.retain(|notice| notice.message_id != id);
         for entry in &mut state.entries {
             let Some(entry) = entry.capture_worker_mut() else {

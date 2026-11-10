@@ -6,6 +6,10 @@ pub fn rewrite_snapshot_as_version_one(path: &Path, ordinary_tasks: &[usize]) {
     snapshot["schema_version"] = 1.into();
     let graph = snapshot["tasks"].as_object_mut().unwrap();
     graph.remove("migration");
+    for call in graph["accepted_calls"].as_array_mut().unwrap() {
+        let receipt = call.as_object_mut().unwrap().remove("receipt").unwrap();
+        call["accepted_count"] = receipt["accepted_count"].clone();
+    }
     for (index, entry) in graph["entries"]
         .as_array_mut()
         .unwrap()

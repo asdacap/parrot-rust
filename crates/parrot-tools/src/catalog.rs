@@ -699,7 +699,6 @@ pub struct TaskQueueFactories<S, T> {
 pub struct TaskQueueServices<C, F> {
     pub tasks: Arc<C>,
     pub filesystem: Arc<F>,
-    pub templates: Arc<PromptTemplateCatalog>,
 }
 impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
     TaskQueueFactories<S, T>
@@ -717,29 +716,16 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
             > + 'static,
         F: AuthorizedReadService<Security = S> + 'static,
     {
-        let render_accepted = Arc::new(move |count: usize| {
-            services
-                .templates
-                .render(
-                    "agent-task.set-accepted",
-                    &[("count".into(), serde_json::Value::String(count.to_string()))],
-                    &crate::process::ownership::execution::NeverCancelled,
-                )
-                .map_err(|error| {
-                    ToolFailure::new(tasks_queues::FailureKind::Other, error.to_string())
-                })
-        });
         let task = |kind| {
             Ok(bind(
                 TaskToolKind::name(kind),
                 &[],
                 true,
-                TaskTool::<_, _, _, T>::new(
+                TaskTool::<_, _, T>::new(
                     kind,
                     definitions,
                     services.tasks.clone(),
                     services.filesystem.clone(),
-                    render_accepted.clone(),
                 )?,
                 scoped,
             ))

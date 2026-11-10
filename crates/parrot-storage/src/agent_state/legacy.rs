@@ -2,11 +2,11 @@ use parrot_domain::values::{
     agent_state::{
         AGENT_STATE_VERSION, AcceptedTaskCall, AgentDescriptor, AgentStateSnapshot,
         DedicatedTaskExecutionSnapshot, ExecutionCheckpoint, ForkBoundarySnapshot,
-        NotificationCheckpoint, RetainedChild, SelectionSnapshot, TaskEntrySnapshot,
-        TaskExecutionSnapshot, TaskForkModeSnapshot, TaskGraphMigrationSnapshot, TaskGraphSnapshot,
-        TaskNotificationSnapshot, TaskRunnerCheckpoint, TaskStopCheckpoint,
+        NotificationCheckpoint, RetainedChild, SelectionSnapshot, TaskCallReceipt,
+        TaskEntrySnapshot, TaskExecutionSnapshot, TaskForkModeSnapshot, TaskGraphMigrationSnapshot,
+        TaskGraphSnapshot, TaskNotificationSnapshot, TaskRunnerCheckpoint, TaskStopCheckpoint,
     },
-    agent_tasks::{ExecutionStatus, Task},
+    agent_tasks::{ExecutionStatus, Task, TaskCallIdentity},
 };
 use serde::Deserialize;
 
@@ -32,7 +32,14 @@ struct LegacyTaskGraphSnapshot {
     all_resolved: bool,
     completion_notification: Option<NotificationCheckpoint>,
     notifications: Vec<LegacyTaskNotificationSnapshot>,
-    accepted_calls: Vec<AcceptedTaskCall>,
+    accepted_calls: Vec<LegacyAcceptedTaskCall>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyAcceptedTaskCall {
+    identity: TaskCallIdentity,
+    accepted_count: u64,
 }
 
 #[derive(Deserialize)]
@@ -91,7 +98,16 @@ impl LegacyTaskGraphSnapshot {
                 .into_iter()
                 .map(LegacyTaskNotificationSnapshot::normalize)
                 .collect(),
-            accepted_calls: self.accepted_calls,
+            accepted_calls: self
+                .accepted_calls
+                .into_iter()
+                .map(|call| AcceptedTaskCall {
+                    identity: call.identity,
+                    receipt: TaskCallReceipt::LegacyCount {
+                        accepted_count: call.accepted_count,
+                    },
+                })
+                .collect(),
         }
     }
 }

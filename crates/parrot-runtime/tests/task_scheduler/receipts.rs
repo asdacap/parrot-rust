@@ -34,8 +34,10 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
             key.clone(),
         )
         .unwrap();
-    assert_eq!(first.join().await.unwrap(), 1);
-    assert_eq!(duplicate.join().await.unwrap(), 1);
+    let accepted = first.join().await.unwrap();
+    assert_eq!(accepted.accepted_count, 1);
+    assert!(accepted.text.contains("/owner/a"));
+    assert_eq!(duplicate.join().await.unwrap(), accepted);
     held.entered().await;
     let before = root.agent_state().load().await.unwrap().unwrap();
     assert_eq!(before.tasks.entries.len(), 1);
@@ -60,7 +62,8 @@ async fn accepted_call_replay_preserves_generation_and_original_count_but_new_id
             .unwrap()
             .join()
             .await
-            .unwrap(),
+            .unwrap()
+            .accepted_count,
         1
     );
     assert_eq!(snapshot(&root).await[0].state, Succeeded);
@@ -135,7 +138,11 @@ async fn current_batch_receipts_are_bounded_and_stale_batches_cannot_reapply() {
         2
     );
     assert_eq!(
-        scheduler.lookup_accepted(&call(8, "one")).await.unwrap(),
+        scheduler
+            .lookup_accepted(&call(8, "one"))
+            .await
+            .unwrap()
+            .map(|response| response.accepted_count),
         Some(1)
     );
     scheduler
@@ -243,7 +250,14 @@ async fn crash_after_graph_acceptance_replays_without_resetting_resumed_attempt(
     let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
     let restored = second.reopen_root(identity).await;
     let scheduler = restored.get_service::<Scheduler>().unwrap();
-    assert_eq!(scheduler.lookup_accepted(&key).await.unwrap(), Some(1));
+    assert_eq!(
+        scheduler
+            .lookup_accepted(&key)
+            .await
+            .unwrap()
+            .map(|response| response.accepted_count),
+        Some(1)
+    );
     assert_eq!(
         scheduler
             .set_tool_tasks(
@@ -255,7 +269,8 @@ async fn crash_after_graph_acceptance_replays_without_resetting_resumed_attempt(
             .unwrap()
             .join()
             .await
-            .unwrap(),
+            .unwrap()
+            .accepted_count,
         1
     );
     assert_eq!(

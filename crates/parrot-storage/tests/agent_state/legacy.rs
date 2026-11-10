@@ -5,6 +5,10 @@ fn encode_legacy(snapshot: &AgentStateSnapshot) -> Value {
     let mut value = serde_json::to_value(snapshot).unwrap();
     value["schema_version"] = json!(1);
     value["tasks"].as_object_mut().unwrap().remove("migration");
+    for call in value["tasks"]["accepted_calls"].as_array_mut().unwrap() {
+        let receipt = call.as_object_mut().unwrap().remove("receipt").unwrap();
+        call["accepted_count"] = receipt["accepted_count"].clone();
+    }
     for entry in value["tasks"]["entries"].as_array_mut().unwrap() {
         let execution = entry.as_object_mut().unwrap().remove("execution").unwrap();
         assert_eq!(execution["kind"], "dedicated");
@@ -32,7 +36,7 @@ fn populate_legacy_metadata(snapshot: &mut AgentStateSnapshot) {
             assistant_sequence: 71,
             call_id: "call-1".into(),
         },
-        accepted_count: 5,
+        receipt: TaskCallReceipt::LegacyCount { accepted_count: 5 },
     });
     snapshot.execution.as_mut().unwrap().result_claim = Some(TaskResultClaim {
         owner_session_id: "parent".into(),
@@ -277,4 +281,129 @@ async fn current_migration_descriptors_reject_unknown_fields_and_invalid_disposi
             AgentStateErrorKind::Corrupt
         );
     }
+}
+
+#[test]
+fn receipt_decode_preserves_rich_response_and_normalizes_old_counts() {
+    let identity = json!({"assistant_sequence": 17, "call_id": "call-1"});
+    for receipt in [
+        json!({"kind": "legacy_count", "accepted_count": 4}),
+        json!({"kind": "preparing", "accepted_count": 4}),
+        json!({"kind": "accepted", "accepted_count": 4, "response_text": "exact\nresponse"}),
+    ] {
+        let encoded = json!({"identity": identity, "receipt": receipt});
+        let decoded: AcceptedTaskCall = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+    }
+    let old = json!({"identity": identity, "accepted_count": 4});
+    let decoded: AcceptedTaskCall = serde_json::from_value(old).unwrap();
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap(),
+        json!({
+            "identity": identity,
+            "receipt": {"kind": "legacy_count", "accepted_count": 4}
+        })
+    );
+}
+
+#[test]
+fn receipt_decode_rejects_unknown_fields_and_malformed_variants() {
+    let identity = json!({"assistant_sequence": 17, "call_id": "call-1"});
+    for invalid in [
+        json!({"identity": identity, "accepted_count": 4, "extra": true}),
+        json!({"identity": identity, "accepted_count": 4, "receipt": {"kind": "preparing", "accepted_count": 4}}),
+        json!({"identity": identity, "receipt": {"kind": "preparing", "accepted_count": 4, "response_text": "not sealed"}}),
+        json!({"identity": identity, "receipt": {"kind": "accepted", "accepted_count": 4}}),
+        json!({"identity": identity, "receipt": {"kind": "unknown", "accepted_count": 4}}),
+        json!({"identity": identity, "receipt": {"kind": "legacy_count", "accepted_count": -1}}),
+    ] {
+        assert!(serde_json::from_value::<AcceptedTaskCall>(invalid).is_err());
+    }
+}
+
+#[tokio::test]
+async fn version_one_receipts_reject_new_response_metadata() {
+    let fixture = Fixture::new();
+    let store = fixture.store().await;
+    let mut legacy = encode_legacy(&snapshot());
+    legacy["tasks"]["accepted_calls"] = json!([{
+        "identity": {"assistant_sequence": 17, "call_id": "call-1"},
+        "receipt": {"kind": "accepted", "accepted_count": 4, "response_text": "exact response"}
+    }]);
+    let bytes = serde_json::to_vec(&legacy).unwrap();
+    fs::write(fixture.path(), &bytes).unwrap();
+    assert_eq!(
+        store.load().await.unwrap_err().kind,
+        AgentStateErrorKind::Corrupt
+    );
+    assert_eq!(fs::read(fixture.path()).unwrap(), bytes);
+}
+
+#[tokio::test]
+async fn version_two_count_receipt_load_is_read_only_and_section_save_uses_new_shape() {
+    let fixture = Fixture::new();
+    let store = fixture.store().await;
+    let mut old = serde_json::to_value(snapshot()).unwrap();
+    old["tasks"]["accepted_calls"] = json!([{
+        "identity": {"assistant_sequence": 17, "call_id": "call-1"},
+        "accepted_count": 4
+    }]);
+    let bytes = serde_json::to_vec(&old).unwrap();
+    fs::write(fixture.path(), &bytes).unwrap();
+    let loaded = store.load().await.unwrap().unwrap();
+    assert_eq!(
+        loaded.tasks.accepted_calls[0].receipt,
+        TaskCallReceipt::LegacyCount { accepted_count: 4 }
+    );
+    assert_eq!(fs::read(fixture.path()).unwrap(), bytes);
+    store
+        .update(AgentStateUpdate::Children(loaded.children))
+        .await
+        .unwrap();
+    let saved: Value = serde_json::from_slice(&fs::read(fixture.path()).unwrap()).unwrap();
+    assert_eq!(saved["schema_version"], AGENT_STATE_VERSION);
+    assert_eq!(
+        saved["tasks"]["accepted_calls"][0]["receipt"],
+        json!({"kind": "legacy_count", "accepted_count": 4})
+    );
+    assert!(
+        saved["tasks"]["accepted_calls"][0]
+            .get("accepted_count")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn current_rich_receipts_survive_storage_reopen_and_unrelated_section_saves() {
+    let fixture = Fixture::new();
+    let store = fixture.store().await;
+    let mut expected = snapshot();
+    for (index, receipt) in [
+        TaskCallReceipt::LegacyCount { accepted_count: 4 },
+        TaskCallReceipt::Preparing { accepted_count: 5 },
+        TaskCallReceipt::Accepted {
+            accepted_count: 6,
+            response_text: "exact\nresponse with unicode 🦜".into(),
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        expected.tasks.accepted_calls.push(AcceptedTaskCall {
+            identity: parrot_domain::values::agent_tasks::TaskCallIdentity {
+                assistant_sequence: 17,
+                call_id: format!("call-{index}"),
+            },
+            receipt,
+        });
+    }
+    store.initialize(expected.clone()).await.unwrap();
+    let reopened = fixture.store().await;
+    assert_eq!(reopened.load().await.unwrap(), Some(expected.clone()));
+    let saved = reopened
+        .update(AgentStateUpdate::Execution(None))
+        .await
+        .unwrap();
+    assert_eq!(saved.tasks.accepted_calls, expected.tasks.accepted_calls);
+    assert_eq!(fixture.store().await.load().await.unwrap(), Some(saved));
 }

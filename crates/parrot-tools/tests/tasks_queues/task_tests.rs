@@ -21,7 +21,9 @@ use parrot_domain::{
         tools::{ParallelSafety, Tool},
     },
     values::{
-        agent_tasks::{ExecutionStatus, Task, TaskPayload},
+        agent_tasks::{
+            ExecutionStatus, Task, TaskAssignee, TaskPayload, TaskSetResponse, TaskView,
+        },
         tools::{ConfiguredToolDefinition, ToolDefinitionCatalog},
     },
 };
@@ -231,6 +233,9 @@ struct RecordingController {
     lookups: AtomicUsize,
     queries: Mutex<Vec<TaskQuery>>,
     tasks: Vec<Task>,
+    assignees: BTreeMap<String, TaskAssignee>,
+    accepted: Mutex<BTreeMap<(i64, String), TaskSetResponse>>,
+    accepted_response: Option<TaskSetResponse>,
     update_failure: Option<OperationError<ToolFailure>>,
     snapshot_failure: Option<ToolFailure>,
     snapshot_gate: Option<Arc<tokio::sync::Notify>>,
@@ -246,29 +251,25 @@ impl TaskController for RecordingController {
         &'a self,
         identity: &'a parrot_domain::values::agent_tasks::TaskCallIdentity,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Option<usize>, ToolFailure>> {
+    ) -> BoxFuture<'a, OperationResult<Option<TaskSetResponse>, ToolFailure>> {
         self.lookups.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             cancellation
                 .check()
                 .map_err(|_| OperationError::Cancelled)?;
             Ok(self
-                .updates
+                .accepted
                 .lock()
                 .unwrap()
-                .iter()
-                .find(|update| {
-                    update.history_boundary.assistant_sequence == identity.assistant_sequence
-                        && update.history_boundary.call_id == identity.call_id
-                })
-                .map(|update| update.tasks.len()))
+                .get(&(identity.assistant_sequence, identity.call_id.clone()))
+                .cloned())
         })
     }
     fn update<'a>(
         &'a self,
         update: Self::Update,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Self::Snapshot, Self::Error>> {
+    ) -> BoxFuture<'a, OperationResult<TaskSetResponse, Self::Error>> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             cancellation
@@ -277,8 +278,20 @@ impl TaskController for RecordingController {
             if let Some(failure) = &self.update_failure {
                 return Err(failure.clone());
             }
+            let count = update.tasks.len();
+            let response = self.accepted_response.clone().unwrap_or_else(|| TaskSetResponse {
+                accepted_count: count,
+                text: format!("AgentTask update accepted ({count} tasks). State changes are delivered as notifications."),
+            });
+            self.accepted.lock().unwrap().insert(
+                (
+                    update.history_boundary.assistant_sequence,
+                    update.history_boundary.call_id.clone(),
+                ),
+                response.clone(),
+            );
             self.updates.lock().unwrap().push(update);
-            Ok(TaskSnapshot::default())
+            Ok(response)
         })
     }
 
@@ -297,26 +310,38 @@ impl TaskController for RecordingController {
                     .find(|task| &task.name == name)
                     .map(|task| TaskDetail {
                         task: task.clone(),
-                        agent_name: (task.state != ExecutionStatus::Pending)
-                            .then(|| format!("worker-{name}")),
+                        agent_name: match self.assignees.get(name) {
+                            Some(TaskAssignee::Owner) => None,
+                            Some(TaskAssignee::Dedicated { agent_path }) => {
+                                agent_path.rsplit('/').next().map(str::to_owned)
+                            }
+                            None => (task.state != ExecutionStatus::Pending)
+                                .then(|| format!("worker-{name}")),
+                        },
+                        assigned_to: self.assignees.get(name).cloned(),
                     })
             });
             Ok(TaskSnapshot {
-                tasks: self.tasks.clone(),
+                tasks: self
+                    .tasks
+                    .iter()
+                    .map(|task| TaskView {
+                        task: task.clone(),
+                        assigned_to: self.assignees.get(&task.name).cloned(),
+                    })
+                    .collect(),
                 detail,
             })
         })
     }
 }
 
-type Renderer = Box<dyn Fn(usize) -> Result<String, ToolFailure> + Send + Sync>;
-type LocalTaskTool = TaskTool<RecordingController, FixtureReader, Renderer, Arc<Selection>>;
+type LocalTaskTool = TaskTool<RecordingController, FixtureReader, Arc<Selection>>;
 
 #[derive(Default)]
 struct Fixture {
     controller: Arc<RecordingController>,
     reader: Arc<FixtureReader>,
-    rendered: Arc<Mutex<Vec<usize>>>,
 }
 
 impl Fixture {
@@ -331,19 +356,11 @@ impl Fixture {
                 ConfiguredToolDefinition::new("Get tasks", "{}"),
             ),
         ]));
-        let rendered = self.rendered.clone();
-        let renderer: Renderer = Box::new(move |count| {
-            rendered.lock().unwrap().push(count);
-            Ok(format!(
-                "AgentTask update accepted ({count} tasks). State changes are delivered as notifications."
-            ))
-        });
         TaskTool::new(
             kind,
             &definitions,
             self.controller.clone(),
             self.reader.clone(),
-            Arc::new(renderer),
         )
         .unwrap()
     }
@@ -360,7 +377,7 @@ impl Fixture {
 
     fn assert_no_update(&self) {
         assert!(self.controller.updates.lock().unwrap().is_empty());
-        assert!(self.rendered.lock().unwrap().is_empty());
+        assert!(self.controller.accepted.lock().unwrap().is_empty());
     }
 }
 
@@ -533,7 +550,7 @@ async fn assert_set_success(arguments: &str, expected_reads: usize) {
             call_id: "call-7".into()
         }
     );
-    assert_eq!(*fixture.rendered.lock().unwrap(), [2]);
+    assert_eq!(fixture.controller.lookups.load(Ordering::SeqCst), 1);
     let reads = fixture.reader.reads.lock().unwrap();
     assert_eq!(reads.len(), expected_reads);
     if let Some((request, actual_witness)) = reads.first() {
@@ -914,7 +931,7 @@ async fn get_omits_nested_execution_fields_even_when_child_has_state_result_and_
     assert_eq!(result.text.as_bytes(), SHIP_DETAIL.as_bytes());
     let json: serde_json::Value = serde_json::from_str(&result.text).unwrap();
     let child = &json["payload"][0];
-    for omitted in ["state", "result", "failure", "agent_name"] {
+    for omitted in ["state", "result", "failure", "agent_name", "assigned_to"] {
         assert!(child.get(omitted).is_none(), "nested {omitted} leaked");
     }
 }
@@ -988,13 +1005,11 @@ fn task_factories_preserve_the_actual_recursive_configured_schema() {
     ]));
     let fixture = Fixture::default();
     for kind in [TaskToolKind::Set, TaskToolKind::Get] {
-        let render: Renderer = Box::new(|_| Ok(String::new()));
         let tool: LocalTaskTool = TaskTool::new(
             kind,
             &definitions,
             fixture.controller.clone(),
             fixture.reader.clone(),
-            Arc::new(render),
         )
         .unwrap();
         assert_eq!(
@@ -1026,8 +1041,17 @@ fn both_task_tools_use_configured_definitions_are_sequential_and_disabled_after_
 }
 
 #[tokio::test]
-async fn accepted_path_replay_returns_original_count_before_any_new_argument_or_file_read() {
-    let fixture = Fixture::default();
+async fn accepted_path_replay_returns_exact_rich_text_before_any_new_argument_or_file_read() {
+    let fixture = Fixture {
+        controller: Arc::new(RecordingController {
+            accepted_response: Some(TaskSetResponse {
+                accepted_count: 2,
+                text: "Saved rich assignment\nInstruction: preserve exact bytes.\nDedicated /main/self\r\n".into(),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
     let tool = fixture.tool(TaskToolKind::Set);
     let original = tool
         .invoke(
@@ -1061,4 +1085,152 @@ async fn accepted_path_replay_returns_original_count_before_any_new_argument_or_
     assert_eq!(fixture.reader.reads.lock().unwrap().len(), 1);
     assert_eq!(fixture.controller.attempts.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.controller.updates.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn set_returns_controller_response_verbatim_without_another_lookup_or_query() {
+    let text = "  perform owner work\nAcceptance: exact controller bytes.\r\n";
+    let fixture = Fixture {
+        controller: Arc::new(RecordingController {
+            accepted_response: Some(TaskSetResponse {
+                accepted_count: 27,
+                text: text.into(),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let result = fixture
+        .tool(TaskToolKind::Set)
+        .invoke(
+            invocation(&format!(r#"{{"tasks":{DECLARATIONS}}}"#)),
+            context(&Never),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.text.as_bytes(), text.as_bytes());
+    assert_eq!(fixture.controller.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.controller.attempts.load(Ordering::SeqCst), 1);
+    assert!(fixture.controller.queries.lock().unwrap().is_empty());
+    assert!(fixture.reader.reads.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn get_exposes_owner_and_absolute_dedicated_assignees_in_summary_and_detail() {
+    let fixture = Fixture {
+        controller: Arc::new(RecordingController {
+            tasks: parse_task_set(SNAPSHOT_TASKS).unwrap(),
+            assignees: BTreeMap::from([
+                ("build".into(), TaskAssignee::Owner),
+                (
+                    "test".into(),
+                    TaskAssignee::Dedicated {
+                        agent_path: "/main/self".into(),
+                    },
+                ),
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let tool = fixture.tool(TaskToolKind::Get);
+    let result = tool
+        .invoke(invocation("{}"), context(&Never))
+        .await
+        .unwrap();
+    let summary: serde_json::Value = serde_json::from_str(&result.text).unwrap();
+    assert_eq!(summary[0]["state"], "succeeded");
+    assert_eq!(summary[0]["assigned_to"], "self");
+    assert_eq!(summary[1]["state"], "failed");
+    assert_eq!(summary[1]["assigned_to"], "/main/self");
+    assert!(summary[2].get("assigned_to").is_none());
+    for (name, assigned_to, alias) in [
+        ("build", "self", None),
+        ("test", "/main/self", Some("self")),
+    ] {
+        let result = tool
+            .invoke(
+                invocation(&format!(r#"{{"name":"{name}"}}"#)),
+                context(&Never),
+            )
+            .await
+            .unwrap();
+        let detail: serde_json::Value = serde_json::from_str(&result.text).unwrap();
+        assert_eq!(detail["assigned_to"], assigned_to);
+        assert_eq!(
+            detail.get("agent_name").and_then(serde_json::Value::as_str),
+            alias
+        );
+    }
+}
+
+#[tokio::test]
+async fn composite_detail_keeps_execution_metadata_out_of_recursive_declarations() {
+    let mut tasks = parse_task_set(SNAPSHOT_TASKS).unwrap();
+    let TaskPayload::Tasks(children) = &mut tasks[2].payload else {
+        panic!("fixture composite task must have children");
+    };
+    children[0].state = ExecutionStatus::Failed;
+    children[0].failure = Some("runtime state is not a declaration".into());
+    let fixture = Fixture {
+        controller: Arc::new(RecordingController {
+            tasks,
+            assignees: BTreeMap::from([(
+                "ship".into(),
+                TaskAssignee::Dedicated {
+                    agent_path: "/main/composite".into(),
+                },
+            )]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let result = fixture
+        .tool(TaskToolKind::Get)
+        .invoke(invocation(r#"{"name":"ship"}"#), context(&Never))
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_str(&result.text).unwrap();
+    assert_eq!(detail["assigned_to"], "/main/composite");
+    for field in ["assigned_to", "agent_name", "state", "result", "failure"] {
+        assert!(
+            detail["payload"][0].get(field).is_none(),
+            "recursive {field} leaked"
+        );
+    }
+}
+
+#[tokio::test]
+async fn set_rejects_assignee_metadata_in_inline_artifact_and_recursive_declarations() {
+    for tasks in [
+        r#"[{"name":"a","description":"d","payload":"p","acceptance_criteria":"c","assigned_to":"self"}]"#,
+        r#"[{"name":"a","description":"d","payload":[{"name":"b","description":"d","payload":"p","acceptance_criteria":"c","assigned_to":"/main/self"}],"acceptance_criteria":"c"}]"#,
+    ] {
+        for artifact in [false, true] {
+            let fixture = Fixture {
+                reader: Arc::new(FixtureReader {
+                    artifact: format!(r#"{{"schema_version":1,"tasks":{tasks}}}"#).into_bytes(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let arguments = if artifact {
+                r#"{"path":"artifact.json"}"#.into()
+            } else {
+                format!(r#"{{"tasks":{tasks}}}"#)
+            };
+            let result = fixture
+                .tool(TaskToolKind::Set)
+                .invoke(invocation(&arguments), context(&Never))
+                .await
+                .unwrap();
+            assert!(
+                result.text.contains("unknown field 'assigned_to'"),
+                "{}",
+                result.text
+            );
+            fixture.assert_no_update();
+            assert_eq!(fixture.controller.attempts.load(Ordering::SeqCst), 0);
+        }
+    }
 }

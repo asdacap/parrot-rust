@@ -27,7 +27,7 @@ use parrot_domain::{
     },
     values::{
         activity::{AgentSessionActivitySnapshot, DrainState},
-        agent_tasks::Task,
+        agent_tasks::{Task, TaskSetResponse, TaskView},
         context::{ContextSize, ContextSnapshot},
         progress::{ProgressSnapshot, ProgressUpdate},
     },
@@ -672,7 +672,7 @@ impl TaskController for Services {
         &'a self,
         identity: &'a parrot_domain::values::agent_tasks::TaskCallIdentity,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Option<usize>, ToolFailure>> {
+    ) -> BoxFuture<'a, OperationResult<Option<TaskSetResponse>, ToolFailure>> {
         Box::pin(async move {
             cancelled(cancellation)?;
             let state = self.state.lock().unwrap();
@@ -682,14 +682,17 @@ impl TaskController for Services {
                 .filter(|(sequence, call_id)| {
                     *sequence == identity.assistant_sequence && *call_id == identity.call_id
                 })
-                .map(|_| state.tasks.len()))
+                .map(|_| TaskSetResponse {
+                    accepted_count: state.tasks.len(),
+                    text: format!("AgentTask update accepted ({} tasks). State changes are delivered as notifications.", state.tasks.len()),
+                }))
         })
     }
     fn update<'a>(
         &'a self,
         update: TaskUpdate<Selection>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<TaskSnapshot, ToolFailure>> {
+    ) -> BoxFuture<'a, OperationResult<TaskSetResponse, ToolFailure>> {
         Box::pin(async move {
             cancelled(cancellation)?;
             self.record(
@@ -704,9 +707,12 @@ impl TaskController for Services {
                 update.history_boundary.assistant_sequence,
                 update.history_boundary.call_id,
             ));
-            Ok(TaskSnapshot {
-                tasks: state.tasks.clone(),
-                detail: None,
+            Ok(TaskSetResponse {
+                accepted_count: state.tasks.len(),
+                text: format!(
+                    "AgentTask update accepted ({} tasks). State changes are delivered as notifications.",
+                    state.tasks.len()
+                ),
             })
         })
     }
@@ -721,9 +727,18 @@ impl TaskController for Services {
                 .map(|task| TaskDetail {
                     task: task.clone(),
                     agent_name: Some("catalog-worker".into()),
+                    assigned_to: None,
                 });
             Ok(TaskSnapshot {
-                tasks: state.tasks.clone(),
+                tasks: state
+                    .tasks
+                    .iter()
+                    .cloned()
+                    .map(|task| TaskView {
+                        task,
+                        assigned_to: None,
+                    })
+                    .collect(),
                 detail,
             })
         })

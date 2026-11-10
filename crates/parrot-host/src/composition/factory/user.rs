@@ -853,6 +853,9 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         for scheduler in &schedulers {
             scheduler.prepare_recovery().await.map_err(internal)?;
         }
+        for scheduler in &schedulers {
+            scheduler.finalize_preparing().await.map_err(internal)?;
+        }
         let mut claimed = migration_exclusions.clone();
         for scheduler in &schedulers {
             claimed.extend(scheduler.claimed_worker_ids().await);

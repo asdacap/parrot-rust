@@ -62,6 +62,25 @@ prompt_templates:
       AgentTask update accepted ({count} tasks). State changes are delivered as notifications.
     allowed_arguments: [count]
     required_arguments: [count]
+  agent-task.set-assigned:
+    engine: minijinja
+    template: |-
+      AgentTask update accepted ({{ count }} tasks).
+      {% if self_assignment %}AgentTask assigned to self: {{ self_assignment.name }}
+      Description: {{ self_assignment.description }}
+      Instruction:
+      {{ self_assignment.instruction }}
+      Acceptance criteria: {{ self_assignment.acceptance_criteria }}
+      Direct dependency results:{% for dependency in self_assignment.dependencies %}
+      [{{ dependency.name }}] {{ dependency.description }}
+      Result: {{ dependency.result }}{% endfor %}
+      Perform this task in your current agent. Complete it with set_agent_tasks by recording its outcome and result. Your final response does not complete this self assignment.
+      {% else %}No task is currently assigned to self.
+      {% endif %}{% if dedicated %}Active dedicated tasks (out of scope):{% for assignment in dedicated %}
+      [{{ assignment.name }}] {{ assignment.description }}
+      Assigned agent: {{ assignment.agent_path }}{% endfor %}{% else %}No dedicated tasks are currently active.{% endif %}
+    allowed_arguments: [count, self_assignment, dedicated]
+    required_arguments: [count, self_assignment, dedicated]
   agent-task.self-dependency:
     template: "\n[{name}] {description}\nResult: {result}"
     allowed_arguments: [name, description, result]

@@ -2,6 +2,7 @@
 mod admission_publisher;
 mod composites;
 mod concurrency;
+mod durable_responses;
 mod fixture;
 mod harness;
 mod history;

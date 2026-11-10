@@ -2,10 +2,13 @@
 
 use std::sync::Arc;
 
-use parrot_domain::contracts::{
-    async_ops::{BoxFuture, Cancellation, OperationError},
-    runtime::TaskController,
-    security::RestrictableAccessSnapshot,
+use parrot_domain::{
+    contracts::{
+        async_ops::{BoxFuture, Cancellation, OperationError},
+        runtime::TaskController,
+        security::RestrictableAccessSnapshot,
+    },
+    values::agent_tasks::TaskSetResponse,
 };
 use parrot_runtime::{
     agent_turn::services::TurnSelection,
@@ -58,10 +61,11 @@ where
                     .map(|detail| TaskDetail {
                         task: detail.task,
                         agent_name: detail.agent_name,
+                        assigned_to: detail.assigned_to,
                     }),
             },
             None => TaskSnapshot {
-                tasks: self.scheduler.snapshot().await,
+                tasks: self.scheduler.capture_views().await,
                 detail: None,
             },
         }
@@ -82,7 +86,7 @@ where
         &'a self,
         identity: &'a parrot_domain::values::agent_tasks::TaskCallIdentity,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<usize>, OperationError<ToolFailure>>> {
+    ) -> BoxFuture<'a, Result<Option<TaskSetResponse>, OperationError<ToolFailure>>> {
         Box::pin(async move {
             if cancellation.is_cancelled() {
                 return Err(OperationError::Cancelled);
@@ -94,7 +98,7 @@ where
         &'a self,
         update: Self::Update,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::Snapshot, OperationError<Self::Error>>> {
+    ) -> BoxFuture<'a, Result<TaskSetResponse, OperationError<Self::Error>>> {
         Box::pin(async move {
             if cancellation.is_cancelled() {
                 return Err(OperationError::Cancelled);
@@ -117,15 +121,7 @@ where
                 .map_err(operation_error)?;
             // Cancellation stops only this observer. The actual scheduler owns
             // admission, notification and execution until settlement joins them.
-            operation
-                .wait(cancellation)
-                .await
-                .map_err(operation_error)?;
-            tokio::select! {
-                biased;
-                _ = cancellation.cancelled() => Err(OperationError::Cancelled),
-                snapshot = self.capture_snapshot(TaskQuery { name: None }) => Ok(snapshot),
-            }
+            operation.wait(cancellation).await.map_err(operation_error)
         })
     }
 

@@ -1778,7 +1778,7 @@ async fn actual_scheduler_owner_guard_accepts_registered_task_session_and_blocks
         description: "registered owner admission".into(),
         payload: TaskPayload::Instruction("do not invoke a provider".into()),
         acceptance_criteria: "profile supplier rejects this fixture".into(),
-        model: None,
+        model: Some("local/model".into()),
         hidden: false,
         state: ExecutionStatus::Pending,
         result: None,

@@ -56,6 +56,12 @@ pub enum TaskAssignee {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskSetResponse {
+    pub accepted_count: usize,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskView {
     pub task: Task,
     pub assigned_to: Option<TaskAssignee>,

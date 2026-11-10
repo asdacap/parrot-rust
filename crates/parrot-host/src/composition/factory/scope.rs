@@ -1792,7 +1792,6 @@ where
                             TaskQueueServices {
                                 tasks: catalog_tasks.clone(),
                                 filesystem: Arc::new(config.filesystem.clone()),
-                                templates: user.templates.clone(),
                             },
                             &definitions,
                         )

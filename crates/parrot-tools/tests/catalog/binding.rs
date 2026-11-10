@@ -163,7 +163,6 @@ impl Fixture {
             catalog::TaskQueueServices {
                 tasks: shared.clone(),
                 filesystem: shared.clone(),
-                templates: templates.clone(),
             },
             &definitions,
         )

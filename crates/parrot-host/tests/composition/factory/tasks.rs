@@ -11,12 +11,13 @@ mod harness;
 mod support;
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 use parrot_domain::{
     contracts::{
+        agent_state::{AgentStateError, AgentStateStore},
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
         filesystem::{
             AuthorizedReadService, BoundRead, FileMetadata, FileReadError, FileReadErrorKind,
@@ -27,6 +28,7 @@ use parrot_domain::{
         tools::Tool,
     },
     values::{
+        agent_state::{AgentStateSnapshot, AgentStateUpdate, TaskCallReceipt},
         agent_tasks::ExecutionStatus,
         tools::{ConfiguredToolDefinition, ToolDefinitionCatalog},
     },
@@ -53,6 +55,42 @@ use harness::Harness;
 use support::{Security, bounded};
 
 type Controller = ScopedTaskController<Security, TurnSelection<Security>>;
+
+struct SealingState {
+    inner: Arc<dyn AgentStateStore>,
+    gate: Mutex<Option<Arc<support::Gate>>>,
+}
+impl AgentStateStore for SealingState {
+    fn load(&self) -> BoxFuture<'_, Result<Option<AgentStateSnapshot>, AgentStateError>> {
+        self.inner.load()
+    }
+    fn initialize(
+        &self,
+        snapshot: AgentStateSnapshot,
+    ) -> BoxFuture<'_, Result<(), AgentStateError>> {
+        self.inner.initialize(snapshot)
+    }
+    fn update(
+        &self,
+        update: AgentStateUpdate,
+    ) -> BoxFuture<'_, Result<AgentStateSnapshot, AgentStateError>> {
+        Box::pin(async move {
+            let gate = if matches!(&update, AgentStateUpdate::Tasks(graph) if graph.accepted_calls.last().is_some_and(|call| matches!(call.receipt, TaskCallReceipt::Accepted { .. })))
+            {
+                self.gate.lock().unwrap().take()
+            } else {
+                None
+            };
+            if let Some(gate) = gate {
+                gate.wait(&NeverCancelled).await.unwrap();
+            }
+            self.inner.update(update).await
+        })
+    }
+    fn retire(&self) -> BoxFuture<'_, Result<(), AgentStateError>> {
+        self.inner.retire()
+    }
+}
 
 async fn root_with_controller(
     h: &Harness,
@@ -125,10 +163,14 @@ async fn root_with_controller(
     let mut configuration = TaskConfiguration::defaults(support::templates());
     configuration.fork_history_mode = mode;
     let concurrency = h.factory.concurrency.lock().unwrap().clone().unwrap();
+    let sealing = Arc::new(SealingState {
+        inner: agent_state.clone(),
+        gate: Mutex::new(None),
+    });
     let controller = Controller::new(SchedulerConfig {
         owner_identity: identity.clone(),
         concurrency,
-        state: agent_state.clone(),
+        state: sealing.clone(),
         registry: Arc::downgrade(&h.registry),
         owner_session: task_session.clone(),
         history: built.history.clone(),
@@ -146,6 +188,7 @@ async fn root_with_controller(
     parts.services = vec![
         ServiceRegistration::new(controller.scheduler().clone()),
         ServiceRegistration::new(task_session),
+        ServiceRegistration::new(sealing),
     ];
     parts.work = vec![controller.scheduler().work_owner()];
     let scope = bounded(
@@ -170,6 +213,7 @@ async fn root_with_controller(
 #[derive(Default)]
 struct Reader {
     bytes: Vec<u8>,
+    file: Option<PathBuf>,
     denied: bool,
     calls: Mutex<Vec<(ReadRequest, u8)>>,
 }
@@ -216,7 +260,15 @@ impl AuthorizedReadService for Reader {
             Ok(BoundRead {
                 lexical_path: request.requested.clone(),
                 physical_path: request.requested.clone(),
-                bytes: self.bytes.clone(),
+                bytes: match &self.file {
+                    Some(path) => std::fs::read(path).map_err(|error| {
+                        OperationError::Failed(FileReadError::new(
+                            FileReadErrorKind::Io,
+                            error.to_string(),
+                        ))
+                    })?,
+                    None => self.bytes.clone(),
+                },
             })
         })
     }
@@ -243,31 +295,9 @@ fn definitions() -> ToolDefinitionCatalog {
             .collect(),
     )
 }
-fn render_accepted(count: usize) -> Result<String, ToolFailure> {
-    support::templates()
-        .render(
-            "agent-task.set-accepted",
-            &[("count".into(), serde_json::Value::String(count.to_string()))],
-            &NeverCancelled,
-        )
-        .map_err(|error| {
-            ToolFailure::new(
-                parrot_tools::tasks_queues::FailureKind::Other,
-                error.to_string(),
-            )
-        })
-}
-type TaskToolBridge =
-    TaskTool<Controller, Reader, fn(usize) -> Result<String, ToolFailure>, TurnSelection<Security>>;
+type TaskToolBridge = TaskTool<Controller, Reader, TurnSelection<Security>>;
 fn tool(kind: TaskToolKind, controller: &Arc<Controller>, reader: Arc<Reader>) -> TaskToolBridge {
-    TaskTool::new(
-        kind,
-        &definitions(),
-        controller.clone(),
-        reader,
-        Arc::new(render_accepted as fn(usize) -> Result<String, ToolFailure>),
-    )
-    .unwrap()
+    TaskTool::new(kind, &definitions(), controller.clone(), reader).unwrap()
 }
 fn invocation(arguments: &str) -> ToolInvocation {
     ToolInvocation {
@@ -292,18 +322,39 @@ async fn invoke(
 fn declaration(name: &str) -> serde_json::Value {
     serde_json::json!({"name":name,"description":format!("Do {name}"),"payload":"Do work","acceptance_criteria":"Done"})
 }
+async fn occupy_self(
+    root: &Arc<parrot_runtime::children::Scope<Security>>,
+    controller: &Arc<Controller>,
+) {
+    let set = tool(TaskToolKind::Set, controller, Arc::new(Reader::default()));
+    let selected = root.selection().current().unwrap();
+    bounded(set.invoke(
+        ToolInvocation {
+            call_id: "owner-slot-call".into(),
+            assistant_sequence: 0,
+            arguments_json: serde_json::json!({"tasks":[declaration("owner-slot")]}).to_string(),
+        },
+        InvocationContext::new((*selected.security).clone(), selected, &NeverCancelled),
+    ))
+    .await
+    .unwrap();
+}
 async fn state(controller: &Controller) -> Vec<parrot_domain::values::agent_tasks::Task> {
     controller
         .snapshot(TaskQuery { name: None })
         .await
         .unwrap()
         .tasks
+        .into_iter()
+        .map(|view| view.task)
+        .collect()
 }
 
 #[tokio::test]
 async fn actual_tool_parser_scheduler_and_runner_preserve_captured_model_and_details() {
     let h = Harness::new();
     let (root, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    occupy_self(&root, &controller).await;
     let set = tool(TaskToolKind::Set, &controller, Arc::new(Reader::default()));
     let selected = support::selection(&h.provider, "second", "root-mode", 0x3f);
     h.provider.script(
@@ -320,15 +371,14 @@ async fn actual_tool_parser_scheduler_and_runner_preserve_captured_model_and_det
     )
     .await
     .unwrap();
-    assert_eq!(
-        result.text,
-        "AgentTask update accepted (1 tasks). State changes are delivered as notifications."
-    );
+    assert!(result.text.contains("owner-slot"));
+    assert!(result.text.contains("/owner/build"));
     bounded(async {
         loop {
             let tasks = state(&controller).await;
-            assert_ne!(tasks[0].state, ExecutionStatus::Failed, "{tasks:?}");
-            if tasks[0].state == ExecutionStatus::Succeeded {
+            let task = tasks.iter().find(|task| task.name == "build").unwrap();
+            assert_ne!(task.state, ExecutionStatus::Failed, "{tasks:?}");
+            if task.state == ExecutionStatus::Succeeded {
                 break;
             }
             tokio::task::yield_now().await;
@@ -358,6 +408,7 @@ async fn actual_tool_parser_scheduler_and_runner_preserve_captured_model_and_det
     assert_eq!(detail["result"], "built");
     assert_eq!(detail["state"], "succeeded");
     assert_eq!(detail["agent_name"], child.adapter.identity().session.name);
+    assert_eq!(detail["assigned_to"], "/owner/build");
     bounded(controller.scheduler().settle().join())
         .await
         .unwrap();
@@ -369,7 +420,8 @@ async fn actual_child_history_fork_stops_before_the_invoking_tool_batch() {
     use parrot_domain::protocol::messages::parrot::Event;
     use parrot_storage::conversation::{ConversationMessage, MessageRole, ToolCall};
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Parent).await;
+    let (root, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Parent).await;
+    occupy_self(&root, &controller).await;
     let history = &h.factory.get("owner").history;
     h.histories.append(history, "safe-prefix").await;
     let mut event = Event::new();
@@ -415,8 +467,9 @@ async fn actual_child_history_fork_stops_before_the_invoking_tool_batch() {
     bounded(async {
         loop {
             let tasks = state(&controller).await;
-            assert_ne!(tasks[0].state, ExecutionStatus::Failed, "{tasks:?}");
-            if tasks[0].state == ExecutionStatus::Succeeded {
+            let task = tasks.iter().find(|task| task.name == "forked").unwrap();
+            assert_ne!(task.state, ExecutionStatus::Failed, "{tasks:?}");
+            if task.state == ExecutionStatus::Succeeded {
                 break;
             }
             tokio::task::yield_now().await;
@@ -546,7 +599,9 @@ async fn admitted_update_survives_observer_cancellation_and_real_get_waits_for_s
     let selected = support::selection(&h.provider, "first", "root-mode", 0xff);
     let set = tool(TaskToolKind::Set, &controller, Arc::new(Reader::default()));
     let cancellation = Signal::new();
-    let arguments = serde_json::json!({"tasks":[declaration("retained")]}).to_string();
+    let mut retained = declaration("retained");
+    retained["model"] = "first".into();
+    let arguments = serde_json::json!({"tasks":[retained]}).to_string();
     let mut update = Box::pin(invoke(&set, &arguments, selected.clone(), &cancellation));
     tokio::select! {
         result = &mut update => panic!("update completed before held admission: {result:?}"),
@@ -596,61 +651,111 @@ async fn admitted_update_survives_observer_cancellation_and_real_get_waits_for_s
 }
 
 #[tokio::test]
-async fn update_observer_cancellation_remains_live_during_final_snapshot_of_later_admission() {
-    use parrot_domain::contracts::agent_tasks::TaskArtifactParser;
+async fn update_observer_cancellation_remains_live_during_accepted_response_sealing() {
     use parrot_storage::conversation::HistoryForkBoundary;
     use std::{future::Future, task::Poll};
+
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
-    let set = tool(TaskToolKind::Set, &controller, Arc::new(Reader::default()));
+    let (root, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let seal = support::Gate::new();
+    *root
+        .get_service::<SealingState>()
+        .unwrap()
+        .gate
+        .lock()
+        .unwrap() = Some(seal.clone());
+    let path = h.histories.path.join("held-seal-tasks.json");
+    let reader = Arc::new(Reader {
+        file: Some(path.clone()),
+        ..Reader::default()
+    });
+    let set = tool(TaskToolKind::Set, &controller, reader.clone());
     let cancellation = Signal::new();
     let selected = support::selection(&h.provider, "first", "root-mode", 0xff);
     let mut first = declaration("already-done");
     first["state"] = "succeeded".into();
     first["result"] = "recorded".into();
-    let arguments = serde_json::json!({"tasks":[first]}).to_string();
-    let mut update = Box::pin(invoke(&set, &arguments, selected.clone(), &cancellation));
-    assert!(std::future::poll_fn(|cx| Poll::Ready(update.as_mut().poll(cx).is_pending())).await);
-    let construction = support::Gate::new();
-    *h.factory.construction.lock().unwrap() = Some(construction.clone());
-    h.provider.script(
-        "later",
-        [fixture::Reply::text(
-            r#"{"result":"later","verdict":"accept"}"#,
-        )],
-    );
-    let tasks = TaskArtifactParserAdapter
-        .parse_task_set(&serde_json::json!([declaration("later")]).to_string())
-        .unwrap();
-    let later = controller
-        .scheduler()
-        .set_tasks(tasks, selected, HistoryForkBoundary::AfterCompletedHistory)
-        .unwrap();
-    construction.entered().await;
-    // FIFO proves the first operation completed; this poll advances its observer
-    // into the final snapshot, which must wait for the still-held later update.
-    assert!(std::future::poll_fn(|cx| Poll::Ready(update.as_mut().poll(cx).is_pending())).await);
+    std::fs::write(
+        &path,
+        serde_json::json!({"schema_version":1,"tasks":[first]}).to_string(),
+    )
+    .unwrap();
+    let arguments = serde_json::json!({"path":path}).to_string();
+    let call_id = support::id();
+    let invoke_set = |arguments_json: String, cancellation| {
+        set.invoke(
+            ToolInvocation {
+                call_id: call_id.clone(),
+                assistant_sequence: 17,
+                arguments_json,
+            },
+            InvocationContext::new((*selected.security).clone(), selected.clone(), cancellation),
+        )
+    };
+    let mut update = Box::pin(invoke_set(arguments.clone(), &cancellation));
+    tokio::select! {
+        result = &mut update => panic!("update completed before held response seal: {result:?}"),
+        _ = seal.entered() => {}
+    }
+    let saved = root.agent_state().load().await.unwrap().unwrap();
+    assert!(matches!(
+        saved.tasks.accepted_calls[0].receipt,
+        TaskCallReceipt::Preparing { .. }
+    ));
     cancellation.cancel();
     assert!(matches!(
         bounded(update).await,
         Err(OperationError::Cancelled)
     ));
+    std::fs::write(&path, "changed and invalid artifact bytes").unwrap();
+    let mut preparing_replay = Box::pin(invoke_set(arguments, &NeverCancelled));
+    assert!(
+        std::future::poll_fn(|cx| Poll::Ready(preparing_replay.as_mut().poll(cx).is_pending()))
+            .await
+    );
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(reader.calls.lock().unwrap().len(), 1);
+    let later = controller
+        .scheduler()
+        .set_tasks(
+            vec![fixture::state("later", ExecutionStatus::Canceled)],
+            selected.clone(),
+            HistoryForkBoundary::AfterCompletedHistory,
+        )
+        .unwrap();
     assert!(!later.is_finished());
-    construction.open();
+    let get = tool(TaskToolKind::Get, &controller, Arc::new(Reader::default()));
+    let mut snapshot = Box::pin(invoke(&get, "{}", selected.clone(), &NeverCancelled));
+    assert!(std::future::poll_fn(|cx| Poll::Ready(snapshot.as_mut().poll(cx).is_pending())).await);
+    assert_eq!(
+        root.agent_state()
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .tasks
+            .entries
+            .len(),
+        1
+    );
+    seal.open();
     bounded(later.join()).await.unwrap();
-    bounded(async {
-        loop {
-            let tasks = state(&controller).await;
-            let later = tasks.iter().find(|task| task.name == "later").unwrap();
-            assert_ne!(later.state, ExecutionStatus::Failed, "{tasks:?}");
-            if later.state == ExecutionStatus::Succeeded {
-                assert_eq!(later.result.as_deref(), Some("later"));
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&bounded(snapshot).await.unwrap().text).unwrap();
+    assert_eq!(snapshot.as_array().unwrap().len(), 2);
+    let saved = root.agent_state().load().await.unwrap().unwrap();
+    let TaskCallReceipt::Accepted { response_text, .. } = &saved.tasks.accepted_calls[0].receipt
+    else {
+        panic!("accepted response must seal after its observer cancels");
+    };
+    let replay = bounded(preparing_replay).await.unwrap();
+    assert_eq!(&replay.text, response_text);
+    let malformed = bounded(invoke_set("not JSON".into(), &NeverCancelled))
+        .await
+        .unwrap();
+    assert_eq!(malformed.text, replay.text);
+    assert_eq!(reader.calls.lock().unwrap().len(), 1);
+    assert_eq!(state(&controller).await.len(), 2);
     bounded(controller.scheduler().settle().join())
         .await
         .unwrap();
@@ -768,6 +873,177 @@ async fn actual_scoped_notifier_spills_exact_bytes_and_wakes_only_its_owning_ses
     let mut expected = vec![expected_update, expected_complete];
     expected.sort();
     assert_eq!(texts, expected);
+    bounded(controller.scheduler().settle().join())
+        .await
+        .unwrap();
+    h.close().await;
+}
+
+#[tokio::test]
+async fn actual_bridge_returns_actionable_self_work_and_registered_dedicated_assignment() {
+    let h = Harness::new();
+    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let provider = support::Gate::new();
+    h.provider.script(
+        "self",
+        [fixture::Reply::held(
+            r#"{"result":"delegated result","verdict":"accept"}"#,
+            &provider,
+        )],
+    );
+    let mut own = declaration("owner-todo");
+    own["payload"] = "Apply the unique owner instruction".into();
+    own["acceptance_criteria"] = "The unique owner regression passes".into();
+    let mut delegated = declaration("self");
+    delegated["model"] = "first".into();
+    let set = tool(TaskToolKind::Set, &controller, Arc::new(Reader::default()));
+    let response = invoke(
+        &set,
+        &serde_json::json!({"tasks":[own, delegated]}).to_string(),
+        support::selection(&h.provider, "first", "root-mode", 0xff),
+        &NeverCancelled,
+    )
+    .await
+    .unwrap();
+    assert!(response.text.contains("Apply the unique owner instruction"));
+    assert!(response.text.contains("The unique owner regression passes"));
+    assert!(response.text.contains("/owner/self"));
+    let get = tool(TaskToolKind::Get, &controller, Arc::new(Reader::default()));
+    let selected = support::selection(&h.provider, "first", "root-mode", 0xff);
+    let summaries: serde_json::Value = serde_json::from_str(
+        &invoke(&get, "{}", selected.clone(), &NeverCancelled)
+            .await
+            .unwrap()
+            .text,
+    )
+    .unwrap();
+    assert_eq!(summaries[0]["assigned_to"], "self");
+    assert_eq!(summaries[1]["assigned_to"], "/owner/self");
+    let own: serde_json::Value = serde_json::from_str(
+        &invoke(
+            &get,
+            r#"{"name":"owner-todo"}"#,
+            selected.clone(),
+            &NeverCancelled,
+        )
+        .await
+        .unwrap()
+        .text,
+    )
+    .unwrap();
+    assert_eq!(own["assigned_to"], "self");
+    assert!(own.get("agent_name").is_none());
+    let dedicated: serde_json::Value = serde_json::from_str(
+        &invoke(&get, r#"{"name":"self"}"#, selected, &NeverCancelled)
+            .await
+            .unwrap()
+            .text,
+    )
+    .unwrap();
+    assert_eq!(dedicated["assigned_to"], "/owner/self");
+    assert_eq!(dedicated["agent_name"], "self");
+    provider.open();
+    bounded(async {
+        loop {
+            let tasks = state(&controller).await;
+            let task = tasks.iter().find(|task| task.name == "self").unwrap();
+            assert_ne!(task.state, ExecutionStatus::Failed, "{tasks:?}");
+            if task.state == ExecutionStatus::Succeeded {
+                assert_eq!(task.result.as_deref(), Some("delegated result"));
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    bounded(controller.scheduler().settle().join())
+        .await
+        .unwrap();
+    h.close().await;
+}
+
+#[tokio::test]
+async fn actual_bridge_replays_exact_response_without_reading_changed_or_removed_artifact() {
+    use parrot_storage::conversation::HistoryForkBoundary;
+
+    let h = Harness::new();
+    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let path = h.histories.path.join("accepted-tasks.json");
+    let mut task = declaration("artifact-owner");
+    task["payload"] = "Implement the original artifact instruction".into();
+    task["acceptance_criteria"] = "The original artifact criteria pass".into();
+    std::fs::write(
+        &path,
+        serde_json::json!({"schema_version":1,"tasks":[task]}).to_string(),
+    )
+    .unwrap();
+    let reader = Arc::new(Reader {
+        file: Some(path.clone()),
+        ..Reader::default()
+    });
+    let set = tool(TaskToolKind::Set, &controller, reader.clone());
+    let selected = support::selection(&h.provider, "first", "root-mode", 0xff);
+    let arguments = serde_json::json!({"path":path}).to_string();
+    let invoke_set = |arguments_json: String| {
+        set.invoke(
+            ToolInvocation {
+                call_id: "artifact-call".into(),
+                assistant_sequence: 17,
+                arguments_json,
+            },
+            InvocationContext::new(
+                (*selected.security).clone(),
+                selected.clone(),
+                &NeverCancelled,
+            ),
+        )
+    };
+    let accepted = bounded(invoke_set(arguments.clone())).await.unwrap();
+    assert!(
+        accepted
+            .text
+            .contains("Implement the original artifact instruction")
+    );
+    assert!(
+        accepted
+            .text
+            .contains("The original artifact criteria pass")
+    );
+    assert_eq!(reader.calls.lock().unwrap().len(), 1);
+    let mut completed = controller
+        .scheduler()
+        .capture_detail("artifact-owner")
+        .await
+        .unwrap()
+        .task;
+    completed.state = ExecutionStatus::Succeeded;
+    completed.result = Some("completed after accepting the original response".into());
+    bounded(
+        controller
+            .scheduler()
+            .set_tasks(
+                vec![completed],
+                selected.clone(),
+                HistoryForkBoundary::AfterCompletedHistory,
+            )
+            .unwrap()
+            .join(),
+    )
+    .await
+    .unwrap();
+    std::fs::write(&path, "changed and invalid artifact bytes").unwrap();
+    let changed = bounded(invoke_set(arguments.clone())).await.unwrap();
+    assert_eq!(changed.text, accepted.text);
+    std::fs::remove_file(&path).unwrap();
+    let removed = bounded(invoke_set(arguments)).await.unwrap();
+    assert_eq!(removed.text, accepted.text);
+    let malformed = bounded(invoke_set("not JSON".into())).await.unwrap();
+    assert_eq!(malformed.text, accepted.text);
+    assert_eq!(reader.calls.lock().unwrap().len(), 1);
+    assert_eq!(
+        state(&controller).await[0].state,
+        ExecutionStatus::Succeeded
+    );
     bounded(controller.scheduler().settle().join())
         .await
         .unwrap();

@@ -126,11 +126,56 @@ pub enum TaskMigrationDisposition {
     CancelObsolete,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcceptedTaskCall {
     pub identity: TaskCallIdentity,
-    pub accepted_count: u64,
+    pub receipt: TaskCallReceipt,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TaskCallReceipt {
+    LegacyCount {
+        accepted_count: u64,
+    },
+    Preparing {
+        accepted_count: u64,
+    },
+    Accepted {
+        accepted_count: u64,
+        response_text: String,
+    },
+}
+
+impl<'de> Deserialize<'de> for AcceptedTaskCall {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged, deny_unknown_fields)]
+        enum Call {
+            Current {
+                identity: TaskCallIdentity,
+                receipt: TaskCallReceipt,
+            },
+            Legacy {
+                identity: TaskCallIdentity,
+                accepted_count: u64,
+            },
+        }
+        Ok(match Call::deserialize(deserializer)? {
+            Call::Current { identity, receipt } => Self { identity, receipt },
+            Call::Legacy {
+                identity,
+                accepted_count,
+            } => Self {
+                identity,
+                receipt: TaskCallReceipt::LegacyCount { accepted_count },
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

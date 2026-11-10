@@ -9,7 +9,9 @@ use parrot_domain::{
         tools::{ParallelSafety, Tool},
     },
     values::{
-        agent_tasks::{ExecutionStatus, Task, TaskCallIdentity, TaskPayload},
+        agent_tasks::{
+            ExecutionStatus, Task, TaskAssignee, TaskCallIdentity, TaskPayload, TaskView,
+        },
         tools::{ConfiguredToolDefinition, MissingToolDefinition, ToolDefinitionCatalog},
     },
 };
@@ -48,24 +50,24 @@ pub struct TaskQuery {
 pub struct TaskDetail {
     pub task: Task,
     pub agent_name: Option<String>,
+    pub assigned_to: Option<TaskAssignee>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TaskSnapshot {
-    pub tasks: Vec<Task>,
+    pub tasks: Vec<TaskView>,
     pub detail: Option<TaskDetail>,
 }
 
-pub struct TaskTool<Controller, Reader, Render, Selection> {
+pub struct TaskTool<Controller, Reader, Selection> {
     kind: TaskToolKind,
     definition: ConfiguredToolDefinition,
     controller: Arc<Controller>,
     reader: Arc<Reader>,
-    render_accepted: Arc<Render>,
     selection: PhantomData<fn(Selection)>,
 }
 
-impl<C, R, P, S> TaskTool<C, R, P, S>
+impl<C, R, S> TaskTool<C, R, S>
 where
     C: TaskController<
             Update = TaskUpdate<S>,
@@ -74,7 +76,6 @@ where
             Error = ToolFailure,
         >,
     R: AuthorizedReadService,
-    P: Fn(usize) -> Result<String, ToolFailure> + Send + Sync,
     S: Clone + Send + 'static,
 {
     pub fn new(
@@ -82,14 +83,12 @@ where
         definitions: &ToolDefinitionCatalog,
         controller: Arc<C>,
         reader: Arc<R>,
-        render_accepted: Arc<P>,
     ) -> Result<Self, MissingToolDefinition> {
         Ok(Self {
             kind,
             definition: definitions.describe(kind.name())?.clone(),
             controller,
             reader,
-            render_accepted,
             selection: PhantomData,
         })
     }
@@ -126,7 +125,7 @@ where
             .lookup_accepted(&identity, context.cancellation())
             .await
         {
-            Ok(Some(count)) => return self.render_accepted_count(count),
+            Ok(Some(response)) => return Ok(ToolOutput::text(response.text)),
             Ok(None) => {}
             Err(OperationError::Failed(error)) if error.task_caught() => {
                 return Ok(ToolOutput::error(error));
@@ -166,33 +165,11 @@ where
             },
         };
         match self.controller.update(update, context.cancellation()).await {
-            Ok(_) => match self
-                .controller
-                .lookup_accepted(&identity, context.cancellation())
-                .await
-            {
-                Ok(Some(count)) => self.render_accepted_count(count),
-                Ok(None) => Err(OperationError::Failed(ToolFailure::new(
-                    FailureKind::InvalidOperation,
-                    "Accepted task update has no durable receipt.",
-                ))),
-                Err(OperationError::Failed(error)) if error.task_caught() => {
-                    Ok(ToolOutput::error(error))
-                }
-                Err(error) => Err(error),
-            },
+            Ok(response) => Ok(ToolOutput::text(response.text)),
             Err(OperationError::Failed(error)) if error.task_caught() => {
                 Ok(ToolOutput::error(error))
             }
             Err(error) => Err(error),
-        }
-    }
-
-    fn render_accepted_count(&self, count: usize) -> OperationResult<ToolOutput, ToolFailure> {
-        match (self.render_accepted)(count) {
-            Ok(text) => Ok(ToolOutput::text(text)),
-            Err(error) if error.task_caught() => Ok(ToolOutput::error(error)),
-            Err(error) => Err(OperationError::Failed(error)),
         }
     }
 
@@ -223,6 +200,7 @@ where
                         &mut output,
                         &detail.task,
                         detail.agent_name.as_deref(),
+                        detail.assigned_to.as_ref(),
                         true,
                     );
                     Ok(ToolOutput::text(output))
@@ -235,7 +213,7 @@ where
     }
 }
 
-impl<C, R, P, S> Tool for TaskTool<C, R, P, S>
+impl<C, R, S> Tool for TaskTool<C, R, S>
 where
     C: TaskController<
             Update = TaskUpdate<S>,
@@ -245,7 +223,6 @@ where
         >,
     R: AuthorizedReadService,
     R::Security: 'static,
-    P: Fn(usize) -> Result<String, ToolFailure> + Send + Sync,
     S: Clone + Send + 'static,
 {
     type Definition = ConfiguredToolDefinition;
@@ -312,23 +289,33 @@ fn state(status: ExecutionStatus) -> &'static str {
     }
 }
 
-pub fn write_summaries(tasks: &[Task]) -> String {
+pub fn write_summaries(tasks: &[TaskView]) -> String {
     let entries: Vec<_> = tasks
         .iter()
-        .map(|task| {
-            format!(
-                "{{\"name\":{},\"state\":{},\"description\":{},\"hidden\":{}}}",
+        .map(|view| {
+            let task = &view.task;
+            let mut output = format!(
+                "{{\"name\":{},\"state\":{},\"description\":{},\"hidden\":{}",
                 quoted(&task.name),
                 quoted(state(task.state)),
                 quoted(&task.description),
                 task.hidden,
-            )
+            );
+            write_assignee(&mut output, view.assigned_to.as_ref());
+            output.push('}');
+            output
         })
         .collect();
     format!("[{}]", entries.join(","))
 }
 
-fn write_task(output: &mut String, task: &Task, agent_name: Option<&str>, with_execution: bool) {
+fn write_task(
+    output: &mut String,
+    task: &Task,
+    agent_name: Option<&str>,
+    assigned_to: Option<&TaskAssignee>,
+    with_execution: bool,
+) {
     output.push_str(&format!(
         "{{\"name\":{},\"dependencies\":[",
         quoted(&task.name)
@@ -351,7 +338,7 @@ fn write_task(output: &mut String, task: &Task, agent_name: Option<&str>, with_e
                 if index > 0 {
                     output.push(',');
                 }
-                write_task(output, child, None, false);
+                write_task(output, child, None, None, false);
             }
             output.push(']');
         }
@@ -368,6 +355,7 @@ fn write_task(output: &mut String, task: &Task, agent_name: Option<&str>, with_e
         output.push_str(&format!(",\"agent_name\":{}", quoted(name)));
     }
     if with_execution {
+        write_assignee(output, assigned_to);
         output.push_str(&format!(",\"state\":{}", quoted(state(task.state))));
         if let Some(result) = &task.result {
             output.push_str(&format!(",\"result\":{}", quoted(result)));
@@ -377,4 +365,14 @@ fn write_task(output: &mut String, task: &Task, agent_name: Option<&str>, with_e
         }
     }
     output.push('}');
+}
+
+fn write_assignee(output: &mut String, assigned_to: Option<&TaskAssignee>) {
+    if let Some(assigned_to) = assigned_to {
+        let name = match assigned_to {
+            TaskAssignee::Owner => "self",
+            TaskAssignee::Dedicated { agent_path } => agent_path,
+        };
+        output.push_str(&format!(",\"assigned_to\":{}", quoted(name)));
+    }
 }
