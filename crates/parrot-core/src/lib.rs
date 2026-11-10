@@ -1,4 +1,4 @@
-//! Turn orchestration with core-owned provider, tool, and state contracts.
+//! Turn orchestration with core-owned provider, tool, state, and event contracts.
 
 pub mod budget;
 pub mod compaction;
@@ -16,10 +16,12 @@ pub async fn run(
     states: &mut dyn States,
     tools: &dyn Tools,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
+    cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
     loop {
-        if provider.is_cancelled() {
+        if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
         let turn = states.get_last_turn().await?;
@@ -28,7 +30,7 @@ pub async fn run(
         {
             return Ok(Outcome::Completed(answer));
         }
-        match run_turn(states, tools, provider).await? {
+        match run_turn(states, tools, provider, publisher, cancellation).await? {
             Outcome::Completed(completed) => answer = completed,
             Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
         }
@@ -40,9 +42,19 @@ pub async fn run_turn(
     states: &mut dyn States,
     tools: &dyn Tools,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
+    cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut budget = states.read_turn_budget()?;
-    let result = execute_turn(states, tools, provider, &mut budget).await;
+    let result = execute_turn(
+        states,
+        tools,
+        provider,
+        publisher,
+        cancellation,
+        &mut budget,
+    )
+    .await;
     states.write_turn_budget(budget)?;
     result
 }
@@ -51,9 +63,10 @@ async fn execute_turn(
     states: &mut dyn States,
     tools: &dyn Tools,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
+    cancellation: CancellationToken<'_>,
     budget: &mut TurnBudget,
 ) -> Result<Outcome, Error> {
-    let cancellation = CancellationToken::from_provider(provider);
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
@@ -83,15 +96,22 @@ async fn execute_turn(
         } else {
             &catalog.normal
         };
-        let request =
-            context::prepare_request(states, provider, definitions, flags, &options, cancellation)
-                .await?;
+        let request = context::prepare_request(
+            states,
+            provider,
+            publisher,
+            definitions,
+            flags,
+            &options,
+            cancellation,
+        )
+        .await?;
         let attempt = budget.count_request();
-        let response = match provider.invoke(request).await {
+        let response = match provider.invoke(request, cancellation).await {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(states, provider, definitions)
+                if !context::compact_context(states, provider, publisher, definitions, cancellation)
                     .await?
                     .reduced
                 {
@@ -104,7 +124,7 @@ async fn execute_turn(
         compacted_oversized = false;
         if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
             let content =
-                rendering::render_template(states, "agent-session.truncated-tool-call", &[])
+                rendering::render_template(states, ConfigKey::TruncatedToolCallTemplate, &[])
                     .await?;
             states.record_retry(&content, attempt).await?;
             continue;
@@ -115,7 +135,7 @@ async fn execute_turn(
             .any(|call| serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err())
         {
             let content =
-                rendering::render_template(states, "agent-session.invalid-tool-call", &[]).await?;
+                rendering::render_template(states, ConfigKey::InvalidToolCallTemplate, &[]).await?;
             states.record_retry(&content, attempt).await?;
             continue;
         }

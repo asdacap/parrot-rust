@@ -159,12 +159,6 @@ impl Provider {
 }
 
 impl parrot_core::Provider for Provider {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
     fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
         self.estimates.estimate_tokens(messages)
     }

@@ -1,15 +1,14 @@
 //! Awaited context epochs over the authoritative storage history.
 use super::execution::{
-    CompactionEstimates, CompactionProvider, CoreCancellation, NativeErrors, describe_error,
-    progress_event,
+    CompactionEstimates, CompactionProvider, NativeErrors, describe_error, progress_event,
 };
 use super::{
-    CompactionError, CompactionObserver, CompactionResult, Compactor, ContextCadence, ContextSize,
-    ContextSnapshot, PlanningError, ProviderTokenBudget,
+    CompactionError, CompactionObserver, CompactionResult, Compactor, ContextSize, ContextSnapshot,
+    PlanningError, ProviderTokenBudget,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_core::{
-    ContextCadence as CoreContextCadence, ContextConfiguration as CoreContextConfiguration,
+    ContextConfiguration as CoreContextConfiguration,
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
     ContextSnapshot as CoreContextSnapshot,
 };
@@ -22,7 +21,7 @@ use parrot_domain::{
         AgentNotice, CompactionFailed, CompactionFinished, CompactionPhase,
         CompactionProgressEvent, CompactionStarted, Event,
     },
-    values::{context::ContextCadenceError, identifiers::Identifier},
+    values::identifiers::Identifier,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{
@@ -40,7 +39,6 @@ pub enum ContextError {
     Compaction(CompactionError),
     History(EventError),
     Prompt(PromptError),
-    Cadence(ContextCadenceError),
     Identifier(std::io::Error),
     InvalidOperation(String),
     Argument(String),
@@ -61,7 +59,6 @@ impl fmt::Display for ContextError {
             Self::Compaction(error) => error.fmt(f),
             Self::History(error) => error.fmt(f),
             Self::Prompt(error) => error.fmt(f),
-            Self::Cadence(error) => error.fmt(f),
             Self::Identifier(error) => error.fmt(f),
             Self::InvalidOperation(message)
             | Self::Argument(message)
@@ -100,11 +97,6 @@ impl From<parrot_core::compaction::CompactionFailure> for ContextError {
             }
             failure => Self::Compaction(failure.into()),
         }
-    }
-}
-impl From<ContextCadenceError> for ContextError {
-    fn from(error: ContextCadenceError) -> Self {
-        Self::Cadence(error)
     }
 }
 pub type ContextResult<T> = Result<T, ContextError>;
@@ -184,7 +176,6 @@ pub struct ContextController {
     blobs: parrot_storage::artifacts::compaction::CompactionGroupBlobStore,
     templates: Arc<PromptTemplateCatalog>,
     budget: ProviderTokenBudget,
-    cadence: ContextCadence,
     initial_status_pending: bool,
 }
 impl ContextController {
@@ -200,7 +191,6 @@ impl ContextController {
             blobs,
             templates,
             budget: ProviderTokenBudget::default(),
-            cadence: ContextCadence::new(),
             initial_status_pending: true,
         }
     }
@@ -223,15 +213,7 @@ impl ContextController {
             .capture_context_configuration(selection)
     }
 
-    pub(crate) fn capture_context_cadence(&self) -> CoreContextCadence {
-        self.cadence.capture_state()
-    }
-
-    pub(crate) fn write_context_cadence(&mut self, cadence: CoreContextCadence) {
-        self.cadence.apply_state(cadence);
-    }
-
-    pub(crate) async fn read_context_checkpoint(
+    pub(crate) async fn get_last_context_reminder(
         &self,
     ) -> ContextResult<Option<CoreContextReminderCheckpoint>> {
         Ok(self.history.latest_context_reminder().await?.map(|value| {
@@ -468,20 +450,11 @@ impl ContextController {
             context = self.estimate(&input, &instructions)?;
             ensure_request_fits(&context)?;
         }
-        if !self.cadence.is_restored() {
-            self.cadence
-                .restore(self.history.latest_context_reminder().await?.map(|value| {
-                    parrot_domain::values::context::ContextReminderCheckpoint {
-                        canonical_model: value.canonical_model,
-                        context_limit: value.context_limit,
-                        percentage: value.percentage,
-                    }
-                }));
-        }
+        let last_reminder = self.get_last_context_reminder().await?;
         let selector = input.selection.canonical_model.selector();
+        let snapshot = CoreContextSnapshot::estimate(context.estimated_tokens, &configuration);
         if let Some(percentage) =
-            self.cadence
-                .observe(&context, &selector, input.conversation.len() as i64)?
+            snapshot.select_reminder_percentage(&selector, last_reminder.as_ref())
         {
             let reminder = self.render_reminder(&context, percentage)?;
             let mut candidate = provider_messages(input.conversation);
@@ -517,19 +490,7 @@ impl ContextController {
                         )
                         .await?
                     {
-                        let persisted = self.estimate(&input, &instructions)?;
-                        self.cadence.acknowledge(
-                            &persisted,
-                            &selector,
-                            input.conversation.len() as i64,
-                        )?;
                         input.events.publish(published, &Uncancelled).await?;
-                    } else {
-                        self.cadence.acknowledge(
-                            &inserted,
-                            &selector,
-                            input.conversation.len() as i64,
-                        )?;
                     }
                 }
             }
@@ -582,8 +543,14 @@ impl ContextController {
         let errors = NativeErrors::new();
         let templates = self.templates.clone();
         let (prepared, result) = {
+            let controller = tokio::sync::Mutex::new(&mut *self);
+            let publisher = EpochEventPublisher {
+                controller: &controller,
+                events: input.events,
+                errors: &errors,
+            };
             let mut states = EpochStates {
-                controller: tokio::sync::Mutex::new(&mut *self),
+                controller: &controller,
                 conversation: input.conversation,
                 prompt: input.prompt,
                 selection: input.selection,
@@ -599,7 +566,6 @@ impl ContextController {
                 &estimates,
                 input.sessions,
                 ContextObserver(input.events),
-                cancellation,
                 &errors,
             );
             let preparation_provider = EpochProvider {
@@ -612,8 +578,10 @@ impl ContextController {
             let prepared = parrot_core::compaction::prepare_compaction(
                 &mut states,
                 &preparation_provider,
+                &publisher,
                 &definitions,
                 &configuration,
+                parrot_core::CancellationToken::new(cancellation),
             )
             .await
             .map_err(|error| errors.restore(error, ContextError::from))?;
@@ -623,6 +591,7 @@ impl ContextController {
                 &configuration,
                 &mut states,
                 &provider,
+                parrot_core::CancellationToken::new(cancellation),
             )
             .await
             .map_err(|error| errors.restore(error, ContextError::from));
@@ -754,12 +723,6 @@ impl ContextController {
             reduced = true;
             self.budget.reset();
             input.conversation.reload().await?;
-            let persisted = self.estimate(input, &instructions)?;
-            self.cadence.acknowledge(
-                &persisted,
-                &input.selection.canonical_model.selector(),
-                input.conversation.len() as i64,
-            )?;
             input
                 .events
                 .publish_committed(Committed::after_commit(published), &Uncancelled)
@@ -800,7 +763,9 @@ impl ContextController {
             ),
             (
                 "notification_interval".into(),
-                ContextCadence::NOTIFICATION_INTERVAL.to_string().into(),
+                CoreContextReminderCheckpoint::NOTIFICATION_INTERVAL
+                    .to_string()
+                    .into(),
             ),
             ("trigger".into(), context.trigger_percent.to_string().into()),
         ];
@@ -843,8 +808,46 @@ impl ContextController {
     }
 }
 
+struct EpochEventPublisher<'a> {
+    controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
+    events: &'a dyn ContextEvents,
+    errors: &'a NativeErrors<ContextError>,
+}
+
+impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .report_epoch_started(self.events)
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
+    fn report_compaction_failed(
+        &self,
+        message: String,
+    ) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .fail_epoch_compaction(message, self.events)
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
+}
+
 struct EpochStates<'a> {
-    controller: tokio::sync::Mutex<&'a mut ContextController>,
+    controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
     conversation: &'a AgentConversation,
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
@@ -912,44 +915,30 @@ impl parrot_core::States for EpochStates<'_> {
             match key {
                 ConfigKey::Compaction => Ok(ConfigValue::Compaction(self.configuration.clone())),
                 ConfigKey::Context => Ok(ConfigValue::Context(self.configuration.context.clone())),
-                ConfigKey::PromptTemplate(id) => self
-                    .templates
-                    .get_template(&id)
-                    .map(ConfigValue::PromptTemplate)
-                    .map_err(|error| self.capture_error(PromptError::Template(error.to_string()))),
+                ConfigKey::SystemPromptBindings => self
+                    .prompt
+                    .read_core_prompt_bindings(self.cancellation)
+                    .await
+                    .map(ConfigValue::SystemPromptBindings)
+                    .map_err(|error| self.capture_error(error)),
                 ConfigKey::Turn => Err(parrot_core::Error::failed(
                     "turn configuration is unavailable for a compaction epoch",
                 )),
+                key => self
+                    .templates
+                    .get_template(
+                        key.get_prompt_template_id()
+                            .ok_or_else(|| parrot_core::Error::unsupported("configuration"))?,
+                    )
+                    .map(ConfigValue::PromptTemplate)
+                    .map_err(|error| self.capture_error(PromptError::Template(error.to_string()))),
             }
-        })
-    }
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
-        Box::pin(async move {
-            self.controller
-                .lock()
-                .await
-                .report_epoch_started(self.events)
-                .await
-                .map_err(|error| self.capture_error(error))
         })
     }
     fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
         Box::pin(async move {
             self.prompt
                 .sample_epoch(self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-    fn report_compaction_failed(
-        &self,
-        message: String,
-    ) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
-        Box::pin(async move {
-            self.controller
-                .lock()
-                .await
-                .fail_epoch_compaction(message, self.events)
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -986,7 +975,7 @@ impl parrot_core::States for EpochStates<'_> {
                         trigger_tokens: context.trigger_tokens,
                         has_context_limit_override: context.has_context_limit_override,
                     },
-                    &CoreCancellation(cancellation),
+                    &cancellation,
                 )
                 .await
                 .map_err(|error| self.capture_error(error))
@@ -1020,7 +1009,7 @@ impl parrot_core::States for EpochStates<'_> {
     {
         Box::pin(async move {
             self.events
-                .observe_progress(progress_event(progress), &CoreCancellation(cancellation))
+                .observe_progress(progress_event(progress), &cancellation)
                 .await
                 .map_err(CompactionError::from)
                 .map_err(|error| self.capture_error(error))
@@ -1032,17 +1021,6 @@ impl parrot_core::States for EpochStates<'_> {
         Box::pin(async move {
             self.prompt
                 .read_system_prompts(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_prompt_templates(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String)>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_prompt_templates(self.cancellation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -1230,14 +1208,6 @@ impl EpochProvider<'_> {
 }
 
 impl parrot_core::Provider for EpochProvider<'_> {
-    fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.cancellation.cancelled()
-    }
-
     fn read_model_aliases(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, parrot_core::Error>> {

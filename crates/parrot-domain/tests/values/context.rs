@@ -1,6 +1,5 @@
 use parrot_domain::values::context::{
-    ContextCadence, ContextCadenceError, ContextCompactionPolicy, ContextReminderCheckpoint,
-    ContextSize, ContextSnapshot, TokenEstimator,
+    ContextCompactionPolicy, ContextSize, ContextSnapshot, TokenEstimator,
 };
 
 #[test]
@@ -196,126 +195,6 @@ fn scales_maximum_trigger_without_intermediate_overflow() {
 }
 
 #[test]
-fn emits_ten_percent_bands_starting_at_fifty_and_rebases_state() {
-    let mut cadence = ContextCadence::new();
-    for (percentage, history, expected) in [
-        (4, 10, None),
-        (24, 11, None),
-        (49, 12, None),
-        (50, 13, Some(50)),
-        (55, 14, None),
-        (59, 15, None),
-        (60, 16, Some(60)),
-        (83, 17, Some(80)),
-        (9, 5, None),
-        (12, 6, None),
-        (49, 7, None),
-        (50, 8, Some(50)),
-    ] {
-        let snapshot = ContextSnapshot::new(i64::from(percentage), 100, Some(percentage), 90);
-        assert_eq!(
-            cadence.observe(&snapshot, "model", history).unwrap(),
-            expected
-        );
-    }
-}
-
-#[test]
-fn changes_and_acknowledgement_rebase_without_duplicate() {
-    let mut cadence = ContextCadence::new();
-    cadence
-        .observe(&ContextSnapshot::new(49, 100, Some(49), 90), "model", 1)
-        .unwrap();
-    assert_eq!(
-        cadence
-            .observe(&ContextSnapshot::new(59, 100, Some(59), 90), "model", 2)
-            .unwrap(),
-        Some(50)
-    );
-    cadence
-        .acknowledge(&ContextSnapshot::new(64, 100, Some(64), 90), "model", 2)
-        .unwrap();
-    assert_eq!(
-        cadence
-            .observe(&ContextSnapshot::new(69, 100, Some(69), 90), "model", 3)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        cadence
-            .observe(&ContextSnapshot::new(70, 100, Some(70), 90), "model", 4)
-            .unwrap(),
-        Some(70)
-    );
-    assert_eq!(
-        cadence
-            .observe(&ContextSnapshot::new(51, 100, Some(51), 90), "other", 5)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        cadence
-            .observe(&ContextSnapshot::new(60, 100, Some(60), 90), "other", 6)
-            .unwrap(),
-        Some(60)
-    );
-    assert_eq!(
-        cadence
-            .observe(&ContextSnapshot::new(1, 0, None, 90), "other", 7)
-            .unwrap(),
-        None
-    );
-}
-
-#[test]
-fn durable_checkpoint_suppresses_restart_duplicate_and_allows_new_band() {
-    for checkpoint_percentage in [50, 55] {
-        let mut cadence = ContextCadence::new();
-        cadence.restore(Some(ContextReminderCheckpoint {
-            canonical_model: "model".to_owned(),
-            context_limit: 100,
-            percentage: checkpoint_percentage,
-        }));
-        for (percentage, history, expected) in [
-            (49, 10, None),
-            (59, 11, None),
-            (66, 12, Some(60)),
-            (71, 13, Some(70)),
-        ] {
-            let snapshot = ContextSnapshot::new(i64::from(percentage), 100, Some(percentage), 90);
-            assert_eq!(
-                cadence.observe(&snapshot, "model", history).unwrap(),
-                expected
-            );
-        }
-    }
-}
-
-#[test]
-fn parent_and_child_state_is_independent() {
-    let mut parent = ContextCadence::new();
-    let mut child = ContextCadence::new();
-    parent
-        .observe(&ContextSnapshot::new(4, 100, Some(4), 90), "model", 1)
-        .unwrap();
-    child
-        .observe(&ContextSnapshot::new(4, 100, Some(4), 90), "model", 1)
-        .unwrap();
-    assert_eq!(
-        parent
-            .observe(&ContextSnapshot::new(64, 100, Some(64), 90), "model", 2)
-            .unwrap(),
-        Some(60)
-    );
-    assert_eq!(
-        child
-            .observe(&ContextSnapshot::new(59, 100, Some(59), 90), "model", 2)
-            .unwrap(),
-        Some(50)
-    );
-}
-
-#[test]
 fn snapshot_defaults_and_strict_thresholds() {
     let mut snapshot = ContextSnapshot::new(90, 100, Some(90), 90);
     assert_eq!(snapshot.input_limit, 100);
@@ -335,28 +214,4 @@ fn snapshot_defaults_and_strict_thresholds() {
     let unavailable = ContextSnapshot::new(1, 0, None, 90);
     assert!(!unavailable.is_available());
     assert_eq!(unavailable.trigger_tokens, None);
-}
-
-#[test]
-fn cadence_rejects_invalid_observation_arguments() {
-    let snapshot = ContextSnapshot::new(50, 100, Some(50), 90);
-    let mut cadence = ContextCadence::new();
-    for model in ["", " \t\n"] {
-        assert_eq!(
-            cadence.observe(&snapshot, model, 0),
-            Err(ContextCadenceError::EmptyCanonicalModel)
-        );
-        assert_eq!(
-            cadence.acknowledge(&snapshot, model, 0),
-            Err(ContextCadenceError::EmptyCanonicalModel)
-        );
-    }
-    assert_eq!(
-        cadence.observe(&snapshot, "model", -1),
-        Err(ContextCadenceError::NegativeEffectiveHistorySize)
-    );
-    assert_eq!(
-        cadence.acknowledge(&snapshot, "model", -1),
-        Err(ContextCadenceError::NegativeEffectiveHistorySize)
-    );
 }

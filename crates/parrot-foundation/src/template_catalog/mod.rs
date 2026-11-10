@@ -3,7 +3,7 @@
 //! Descriptor and argument order are retained. Inputs are owned JSON values, not
 //! host objects or engine values; scalar insertion accepts actual strings only.
 use crate::config::{ConfigError, Configuration, Result, templates::TemplateSpec};
-use crate::template_scalar::{NativeCancellation, translate_error};
+use crate::template_scalar::translate_error;
 use parrot_core::{CancellationToken, PromptTemplate};
 use parrot_domain::contracts::async_ops::{Cancellation, OperationError, OperationResult};
 use serde_json::Value;
@@ -141,10 +141,9 @@ impl PromptTemplateCatalog {
                 "prompt_templates.{id} is not defined"
             ))));
         };
-        let source = NativeCancellation(cancellation);
         self.templates[*index]
             .compiled
-            .render(arguments, CancellationToken::from_provider(&source))
+            .render(arguments, CancellationToken::new(cancellation))
             .map_err(translate_error)
     }
 

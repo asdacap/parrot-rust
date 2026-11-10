@@ -1,7 +1,7 @@
 use crate::{
     CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration,
-    ContextReminderCheckpoint, ContextSnapshot, Error, PendingPrompt, Provider, ProviderRequest,
-    States, ToolDefinition, TurnOptions,
+    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, PendingPrompt, Provider,
+    ProviderRequest, States, ToolDefinition, TurnOptions,
     budget::TurnFlags,
     compaction::{compact_conversation, prepare_compaction},
     rendering::{render_instructions, render_template},
@@ -10,15 +10,32 @@ use crate::{
 pub(crate) async fn compact_context(
     states: &mut dyn States,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
+    cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
     let configuration = states
         .get_config(ConfigKey::Compaction)
         .await?
         .into_compaction()?;
-    let input = prepare_compaction(states, provider, definitions, &configuration).await?;
-    let compacted =
-        compact_conversation(&input, definitions, &configuration, states, provider).await;
+    let input = prepare_compaction(
+        states,
+        provider,
+        publisher,
+        definitions,
+        &configuration,
+        cancellation,
+    )
+    .await?;
+    let compacted = compact_conversation(
+        &input,
+        definitions,
+        &configuration,
+        states,
+        provider,
+        cancellation,
+    )
+    .await;
     states
         .record_compaction(&input.instructions, definitions, compacted)
         .await
@@ -28,19 +45,15 @@ async fn prepare_pending_prompt(
     states: &mut dyn States,
     context: &ContextSnapshot,
     configuration: &ContextConfiguration,
-    message_count: usize,
 ) -> Result<Option<PendingPrompt>, Error> {
     if let Some(prompt) = states.read_pending_prompt().await? {
         return Ok(Some(PendingPrompt::Message(prompt)));
     }
-    let mut cadence = states.read_context_cadence().await?;
-    if !cadence.is_restored() {
-        cadence.restore(states.read_context_checkpoint().await?);
-    }
+    let last_reminder = states.get_last_context_reminder().await?;
     let canonical_model = &configuration.model.canonical_model;
-    let observation = cadence.observe(context, canonical_model, message_count as i64);
-    states.write_context_cadence(cadence).await?;
-    let Some(percentage) = observation? else {
+    let Some(percentage) =
+        context.select_reminder_percentage(canonical_model, last_reminder.as_ref())
+    else {
         return Ok(None);
     };
     let mut arguments = vec![
@@ -55,7 +68,7 @@ async fn prepare_pending_prompt(
         ),
         (
             "notification_interval".into(),
-            crate::ContextCadence::NOTIFICATION_INTERVAL
+            ContextReminderCheckpoint::NOTIFICATION_INTERVAL
                 .to_string()
                 .into(),
         ),
@@ -69,9 +82,9 @@ async fn prepare_pending_prompt(
                 .map_or_else(|| "unavailable".into(), |value| value.to_string())
                 .into(),
         ));
-        "agent-session.context-limit-reminder"
+        ConfigKey::ContextLimitReminderTemplate
     } else {
-        "agent-session.context-reminder"
+        ConfigKey::ContextReminderTemplate
     };
     let content = render_template(states, key, &arguments).await?;
     Ok(Some(PendingPrompt::ContextReminder {
@@ -85,31 +98,17 @@ async fn prepare_pending_prompt(
     }))
 }
 
-async fn acknowledge_prompt(
-    states: &mut dyn States,
-    prompt: &PendingPrompt,
-    context: &ContextSnapshot,
-    message_count: usize,
-) -> Result<(), Error> {
-    states.acknowledge_pending_prompt(prompt, context).await?;
-    if let PendingPrompt::ContextReminder { checkpoint, .. } = prompt {
-        let mut cadence = states.read_context_cadence().await?;
-        cadence.acknowledge(context, &checkpoint.canonical_model, message_count as i64)?;
-        states.write_context_cadence(cadence).await?;
-    }
-    Ok(())
-}
-
 pub(crate) async fn prepare_request(
     states: &mut dyn States,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     flags: TurnFlags,
     options: &TurnOptions,
     cancellation: CancellationToken<'_>,
 ) -> Result<ProviderRequest, Error> {
     if flags.final_phase {
-        let content = render_template(states, "agent-session.final-request", &[]).await?;
+        let content = render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
         states.record_steer(&content).await?;
     }
     if cancellation.is_cancelled() {
@@ -125,7 +124,7 @@ pub(crate) async fn prepare_request(
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        instructions = compact_context(states, provider, definitions)
+        instructions = compact_context(states, provider, publisher, definitions, cancellation)
             .await?
             .instructions;
         messages = states.read_messages().await?;
@@ -137,15 +136,13 @@ pub(crate) async fn prepare_request(
         context = ContextSnapshot::estimate(estimate, &configuration);
         context.ensure_input_fits()?;
     }
-    if let Some(prompt) =
-        prepare_pending_prompt(states, &context, &configuration, messages.len()).await?
-    {
+    if let Some(prompt) = prepare_pending_prompt(states, &context, &configuration).await? {
         let mut candidate = messages.clone();
         candidate.push(prompt.render_message());
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
         let inserted = ContextSnapshot::estimate(estimate, &configuration);
         if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            instructions = compact_context(states, provider, definitions)
+            instructions = compact_context(states, provider, publisher, definitions, cancellation)
                 .await?
                 .instructions;
             messages = states.read_messages().await?;
@@ -165,7 +162,9 @@ pub(crate) async fn prepare_request(
             } else {
                 inserted
             };
-            acknowledge_prompt(states, &prompt, &acknowledged, messages.len()).await?;
+            states
+                .acknowledge_pending_prompt(&prompt, &acknowledged)
+                .await?;
             if let Some(receipt) = receipt {
                 states.publish_pending_prompt(receipt).await?;
             }

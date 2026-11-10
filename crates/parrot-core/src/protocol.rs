@@ -4,33 +4,72 @@ use std::{fmt, future::Future, pin::Pin};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// The caller cancelled an operation before its cancellation boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Cancelled;
+
+impl fmt::Display for Cancelled {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("operation cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
+/// Read-only cancellation observation; only the scope owner may cancel.
+pub trait Cancellation: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+
+    /// Resolves when cancellation is observed, including prior cancellation.
+    fn cancelled(&self) -> BoxFuture<'_, ()>;
+
+    /// Checks the actual current state, rather than assuming success.
+    fn check(&self) -> Result<(), Cancelled> {
+        if self.is_cancelled() {
+            Err(Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Borrows live cancellation observation without owning a signal or background work.
 #[derive(Clone, Copy)]
 pub struct CancellationToken<'a> {
-    provider: Option<&'a dyn Provider>,
+    cancellation: Option<&'a dyn Cancellation>,
 }
 
 impl<'a> CancellationToken<'a> {
-    pub fn from_provider(provider: &'a dyn Provider) -> Self {
+    pub fn new(cancellation: &'a dyn Cancellation) -> Self {
         Self {
-            provider: Some(provider),
+            cancellation: Some(cancellation),
         }
     }
 
     pub fn uncancelled() -> CancellationToken<'static> {
-        CancellationToken { provider: None }
+        CancellationToken { cancellation: None }
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.provider
-            .is_some_and(|provider| provider.is_cancelled())
+        self.cancellation
+            .is_some_and(|cancellation| cancellation.is_cancelled())
     }
 
     pub fn cancelled(&self) -> BoxFuture<'a, ()> {
-        match self.provider {
-            Some(provider) => provider.cancelled(),
+        match self.cancellation {
+            Some(cancellation) => cancellation.cancelled(),
             None => Box::pin(std::future::pending()),
         }
+    }
+}
+
+impl Cancellation for CancellationToken<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.is_cancelled()
+    }
+
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        self.cancelled()
     }
 }
 
@@ -57,10 +96,6 @@ pub trait Provider: Send + Sync {
     fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("Provider.read_model_system_prompt")) })
     }
-    /// Observes invocation cancellation independently of mutable conversation state.
-    fn is_cancelled(&self) -> bool;
-    /// Waits for invocation cancellation without owning background work.
-    fn cancelled(&self) -> BoxFuture<'_, ()>;
     /// Estimates exactly the supplied request using model-specific token costs.
     fn estimate_input_tokens(
         &self,
@@ -100,7 +135,14 @@ pub trait Provider: Send + Sync {
 
     /// Invokes the request and joins stream cleanup before returning, including
     /// after errors or cancellation.
-    fn invoke(&self, _request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, Error>> {
+    fn invoke<'a, 'c>(
+        &'a self,
+        _request: ProviderRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    where
+        'c: 'a,
+    {
         Box::pin(async { Err(Error::unsupported("Provider.invoke")) })
     }
 }
@@ -208,13 +250,21 @@ impl PendingPrompt {
     }
 }
 
-/// A recorded prompt notice awaiting publication after cadence acknowledgement.
+/// A recorded prompt notice awaiting publication after prompt acknowledgement.
 #[derive(Debug, Eq, PartialEq)]
 pub struct PromptPublication {
     pub event_id: String,
     pub agent_session_id: String,
     pub kind: String,
     pub notice: String,
+}
+
+/// Publishes compaction lifecycle notifications independently of conversation state.
+pub trait EventPublisher: Send + Sync {
+    /// Publishes compaction start without request cancellation.
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Publishes compaction failure without request cancellation.
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>>;
 }
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
@@ -233,26 +283,17 @@ pub trait States: Send + Sync {
     fn write_turn_budget(&mut self, _budget: TurnBudget) -> Result<(), Error> {
         Err(Error::unsupported("States.write_turn_budget"))
     }
-    fn read_context_cadence(&self) -> BoxFuture<'_, Result<ContextCadence, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_context_cadence")) })
-    }
-    /// Reads the last persisted context reminder checkpoint to restore reminder cadence.
-    fn read_context_checkpoint(
+    /// Reads the last stored context reminder in the current compaction epoch.
+    fn get_last_context_reminder(
         &self,
     ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_context_checkpoint")) })
-    }
-    fn write_context_cadence(
-        &mut self,
-        _cadence: ContextCadence,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.write_context_cadence")) })
+        Box::pin(async { Err(Error::unsupported("States.get_last_context_reminder")) })
     }
     /// Reads an optional native prompt without choosing or rendering context reminders.
     fn read_pending_prompt(&mut self) -> BoxFuture<'_, Result<Option<Message>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_pending_prompt")) })
     }
-    /// Acknowledges a supplied native prompt without changing context reminder cadence.
+    /// Acknowledges a supplied native prompt without changing context reminders.
     fn acknowledge_pending_prompt<'a>(
         &'a mut self,
         _prompt: &'a PendingPrompt,
@@ -264,17 +305,9 @@ pub trait States: Send + Sync {
     fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_exit_blockers")) })
     }
-    /// Publishes compaction start without request cancellation.
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.report_compaction_started")) })
-    }
     /// Refreshes raw epoch observations without rendering instructions.
     fn sample_epoch(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.sample_epoch")) })
-    }
-    /// Publishes compaction failure without request cancellation.
-    fn report_compaction_failed(&self, _message: String) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.report_compaction_failed")) })
     }
     /// Observes native status for the exact context selected by core.
     fn render_status<'a, 'c>(
@@ -315,10 +348,6 @@ pub trait States: Send + Sync {
     /// without rendering templates.
     fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_system_prompts")) })
-    }
-    /// Reads namespace keys and configured template catalog keys without expansion.
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_prompt_templates")) })
     }
     /// Reads literal template arguments for the supplied registered source.
     fn read_template_arguments<'a>(
@@ -414,7 +443,7 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.record_pending_prompt")) })
     }
     /// Publishes the supplied receipt without cancellation.
-    /// Core calls this after acknowledging prompt cadence.
+    /// Core calls this after acknowledging the recorded prompt.
     fn publish_pending_prompt(
         &mut self,
         _receipt: PromptPublication,
@@ -839,19 +868,6 @@ pub struct TokenCalibration {
     pub(crate) actual_input_tokens: i32,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ContextCadence {
-    pub(crate) canonical_model: Option<String>,
-    pub(crate) context_window: Option<i32>,
-    pub(crate) effective_history_size: i64,
-    pub(crate) observed_band: i32,
-    pub(crate) reported_band: i32,
-    pub(crate) suppress_next_increase: bool,
-    pub(crate) initialized: bool,
-    pub(crate) checkpoint: Option<ContextReminderCheckpoint>,
-    pub(crate) restored: bool,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TurnFlags {
     pub final_phase: bool,
@@ -970,18 +986,118 @@ pub struct CompactionConfiguration {
 }
 
 /// Selects a typed runtime configuration value without an additional service contract.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ConfigKey {
     Turn,
     Context,
     Compaction,
-    PromptTemplate(String),
+    SystemPromptBindings,
+    AgentsFileTemplate,
+    ModelAliasesTemplate,
+    AgentIdentityTemplate,
+    StandingInstructionTemplate,
+    SkillCatalogTemplate,
+    SkillUnavailableTemplate,
+    SkillSelectedTemplate,
+    SkillTooLargeTemplate,
+    ContextReminderTemplate,
+    ContextLimitReminderTemplate,
+    FinalRequestTemplate,
+    TruncatedToolCallTemplate,
+    InvalidToolCallTemplate,
+    OptionalCliUtilitiesTemplate,
+    ExpectedCliUtilitiesTemplate,
+    PlatformTemplate,
+    WorkingDirectoryTemplate,
+    GitRepositoryTemplate,
+    SubagentsTemplate,
+    AgentPathEnvironmentTemplate,
+    AgentScratchTemplate,
+    AgentHistoryTemplate,
+}
+
+const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
+    (ConfigKey::AgentsFileTemplate, "context.agents-file"),
+    (ConfigKey::ModelAliasesTemplate, "context.model-aliases"),
+    (ConfigKey::AgentIdentityTemplate, "system.agent-identity"),
+    (
+        ConfigKey::StandingInstructionTemplate,
+        "context.standing-instruction",
+    ),
+    (ConfigKey::SkillCatalogTemplate, "context.skills"),
+    (
+        ConfigKey::SkillUnavailableTemplate,
+        "context.skill-unavailable",
+    ),
+    (ConfigKey::SkillSelectedTemplate, "context.skill-selected"),
+    (ConfigKey::SkillTooLargeTemplate, "context.skill-too-large"),
+    (
+        ConfigKey::ContextReminderTemplate,
+        "agent-session.context-reminder",
+    ),
+    (
+        ConfigKey::ContextLimitReminderTemplate,
+        "agent-session.context-limit-reminder",
+    ),
+    (
+        ConfigKey::FinalRequestTemplate,
+        "agent-session.final-request",
+    ),
+    (
+        ConfigKey::TruncatedToolCallTemplate,
+        "agent-session.truncated-tool-call",
+    ),
+    (
+        ConfigKey::InvalidToolCallTemplate,
+        "agent-session.invalid-tool-call",
+    ),
+    (
+        ConfigKey::OptionalCliUtilitiesTemplate,
+        "context.optional-cli-utilities",
+    ),
+    (
+        ConfigKey::ExpectedCliUtilitiesTemplate,
+        "context.expected-cli-utilities",
+    ),
+    (ConfigKey::PlatformTemplate, "context.platform"),
+    (
+        ConfigKey::WorkingDirectoryTemplate,
+        "system.working-directory",
+    ),
+    (ConfigKey::GitRepositoryTemplate, "context.git-repository"),
+    (ConfigKey::SubagentsTemplate, "context.subagents"),
+    (
+        ConfigKey::AgentPathEnvironmentTemplate,
+        "context.agent-path-environment",
+    ),
+    (ConfigKey::AgentScratchTemplate, "context.agent-scratch"),
+    (ConfigKey::AgentHistoryTemplate, "context.agent-history"),
+];
+
+impl ConfigKey {
+    pub fn get_prompt_template_id(self) -> Option<&'static str> {
+        PROMPT_TEMPLATE_CONFIG_KEYS
+            .iter()
+            .find_map(|(key, id)| (*key == self).then_some(*id))
+    }
+    pub fn from_prompt_template_id(id: &str) -> Result<Self, Error> {
+        PROMPT_TEMPLATE_CONFIG_KEYS
+            .iter()
+            .find_map(|(key, candidate)| (*candidate == id).then_some(*key))
+            .ok_or_else(|| {
+                Error::template(format!(
+                    "prompt_templates.{id} is not an enumerated core prompt template"
+                ))
+            })
+    }
 }
 
 pub enum ConfigValue {
     Turn(TurnOptions),
     Context(ContextConfiguration),
     Compaction(CompactionConfiguration),
+    /// Ordered namespace keys and their explicitly enumerated template configuration keys.
+    SystemPromptBindings(Vec<(String, ConfigKey)>),
     PromptTemplate(Arc<PromptTemplate>),
 }
 
@@ -1002,6 +1118,14 @@ impl ConfigValue {
         match self {
             Self::Compaction(value) => Ok(value),
             _ => Err(Error::failed("expected compaction configuration")),
+        }
+    }
+    pub fn into_system_prompt_bindings(self) -> Result<Vec<(String, ConfigKey)>, Error> {
+        match self {
+            Self::SystemPromptBindings(value) => Ok(value),
+            _ => Err(Error::failed(
+                "expected system prompt bindings configuration",
+            )),
         }
     }
     pub fn into_prompt_template(self) -> Result<Arc<PromptTemplate>, Error> {

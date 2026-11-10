@@ -3,8 +3,8 @@ use super::{
     ConversationState,
 };
 use crate::{
-    CancellationToken, Content, ContextSnapshot, Error, Message, Provider, Role, States,
-    ToolDefinition,
+    CancellationToken, Content, ContextSnapshot, Error, EventPublisher, Message, Provider, Role,
+    States, ToolDefinition,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,11 +13,12 @@ use std::collections::{BTreeMap, BTreeSet};
 pub async fn prepare_compaction(
     states: &mut dyn States,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     configuration: &CompactionConfiguration,
+    cancellation: CancellationToken<'_>,
 ) -> Result<CompactionInput, Error> {
-    let cancellation = CancellationToken::from_provider(provider);
-    states.report_compaction_started().await?;
+    publisher.report_compaction_started().await?;
     let outcome: Result<CompactionInput, Error> = async {
         states.sample_epoch().await?;
         let instructions = crate::rendering::render_instructions(states, provider).await?;
@@ -43,7 +44,9 @@ pub async fn prepare_compaction(
     match outcome {
         Ok(input) => Ok(input),
         Err(error) => {
-            states.report_compaction_failed(error.to_string()).await?;
+            publisher
+                .report_compaction_failed(error.to_string())
+                .await?;
             Err(error)
         }
     }

@@ -394,12 +394,6 @@ impl<'a> PlanningProvider<'a> {
 }
 
 impl parrot_core::Provider for PlanningProvider<'_> {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> parrot_core::BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
     fn estimate_tokens(
         &self,
         messages: &[parrot_core::Message],

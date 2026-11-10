@@ -10,6 +10,7 @@ mod harness;
 use harness::*;
 #[path = "../../../parrot-runtime/tests/tool_settlement/runtime.rs"]
 mod runtime;
+use parrot_core::ContextReminderCheckpoint;
 use parrot_domain::contracts::runtime::SessionControl;
 use parrot_host::composition::context::{
     CompactRequest, ContextControl, ContextSelection, ContextServices, RetainedCompactTool,
@@ -436,7 +437,9 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
         ),
         (
             "notification_interval".into(),
-            ContextCadence::NOTIFICATION_INTERVAL.to_string().into(),
+            ContextReminderCheckpoint::NOTIFICATION_INTERVAL
+                .to_string()
+                .into(),
         ),
         (
             "trigger".into(),

@@ -16,23 +16,54 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     budget: &'a mut parrot_core::TurnBudget,
 }
 
+struct RuntimeEventPublisher<'a, S: AccessSnapshot, T: TurnTools<S>> {
+    backend: &'a RuntimeBackend<S, T>,
+}
+
+impl<S, T> parrot_core::EventPublisher for RuntimeEventPublisher<'_, S, T>
+where
+    S: AccessSnapshot + 'static,
+    T: TurnTools<S> + 'static,
+    T::Snapshot: 'static,
+{
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .report_epoch_started(&ContextEmitter {
+                    backend: self.backend,
+                })
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .context
+                .fail_epoch_compaction(
+                    message,
+                    &ContextEmitter {
+                        backend: self.backend,
+                    },
+                )
+                .await
+                .map_err(Into::into)
+        })
+    }
+}
+
 struct RuntimeTools<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S>,
     cancellation: &'a dyn Cancellation,
     captured: std::sync::Mutex<Option<CapturedTools<T::Snapshot>>>,
-}
-
-struct RuntimeCancellation<'a>(parrot_core::CancellationToken<'a>);
-
-impl Cancellation for RuntimeCancellation<'_> {
-    fn is_cancelled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.0.cancelled()
-    }
 }
 
 struct RuntimeProvider<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -269,7 +300,14 @@ where
                     Ok(())
                 })
                 .await?;
-                parrot_core::run_turn(&mut states, &tools, &provider).await
+                parrot_core::run_turn(
+                    &mut states,
+                    &tools,
+                    &provider,
+                    &RuntimeEventPublisher { backend },
+                    parrot_core::CancellationToken::new(cancellation),
+                )
+                .await
             }
             .await;
             match result {
@@ -354,10 +392,20 @@ where
                             .capture_compaction_configuration(&selection.model, None),
                     ))
                 }
-                ConfigKey::PromptTemplate(id) => self
+                ConfigKey::SystemPromptBindings => self
+                    .backend
+                    .prompt
+                    .read_core_prompt_bindings(self.cancellation)
+                    .await
+                    .map(ConfigValue::SystemPromptBindings)
+                    .map_err(ContextError::from)
+                    .map_err(Into::into),
+                key => self
                     .backend
                     .templates
-                    .get_template(&id)
+                    .get_template(key.get_prompt_template_id().ok_or_else(|| {
+                        TurnError::Service("unsupported template configuration key".into())
+                    })?)
                     .map(ConfigValue::PromptTemplate)
                     .map_err(|error| {
                         TurnError::Prompt(crate::prompt_context::PromptError::Template(
@@ -374,20 +422,7 @@ where
         *self.budget = budget;
         Ok(())
     }
-    fn read_context_cadence(
-        &self,
-    ) -> BoxFuture<'_, Result<parrot_core::ContextCadence, CoreError>> {
-        adapt_operation(async move {
-            Ok(self
-                .backend
-                .state
-                .lock()
-                .await
-                .context
-                .capture_context_cadence())
-        })
-    }
-    fn read_context_checkpoint(
+    fn get_last_context_reminder(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ContextReminderCheckpoint>, CoreError>> {
         adapt_operation(async move {
@@ -396,23 +431,9 @@ where
                 .lock()
                 .await
                 .context
-                .read_context_checkpoint()
+                .get_last_context_reminder()
                 .await
                 .map_err(Into::into)
-        })
-    }
-    fn write_context_cadence(
-        &mut self,
-        cadence: parrot_core::ContextCadence,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .write_context_cadence(cadence);
-            Ok(())
         })
     }
     fn read_pending_prompt(
@@ -478,38 +499,6 @@ where
         })
     }
 
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .report_epoch_started(&ContextEmitter {
-                    backend: self.backend,
-                })
-                .await
-                .map_err(Into::into)
-        })
-    }
-
-    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .state
-                .lock()
-                .await
-                .context
-                .fail_epoch_compaction(
-                    message,
-                    &ContextEmitter {
-                        backend: self.backend,
-                    },
-                )
-                .await
-                .map_err(Into::into)
-        })
-    }
     fn render_status<'a, 'c>(
         &'a self,
         context: CoreContextSnapshot,
@@ -538,7 +527,7 @@ where
                         trigger_tokens: context.trigger_tokens,
                         has_context_limit_override: context.has_context_limit_override,
                     },
-                    &RuntimeCancellation(cancellation),
+                    &cancellation,
                 )
                 .await
                 .map_err(Into::into)
@@ -580,7 +569,7 @@ where
                     total_groups: progress.total_groups as u64,
                     ..protocol::CompactionProgressEvent::new()
                 },
-                &RuntimeCancellation(cancellation),
+                &cancellation,
             )
             .await
             .map_err(crate::compaction::CompactionError::from)
@@ -606,16 +595,6 @@ where
             backend
                 .prompt
                 .read_system_prompts(&selection.model, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
-        adapt_operation(async move {
-            self.backend
-                .prompt
-                .read_prompt_templates(self.cancellation)
                 .await
                 .map_err(ContextError::from)
                 .map_err(Into::into)
@@ -1141,7 +1120,6 @@ where
         cancellation: parrot_core::CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
-            let cancellation = RuntimeCancellation(cancellation);
             let backend = self.backend;
             let assistant_sequence = receipt.assistant_sequence;
             let selection = self.binding.capture_selection()?;
@@ -1238,12 +1216,6 @@ where
                 .map_err(Into::into)
         })
     }
-    fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.cancellation.cancelled()
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -1296,10 +1268,14 @@ where
         })
     }
 
-    fn invoke(
-        &self,
+    fn invoke<'a, 'c>(
+        &'a self,
         request: ProviderRequest,
-    ) -> BoxFuture<'_, Result<ProviderResponse, CoreError>> {
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, CoreError>>
+    where
+        'c: 'a,
+    {
         Box::pin(async move {
             let backend = self.backend;
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
@@ -1332,10 +1308,7 @@ where
                 activity: &activity,
                 usage: &mut *state,
             };
-            let event = match call
-                .stream(session.as_ref(), request, self.cancellation)
-                .await
-            {
+            let event = match call.stream(session.as_ref(), request, &cancellation).await {
                 Ok(event) => event,
                 Err(
                     error @ provider_call::ProviderCallError::Provider(

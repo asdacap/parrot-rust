@@ -1,6 +1,5 @@
 //! Provider budgets, causal summary execution and awaited durable context epochs.
 mod budget;
-mod cadence;
 mod execution;
 pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
 pub(crate) use execution::{CompactionEstimates, SummaryProviderAdapter};
@@ -12,7 +11,6 @@ pub use context::{
 mod planning;
 
 pub use budget::ProviderTokenBudget;
-pub use cadence::ContextCadence;
 pub use parrot_core::compaction::PlanningError;
 pub use parrot_domain::values::{
     accounting::RetainedAgentBudget,

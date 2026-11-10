@@ -1,12 +1,13 @@
 //! Source-ordered, independently sampled runtime status sections.
 
+use parrot_core::ContextReminderCheckpoint;
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError},
     values::{
         accounting::{
             AgentSessionStatisticsSnapshot, AgentUsageKey, AgentUsageSnapshot, AgentUsageTotals,
         },
-        context::{ContextCadence, ContextSnapshot},
+        context::ContextSnapshot,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -350,7 +351,7 @@ impl StatusProvider for ContextStatusProvider {
             let mut model = json!({
                 "available": snapshot.is_available(), "estimated_tokens": format_tokens(snapshot.estimated_tokens),
                 "context_limit": format_tokens(i64::from(snapshot.context_limit)),
-                "cadence": ContextCadence::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
+                "cadence": ContextReminderCheckpoint::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
             }).as_object().unwrap().clone();
             if let Some(usage) = snapshot.usage_percent {
                 model.insert("usage".into(), usage.to_string().into());
@@ -619,7 +620,6 @@ impl<E: fmt::Display> StatusFittingErrors<E> {
 
 struct StatusFittingProvider<'a, F, E> {
     estimate: std::sync::Mutex<F>,
-    cancellation: &'a dyn Cancellation,
     errors: &'a StatusFittingErrors<E>,
 }
 
@@ -628,14 +628,6 @@ where
     F: FnMut(&str) -> Result<ContextSnapshot, E> + Send,
     E: fmt::Display + Send,
 {
-    fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        self.cancellation.cancelled()
-    }
-
     fn estimate_status_context(
         &self,
         content: &str,
@@ -693,23 +685,26 @@ where
     let errors = StatusFittingErrors(std::sync::Mutex::new(None));
     let provider = StatusFittingProvider {
         estimate: std::sync::Mutex::new(estimate),
-        cancellation,
         errors: &errors,
     };
     let states = StatusFittingStates {
         render: &render,
         errors: &errors,
     };
-    parrot_core::compaction::fit_status(&states, &provider)
-        .await
-        .map_err(|error| {
-            errors
-                .0
-                .lock()
-                .expect("status fitting errors poisoned")
-                .take()
-                .unwrap_or_else(|| fallback(error))
-        })
+    parrot_core::compaction::fit_status(
+        &states,
+        &provider,
+        parrot_core::CancellationToken::new(cancellation),
+    )
+    .await
+    .map_err(|error| {
+        errors
+            .0
+            .lock()
+            .expect("status fitting errors poisoned")
+            .take()
+            .unwrap_or_else(|| fallback(error))
+    })
 }
 
 pub(crate) async fn fit_context_status<S: crate::compaction::ContextStatus + ?Sized>(

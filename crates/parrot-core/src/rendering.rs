@@ -10,13 +10,10 @@ fn render(template: &PromptTemplate, arguments: &[(String, Value)]) -> Result<St
 
 pub(crate) async fn render_template(
     states: &dyn States,
-    key: &str,
+    key: ConfigKey,
     arguments: &[(String, Value)],
 ) -> Result<String, Error> {
-    let template = states
-        .get_config(ConfigKey::PromptTemplate(key.into()))
-        .await?
-        .into_prompt_template()?;
+    let template = states.get_config(key).await?.into_prompt_template()?;
     render(&template, arguments)
 }
 
@@ -25,14 +22,18 @@ pub(crate) async fn render_instructions(
     provider: &dyn Provider,
 ) -> Result<String, Error> {
     let mut sections = states.read_system_prompts().await?;
-    for (source_key, key) in states.read_prompt_templates().await? {
+    let bindings = states
+        .get_config(ConfigKey::SystemPromptBindings)
+        .await?
+        .into_system_prompt_bindings()?;
+    for (source_key, key) in bindings {
         let arguments = states.read_template_arguments(&source_key).await?;
-        sections.push((source_key, render_template(states, &key, &arguments).await?));
+        sections.push((source_key, render_template(states, key, &arguments).await?));
     }
     let files = states.read_agents_files().await?;
     if !files.is_empty() {
         let template = states
-            .get_config(ConfigKey::PromptTemplate("context.agents-file".into()))
+            .get_config(ConfigKey::AgentsFileTemplate)
             .await?
             .into_prompt_template()?;
         sections.push(render_agents_files(&files, &template)?);
@@ -41,7 +42,7 @@ pub(crate) async fn render_instructions(
     let guidance = provider.read_model_system_prompt().await?;
     if !aliases.is_empty() || guidance.is_some() {
         let template = states
-            .get_config(ConfigKey::PromptTemplate("context.model-aliases".into()))
+            .get_config(ConfigKey::ModelAliasesTemplate)
             .await?
             .into_prompt_template()?;
         prepend_system_prompt_section(
@@ -51,7 +52,7 @@ pub(crate) async fn render_instructions(
     }
     if let Some(identity) = states.read_agent_identity().await? {
         let template = states
-            .get_config(ConfigKey::PromptTemplate("system.agent-identity".into()))
+            .get_config(ConfigKey::AgentIdentityTemplate)
             .await?
             .into_prompt_template()?;
         sections.push(render_agent_identity(&identity, &template)?);
@@ -59,9 +60,7 @@ pub(crate) async fn render_instructions(
     let instruction = states.read_standing_instruction().await?;
     if !instruction.is_empty() {
         let template = states
-            .get_config(ConfigKey::PromptTemplate(
-                "context.standing-instruction".into(),
-            ))
+            .get_config(ConfigKey::StandingInstructionTemplate)
             .await?
             .into_prompt_template()?;
         sections.push(render_standing_instruction(&instruction, &template)?);
@@ -69,7 +68,7 @@ pub(crate) async fn render_instructions(
     let skills = states.read_skill_catalog().await?;
     if !skills.is_empty() {
         let template = states
-            .get_config(ConfigKey::PromptTemplate("context.skills".into()))
+            .get_config(ConfigKey::SkillCatalogTemplate)
             .await?
             .into_prompt_template()?;
         sections.push(render_skill_catalog_entries(&skills, &template)?);
