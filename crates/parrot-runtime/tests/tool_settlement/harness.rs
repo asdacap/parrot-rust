@@ -347,8 +347,8 @@ impl Harness {
                         .await?;
                     cancelled |= results
                         .iter()
-                        .any(|result| result.result.status == parrot_core::ToolStatus::Cancelled);
-                    completed.extend(results.into_iter().map(|result| result.result));
+                        .any(|result| result.status == parrot_core::ToolStatus::Cancelled);
+                    completed.extend(results);
                 }
                 self.state
                     .complete_execution(&mut self.conversation, &completed)

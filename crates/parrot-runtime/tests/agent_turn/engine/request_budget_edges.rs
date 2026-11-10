@@ -42,10 +42,7 @@ impl TurnTools<Security> for EdgeTools {
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<
-        'a,
-        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
-    > {
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
         self.inner.execute(
             request,
             resources,

@@ -56,10 +56,7 @@ impl TurnTools<Security> for BudgetTools {
         snapshot: &'a Self::Snapshot,
         capture: &'a dyn SelectionSource<Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<
-        'a,
-        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
-    > {
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
         self.executions.lock().unwrap().push((
             selection.profile.id.clone(),
             snapshot.iter().map(|tool| tool.name.clone()).collect(),

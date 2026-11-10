@@ -6,8 +6,8 @@ use parrot_core::{
     Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
     PendingMessage, PromotedInput, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
     Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
-    ToolExecutionResult, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolImage,
+    ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions,
 };
@@ -226,7 +226,7 @@ impl Tools for MemoryTools {
         &'a self,
         request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -240,7 +240,7 @@ impl Tools for MemoryTools {
             self.flags.lock().unwrap().push(flags);
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
-                return Ok(reply.into_iter().map(Into::into).collect());
+                return Ok(reply);
             }
             Ok(calls
                 .into_iter()
@@ -250,7 +250,6 @@ impl Tools for MemoryTools {
                     tool_name: call.name,
                     ..ToolResult::default()
                 })
-                .map(Into::into)
                 .collect())
         })
     }
@@ -786,7 +785,7 @@ impl States for MemoryState {
                 },
                 ConversationPersistence::ToolResult { result, .. } => {
                     self.step("record_results")?;
-                    self.applied_results.push(result.result.clone());
+                    self.applied_results.push(result.clone());
                 }
                 ConversationPersistence::ToolImages { .. } => {}
                 ConversationPersistence::Status { .. } => {
@@ -1878,10 +1877,7 @@ fn tools_and_provider_operate_without_states() {
     .unwrap();
     assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(
-        results
-            .into_iter()
-            .map(|execution| execution.result)
-            .collect::<Vec<_>>(),
+        results,
         [ToolResult {
             call_id: "explicit-call".into(),
             tool_name: "read".into(),

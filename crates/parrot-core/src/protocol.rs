@@ -145,7 +145,7 @@ pub trait Tools: Send + Sync {
         &'a self,
         request: crate::ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<crate::ToolExecutionResult>, Error>>;
+    ) -> BoxFuture<'a, Result<Vec<crate::ToolResult>, Error>>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -580,6 +580,8 @@ pub struct ToolResult {
     pub text: String,
     pub error_message: String,
     pub images: Vec<ToolImage>,
+    /// Adapter-owned metadata forwarded unchanged to conversation persistence.
+    pub metadata: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

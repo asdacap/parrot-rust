@@ -899,7 +899,7 @@ where
         &'a self,
         request: parrot_core::ToolExecutionRequest,
         cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolExecutionResult>, CoreError>> {
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
             let selection = self.binding.capture_selection()?;
@@ -921,7 +921,7 @@ where
                 .clone()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
             let events = ContextEmitter { backend };
-            let chunk = backend
+            backend
                 .tools
                 .execute(
                     ToolExecutionChunk {
@@ -945,24 +945,7 @@ where
                     backend.selection.as_ref(),
                     &cancellation,
                 )
-                .await?;
-            Ok(chunk
-                .into_iter()
-                .map(|execution| parrot_core::ToolExecutionResult {
-                    result: execution.result,
-                    yielded_process: execution.yielded_process.map(|value| {
-                        parrot_core::YieldedProcess {
-                            process_id: value.process_id,
-                            name: value.name,
-                            inventory_instance_id: value.inventory_instance_id,
-                            visible_revision: value.visible_revision,
-                            stdout_path: value.stdout_path,
-                            stderr_path: value.stderr_path,
-                            activity_kind: value.activity_kind.value(),
-                        }
-                    }),
-                })
-                .collect())
+                .await
         })
     }
 }
