@@ -100,15 +100,26 @@ tracked.
 
 ## Gates
 
-Run inside `nix develop`:
+Run compilation and tests with high concurrency inside `nix develop`. Use all
+available CPUs by default:
 
 ```sh
+export CARGO_BUILD_JOBS="$(getconf _NPROCESSORS_ONLN)"
+export RUST_TEST_THREADS="$CARGO_BUILD_JOBS"
 cargo build --workspace --locked
 cargo test --workspace --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 nix flake check
 ```
+
+When available, use `cargo nextest run --workspace --locked --test-threads "$RUST_TEST_THREADS"`
+to run tests across executables in parallel, followed by
+`cargo test --workspace --doc --locked` for doctests. Otherwise, use the Cargo
+command above and run independent test groups concurrently. Give concurrent
+Cargo processes separate `CARGO_TARGET_DIR` directories under the main worktree's
+`.tmp` directory to avoid build-lock contention. Reduce concurrency only for an
+observed resource limit or tests that require serial execution, and report why.
 
 The [CI workflow](.github/workflows/check.yml) also defines frontend, contract,
 native-platform and package-smoke gates. The workspace denies Rust warnings and
