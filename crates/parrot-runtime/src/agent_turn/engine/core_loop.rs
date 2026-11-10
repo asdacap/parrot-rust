@@ -4,8 +4,9 @@ use parrot_core::{
     ContextConfiguration as CoreContextConfiguration,
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
     ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorCode, ErrorKind,
-    ProviderRequest, ProviderResponse, States as CoreStates, TokenCalibration, ToolCall,
-    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
+    PendingPrompt, PromptPublication, ProviderRequest, ProviderResponse, States as CoreStates,
+    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult,
+    ToolStatus, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -14,13 +15,6 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
     persistence_key: Option<TurnKey>,
-}
-
-struct PendingPrompt {
-    checkpoint: CoreContextReminderCheckpoint,
-    content: String,
-    observed_percentage: i32,
-    published: Option<Event>,
 }
 
 struct RuntimePreparation<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -78,13 +72,8 @@ where
     fn get_pending_prompt<'a>(
         &'a mut self,
         context: &'a CoreContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<parrot_core::Message>, CoreError>> {
+    ) -> BoxFuture<'a, Result<Option<PendingPrompt>, CoreError>> {
         adapt_operation(async move {
-            *self
-                .binding
-                .pending_prompt
-                .lock()
-                .expect("pending prompt poisoned") = None;
             let mut state = self.backend.state.lock().await;
             let selection = self.binding.capture_selection()?;
             let mut cadence = state.context.capture_context_cadence();
@@ -115,12 +104,7 @@ where
                 },
                 percentage,
             )?;
-            let message = sessions::Message::system(&content).into();
-            *self
-                .binding
-                .pending_prompt
-                .lock()
-                .expect("pending prompt poisoned") = Some(PendingPrompt {
+            Ok(Some(PendingPrompt::ContextReminder {
                 checkpoint: CoreContextReminderCheckpoint {
                     canonical_model: selection.model.canonical_model.selector(),
                     context_limit: context.context_limit,
@@ -128,30 +112,26 @@ where
                 },
                 content,
                 observed_percentage: context.usage_percent.unwrap_or_default(),
-                published: None,
-            });
-            Ok(Some(message))
+            }))
         })
     }
     fn acknowledge_prompt<'a>(
         &'a mut self,
+        prompt: &'a PendingPrompt,
         context: &'a CoreContextSnapshot,
     ) -> BoxFuture<'a, Result<(), CoreError>> {
         adapt_operation(async move {
-            let canonical_model = self
-                .binding
-                .pending_prompt
-                .lock()
-                .expect("pending prompt poisoned")
-                .as_ref()
-                .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?
-                .checkpoint
-                .canonical_model
-                .clone();
+            let PendingPrompt::ContextReminder { checkpoint, .. } = prompt else {
+                return Ok(());
+            };
             let mut state = self.backend.state.lock().await;
             let mut cadence = state.context.capture_context_cadence();
             cadence
-                .acknowledge(context, &canonical_model, state.conversation.len() as i64)
+                .acknowledge(
+                    context,
+                    &checkpoint.canonical_model,
+                    state.conversation.len() as i64,
+                )
                 .map_err(CoreError::from)
                 .map_err(TurnError::Core)?;
             state.context.write_context_cadence(cadence);
@@ -465,7 +445,6 @@ struct CapturedTools<T> {
 
 struct TurnBinding<S: AccessSnapshot> {
     selection: std::sync::Mutex<Option<TurnSelection<S>>>,
-    pending_prompt: std::sync::Mutex<Option<PendingPrompt>>,
     exit_blocker_sources:
         std::sync::Mutex<Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>>,
 }
@@ -474,7 +453,6 @@ impl<S: AccessSnapshot> TurnBinding<S> {
     fn new() -> Self {
         Self {
             selection: std::sync::Mutex::new(None),
-            pending_prompt: std::sync::Mutex::new(None),
             exit_blocker_sources: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -962,51 +940,60 @@ where
             Ok(())
         })
     }
-    fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, CoreError>> {
+    fn record_pending_prompt<'a>(
+        &'a mut self,
+        prompt: &'a PendingPrompt,
+    ) -> BoxFuture<'a, Result<Option<PromptPublication>, CoreError>> {
         adapt_operation(async move {
-            let mut pending = self
-                .binding
-                .pending_prompt
-                .lock()
-                .expect("pending prompt poisoned")
-                .take()
-                .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?;
-            let mut guard = self.backend.state.lock().await;
-            let state = &mut *guard;
-            pending.published = state
+            let PendingPrompt::ContextReminder {
+                checkpoint,
+                content,
+                observed_percentage,
+            } = prompt
+            else {
+                return Err(TurnError::Service(
+                    "ordinary pending prompt recording is unsupported".into(),
+                ));
+            };
+            let mut state = self.backend.state.lock().await;
+            let state = &mut *state;
+            let published = state
                 .context
                 .append_context_reminder(
                     &mut state.conversation,
-                    pending.checkpoint.clone(),
-                    pending.content.clone(),
-                    pending.observed_percentage,
+                    checkpoint.clone(),
+                    content.clone(),
+                    *observed_percentage,
                 )
                 .await?;
-            let inserted = pending.published.is_some();
-            *self
-                .binding
-                .pending_prompt
-                .lock()
-                .expect("pending prompt poisoned") = Some(pending);
-            Ok(inserted)
+            Ok(published.map(|event| PromptPublication {
+                kind: event.agent_notice().kind.clone(),
+                notice: event.agent_notice().notice.clone(),
+                event_id: event.id,
+                agent_session_id: event.agent_session_id,
+            }))
         })
     }
-    fn publish_pending_prompt(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn publish_pending_prompt(
+        &mut self,
+        receipt: PromptPublication,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            let pending = self
-                .binding
-                .pending_prompt
-                .lock()
-                .expect("pending prompt poisoned")
-                .take()
-                .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?;
-            if let Some(published) = pending.published {
-                ContextEmitter {
-                    backend: self.backend,
-                }
-                .publish(published, &NeverCancelled)
-                .await?;
+            let mut event = Event {
+                id: receipt.event_id,
+                agent_session_id: receipt.agent_session_id,
+                ..Event::new()
+            };
+            event.set_agent_notice(protocol::AgentNotice {
+                kind: receipt.kind,
+                notice: receipt.notice,
+                ..protocol::AgentNotice::new()
+            });
+            ContextEmitter {
+                backend: self.backend,
             }
+            .publish(event, &NeverCancelled)
+            .await?;
             Ok(())
         })
     }
