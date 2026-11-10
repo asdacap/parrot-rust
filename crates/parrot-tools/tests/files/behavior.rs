@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use parrot_domain::contracts::{
     async_ops::OperationError,
@@ -1150,4 +1151,140 @@ async fn glob_propagates_cancellation_and_uses_real_tokio_timeout() {
         .await
         .unwrap();
     assert_eq!(result.text, "error: glob timed out");
+}
+
+fn short_paths() -> WorkspacePaths {
+    WorkspacePaths::new(&BTreeMap::from([("SCRATCH".into(), "/scratch".into())]))
+}
+
+#[tokio::test]
+async fn read_appends_the_path_variable_note_only_when_the_shorthand_was_unused() {
+    let service = RecordingService::default();
+    service.file(
+        "/scratch/notes.txt",
+        "/actual/notes.txt",
+        b"live output\n".to_vec(),
+    );
+    let tool = ReadTool::new(service, short_paths(), definition());
+    let note = "tip: the same path can be written as $SCRATCH/notes.txt. Use it in path arguments to shorten later tool calls.";
+    let full = tool
+        .execute(
+            &invocation(json!({"path":"/scratch/notes.txt"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        full.text,
+        format!("1: live output\ntotal lines in file: 1\n{note}")
+    );
+    let shorthand = tool
+        .execute(
+            &invocation(json!({"path":"$SCRATCH/notes.txt"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(shorthand.text, "1: live output\ntotal lines in file: 1\n");
+}
+
+#[tokio::test]
+async fn read_renders_the_path_variable_note_through_the_configured_template() {
+    let service = RecordingService::default();
+    service.file(
+        "/scratch/notes.txt",
+        "/actual/notes.txt",
+        b"live\n".to_vec(),
+    );
+    let environment = BTreeMap::from([("HOME".to_owned(), "/session/home".to_owned())]);
+    let templates = Arc::new(
+        parrot_foundation::template_catalog::PromptTemplateCatalog::from_content(
+            "prompt_templates:\n  tool-result.path-variable-note:\n    template: 'SHORT<{short}>'\n    allowed_arguments: [short]\n    required_arguments: [short]\n",
+            &environment,
+        )
+        .unwrap()
+        .1,
+    );
+    let tool = ReadTool::new(service, short_paths(), definition());
+    let mut full = invocation(json!({"path":"/scratch/notes.txt"}));
+    full.prompt_templates = Some(templates.clone());
+    let result = tool.execute(&full, &Snapshot(1), &NoCancel).await.unwrap();
+    assert!(
+        result.text.ends_with("\nSHORT<$SCRATCH/notes.txt>"),
+        "{}",
+        result.text
+    );
+    let mut shorthand = invocation(json!({"path":"$SCRATCH/notes.txt"}));
+    shorthand.prompt_templates = Some(templates.clone());
+    let result = tool
+        .execute(&shorthand, &Snapshot(1), &NoCancel)
+        .await
+        .unwrap();
+    assert!(result.text.ends_with("total lines in file: 1\n"));
+}
+
+#[tokio::test]
+async fn write_appends_the_path_variable_note_only_when_the_shorthand_was_unused() {
+    let service = RecordingService::default();
+    service.0.lock().unwrap().mutation_bytes = None;
+    let tool = WriteTool::new(service, short_paths(), definition());
+    let note = "tip: the same path can be written as $SCRATCH/notes.txt. Use it in path arguments to shorten later tool calls.";
+    let full = tool
+        .execute(
+            &invocation(json!({"path":"/scratch/notes.txt","content":"x\n"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        full.text,
+        format!("Lines before: 0\nLines after: 1\n{note}")
+    );
+    let shorthand = tool
+        .execute(
+            &invocation(json!({"path":"$SCRATCH/notes.txt","content":"x\n"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(shorthand.text, "Lines before: 1\nLines after: 1");
+}
+
+#[tokio::test]
+async fn edit_appends_the_path_variable_note_to_applied_diff_and_no_change_results() {
+    let note = "tip: the same path can be written as $SCRATCH/notes.txt. Use it in path arguments to shorten later tool calls.";
+    let applied_call = json!({"path":"/scratch/notes.txt","old_string":"old","new_string":"new"});
+    let tool_for = |bytes: Option<&[u8]>| {
+        let service = RecordingService::default();
+        service.0.lock().unwrap().mutation_bytes = bytes.map(<[u8]>::to_vec);
+        EditTool::new(service, short_paths(), definition())
+    };
+    let applied = tool_for(Some(b"old\n"))
+        .execute(&invocation(applied_call.clone()), &Snapshot(1), &NoCancel)
+        .await
+        .unwrap();
+    assert!(applied.text.starts_with("--- a//scratch/notes.txt\n"));
+    assert!(applied.text.ends_with(note), "{}", applied.text);
+    let unchanged = tool_for(Some(b"old\n"))
+        .execute(
+            &invocation(json!({"path":"/scratch/notes.txt","old_string":"old","new_string":"old"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(unchanged.text, format!("No changes made.\n{note}"));
+    let shorthand = tool_for(Some(b"old\n"))
+        .execute(
+            &invocation(json!({"path":"$SCRATCH/notes.txt","old_string":"old","new_string":"new"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert!(!shorthand.text.contains("tip:"));
 }

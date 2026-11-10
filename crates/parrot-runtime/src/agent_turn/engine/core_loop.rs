@@ -118,7 +118,7 @@ where
     if let Err(error) = initialized {
         return (Err(error), None);
     }
-    let mut budget = parrot_core::budget::TurnBudget::new(backend.agent_limits.disable_max_turns);
+    let mut agent_state = parrot_core::AgentState::new(backend.agent_limits.disable_max_turns);
     let mut failed_key = None;
     let outcome: Result<parrot_core::Outcome, CoreError> = async {
         let mut answer = String::new();
@@ -151,7 +151,7 @@ where
                 cancellation,
                 work,
                 persistence_key: None,
-                budget: &mut budget,
+                agent_state: &mut agent_state,
             };
             if cancellation.is_cancelled() {
                 return Err(CoreError::cancelled());
@@ -314,7 +314,7 @@ where
     S: AccessSnapshot + 'static,
 {
     let binding = TurnBinding::new();
-    let mut budget = parrot_core::TurnBudget::new(backend.agent_limits.disable_max_turns);
+    let mut agent_state = parrot_core::AgentState::new(backend.agent_limits.disable_max_turns);
     let mut states = RuntimeStates {
         history: &backend.history,
         sessions: &backend.sessions,
@@ -339,7 +339,7 @@ where
         cancellation: &NeverCancelled,
         work,
         persistence_key: None,
-        budget: &mut budget,
+        agent_state: &mut agent_state,
     };
     states.persistence_key = Some(key.clone());
     if let Some(message) = parrot_core::interrupt_turn(&mut states)

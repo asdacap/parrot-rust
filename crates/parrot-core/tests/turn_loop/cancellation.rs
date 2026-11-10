@@ -175,7 +175,7 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     let waker = Waker::from(wakes.clone());
     let mut context = Context::from_waker(&waker);
 
-    state.budget = TurnBudget::new(state.unlimited);
+    state.budget = AgentState::new(state.unlimited);
     let result = {
         let mut running = std::pin::pin!(run(
             &mut state,

@@ -69,7 +69,7 @@ pub const AGENT_COMMUNICATION_IDS: [&str; 8] = [
     "agent-session.final-request-interrupted",
 ];
 
-pub const NATIVE_SCALAR_IDS: [&str; 8] = [
+pub const NATIVE_SCALAR_IDS: [&str; 9] = [
     "agent-task.self-dependency",
     "agent-task.notification-assigned-self",
     "agent-session.crashed-tool-result",
@@ -78,6 +78,7 @@ pub const NATIVE_SCALAR_IDS: [&str; 8] = [
     "progress-tool.already-closed",
     "progress-tool.closed",
     "progress-tool.updated",
+    "tool-result.path-variable-note",
 ];
 
 fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {

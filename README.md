@@ -115,6 +115,11 @@ cache reuse across clean targets or worktrees, run `CARGO_INCREMENTAL=0 cargo bu
 compilation cacheable; for example, linking binaries is not cached. Use
 `sccache --show-stats` to inspect cache hits and non-cacheable compilations.
 
+Development and test builds keep file and line information for backtraces, but
+omit debugger local-variable and type information. Set
+`CARGO_PROFILE_DEV_DEBUG=2` for `cargo build` or `cargo test` when you need full
+debug information. The release profile is unchanged.
+
 ## Running tests
 
 Run from the repository root in `nix develop`. The native test harnesses require

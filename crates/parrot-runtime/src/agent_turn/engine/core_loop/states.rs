@@ -21,7 +21,7 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot> {
     pub(super) cancellation: &'a dyn Cancellation,
     pub(super) work: &'a dyn DrainWork,
     pub(super) persistence_key: Option<TurnKey>,
-    pub(super) budget: &'a mut parrot_core::TurnBudget,
+    pub(super) agent_state: &'a mut parrot_core::AgentState,
 }
 
 impl<S> CoreStates for RuntimeStates<'_, S>
@@ -215,8 +215,27 @@ where
             })
         })
     }
-    fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
-        adapt_operation(async move { self.history.read_final_phase().await.map_err(Into::into) })
+    fn get_agent_state(&self) -> BoxFuture<'_, Result<parrot_core::AgentState, CoreError>> {
+        let mut state = self.agent_state.clone();
+        adapt_operation(async move {
+            state.final_phase = self
+                .history
+                .read_final_phase()
+                .await
+                .map_err(TurnError::from)?;
+            Ok(state)
+        })
+    }
+    // The durable final-phase marker is only ever flipped by phase-prompt additions,
+    // so saving the state never writes the marker durably.
+    fn set_agent_state(
+        &mut self,
+        state: parrot_core::AgentState,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            *self.agent_state = state;
+            Ok(())
+        })
     }
     fn get_config(
         &self,
@@ -267,13 +286,6 @@ where
                     }),
             }
         })
-    }
-    fn read_turn_budget(&self) -> Result<parrot_core::TurnBudget, CoreError> {
-        Ok(self.budget.clone())
-    }
-    fn write_turn_budget(&mut self, budget: parrot_core::TurnBudget) -> Result<(), CoreError> {
-        *self.budget = budget;
-        Ok(())
     }
     fn read_last_context_reminder_checkpoint(
         &self,

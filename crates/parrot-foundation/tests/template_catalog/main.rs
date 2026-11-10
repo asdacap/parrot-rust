@@ -73,11 +73,11 @@ const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
 #[test]
 fn m6_full_configuration_compiles_and_renders_retained_independent_source_models() {
     let (configuration, catalog) = PromptTemplateCatalog::from_content("", &environment()).unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 109);
+    assert_eq!(configuration.prompt_templates.len(), 110);
     let inventory = fixture(&(A.to_owned() + "catalog-inventory.json"));
     let migration = fixture(&(A.to_owned() + "bundled-migration-map.json"));
     let actual: Vec<_> = catalog.descriptors().collect();
-    assert_eq!(actual.len(), 109);
+    assert_eq!(actual.len(), 110);
     let (_, legacy_warning) = actual
         .iter()
         .find(|(id, _)| *id == "session.legacy-resume-warning")
@@ -350,7 +350,7 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
             .render("agent-task.stop-succeeded", &[], &CancellationState::Active)
             .unwrap()
     );
-    assert_eq!(config.prompt_templates.len(), 109);
+    assert_eq!(config.prompt_templates.len(), 110);
 }
 
 #[test]
@@ -690,7 +690,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     let new = "prompt_templates:\n  custom.structured:\n    engine: minijinja\n    template: '{{ value }}'\n    allowed_arguments: [value]\n    required_arguments: [value]\n";
     std::fs::write(&path, new).unwrap();
     let (config, catalog) = PromptTemplateCatalog::load(&path, &predefined, &env).unwrap();
-    assert_eq!(config.prompt_templates.len(), 110);
+    assert_eq!(config.prompt_templates.len(), 111);
     assert_eq!(
         catalog
             .render(

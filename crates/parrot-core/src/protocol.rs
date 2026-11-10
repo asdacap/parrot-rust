@@ -230,7 +230,6 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
         Box::pin(async { Err(Error::unsupported("States.apply_conversation_addition")) })
     }
-    /// Reads the durable final-phase marker without changing the conversation.
     fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_final_phase_marker")) })
     }
@@ -252,15 +251,16 @@ pub trait States: Send + Sync {
     }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
-    /// Loads the provider-request budget that core updates during one turn, not a token budget.
-    /// Core resets the request count at turn start but retains settlement extensions from earlier turns.
-    fn read_turn_budget(&self) -> Result<TurnBudget, Error> {
-        Err(Error::unsupported("States.read_turn_budget"))
+    /// Reads the consolidated agent state that survives across turns, including
+    /// the durable final-phase marker and the provider-request budget. Core resets
+    /// the request count at turn start but retains settlement extensions from earlier turns.
+    fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.get_agent_state")) })
     }
-    /// Saves the updated provider-request budget after the turn returns, even on error.
+    /// Saves the updated agent state after the turn returns, even on error.
     /// Retains settlement extensions for subsequent turns in the same invocation.
-    fn write_turn_budget(&mut self, _budget: TurnBudget) -> Result<(), Error> {
-        Err(Error::unsupported("States.write_turn_budget"))
+    fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.set_agent_state")) })
     }
     /// Reads the last stored context reminder in the current compaction epoch.
     fn read_last_context_reminder_checkpoint(
@@ -780,16 +780,23 @@ pub struct TokenCalibration {
     pub(crate) actual_input_tokens: i32,
 }
 
+/// Consolidates the agent-local state that survives across turns. Core reads it at
+/// turn start and saves it after the turn returns, even on error.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentState {
+    /// Durable final-phase marker read without changing the conversation.
+    pub final_phase: bool,
+    /// Per-invocation setting that turns off the provider-request limit entirely.
+    pub(crate) disable_max_turns: bool,
+    /// Provider requests counted during the current turn. Not a token budget.
+    pub(crate) provider_requests: i32,
+    /// Settlement extensions retained across turns within the same invocation.
+    pub(crate) settlement_extensions: i32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TurnFlags {
     pub final_phase: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct TurnBudget {
-    pub(crate) disable_max_turns: bool,
-    pub(crate) provider_requests: i32,
-    pub(crate) settlement_extensions: i32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
