@@ -99,11 +99,8 @@ pub trait SystemPrompt: Send {
     ) -> PromptResult<Vec<ModelAliasDescription>> {
         Ok(Vec::new())
     }
-    fn read_model_guidance(
-        &self,
-        _selection: &ResolvedModelSelection,
-    ) -> (Option<String>, Option<String>) {
-        (None, None)
+    fn read_model_system_prompt(&self, _selection: &ResolvedModelSelection) -> Option<String> {
+        None
     }
     fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
         None
@@ -153,13 +150,16 @@ impl dyn SystemPrompt + '_ {
             )?);
         }
         let aliases = self.read_model_aliases(selection)?;
-        let guidance = self.read_model_guidance(selection);
-        if !aliases.is_empty() || guidance.0.is_some() || guidance.1.is_some() {
-            sections.push(render_model_prompt(
-                &aliases,
-                &guidance,
-                self.require_template_catalog("runtime:system-context:10-model-prompt")?,
-            )?);
+        let guidance = self.read_model_system_prompt(selection);
+        if !aliases.is_empty() || guidance.is_some() {
+            parrot_core::rendering::prepend_system_prompt_section(
+                &mut sections,
+                render_model_prompt(
+                    &aliases,
+                    &guidance,
+                    self.require_template_catalog("runtime:system-context:10-model-prompt")?,
+                )?,
+            );
         }
         if let Some(identity) = self.read_agent_identity() {
             sections.push(render_agent_identity(
@@ -351,15 +351,10 @@ impl SystemPrompt for CompositeSystemPrompt {
         }
         Ok(values)
     }
-    fn read_model_guidance(
-        &self,
-        selection: &ResolvedModelSelection,
-    ) -> (Option<String>, Option<String>) {
+    fn read_model_system_prompt(&self, selection: &ResolvedModelSelection) -> Option<String> {
         self.prompts
             .iter()
-            .map(|prompt| prompt.read_model_guidance(selection))
-            .find(|guidance| guidance.0.is_some() || guidance.1.is_some())
-            .unwrap_or((None, None))
+            .find_map(|prompt| prompt.read_model_system_prompt(selection))
     }
     fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
         self.prompts

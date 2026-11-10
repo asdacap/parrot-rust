@@ -61,6 +61,43 @@ async fn raw_template_getters_return_literal_state_with_a_broken_template() {
     ));
 }
 
+#[tokio::test]
+async fn raw_system_prompts_include_only_the_selected_alias_augmentation_verbatim() {
+    let mut alias = ModelAliasDefinition::new("preferred", "unused/vendor/model", "primary");
+    alias.augment_system_prompt = Some("literal {{ alias }}\n\ttext".into());
+    let (_, router) = route(vec![alias]);
+    let prompt = SessionPrompt::new(
+        ModelPromptProvider::new(
+            profiles(&[("unused/vendor/model", None, Some("model guidance"))]),
+            router.clone(),
+            templates(""),
+        )
+        .materialize(&identity())
+        .unwrap(),
+    );
+    let cancellation = parrot_storage::events::NeverCancelled;
+    let selected = router.resolve("preferred").unwrap();
+    let sections = prompt
+        .read_system_prompts(&selected, &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0].1, "literal {{ alias }}\n\ttext");
+    assert!(
+        prompt
+            .read_system_prompts(
+                &router.resolve("unused/vendor/model").unwrap(),
+                &cancellation,
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let rendered = prompt.build(&selected, &cancellation).await.unwrap();
+    assert!(rendered.ends_with("model guidance\n\nliteral {{ alias }}\n\ttext"));
+    assert_eq!(rendered.matches("literal {{ alias }}").count(), 1);
+}
+
 #[test]
 fn security_description_template_is_lazy_and_retains_its_first_error_across_epochs() {
     let catalog =

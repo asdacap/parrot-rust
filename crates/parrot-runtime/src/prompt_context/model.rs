@@ -102,18 +102,22 @@ impl SystemPrompt for ModelPrompt {
             .map(|(_, aliases)| aliases.clone())
             .unwrap_or_default())
     }
-    fn read_model_guidance(
-        &self,
+    fn read_system_prompts(
+        &mut self,
         selection: &ResolvedModelSelection,
-    ) -> (Option<String>, Option<String>) {
-        let profile = self.profiles.resolve(&selection.canonical_model.selector());
-        (
-            profile.system_prompt,
-            selection
-                .alias
-                .as_ref()
-                .and_then(|alias| alias.augment_system_prompt.clone()),
-        )
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(selection
+            .alias
+            .as_ref()
+            .and_then(|alias| alias.augment_system_prompt.clone())
+            .map(|content| ("runtime:system-context:10-model-prompt".into(), content))
+            .into_iter()
+            .collect())
+    }
+    fn read_model_system_prompt(&self, selection: &ResolvedModelSelection) -> Option<String> {
+        self.profiles
+            .resolve(&selection.canonical_model.selector())
+            .system_prompt
     }
     fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
         (source_key == "runtime:system-context:10-model-prompt").then_some(self.templates.as_ref())

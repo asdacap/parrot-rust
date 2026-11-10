@@ -602,9 +602,16 @@ impl ContextController {
                 cancellation,
                 &errors,
             );
+            let preparation_provider = EpochProvider {
+                prompt: input.prompt,
+                selection: input.selection,
+                cancellation,
+                estimates: &estimates,
+                errors: &errors,
+            };
             let prepared = parrot_core::compaction::prepare_compaction(
                 &mut states,
-                &provider,
+                &preparation_provider,
                 &definitions,
                 &configuration,
             )
@@ -1052,17 +1059,6 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_model_aliases(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
     fn read_agent_identity(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, parrot_core::Error>>
@@ -1091,30 +1087,6 @@ impl parrot_core::States for EpochStates<'_> {
             self.prompt
                 .read_skill_catalog(self.cancellation)
                 .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_model_system_prompt(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<String>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_model_guidance(self.selection, self.cancellation)
-                .await
-                .map(|value| value.0)
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-
-    fn read_alias_system_prompt(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<String>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.prompt
-                .read_model_guidance(self.selection, self.cancellation)
-                .await
-                .map(|value| value.1)
                 .map_err(|error| self.capture_error(error))
         })
     }
@@ -1238,5 +1210,64 @@ impl Cancellation for Uncancelled {
     }
     fn cancelled(&self) -> BoxFuture<'_, ()> {
         Box::pin(std::future::pending())
+    }
+}
+
+struct EpochProvider<'a> {
+    prompt: &'a SessionPrompt,
+    selection: &'a ResolvedModelSelection,
+    cancellation: &'a dyn Cancellation,
+    estimates: &'a CompactionEstimates,
+    errors: &'a NativeErrors<ContextError>,
+}
+
+impl EpochProvider<'_> {
+    fn capture_error(&self, error: impl Into<ContextError>) -> parrot_core::Error {
+        let error = error.into();
+        let diagnostic = describe_context_error(&error);
+        self.errors.capture(error, diagnostic)
+    }
+}
+
+impl parrot_core::Provider for EpochProvider<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        self.cancellation.cancelled()
+    }
+
+    fn read_model_aliases(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, parrot_core::Error>> {
+        Box::pin(async move {
+            self.prompt
+                .read_model_aliases(self.selection, self.cancellation)
+                .await
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+
+    fn read_model_system_prompt(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<String>, parrot_core::Error>> {
+        Box::pin(async move {
+            self.prompt
+                .read_model_system_prompt(self.selection, self.cancellation)
+                .await
+                .map_err(|error| self.capture_error(error))
+        })
+    }
+
+    fn estimate_input_tokens(
+        &self,
+        instructions: &str,
+        definitions: &[parrot_core::ToolDefinition],
+        messages: &[parrot_core::Message],
+    ) -> Result<i64, parrot_core::Error> {
+        self.estimates
+            .estimate_context_tokens(instructions, definitions, messages)
+            .map_err(|error| self.capture_error(error))
     }
 }

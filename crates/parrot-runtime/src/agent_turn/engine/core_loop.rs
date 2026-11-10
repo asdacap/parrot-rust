@@ -644,43 +644,6 @@ where
                 .map_err(Into::into)
         })
     }
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            self.backend
-                .prompt
-                .read_model_aliases(&selection.model, self.cancellation)
-                .await
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            self.backend
-                .prompt
-                .read_model_guidance(&selection.model, self.cancellation)
-                .await
-                .map(|(model, _)| model)
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
-    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            self.backend
-                .prompt
-                .read_model_guidance(&selection.model, self.cancellation)
-                .await
-                .map(|(_, alias)| alias)
-                .map_err(ContextError::from)
-                .map_err(Into::into)
-        })
-    }
     fn read_agent_identity(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, CoreError>> {
@@ -1251,6 +1214,30 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn read_model_aliases(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            self.backend
+                .prompt
+                .read_model_aliases(&selection.model, self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            self.backend
+                .prompt
+                .read_model_system_prompt(&selection.model, self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
     fn is_cancelled(&self) -> bool {
         self.cancellation.is_cancelled()
     }

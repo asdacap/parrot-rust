@@ -1,6 +1,6 @@
 use crate::{
     AgentIdentityDescription, CancellationToken, ConfigKey, Error, ModelAliasDescription,
-    PromptTemplate, SkillCatalogEntry, States,
+    PromptTemplate, Provider, SkillCatalogEntry, States,
 };
 use serde_json::{Value, json};
 
@@ -20,7 +20,10 @@ pub(crate) async fn render_template(
     render(&template, arguments)
 }
 
-pub(crate) async fn render_instructions(states: &mut dyn States) -> Result<String, Error> {
+pub(crate) async fn render_instructions(
+    states: &mut dyn States,
+    provider: &dyn Provider,
+) -> Result<String, Error> {
     let mut sections = states.read_system_prompts().await?;
     for (source_key, key) in states.read_prompt_templates().await? {
         let arguments = states.read_template_arguments(&source_key).await?;
@@ -34,17 +37,17 @@ pub(crate) async fn render_instructions(states: &mut dyn States) -> Result<Strin
             .into_prompt_template()?;
         sections.push(render_agents_files(&files, &template)?);
     }
-    let aliases = states.read_model_aliases().await?;
-    let guidance = (
-        states.read_model_system_prompt().await?,
-        states.read_alias_system_prompt().await?,
-    );
-    if !aliases.is_empty() || guidance.0.is_some() || guidance.1.is_some() {
+    let aliases = provider.read_model_aliases().await?;
+    let guidance = provider.read_model_system_prompt().await?;
+    if !aliases.is_empty() || guidance.is_some() {
         let template = states
             .get_config(ConfigKey::PromptTemplate("context.model-aliases".into()))
             .await?
             .into_prompt_template()?;
-        sections.push(render_model_prompt(&aliases, &guidance, &template)?);
+        prepend_system_prompt_section(
+            &mut sections,
+            render_model_prompt(&aliases, &guidance, &template)?,
+        );
     }
     if let Some(identity) = states.read_agent_identity().await? {
         let template = states
@@ -96,7 +99,7 @@ pub fn render_agents_files(
 
 pub fn render_model_prompt(
     aliases: &[ModelAliasDescription],
-    guidance: &(Option<String>, Option<String>),
+    guidance: &Option<String>,
     template: &PromptTemplate,
 ) -> Result<(String, String), Error> {
     let aliases = aliases
@@ -120,11 +123,7 @@ pub fn render_model_prompt(
     } else {
         render(template, &[("aliases".into(), aliases.into())])?
     };
-    let sections = [
-        Some(alias_section.as_str()),
-        guidance.0.as_deref(),
-        guidance.1.as_deref(),
-    ];
+    let sections = [Some(alias_section.as_str()), guidance.as_deref()];
     Ok((
         "runtime:system-context:10-model-prompt".into(),
         sections
@@ -191,6 +190,21 @@ pub fn render_skill_catalog_entries(
         "runtime:system-context:09b-skills".into(),
         render_catalog_entries(skills, template)?,
     ))
+}
+
+pub fn prepend_system_prompt_section(
+    sections: &mut Vec<(String, String)>,
+    section: (String, String),
+) {
+    if let Some((_, content)) = sections.iter_mut().find(|(key, _)| key == &section.0) {
+        *content = [section.1.as_str(), content.as_str()]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+    } else {
+        sections.push(section);
+    }
 }
 
 pub fn render_system_prompt_sections(mut sections: Vec<(String, String)>) -> String {
