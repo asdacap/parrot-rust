@@ -33,6 +33,9 @@ version = "0.0.0-dev"
 edition = "2024"
 rust-version = "1.85"
 
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = 1
 codegen-units = 256
