@@ -7,7 +7,6 @@ pub mod compaction;
 mod image_inspection;
 mod image_repository;
 mod image_store;
-mod metadata;
 
 pub mod agent_output_file;
 pub mod output_blobs;
@@ -15,7 +14,7 @@ pub mod output_blobs;
 pub use image_inspection::ImageInspection;
 pub use image_repository::ImageArtifactRepository;
 pub use image_store::{ImageArtifactStore, ImageLimits};
-pub use metadata::ImageArtifactMetadata;
+pub use parrot_domain::values::image_artifact::ImageArtifactMetadata;
 
 use std::fmt;
 use std::io;

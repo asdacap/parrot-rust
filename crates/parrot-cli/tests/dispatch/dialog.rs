@@ -270,11 +270,17 @@ fn load_passes_through_typed_result_failure_and_cancellation_without_ui() {
     let token = Token::default();
     let mut dialog = BasicSlashDialog::new(Cursor::new(""), Writer::default(), Vec::new());
     assert_eq!(
-        complete(load(&mut dialog, "Loading", async { Ok(42) }, &token)).unwrap(),
+        complete(load(
+            &mut dialog,
+            "Loading",
+            async { Ok::<_, tonic::Status>(42) },
+            &token
+        ))
+        .unwrap(),
         42
     );
     let failure = tonic::Status::not_found("load failed");
-    let returned = complete(load::<()>(
+    let returned = complete(load::<(), _>(
         &mut dialog,
         "Loading",
         async { Err(failure) },
@@ -283,7 +289,7 @@ fn load_passes_through_typed_result_failure_and_cancellation_without_ui() {
     .unwrap_err();
     assert_eq!(returned.code(), Code::NotFound);
     assert_eq!(returned.message(), "load failed");
-    let cancelled = complete(load::<()>(
+    let cancelled = complete(load::<(), _>(
         &mut dialog,
         "Loading",
         async { Err(tonic::Status::cancelled("work cancelled")) },
@@ -298,7 +304,7 @@ fn load_passes_through_typed_result_failure_and_cancellation_without_ui() {
     let result = complete(load(
         &mut dialog,
         "Loading",
-        async { Ok(token.is_cancelled()) },
+        async { Ok::<_, tonic::Status>(token.is_cancelled()) },
         &token,
     ))
     .unwrap();

@@ -10,12 +10,9 @@ use std::sync::{
 use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 
 /// The exact prepared T27 request and provider-owned HTTP fallback for one call.
-/// The error slot preserves original header-source and HTTP failures through
-/// T29's socket error boundary and is shared with those provider adapters.
 pub struct ResponsePrepared {
     pub prepare_websocket: Box<dyn FnOnce() -> Result<WebSocketRequest, WebSocketError> + Send>,
     pub http: Arc<dyn HttpFallback>,
-    pub http_error: Arc<StdMutex<Option<Error>>>,
 }
 pub trait ResponseCallFactory: Send + Sync {
     fn prepare(
@@ -324,10 +321,7 @@ async fn run(
         }
     };
     if let Some(trace) = trace {
-        call = call.with_websocket_observer(Arc::new(WebSocketTraceObserver {
-            trace,
-            original_error: prepared.http_error.clone(),
-        }));
+        call = call.with_websocket_observer(Arc::new(WebSocketTraceObserver { trace }));
     }
     loop {
         let pull = tokio::select! {
@@ -338,18 +332,7 @@ async fn run(
         let result = call
             .next(&actor.stop)
             .await
-            .map(|event| event.map(Event::from))
-            .map_err(|error| {
-                let original = prepared.http_error.lock().expect("HTTP error slot").take();
-                if actor.stop.is_cancelled()
-                    && original.is_none()
-                    && error == WebSocketError::Cancelled
-                {
-                    Error::Cancelled
-                } else {
-                    restore_original_error(error, original)
-                }
-            });
+            .map(|event| event.map(Event::from));
         let terminal = !matches!(&result, Ok(Some(_)));
         let _ = pull.reply.send(result);
         if terminal {
@@ -360,50 +343,8 @@ async fn run(
     // while the exclusive session lock is still held.
 }
 
-fn restore_original_error(error: WebSocketError, original: Option<Error>) -> Error {
-    let Some(original) = original else {
-        return Error::Socket(error);
-    };
-    if let WebSocketError::TransportFailure { message, .. } = error {
-        let preserved = matches!(
-            &original,
-            Error::Cancelled
-                | Error::Cancellation(_)
-                | Error::Provider(_)
-                | Error::ProviderWithCause { .. }
-                | Error::WebSocketTransport { .. }
-                | Error::ChatProvider(_)
-                | Error::Response(crate::responses::ResponsesError::ProviderResponse { .. })
-                | Error::Http(
-                    crate::http_stream::HttpError::Cancelled
-                        | crate::http_stream::HttpError::RequestCancelled(_)
-                        | crate::http_stream::HttpError::Provider(_)
-                        | crate::http_stream::HttpError::RequestTooLarge(_)
-                )
-                | Error::Socket(
-                    WebSocketError::Cancelled
-                        | WebSocketError::RequestTooLarge { .. }
-                        | WebSocketError::TransportFailure { .. }
-                        | WebSocketError::Transport(_)
-                        | WebSocketError::Upgrade { .. }
-                        | WebSocketError::Response(
-                            crate::responses::ResponsesError::ProviderResponse { .. }
-                        )
-                )
-        );
-        if !preserved {
-            return Error::WebSocketTransport {
-                message,
-                cause: Box::new(original),
-            };
-        }
-    }
-    original
-}
-
 struct WebSocketTraceObserver {
     trace: Arc<CallTrace>,
-    original_error: Arc<StdMutex<Option<Error>>>,
 }
 impl responses_websocket::WebSocketObserver for WebSocketTraceObserver {
     fn start(&self) -> Box<dyn responses_websocket::WebSocketAttemptObserver> {
@@ -415,13 +356,11 @@ impl responses_websocket::WebSocketObserver for WebSocketTraceObserver {
         );
         Box::new(WebSocketTraceAttempt {
             request: self.trace.begin_request("websocket", &request_id),
-            original_error: self.original_error.clone(),
         })
     }
 }
 struct WebSocketTraceAttempt {
     request: RequestTrace,
-    original_error: Arc<StdMutex<Option<Error>>>,
 }
 impl responses_websocket::WebSocketAttemptObserver for WebSocketTraceAttempt {
     fn dump_request(&mut self, body: &[u8], full_body: &[u8]) {
@@ -449,16 +388,10 @@ impl responses_websocket::WebSocketAttemptObserver for WebSocketTraceAttempt {
             responses_websocket::WebSocketAttemptOutcome::Completed => TraceOutcome::Completed,
             responses_websocket::WebSocketAttemptOutcome::Disposed => TraceOutcome::Disposed,
             responses_websocket::WebSocketAttemptOutcome::Failed(error) => {
-                let kind = self
-                    .original_error
-                    .lock()
-                    .expect("original error slot")
-                    .as_ref()
-                    .map_or_else(
-                        || super::diagnostic_session::socket_failure_kind(error),
-                        super::diagnostic_session::failure_kind,
-                    );
-                TraceOutcome::Failed(kind)
+                TraceOutcome::Failed(super::diagnostic_session::socket_failure_kind(error))
+            }
+            responses_websocket::WebSocketAttemptOutcome::CredentialsFailed(error) => {
+                TraceOutcome::Failed(super::diagnostic_session::failure_kind(error))
             }
         });
     }

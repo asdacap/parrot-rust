@@ -5,6 +5,7 @@ pub mod agent_tasks;
 pub mod config;
 pub mod context;
 pub mod identifiers;
+pub mod image_artifact;
 pub mod lineage;
 pub mod progress;
 pub mod project_workspace;

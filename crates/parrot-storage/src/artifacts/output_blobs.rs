@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -44,9 +45,61 @@ pub fn format_process_output(
 pub struct ToolOutputBlobStore {
     directory: PathBuf,
     filename_generator: Arc<dyn FilenameGenerator>,
+    path_variables: BTreeMap<String, String>,
 }
 
 impl ToolOutputBlobStore {
+    pub fn with_path_variables(mut self, variables: BTreeMap<String, String>) -> Self {
+        self.path_variables = variables;
+        self
+    }
+
+    pub fn substitute_process_notice(&self, text: &str) -> String {
+        let Some((completion, notice)) = text.rsplit_once('\n') else {
+            return text.to_owned();
+        };
+        let process_completion = completion
+            .strip_prefix("Shell process '")
+            .and_then(|text| text.split_once("' completed.\n"))
+            .map_or(completion, |(_, completion)| completion);
+        if !process_completion.starts_with("Process exited with code ")
+            || process_completion.contains('\n')
+        {
+            return text.to_owned();
+        }
+        let Some(path) = notice
+            .strip_prefix("Tool output exceeded 64 KiB and was saved to ")
+            .and_then(|path| path.strip_suffix('.'))
+        else {
+            return text.to_owned();
+        };
+        format!(
+            "{completion}\nTool output exceeded 64 KiB and was saved to {}.",
+            self.format_path(Path::new(path))
+        )
+    }
+
+    fn format_path(&self, path: &Path) -> String {
+        let mut matched: Option<(usize, String)> = None;
+        for (name, root) in &self.path_variables {
+            let Ok(suffix) = path.strip_prefix(root) else {
+                continue;
+            };
+            if matched
+                .as_ref()
+                .is_none_or(|(length, _)| root.len() > *length)
+            {
+                let reference = if suffix.as_os_str().is_empty() {
+                    format!("${name}")
+                } else {
+                    format!("${name}/{}", suffix.display())
+                };
+                matched = Some((root.len(), reference));
+            }
+        }
+        matched.map_or_else(|| path.display().to_string(), |(_, reference)| reference)
+    }
+
     pub fn for_session(
         root: &SelectedSessionRoot,
         relative: impl AsRef<Path>,
@@ -56,6 +109,7 @@ impl ToolOutputBlobStore {
         Ok(Self {
             directory: resource.path().to_owned(),
             filename_generator,
+            path_variables: BTreeMap::new(),
         })
     }
 
@@ -79,7 +133,7 @@ impl ToolOutputBlobStore {
                 .map_err(|e| Error::io("could not flush tool output blob", e))?;
             Ok(format!(
                 "Tool output exceeded 64 KiB and was saved to {}.",
-                path.display()
+                self.format_path(&path)
             ))
         })();
         if result.is_err() {

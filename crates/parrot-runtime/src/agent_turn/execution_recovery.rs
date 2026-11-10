@@ -59,15 +59,9 @@ impl<B: DrainBackend> AgentSession<B> {
                         .iter()
                         .map(|part| match part {
                             ExecutionInputPart::Text { text } => ConversationPart::text(text),
-                            ExecutionInputPart::ImageArtifact {
-                                artifact_id,
-                                media_type,
-                                display_name,
-                            } => ConversationPart::ImageArtifact {
-                                artifact_id: artifact_id.clone(),
-                                media_type: media_type.clone(),
-                                display_name: display_name.clone(),
-                            },
+                            ExecutionInputPart::ImageArtifact { metadata } => {
+                                ConversationPart::image(metadata.clone())
+                            }
                         })
                         .collect();
                     if original_parts != parts {
@@ -168,15 +162,11 @@ impl<B: DrainBackend> AgentSession<B> {
                 .iter()
                 .map(|part| match part {
                     ConversationPart::Text(text) => ExecutionInputPart::Text { text: text.clone() },
-                    ConversationPart::ImageArtifact {
-                        artifact_id,
-                        media_type,
-                        display_name,
-                    } => ExecutionInputPart::ImageArtifact {
-                        artifact_id: artifact_id.clone(),
-                        media_type: media_type.clone(),
-                        display_name: display_name.clone(),
-                    },
+                    ConversationPart::ImageArtifact { metadata } => {
+                        ExecutionInputPart::ImageArtifact {
+                            metadata: metadata.clone(),
+                        }
+                    }
                 })
                 .collect(),
             history_watermark: self.inner.backend.execution_watermark().await?,
@@ -584,15 +574,9 @@ impl<B: DrainBackend> AgentSession<B> {
             .iter()
             .map(|part| match part {
                 ExecutionInputPart::Text { text } => ConversationPart::text(text),
-                ExecutionInputPart::ImageArtifact {
-                    artifact_id,
-                    media_type,
-                    display_name,
-                } => ConversationPart::ImageArtifact {
-                    artifact_id: artifact_id.clone(),
-                    media_type: media_type.clone(),
-                    display_name: display_name.clone(),
-                },
+                ExecutionInputPart::ImageArtifact { metadata } => {
+                    ConversationPart::image(metadata.clone())
+                }
             })
             .collect();
         // SQLite admission is keyed by this exact message identity. The intent

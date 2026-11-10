@@ -95,24 +95,29 @@ pub trait SlashDialog: Send {
 
 /// Runs typed work through the same object-safe loading boundary. As in the
 /// source and WebSlashDialog, the work receives cancellation from its caller.
-pub async fn load<T: Send>(
+pub async fn load<T: Send, E: From<Status> + Send>(
     dialog: &mut dyn SlashDialog,
     activity: &str,
-    work: impl Future<Output = Result<T, Status>> + Send,
+    work: impl Future<Output = Result<T, E>> + Send,
     cancellation: &dyn Cancellation,
-) -> Result<T, Status> {
+) -> Result<T, E> {
     let mut result = None;
-    dialog
+    let loaded = dialog
         .load(
             activity,
             Box::pin(async {
-                result = Some(work.await?);
+                result = Some(work.await);
                 Ok(())
             }),
             cancellation,
         )
-        .await?;
-    result.ok_or_else(|| Status::internal("dialog load did not run supplied work"))
+        .await;
+    match (loaded, result) {
+        (_, Some(Err(error))) => Err(error),
+        (Err(error), _) => Err(error.into()),
+        (Ok(()), Some(Ok(value))) => Ok(value),
+        (Ok(()), None) => Err(Status::internal("dialog load did not run supplied work").into()),
+    }
 }
 
 /// Key input must provide intercepted keys without echoing their contents.

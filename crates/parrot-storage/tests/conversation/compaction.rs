@@ -119,7 +119,7 @@ async fn compaction_is_conversation_owned_without_a_separate_history_table() {
         .await
         .unwrap();
     assert!(!tables.iter().any(|table| table == "agent_history"));
-    assert_eq!(tables.len(), 7);
+    assert_eq!(tables.len(), 5);
     let state = repo.read_conversation_state("agent".into()).await.unwrap();
     assert_eq!(state.snapshot, Some(snapshot("summary", covered)));
     assert_eq!(state.items.len(), 1);

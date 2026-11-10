@@ -295,7 +295,6 @@ impl ModelConfigurationCoordinator {
         self.transaction(|transaction| {
             validate_preset_name(name)?;
             let refreshed = self.reload(transaction)?;
-            let previous_configuration = transaction.reload()?;
             let previous_routing = self.routing.capture();
             let previous_selection = self.router.resolve_from(previous_routing.clone(), selected_model)?;
             let preset = refreshed.model_presets.get(name).cloned().ok_or_else(|| CoordinatorError::MissingPreset(name.to_owned()))?;
@@ -319,7 +318,7 @@ impl ModelConfigurationCoordinator {
             self.routing.publish(replacement);
             if let Err(original) = apply_selection(resolved.clone()) {
                 let restored_selection = apply_selection(previous_selection);
-                self.rollback(transaction, &previous_configuration, previous_routing)?;
+                self.rollback(transaction, &refreshed, previous_routing)?;
                 return Err(restored_selection.err().unwrap_or(original));
             }
             Ok(ModelPresetSelection { preset, resolved_selection: resolved })

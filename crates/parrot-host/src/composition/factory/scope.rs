@@ -433,6 +433,7 @@ struct ScopeLink<S: RestrictableAccessSnapshot + 'static> {
     scope: OnceLock<Weak<Scope<S>>>,
     session: OnceLock<Weak<RuntimeSession<S>>>,
     registry: Weak<parrot_runtime::children::AgentRegistry<S>>,
+    blobs: Arc<ToolOutputBlobStore>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> ScopeLink<S> {
     fn scope(&self) -> ChildResult<Arc<Scope<S>>> {
@@ -483,7 +484,7 @@ impl<S: RestrictableAccessSnapshot + 'static> CompletionSink for ScopeLink<S> {
             session
                 .send(
                     vec![parrot_storage::events::ConversationPart::text(
-                        message.text.clone(),
+                        self.blobs.substitute_process_notice(&message.text),
                     )],
                     message.message_id.clone(),
                     message.delivery,
@@ -1349,7 +1350,8 @@ where
                     agent_relative.join("blobs"),
                     filenames.clone(),
                 )
-                .map_err(child)?,
+                .map_err(child)?
+                .with_path_variables(environment.materialize().clone()),
             );
             let compaction_blobs =
                 CompactionGroupBlobStore::for_session(root, agent_relative, filenames)
@@ -1365,6 +1367,7 @@ where
                 scope: OnceLock::new(),
                 session: OnceLock::new(),
                 registry: Arc::downgrade(&registry),
+                blobs: blobs.clone(),
             });
             let processes = Arc::new(
                 ShellProcessOwner::new(

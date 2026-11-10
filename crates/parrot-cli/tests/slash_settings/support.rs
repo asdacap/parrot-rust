@@ -93,7 +93,6 @@ pub struct Dialog {
     pub shown: Vec<String>,
     pub errors: Vec<String>,
     pub loads: Vec<String>,
-    pub load_failures: Vec<Status>,
     pub confirmed: Vec<Vec<String>>,
     pub secret_prompts: Vec<String>,
     pub text_prompts: Vec<String>,
@@ -213,11 +212,7 @@ impl SlashDialog for Dialog {
         Box::pin(async move {
             self.boundary(cancellation)?;
             self.loads.push(activity.to_owned());
-            let result = work.await;
-            if let Err(status) = &result {
-                self.load_failures.push(status.clone());
-            }
-            result
+            work.await
         })
     }
 }

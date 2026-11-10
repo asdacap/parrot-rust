@@ -41,7 +41,7 @@ use parrot_domain::{
             TaskEntrySnapshot, TaskExecutionSnapshot, TaskForkModeSnapshot,
             TaskGraphMigrationSnapshot, TaskGraphSnapshot, TaskMigrationDisposition,
             TaskNotificationSnapshot, TaskOwnerAssignmentReference, TaskResponseReference,
-            TaskResultClaim, TaskRunnerCheckpoint, TaskStopCheckpoint,
+            TaskResultClaim, TaskRunnerCheckpoint, TaskRunnerPhase, TaskStopCheckpoint,
         },
         agent_tasks::{
             ExecutionStatus, Task, TaskAssignee, TaskCallIdentity, TaskPayload, TaskSetResponse,
@@ -1589,8 +1589,20 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     Ok(())
                 }
                 Err(error) => {
-                    state.persistence_failure = Some(error.clone());
-                    Err(error)
+                    let mut outcome = state.entries[index].task.clone();
+                    outcome.state = ExecutionStatus::Failed;
+                    outcome.failure = Some(error.to_string());
+                    // Retain the phase so recovery can still release the worker claim.
+                    state.entries[index]
+                        .borrow_worker_mut()
+                        .runner
+                        .as_mut()
+                        .expect("owned runner checkpoint")
+                        .outcome = Some(outcome.clone());
+                    match self.save_graph(&mut state).await {
+                        Ok(()) => self.complete(&mut state, index, outcome, &run).await,
+                        Err(error) => Err(error),
+                    }
                 }
             };
             run.ready.finish(completed.clone());
@@ -1605,6 +1617,16 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         run: &Run,
     ) -> ChildResult<()> {
         let sealed = self.seal_preparing(state).await;
+        if sealed.is_ok()
+            && outcome.state == ExecutionStatus::Failed
+            && state.entries[index]
+                .borrow_worker()
+                .runner
+                .as_ref()
+                .is_some_and(|checkpoint| checkpoint.phase != TaskRunnerPhase::Completed)
+        {
+            self.stop_run(state, index, "agent-task.stop-failed")?;
+        }
         state.entries[index].borrow_worker_mut().run = None;
         sealed?;
         let entry = &mut state.entries[index];
@@ -2262,12 +2284,27 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 } else {
                     result
                 };
-                ready.finish(result.clone());
                 state.stopping.remove(&stop.generation_id);
                 state.stop_readiness.remove(&stop.generation_id);
-                if let Err(error) = &result {
-                    state.persistence_failure.get_or_insert(error.clone());
-                }
+                let result = if let Err(error) = &result {
+                    if !retiring && scheduler.ensure_healthy(&state).is_ok() {
+                        scheduler.failure_diagnostic("stop", error);
+                        let entry = &mut state.entries[index];
+                        entry.task.state = ExecutionStatus::Failed;
+                        entry.task.failure = Some(error.to_string());
+                        entry.borrow_worker_mut().reserved_admission = None;
+                        match scheduler.save_graph(&mut state).await {
+                            Ok(()) => scheduler.publish(&mut state).await,
+                            Err(error) => Err(error),
+                        }
+                    } else {
+                        state.persistence_failure.get_or_insert(error.clone());
+                        result
+                    }
+                } else {
+                    result
+                };
+                ready.finish(result.clone());
                 result
             });
             state.executions.push(operation);

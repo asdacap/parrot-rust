@@ -14,7 +14,7 @@ use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{
     collections::VecDeque,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
@@ -394,46 +394,22 @@ fn failure_kind(error: &Error) -> FailureKind {
     }
 }
 
-/// T29's error type does not carry HTTP status/body details. The owning session
-/// checks this shared slot when its call fails, retaining the actual error.
-pub type HttpErrorSlot = Arc<Mutex<Option<Error>>>;
 pub struct HttpEventsBridge {
     driver: HttpDriver,
-    errors: HttpErrorSlot,
 }
 impl HttpEventsBridge {
-    pub fn new(driver: HttpDriver, errors: HttpErrorSlot) -> Self {
-        Self { driver, errors }
-    }
-    fn capture(&self, error: Error) -> WebSocketError {
-        let mapped = match &error {
-            Error::Response(error) => WebSocketError::Response(error.clone()),
-            Error::Http(HttpError::Cancelled) | Error::Cancelled => WebSocketError::Cancelled,
-            Error::Http(HttpError::RequestTooLarge(maximum)) => {
-                WebSocketError::RequestTooLarge { maximum: *maximum }
-            }
-            _ => WebSocketError::Wire(error.to_string()),
-        };
-        *self
-            .errors
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(error);
-        mapped
+    pub fn new(driver: HttpDriver) -> Self {
+        Self { driver }
     }
 }
 impl HttpEvents for HttpEventsBridge {
     fn next<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, Error>> {
         Box::pin(async move {
             loop {
-                match self
-                    .driver
-                    .next_response(cancellation)
-                    .await
-                    .map_err(|error| self.capture(error))?
-                {
+                match self.driver.next_response(cancellation).await? {
                     Some(HttpResponseEvent::Event(event)) => return Ok(Some(event)),
                     Some(_) => {}
                     None => return Ok(None),
@@ -444,21 +420,17 @@ impl HttpEvents for HttpEventsBridge {
     fn next_event<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<SessionEvent>, WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<SessionEvent>, Error>> {
         Box::pin(async move {
-            self.driver
-                .next_response(cancellation)
-                .await
-                .map(|event| {
-                    event.map(|event| match event {
-                        HttpResponseEvent::RequestStarted => SessionEvent::HttpRequestStarted,
-                        HttpResponseEvent::ResponseHeadersReceived => {
-                            SessionEvent::HttpResponseHeadersReceived
-                        }
-                        HttpResponseEvent::Event(event) => SessionEvent::Response(event),
-                    })
+            self.driver.next_response(cancellation).await.map(|event| {
+                event.map(|event| match event {
+                    HttpResponseEvent::RequestStarted => SessionEvent::HttpRequestStarted,
+                    HttpResponseEvent::ResponseHeadersReceived => {
+                        SessionEvent::HttpResponseHeadersReceived
+                    }
+                    HttpResponseEvent::Event(event) => SessionEvent::Response(event),
                 })
-                .map_err(|error| self.capture(error))
+            })
         })
     }
     fn take_turn_state(&mut self) -> Option<String> {

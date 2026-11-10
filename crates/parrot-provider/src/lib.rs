@@ -1,5 +1,7 @@
 //! Provider protocols, model catalogs, streaming, and image integration.
 
+mod provider_error;
+
 pub mod anthropic;
 pub mod catalogs;
 pub mod chat_completions;

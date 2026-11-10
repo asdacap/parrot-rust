@@ -60,7 +60,7 @@ async fn current_metadata_in_legacy_root_binds_real_host_and_reopens_in_place() 
         .await
         .unwrap();
     let resumed_user = fixture.user();
-    let resolved = bounded(resumed.resolve_image(&image.artifact_id))
+    let resolved = bounded(resumed.resolve_image(&image.artifact_id, &image.display_name))
         .await
         .unwrap();
     send(&resumed, "t76-legacy-second", "t76-legacy-message-two").await;

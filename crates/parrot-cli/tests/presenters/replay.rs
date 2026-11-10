@@ -240,3 +240,60 @@ fn presenter_consumes_the_same_external_replay_context_without_duplicate_complet
     let now_live = presenter.observe(&start("root")).unwrap();
     assert!(now_live.started_main_turn);
 }
+
+#[test]
+fn ask_and_reply_completed_content_matches_live_during_history_replay() {
+    for (tool, arguments, result, expected) in [
+        (
+            "ask",
+            r#"{"name":"reviewer","message":"Is this safe?"}"#,
+            "The regression test passes.",
+            "✓ Ask reviewer\r\n  Question:\r\n  Is this safe?\r\n  Response:\r\n  The regression test passes.\r\n",
+        ),
+        (
+            "reply",
+            r#"{"request_id":"request-123","message":"The regression test passes."}"#,
+            "Replied to ask request-123.",
+            "✓ Reply to request-123\r\n  The regression test passes.\r\n",
+        ),
+    ] {
+        for replaying in [false, true] {
+            let mut presenter = EnhancedSessionPresenter::new(160, false, replaying);
+            let mut output = String::new();
+            for published in [
+                start("root"),
+                event(
+                    "root",
+                    Payload::ToolCallChunk(wire::ToolCallChunk {
+                        tool_call_id: "call".into(),
+                        tool_name: tool.into(),
+                        arguments_fragment: arguments.into(),
+                        ..Default::default()
+                    }),
+                ),
+                event(
+                    "root",
+                    Payload::ToolStarted(wire::ToolStarted {
+                        tool_call_id: "call".into(),
+                        tool_name: tool.into(),
+                        ..Default::default()
+                    }),
+                ),
+                event(
+                    "root",
+                    Payload::ToolFinished(wire::ToolFinished {
+                        tool_call_id: "call".into(),
+                        tool_name: tool.into(),
+                        result: Some(result.into()),
+                        ..Default::default()
+                    }),
+                ),
+                completed("root"),
+            ] {
+                let update = presenter.observe(&published).unwrap();
+                output.push_str(&commits(&update.commits, 160));
+            }
+            assert_eq!(output, expected, "{tool}, replaying={replaying}");
+        }
+    }
+}

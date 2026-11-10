@@ -868,7 +868,20 @@ async fn record_does_not_wake_and_execution_message_limits_count_utf8_bytes() {
     assert_eq!(*backend.promoted.lock().unwrap(), ["recorded"]);
     let image_only = session
         .enqueue_execution(
-            vec![ConversationPart::image("artifact", "image/png", "image")],
+            vec![ConversationPart::image(
+                parrot_storage::artifacts::ImageArtifactMetadata {
+                    artifact_id: "a".repeat(64),
+                    sha256: "a".repeat(64),
+                    media_type: "image/png".into(),
+                    byte_length: 70,
+                    width: 1,
+                    height: 1,
+                    frame_count: 1,
+                    aggregate_pixels: 1,
+                    display_name: "image.png".into(),
+                    origin: "test".into(),
+                },
+            )],
             "image".into(),
             None,
             None,

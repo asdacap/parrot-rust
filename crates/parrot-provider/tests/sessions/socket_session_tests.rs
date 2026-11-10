@@ -56,10 +56,7 @@ struct Wire {
 }
 struct Headers;
 impl ws::HeaderSource for Headers {
-    fn headers<'a>(
-        &'a self,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<ws::Headers, ws::WebSocketError>> {
+    fn headers<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<ws::Headers, Error>> {
         Box::pin(async { Ok(Vec::new()) })
     }
 }
@@ -182,7 +179,7 @@ impl ws::HttpEvents for HttpEvents {
     fn next<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<responses::ResponsesEvent>, ws::WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Option<responses::ResponsesEvent>, Error>> {
         let event = if self.sent {
             None
         } else {
@@ -201,7 +198,7 @@ impl ws::HttpFallback for Http {
         _: Vec<u8>,
         _: String,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn ws::HttpEvents>, ws::WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn ws::HttpEvents>, Error>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(Box::new(HttpEvents { sent: false }) as Box<dyn ws::HttpEvents>) })
     }
@@ -209,7 +206,7 @@ impl ws::HttpFallback for Http {
         &'a self,
         state: String,
         cancel: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn ws::HttpEvents>, ws::WebSocketError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn ws::HttpEvents>, Error>> {
         self.open(Vec::new(), state, cancel)
     }
 }
@@ -232,7 +229,6 @@ impl ResponseCallFactory for Factory {
                 ws::WebSocketRequest::new(&prepared)
             }),
             http: self.http.clone(),
-            http_error: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -739,31 +735,10 @@ async fn websocket_connect_failure_has_allowlisted_trace_and_no_encoded_request_
 
 struct FailedAuthHeaders {
     original: Error,
-    slot: Arc<Mutex<Option<Error>>>,
 }
 impl ws::HeaderSource for FailedAuthHeaders {
-    fn headers<'a>(
-        &'a self,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<ws::Headers, ws::WebSocketError>> {
-        *self.slot.lock().unwrap() = Some(self.original.clone());
-        let projected = ws::WebSocketError::InvalidOperation(self.original.to_string());
-        Box::pin(async move { Err(projected) })
-    }
-}
-struct FailedAuthFactory {
-    inner: Factory,
-    slot: Arc<Mutex<Option<Error>>>,
-}
-impl ResponseCallFactory for FailedAuthFactory {
-    fn prepare(
-        &self,
-        request: Request,
-        trace: Option<Arc<diagnostics::CallTrace>>,
-    ) -> Result<ResponsePrepared, Error> {
-        let mut prepared = self.inner.prepare(request, trace)?;
-        prepared.http_error = self.slot.clone();
-        Ok(prepared)
+    fn headers<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<ws::Headers, Error>> {
+        Box::pin(async move { Err(self.original.clone()) })
     }
 }
 #[tokio::test]
@@ -780,10 +755,8 @@ async fn websocket_auth_trace_classifies_original_error_without_consuming_it() {
         (Error::Io("secret-auth-io".into()), "io"),
     ] {
         let wire = Arc::new(Wire::default());
-        let slot = Arc::new(Mutex::new(None));
         let headers = Arc::new(FailedAuthHeaders {
             original: original.clone(),
-            slot: slot.clone(),
         });
         let connector = Arc::new(Connector {
             wire: wire.clone(),
@@ -798,12 +771,9 @@ async fn websocket_auth_trace_classifies_original_error_without_consuming_it() {
         )
         .unwrap();
         let raw = ws::Session::new("fake", headers, client, false);
-        let factory = Arc::new(FailedAuthFactory {
-            inner: Factory {
-                wire: wire.clone(),
-                http: Arc::new(Http::default()),
-            },
-            slot: slot.clone(),
+        let factory = Arc::new(Factory {
+            wire: wire.clone(),
+            http: Arc::new(Http::default()),
         });
         let session = ResponseSession::new(raw, factory);
         let sink = Arc::new(Sink::default());
@@ -826,10 +796,6 @@ async fn websocket_auth_trace_classifies_original_error_without_consuming_it() {
         } else {
             assert_eq!(actual, original);
         }
-        assert!(
-            slot.lock().unwrap().is_none(),
-            "only the outer actor consumes the original failure"
-        );
         assert_eq!(wire.connects.load(Ordering::SeqCst), 0);
         let events = sink.0.lock().unwrap().clone();
         let finished: Vec<_> = events
@@ -841,6 +807,62 @@ async fn websocket_auth_trace_classifies_original_error_without_consuming_it() {
         assert_eq!(finished[0].request_bytes, None);
         assert!(!format!("{events:?}").contains("secret-auth"));
         stream.close().await.unwrap();
+        session.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn header_socket_failures_do_not_trigger_native_recovery() {
+    for original in [
+        Error::Socket(ws::WebSocketError::Upgrade {
+            status: 426,
+            message: "credential service upgrade failed".into(),
+        }),
+        Error::Socket(ws::WebSocketError::Response(
+            responses::ResponsesError::ProviderResponse {
+                error_type: "invalid_request_error".into(),
+                error_code: "previous_response_not_found".into(),
+                detail: "credential service response is unavailable".into(),
+                response_body: "credential failure body".into(),
+            },
+        )),
+    ] {
+        let wire = Arc::new(Wire::default());
+        let http = Arc::new(Http::default());
+        let client = ws::WebSocketClient::new(
+            Arc::new(Connector {
+                wire: wire.clone(),
+                scripts: Mutex::new(VecDeque::new()),
+            }),
+            "https://fake.invalid/responses",
+            None,
+            None,
+            1 << 20,
+        )
+        .unwrap();
+        let raw = ws::Session::new(
+            "fake",
+            Arc::new(FailedAuthHeaders {
+                original: original.clone(),
+            }),
+            client,
+            false,
+        );
+        let session = ResponseSession::new(
+            raw,
+            Arc::new(Factory {
+                wire: wire.clone(),
+                http: http.clone(),
+            }),
+        );
+        for _ in 0..2 {
+            let mut stream = session.call(request("a")).unwrap();
+            assert_eq!(stream.next(&Cancel::default()).await, Err(original.clone()));
+            assert_eq!(stream.next(&Cancel::default()).await.unwrap(), None);
+            stream.close().await.unwrap();
+        }
+        assert_eq!(wire.connects.load(Ordering::SeqCst), 0);
+        assert_eq!(http.calls.load(Ordering::SeqCst), 0);
         session.close().await.unwrap();
     }
 }

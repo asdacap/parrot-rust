@@ -27,7 +27,7 @@ fn project_writes_structured_components_without_legacy_tables() {
         role: MessageRole::Assistant,
         parts: vec![
             ConversationPart::text("first\0"),
-            ConversationPart::image("artifact", "image/webp", "name.webp"),
+            super::Fixture::image("artifact", "image/webp", "name.webp"),
             ConversationPart::text("last"),
         ],
         tool_calls: vec![
@@ -157,7 +157,7 @@ fn part_roundtrip_legacy_fallback_and_unknown_kind_match_source_behavior() {
         vec![ConversationPart::text("legacy")]
     );
     let parts = vec![
-        ConversationPart::image("id", "image/png", "display"),
+        super::Fixture::image("id", "image/png", "display"),
         ConversationPart::text("second"),
     ];
     insert_parts(&tx, "input_part", "input_id", "input", &parts).unwrap();

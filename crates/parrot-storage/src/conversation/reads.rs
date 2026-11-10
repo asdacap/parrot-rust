@@ -236,37 +236,6 @@ impl ConversationRepository {
         }).await
     }
 
-    pub async fn resolve_image_artifact(
-        &self,
-        artifact_id: String,
-    ) -> Result<Option<crate::artifacts::ImageArtifactMetadata>, EventError> {
-        if artifact_id.trim().is_empty() {
-            return Err(EventError::Argument(
-                "artifactId must not be empty or whitespace".into(),
-            ));
-        }
-        self.events.transaction(move |tx| {
-            Ok(tx.query_row(
-                "SELECT artifact_id, media_type, byte_length, width, height, frame_count, aggregate_pixels, display_name, origin FROM image_artifact WHERE artifact_id = ?1;",
-                [artifact_id],
-                |row| {
-                    let artifact_id: String = row.get(0)?;
-                    Ok(crate::artifacts::ImageArtifactMetadata {
-                        sha256: artifact_id.clone(),
-                        artifact_id,
-                        media_type: row.get(1)?,
-                        byte_length: row.get(2)?,
-                        width: row.get(3)?,
-                        height: row.get(4)?,
-                        frame_count: row.get(5)?,
-                        aggregate_pixels: row.get(6)?,
-                        display_name: row.get(7)?,
-                        origin: row.get(8)?,
-                    })
-                },
-            ).optional()?)
-        }).await
-    }
     pub async fn conversation(&self, agent: String) -> Result<Vec<ConversationItem>, EventError> {
         self.conversation_after(agent, 0).await
     }
@@ -335,29 +304,18 @@ impl ConversationRepository {
         for part in parts {
             match part {
                 ConversationPart::Text(text) => contents.push(ModelContent::Text(text)),
-                ConversationPart::ImageArtifact {
-                    artifact_id,
-                    media_type,
-                    ..
-                } => {
+                ConversationPart::ImageArtifact { metadata } => {
                     let store = self.image_store.clone().ok_or_else(|| {
                         EventError::Invalid(
                             "image artifacts cannot be materialized without session resources"
                                 .into(),
                         )
                     })?;
-                    let artifact = self
-                        .resolve_image_artifact(artifact_id.clone())
-                        .await?
-                        .ok_or_else(|| {
-                            EventError::from(std::io::Error::new(
-                                std::io::ErrorKind::NotFound,
-                                "The image artifact does not exist.",
-                            ))
-                        })?;
-                    let width = i32::try_from(artifact.width).map_err(|_| EventError::Overflow)?;
+                    let width = i32::try_from(metadata.width).map_err(|_| EventError::Overflow)?;
                     let height =
-                        i32::try_from(artifact.height).map_err(|_| EventError::Overflow)?;
+                        i32::try_from(metadata.height).map_err(|_| EventError::Overflow)?;
+                    let artifact_id = metadata.artifact_id;
+                    let media_type = metadata.media_type;
                     let path = tokio::task::spawn_blocking(move || store.path_of(&artifact_id))
                         .await
                         .map_err(|error| EventError::from(std::io::Error::other(error)))?

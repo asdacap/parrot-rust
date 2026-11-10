@@ -1455,7 +1455,7 @@ fn image_upload() -> protocol::ImageUpload {
     protocol::ImageUpload {
         byte_length: content.len() as i64,
         content,
-        upload_id: "actual-host-upload".into(),
+
         display_name: "pixel.png".into(),
         media_type: "image/png".into(),
     }
@@ -1471,7 +1471,7 @@ async fn actual_hosted_images_questions_pending_reads_and_listen_share_the_close
         .unwrap();
     assert_eq!((image.width, image.height, image.byte_length), (1, 1, 70));
     assert_eq!(
-        bounded(hosted.resolve_image(&image.artifact_id))
+        bounded(hosted.resolve_image(&image.artifact_id, &image.display_name))
             .await
             .unwrap(),
         Some(image.clone())
@@ -1496,7 +1496,7 @@ async fn actual_hosted_images_questions_pending_reads_and_listen_share_the_close
     );
     assert_eq!(
         hosted
-            .resolve_image(&image.artifact_id)
+            .resolve_image(&image.artifact_id, &image.display_name)
             .await
             .unwrap_err()
             .code,

@@ -6,7 +6,7 @@ use parrot_domain::{
 use parrot_foundation::config::models::validate_preset_name;
 use parrot_host::web::router::WebClient;
 
-use super::{ModelSelection, ModelWizard, check_cancelled, load_command, model_alias, rpc};
+use super::{ModelSelection, ModelWizard, check_cancelled, load, model_alias, rpc};
 use crate::{
     dispatch::dialog::DialogOption,
     slash_sessions::{CommandContext, SlashCommand, SlashFailure},
@@ -78,7 +78,7 @@ impl SlashCommand for ModelsCommand {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
-            let listed = load_command(
+            let listed = load(
                 context.dialog,
                 "Loading models…",
                 rpc(client.list_models(ListModelsRequest::new()), cancellation),
@@ -122,7 +122,7 @@ impl SlashCommand for EffortCommand {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let current_model = context.session.model().to_owned();
-            let (selector, listed) = load_command(
+            let (selector, listed) = load(
                 context.dialog,
                 "Loading models…",
                 async {
@@ -131,7 +131,7 @@ impl SlashCommand for EffortCommand {
                     let mut client = self.client.clone();
                     let listed =
                         rpc(client.list_models(ListModelsRequest::new()), cancellation).await?;
-                    Ok((selector, listed))
+                    Ok::<_, SlashFailure>((selector, listed))
                 },
                 cancellation,
             )
@@ -279,7 +279,7 @@ impl SlashCommand for ModelPresetSelectCommand {
             let name;
             if arguments.trim().is_empty() {
                 context.activity.wait_until_idle(cancellation).await?;
-                let presets = load_command(
+                let presets = load(
                     context.dialog,
                     "Loading presets…",
                     context.session.list_model_presets(cancellation),

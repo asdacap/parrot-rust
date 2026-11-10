@@ -743,7 +743,6 @@ async fn original_materialize_durable_image_at_provider_boundary() {
     let artifact = images
         .persist(
             std::io::Cursor::new(bytes),
-            "upload-1",
             "pixel.png",
             "test",
             None,
@@ -755,11 +754,7 @@ async fn original_materialize_durable_image_at_provider_boundary() {
     let contents = repo
         .materialize(vec![
             ConversationPart::text("before"),
-            ConversationPart::image(
-                artifact.artifact_id,
-                artifact.media_type,
-                artifact.display_name,
-            ),
+            ConversationPart::image(artifact),
         ])
         .await
         .unwrap();

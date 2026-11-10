@@ -10,7 +10,6 @@ pub(super) async fn image(fixture: &Fixture) -> ImageArtifactMetadata {
     .unwrap()
     .persist(
         std::io::Cursor::new(include_bytes!("fixtures/pixel.png").to_vec()),
-        "synthetic-upload",
         "pixel.png",
         "T47 synthetic fixture",
         Some("image/png"),
@@ -115,11 +114,7 @@ async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
             } else {
                 vec![
                     ConversationPart::text("restored"),
-                    ConversationPart::image(
-                        &image.artifact_id,
-                        &image.media_type,
-                        &image.display_name,
-                    ),
+                    ConversationPart::image(image.clone()),
                 ]
             },
         };
@@ -244,7 +239,18 @@ async fn restored_missing_image_metadata_is_visible_error_and_does_not_advance_w
                 status: ToolExecutionStatus::Finished,
                 result_parts: vec![
                     ConversationPart::text("image"),
-                    ConversationPart::image("missing-artifact", "image/png", "missing.png"),
+                    ConversationPart::image(ImageArtifactMetadata {
+                        artifact_id: "f".repeat(64),
+                        sha256: "f".repeat(64),
+                        media_type: "image/png".into(),
+                        byte_length: 70,
+                        width: 1,
+                        height: 1,
+                        frame_count: 1,
+                        aggregate_pixels: 1,
+                        display_name: "missing.png".into(),
+                        origin: "test".into(),
+                    }),
                 ],
             },
         )

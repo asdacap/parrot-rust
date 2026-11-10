@@ -960,14 +960,14 @@ async fn actual_rpc_boundaries_cancel_or_reject_before_unintended_mutation() {
     f.close().await;
 }
 
-async fn upload_image(f: &RpcFixture, id: &str) -> wire::ArtifactReference {
+async fn upload_image(f: &RpcFixture, id: &str, display_name: &str) -> wire::ArtifactReference {
     let upload = image_upload();
     let mut frames = Upload(VecDeque::from([
         wire::AttachmentUploadFrame {
             payload: Some(wire::attachment_upload_frame::Payload::Header(
                 wire::AttachmentUploadHeader {
                     user_session_id: id.into(),
-                    upload_id: upload.upload_id,
+
                     ..Default::default()
                 },
             )),
@@ -982,7 +982,7 @@ async fn upload_image(f: &RpcFixture, id: &str) -> wire::ArtifactReference {
         wire::AttachmentUploadFrame {
             payload: Some(wire::attachment_upload_frame::Payload::Description(
                 wire::AttachmentUploadDescription {
-                    display_name: upload.display_name,
+                    display_name: display_name.into(),
                     media_type: upload.media_type,
                     byte_length: upload.byte_length,
                     ..Default::default()
@@ -1001,7 +1001,7 @@ async fn upload_image(f: &RpcFixture, id: &str) -> wire::ArtifactReference {
         (1, 1, 70)
     );
     assert_eq!(artifact.media_type, "image/png");
-    assert_eq!(artifact.display_name, "pixel.png");
+    assert_eq!(artifact.display_name, display_name);
     artifact
 }
 
@@ -1010,7 +1010,17 @@ async fn actual_uploaded_image_reaches_provider_through_same_session_resources()
     let f = RpcFixture::new().await;
     let session = f.create().await;
     let id = &session.id;
-    let artifact = upload_image(&f, id).await;
+    let artifact = upload_image(&f, id, "first.png").await;
+    let second = upload_image(&f, id, "second.png").await;
+    assert_eq!(artifact.artifact_id, second.artifact_id);
+    assert_eq!(artifact.sha256, second.sha256);
+    assert_eq!(second.display_name, "second.png");
+    assert_eq!(
+        std::fs::read_dir(f.user().lease.images.store().directory())
+            .unwrap()
+            .count(),
+        1
+    );
     let request = wire::SendMessageRequest {
         user_session_id: id.clone(),
         message_id: "rpc-with-image".into(),
@@ -1026,6 +1036,14 @@ async fn actual_uploaded_image_reaches_provider_through_same_session_resources()
                 content: Some(wire::message_content_part::Content::ArtifactId(
                     artifact.artifact_id.clone(),
                 )),
+                display_name: artifact.display_name.clone(),
+                ..Default::default()
+            },
+            wire::MessageContentPart {
+                content: Some(wire::message_content_part::Content::ArtifactId(
+                    second.artifact_id.clone(),
+                )),
+                display_name: second.display_name.clone(),
                 ..Default::default()
             },
         ],
@@ -1057,6 +1075,25 @@ async fn actual_uploaded_image_reaches_provider_through_same_session_resources()
     );
     assert!(events.iter().any(|e| e.has_turn_ended()));
     assert!(!events.iter().any(|e| e.has_turn_failed()));
+    let admitted = events
+        .iter()
+        .find(|event| {
+            event.has_input_admitted() && event.input_admitted().message_id == "rpc-with-image"
+        })
+        .unwrap()
+        .input_admitted();
+    assert_eq!(
+        admitted
+            .parts
+            .iter()
+            .filter(|part| matches!(
+                part.content,
+                Some(wire::message_content_part::Content::ArtifactId(_))
+            ))
+            .map(|part| part.display_name.as_str())
+            .collect::<Vec<_>>(),
+        ["first.png", "second.png"]
+    );
     assert_provider_image_bytes(&f, 0);
     let original_user = f.user();
     let foreign = f.create().await;
@@ -1092,6 +1129,26 @@ async fn actual_uploaded_image_reaches_provider_through_same_session_resources()
         .unwrap();
     until(|| resumed_runtime.is_idle() && f.requests.lock().unwrap().len() == 2).await;
     assert_provider_image_bytes(&f, 1);
+    let history = resumed_root.history().conversation().await.unwrap();
+    let images: Vec<_> = history
+        .iter()
+        .flat_map(|item| &item.message.parts)
+        .filter_map(|part| match part {
+            ConversationPart::ImageArtifact { metadata } => Some(metadata),
+            ConversationPart::Text(_) => None,
+        })
+        .collect();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].display_name, "first.png");
+    assert_eq!(images[1].display_name, "second.png");
+    for image in images {
+        assert_eq!(image.artifact_id, artifact.artifact_id);
+        assert_eq!(image.sha256, artifact.sha256);
+        assert_eq!((image.width, image.height, image.frame_count), (1, 1, 1));
+        assert_eq!((image.byte_length, image.aggregate_pixels), (70, 1));
+        assert_eq!(image.media_type, "image/png");
+        assert_eq!(image.origin, "upload");
+    }
     bounded(reopened.close()).await.unwrap();
     assert_database_closed(&f.user());
 }

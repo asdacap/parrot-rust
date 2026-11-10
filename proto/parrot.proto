@@ -311,10 +311,12 @@ message MessageContentPart {
     string text        = 1;
     string artifact_id = 2;
   }
+  // Image references carry their display name. Text parts leave it empty.
+  string display_name = 3;
 }
 
-// One header binds the upload to its session and retry id. One or more chunks
-// follow, then one terminal description followed by end-of-stream.
+// One header binds the upload to its session. One or more chunks follow,
+// then one terminal description followed by end-of-stream.
 message AttachmentUploadFrame {
   oneof payload {
     AttachmentUploadHeader      header      = 1;
@@ -325,7 +327,8 @@ message AttachmentUploadFrame {
 
 message AttachmentUploadHeader {
   string user_session_id = 1;
-  string upload_id       = 2;
+  reserved 2;
+  reserved "upload_id";
 }
 
 message AttachmentUploadDescription {

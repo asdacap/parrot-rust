@@ -1,12 +1,133 @@
 use super::{fixture::*, harness::Harness, support::*};
-use parrot_domain::values::agent_tasks::{ExecutionStatus::Running, Task};
-use parrot_runtime::children::Operation;
+use parrot_domain::values::agent_tasks::{ExecutionStatus::*, Task};
+use parrot_runtime::children::{ChildError, Operation};
 use parrot_storage::conversation::HistoryForkBoundary;
 use std::{
     future::Future,
     sync::{Arc, Mutex},
     task::{Context, Poll, Wake, Waker},
 };
+
+#[tokio::test]
+async fn runner_errors_fail_only_their_task_and_allow_retry_without_restart() {
+    for error in [
+        ChildError::failure("unexpected", "agent execution is busy"),
+        ChildError::failure("io", "worker admission write failed"),
+        ChildError::registry("worker admission rejected"),
+        ChildError::Cancelled,
+        ChildError::Suspended,
+    ] {
+        let h = Harness::new();
+        let owner = h.root("owner").await;
+        set(&owner, vec![dedicated(task("a"))]).await;
+        complete(&owner).await;
+        let retained = owner.children().find("a").unwrap();
+        h.factory
+            .get("a")
+            .task_session
+            .enqueue_failures
+            .lock()
+            .unwrap()
+            .push_back(error.clone());
+        let sibling = Gate::new();
+        h.provider.script("b", [Reply::held("answer", &sibling)]);
+        set(
+            &owner,
+            vec![
+                dedicated(task("a")),
+                dedicated(task("b")),
+                dedicated(dependent("c", "b")),
+                dedicated(dependent("d", "a")),
+            ],
+        )
+        .await;
+        sibling.entered().await;
+        let failed = wait_tasks(&owner, |tasks| tasks[0].state == Failed).await;
+        assert_eq!(
+            failed[0].failure.as_deref(),
+            Some(error.to_string().as_str())
+        );
+        assert_eq!(failed[3].state, Pending);
+        sibling.open();
+        wait_tasks(&owner, |tasks| {
+            tasks[1].state == Succeeded && tasks[2].state == Succeeded
+        })
+        .await;
+        set(&owner, vec![dedicated(task("a"))]).await;
+        complete(&owner).await;
+        assert!(Arc::ptr_eq(&retained, &owner.children().find("a").unwrap()));
+        assert_eq!(requests(&h.provider, "a").len(), 2);
+        assert_eq!(requests(&h.provider, "d").len(), 1);
+        h.close().await;
+    }
+}
+
+#[tokio::test]
+async fn result_and_stop_errors_fail_only_their_task_and_allow_retry_without_restart() {
+    for failures in [1, 2] {
+        let h = Harness::new();
+        let owner = h.root("owner").await;
+        let failing = Gate::new();
+        let sibling = Gate::new();
+        h.provider.script("a", [Reply::held("answer", &failing)]);
+        h.provider.script("b", [Reply::held("answer", &sibling)]);
+        set(
+            &owner,
+            vec![
+                dedicated(task("a")),
+                dedicated(task("b")),
+                dedicated(dependent("c", "b")),
+            ],
+        )
+        .await;
+        failing.entered().await;
+        sibling.entered().await;
+        let worker = h.factory.get("a");
+        worker
+            .task_session
+            .ack_failures
+            .store(failures, std::sync::atomic::Ordering::SeqCst);
+        failing.open();
+        let failed = wait_tasks(&owner, |tasks| tasks[0].state == Failed).await;
+        assert_eq!(
+            failed[0].failure.as_deref(),
+            Some("claim acknowledgement write failed")
+        );
+        bounded(async {
+            while worker
+                .task_session
+                .ack_failures
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != 0
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        sibling.open();
+        wait_tasks(&owner, |tasks| {
+            tasks[1].state == Succeeded && tasks[2].state == Succeeded
+        })
+        .await;
+        set(&owner, vec![dedicated(task("a"))]).await;
+        complete(&owner).await;
+        let child = owner.children().find("a").unwrap();
+        assert!(
+            child
+                .agent_state()
+                .load()
+                .await
+                .unwrap()
+                .unwrap()
+                .execution
+                .unwrap()
+                .result_claim
+                .is_none()
+        );
+        assert_eq!(requests(&h.provider, "a").len(), 2);
+        h.close().await;
+    }
+}
 
 struct NoWake;
 impl Wake for NoWake {

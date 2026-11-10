@@ -257,6 +257,77 @@ async fn failed_seal_recovers_registered_identity_once_without_duplicate_capacit
 }
 
 #[tokio::test]
+async fn runner_failure_survives_preparing_response_render_failure_and_reopen() {
+    let first = Harness::new();
+    *first.factory.configuration.lock().unwrap() = Some(broken_response());
+    let root = first.root("owner").await;
+    let held = Gate::new();
+    first
+        .provider
+        .script("work", [Reply::held("answer", &held)]);
+    set(&root, vec![dedicated(task("work"))]).await;
+    held.entered().await;
+    let scheduler = root.get_service::<Scheduler>().unwrap();
+    let key = call(31, "preparing-with-runner-failure");
+    assert!(
+        scheduler
+            .set_tool_tasks(
+                vec![state("bookkeeping", Canceled)],
+                root.selection().current().unwrap(),
+                HistoryForkBoundary::AfterCompletedHistory,
+                key.clone(),
+            )
+            .unwrap()
+            .join()
+            .await
+            .is_err()
+    );
+    let worker = first.factory.get("work");
+    worker.task_session.ack_failures.store(1, Ordering::SeqCst);
+    held.open();
+    bounded(async {
+        while worker.task_session.ack_failures.load(Ordering::SeqCst) != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(scheduler.lookup_accepted(&key).await.is_err());
+    let _ = bounded(scheduler.suspend().join()).await;
+    let _ = bounded(first.registry.shutdown().join()).await;
+    let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
+    let restored = second.reopen_root(root.identity().clone()).await;
+    let scheduler = restored.get_service::<Scheduler>().unwrap();
+    scheduler.resolve_workers().await.unwrap();
+    scheduler.prepare_recovery().await.unwrap();
+    scheduler.finalize_preparing().await.unwrap();
+    scheduler.activate_executions().join().await.unwrap();
+    let tasks = wait_tasks(&restored, |tasks| {
+        matches!(tasks[0].state, Failed | Succeeded)
+    })
+    .await;
+    assert_eq!(tasks[0].state, Failed);
+    assert_eq!(
+        tasks[0].failure.as_deref(),
+        Some("claim acknowledgement write failed")
+    );
+    assert_eq!(requests(&second.provider, "work").len(), 1);
+    let child = restored.children().find("work").unwrap();
+    second.close().await;
+    assert!(
+        child
+            .agent_state()
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .execution
+            .unwrap()
+            .result_claim
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn completed_worker_outcome_waits_for_preparing_response_and_recovers_without_provider_repeat()
  {
     let first = Harness::new();

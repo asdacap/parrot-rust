@@ -16,6 +16,7 @@ mod tools {
     mod agent_spawn;
     mod agent_status;
     mod answer;
+    mod ask;
     mod clear_exit_reminder;
     mod exec_command;
     mod file_mutation;
@@ -30,6 +31,7 @@ mod tools {
     mod queue_take;
     mod read;
     mod read_image;
+    mod reply;
     mod set_agent_tasks;
     mod set_checkpoint;
     mod set_exit_reminder;
