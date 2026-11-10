@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use parrot_domain::protocol::messages::parrot::{Event, event::Payload};
+use parrot_domain::{
+    protocol::messages::parrot::{Event, event::Payload},
+    values::activity::RootTurnActivity,
+};
 
 use crate::dispatch::hierarchy::AgentSessionHierarchy;
 
@@ -10,7 +13,7 @@ pub struct SessionReplayContext {
     hierarchy: AgentSessionHierarchy,
     complete: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     replaying: bool,
-    busy: bool,
+    root_turn: RootTurnActivity,
 }
 
 impl SessionReplayContext {
@@ -19,7 +22,7 @@ impl SessionReplayContext {
             hierarchy: AgentSessionHierarchy::default(),
             complete: None,
             replaying,
-            busy: false,
+            root_turn: RootTurnActivity::default(),
         }
     }
 
@@ -28,7 +31,7 @@ impl SessionReplayContext {
     }
 
     pub fn busy(&self) -> bool {
-        self.busy
+        self.root_turn.is_busy()
     }
 
     pub fn set_completion(&mut self, complete: Arc<dyn Fn(bool) + Send + Sync>) {
@@ -42,22 +45,13 @@ impl SessionReplayContext {
         if matches!(published.payload, Some(Payload::SessionUsageSnapshot(_))) {
             self.replaying = false;
             if let Some(complete) = &self.complete {
-                complete(self.busy);
+                complete(self.busy());
             }
             return;
         }
         self.hierarchy.observe(published);
-        if !self.hierarchy.is_root(&published.agent_session_id) {
-            return;
-        }
-        match published.payload {
-            Some(Payload::TurnStarted(_)) => self.busy = true,
-            Some(
-                Payload::TurnEnded(_) | Payload::ModeTurnCompleted(_) | Payload::TurnFailed(_),
-            ) => {
-                self.busy = false;
-            }
-            _ => {}
+        if self.hierarchy.is_root(&published.agent_session_id) {
+            self.root_turn.observe_root(published.payload.as_ref());
         }
     }
 }

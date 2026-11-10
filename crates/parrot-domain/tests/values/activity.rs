@@ -1,4 +1,5 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Cancelled, Clock};
+use parrot_domain::protocol::messages::parrot::{self as wire, event::Payload};
 use parrot_domain::values::activity::*;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -307,6 +308,22 @@ fn tool_and_lifecycle_state_clear_and_retain_terminal_outcome() {
     assert_eq!(terminal.terminal_outcome, Some(outcome));
     activity.begin_execution();
     assert_eq!(activity.capture().terminal_outcome, None);
+}
+
+#[test]
+fn root_turn_busy_matches_browser_timeline_sequences() {
+    let mut turn = RootTurnActivity::default();
+    assert!(!turn.is_busy());
+    turn.observe_root(Some(&Payload::TurnStarted(wire::TurnStarted::default())));
+    assert!(turn.is_busy());
+    turn.observe_root(Some(&Payload::TurnEnded(wire::TurnEnded::default())));
+    assert!(turn.is_busy());
+    turn.observe_root(Some(&Payload::ModeTurnCompleted(
+        wire::ModeTurnCompleted::default(),
+    )));
+    assert!(!turn.is_busy());
+    turn.observe_root(Some(&Payload::TurnFailed(wire::TurnFailed::default())));
+    assert!(!turn.is_busy());
 }
 
 #[test]
