@@ -8,7 +8,7 @@ use parrot_core::{
     Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
     ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolImage,
     ToolResult, ToolStatus, Tools, TurnOptions,
-    budget::{TurnBudget, TurnFlags},
+    budget::{AgentState, TurnFlags},
     parse_skill_mentions,
 };
 use std::{
@@ -444,7 +444,7 @@ struct MemoryState {
     recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
     fitted_statuses: Vec<String>,
     fail_at: Option<&'static str>,
-    budget: TurnBudget,
+    budget: AgentState,
     budget_read_error: Option<Error>,
     budget_write_error: Option<Error>,
     budget_writes: usize,
@@ -577,7 +577,7 @@ impl MemoryState {
             recorded_compactions: Vec::new(),
             fitted_statuses: Vec::new(),
             fail_at: None,
-            budget: TurnBudget::new(false),
+            budget: AgentState::new(false),
             budget_read_error: None,
             budget_write_error: None,
             budget_writes: 0,
@@ -704,7 +704,7 @@ impl MemoryState {
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
-        self.budget = TurnBudget::new(self.unlimited);
+        self.budget = AgentState::new(self.unlimited);
         let source = self.cancellation.clone();
         finish(run(
             self,
@@ -715,7 +715,7 @@ impl MemoryState {
     }
     fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
         std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
-        self.budget = TurnBudget::new(self.unlimited);
+        self.budget = AgentState::new(self.unlimited);
         let tools = self.tools.clone();
         let provider = self.provider.clone();
         let result = finish(run(
@@ -729,9 +729,6 @@ impl MemoryState {
     }
 }
 impl States for MemoryState {
-    fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async { Ok(false) })
-    }
     fn apply_conversation_addition(
         &mut self,
         addition: ConversationAddition,
@@ -911,19 +908,25 @@ impl States for MemoryState {
             }
         })
     }
-    fn read_turn_budget(&self) -> Result<TurnBudget, Error> {
-        if let Some(error) = &self.budget_read_error {
-            return Err(error.clone());
-        }
-        Ok(self.budget.clone())
+    fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
+        Box::pin(async move {
+            if let Some(error) = &self.budget_read_error {
+                return Err(error.clone());
+            }
+            let mut state = self.budget.clone();
+            state.final_phase = false;
+            Ok(state)
+        })
     }
-    fn write_turn_budget(&mut self, budget: TurnBudget) -> Result<(), Error> {
-        self.budget_writes += 1;
-        if let Some(error) = &self.budget_write_error {
-            return Err(error.clone());
-        }
-        self.budget = budget;
-        Ok(())
+    fn set_agent_state(&mut self, state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.budget_writes += 1;
+            if let Some(error) = &self.budget_write_error {
+                return Err(error.clone());
+            }
+            self.budget = state;
+            Ok(())
+        })
     }
     fn read_last_context_reminder_checkpoint(
         &self,
@@ -1354,7 +1357,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         let tools = state.tools.clone();
         let provider = state.provider.clone();
 
-        state.budget = TurnBudget::new(disable_limits);
+        state.budget = AgentState::new(disable_limits);
 
         assert_eq!(
             finish(run(
@@ -1570,7 +1573,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         provider_preferences: " { \"raw\" : [1.2300] } ".into(),
         include_router_metadata: true,
     };
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish({
@@ -1672,7 +1675,7 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish(run_turn(

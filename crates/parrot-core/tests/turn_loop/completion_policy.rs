@@ -239,7 +239,7 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish(run_turn(
@@ -282,7 +282,7 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = TurnBudget::new(false);
+    state.budget = AgentState::new(false);
 
     assert_eq!(
         finish(run_turn(
