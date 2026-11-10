@@ -229,73 +229,15 @@ async fn a003_queued_prompt_gets_its_own_turn_with_two_starts_and_two_endings() 
     );
 }
 
-/// Records the real usage fact before the injected executor returns its result.
-#[derive(Default)]
 struct UsageTools(Tools);
-impl TurnTools<Security> for UsageTools {
-    type Snapshot = Vec<sessions::Tool>;
-    fn materialize(&self) -> Result<Self::Snapshot, TurnError> {
+impl Default for UsageTools {
+    fn default() -> Self {
+        Self(Tools::with_names(&["settled"]))
+    }
+}
+impl ToolFactory<Security> for UsageTools {
+    fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
         self.0.materialize()
-    }
-    fn permitted(
-        &self,
-        snapshot: &Self::Snapshot,
-        selection: &TurnSelection<Security>,
-    ) -> Result<Self::Snapshot, TurnError> {
-        self.0.permitted(snapshot, selection)
-    }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
-        snapshot
-    }
-    fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
-        snapshot.clone()
-    }
-    fn execute<'a>(
-        &'a self,
-        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
-        resources: TurnResources<'a>,
-        selection: &'a TurnSelection<Security>,
-        snapshot: &'a Self::Snapshot,
-        source: &'a dyn SelectionSource<Security>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<
-        'a,
-        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
-    > {
-        Box::pin(async move {
-            for call in &request.calls {
-                resources
-                    .usage
-                    .record_tool(
-                        request.assistant_sequence,
-                        &sessions::ToolCall {
-                            id: call.id.clone(),
-                            name: call.name.clone(),
-                            arguments_json: call.arguments_json.clone(),
-                        },
-                    )
-                    .await?;
-                let mut started = Event::new();
-                started.id = id();
-                started.agent_session_id = "agent".into();
-                started.set_tool_started(protocol::ToolStarted {
-                    tool_call_id: call.id.clone(),
-                    tool_name: call.name.clone(),
-                    ..Default::default()
-                });
-                resources.events.emit(started, cancellation).await?;
-            }
-            self.0
-                .execute(
-                    request,
-                    resources,
-                    selection,
-                    snapshot,
-                    source,
-                    cancellation,
-                )
-                .await
-        })
     }
 }
 
@@ -347,6 +289,11 @@ async fn usage_runtime(
         .unwrap(),
     );
     let backend = RuntimeBackend::new(RuntimeConfig {
+        tool_execution: tool_execution_config(
+            &fixture.history,
+            templates.clone(),
+            publisher.clone(),
+        ),
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
             ..Default::default()

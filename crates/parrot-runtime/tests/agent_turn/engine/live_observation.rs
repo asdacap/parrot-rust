@@ -94,8 +94,8 @@ async fn live_context_does_not_wait_for_held_tool_execution() {
     let fixture = Fixture::new();
     let gate = Gate::new();
     let tools = Arc::new(Tools {
-        execution_gate: Mutex::new(Some(gate.clone())),
-        ..Tools::default()
+        execution_gate: Arc::new(Mutex::new(Some(gate.clone()))),
+        ..Tools::with_names(&["held-tool"])
     });
     let mut first = Step::complete("");
     first

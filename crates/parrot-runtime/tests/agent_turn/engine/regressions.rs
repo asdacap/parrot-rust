@@ -373,7 +373,7 @@ async fn completed_truncated_and_invalid_tool_arguments_retry_before_request_rec
     let runtime = fixture
         .runtime(
             provider.clone(),
-            Arc::new(Tools::default()),
+            Arc::new(Tools::with_names(&["fake_tool"])),
             vec![],
             Arc::new(Signal::new()),
             0,
@@ -432,7 +432,7 @@ async fn any_valid_json_tool_arguments_are_accepted_not_just_objects() {
         let runtime = fixture
             .runtime(
                 provider.clone(),
-                Arc::new(Tools::default()),
+                Arc::new(Tools::with_names(&["fake_tool"])),
                 vec![],
                 Arc::new(Signal::new()),
                 0,

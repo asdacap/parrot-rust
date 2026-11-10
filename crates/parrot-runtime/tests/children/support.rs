@@ -18,6 +18,7 @@ use parrot_provider::{
     },
     sessions::{self, Completion, Error, EventStream, Provider, Request, Session},
 };
+use parrot_runtime::tool_settlement::{ToolFactory, ToolInventory};
 use parrot_runtime::{
     active_work::exit_reminders::ExitReminders,
     agent_turn::{
@@ -31,6 +32,8 @@ use parrot_runtime::{
     event_broker::EventBroker,
     prompt_context::{PromptResult, SystemPrompt},
 };
+#[path = "../tool_execution_support.rs"]
+mod tool_execution_support;
 use parrot_storage::{
     artifacts::compaction::CompactionGroupBlobStore,
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
@@ -49,6 +52,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Semaphore;
+use tool_execution_support::tool_execution_config;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub fn id() -> String {
@@ -317,40 +321,15 @@ impl ChildDiagnostics for Diagnostics {
 
 #[derive(Default)]
 pub struct Tools {
-    pub captures: Mutex<Vec<TurnSelection<Security>>>,
+    pub captures: Arc<Mutex<Vec<TurnSelection<Security>>>>,
 }
-impl TurnTools<Security> for Tools {
-    type Snapshot = Vec<sessions::Tool>;
-    fn materialize(&self) -> Result<Self::Snapshot, TurnError> {
-        Ok(vec![])
-    }
-    fn permitted(
-        &self,
-        snapshot: &Self::Snapshot,
-        selection: &TurnSelection<Security>,
-    ) -> Result<Self::Snapshot, TurnError> {
-        self.captures.lock().unwrap().push(selection.clone());
-        Ok(snapshot.clone())
-    }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
-        snapshot
-    }
-    fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
-        snapshot.clone()
-    }
-    fn execute<'a>(
-        &'a self,
-        _: parrot_runtime::agent_turn::services::ToolExecutionChunk,
-        _: TurnResources<'a>,
-        _: &'a TurnSelection<Security>,
-        _: &'a Self::Snapshot,
-        _: &'a dyn SelectionSource<Security>,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<
-        'a,
-        Result<Vec<parrot_runtime::agent_turn::services::ToolExecutionResult>, TurnError>,
-    > {
-        panic!("child fixture has no executable tools")
+impl ToolFactory<Security> for Tools {
+    fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
+        Ok(ToolInventory {
+            tools: vec![],
+            supported: vec![],
+            definitions: vec![],
+        })
     }
 }
 struct Prompt;
@@ -392,7 +371,7 @@ impl TurnSkills for Skills {
         Box::pin(async {})
     }
 }
-struct Status;
+struct Status(Arc<Mutex<Vec<TurnSelection<Security>>>>);
 impl ContextStatus for Status {
     fn observe<'a>(
         &'a self,
@@ -403,8 +382,9 @@ impl ContextStatus for Status {
     }
 }
 impl TurnStatus<Security> for Status {
-    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        Arc::new(Self)
+    fn bind(&self, selection: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
+        self.0.lock().unwrap().push(selection.clone());
+        Arc::new(Self(self.0.clone()))
     }
 }
 #[derive(Default)]
@@ -564,6 +544,7 @@ impl Factory {
             })
             .collect();
         let backend = RuntimeBackend::new(RuntimeConfig {
+            tool_execution: tool_execution_config(&history, templates.clone(), publisher.clone()),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
                 ..Default::default()
@@ -577,7 +558,7 @@ impl Factory {
             prompt: Box::new(Prompt),
             skills: Arc::new(Skills),
             context: histories.controller(history.clone()),
-            status: Arc::new(Status),
+            status: Arc::new(Status(tools.captures.clone())),
             completion_sources: vec![],
             templates,
             reminders,
