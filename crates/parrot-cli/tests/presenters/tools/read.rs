@@ -481,14 +481,15 @@ fn discovered_skill_reads_show_names_and_actual_returned_ranges() {
             },
         ],
     )));
-    let full_result = (1..=10)
-        .map(|number| format!("{number}: body\n"))
-        .collect::<String>()
-        + "total lines in file: 10\n";
+    let full_result = concat!(
+        "1: body\n2: body\n3: body\n4: body\n5: body\n",
+        "6: body\n7: body\n8: body\n9: body\n10: body\n",
+        "total lines in file: 10\n",
+    );
     for (arguments, result, suffix) in [
         (
             r#"{"path":"/server/skills/grill-with-docs/SKILL.md"}"#,
-            full_result.as_str(),
+            full_result,
             "$SYSTEM_SKILLS/grill-with-docs/SKILL.md L1-L10",
         ),
         (

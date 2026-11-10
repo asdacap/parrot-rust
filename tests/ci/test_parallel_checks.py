@@ -38,8 +38,15 @@ if "--command" not in arguments:
     print(root)
     sys.exit(0)
 command = arguments[arguments.index("--command") + 1:]
-if "ci" in command:
+if command == ["bash", "-c", "command -v bash"]:
+    print(root / "tools" / "bash")
+elif "ci" in command:
     (root / "installed").touch()
+elif command[0] == "cargo" and "--example" in command:
+    assert command[command.index("--example") + 1] == "t17-crash-probe"
+    probe = Path(os.environ["CARGO_TARGET_DIR"]) / "debug/examples/t17-crash-probe"
+    probe.parent.mkdir(parents=True, exist_ok=True)
+    probe.touch()
 elif "build" in command:
     assert (root / "installed").exists(), "frontend build requires installed dependencies"
     (root / "assets").touch()
@@ -62,6 +69,11 @@ else:
     else:
         name = "contracts" if "--manifest-path" in command else "workspace"
         assert (root / "assets").exists(), "Rust tests require frontend assets"
+        if name == "workspace":
+            assert os.environ.get("T57_TEST_SHELL") == str(root / "tools/bash"), "process tests require Nix Bash"
+            probe = Path(os.environ["CARGO_TARGET_DIR"]) / "debug/examples/t17-crash-probe"
+            assert os.environ.get("T17_CRASH_PROBE_BINARY") == str(probe) and probe.exists(), "crash tests require a built probe"
+            assert os.environ.get("PARROT_T64_BROWSER_MODULES") == str(Path.cwd() / "web/node_modules"), "browser tests require installed modules"
         (root / f"{name}.target").write_text(os.environ["CARGO_TARGET_DIR"])
     (root / f"{name}.started").touch()
     deadline = time.monotonic() + 5

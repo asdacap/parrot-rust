@@ -61,12 +61,17 @@ jobs:
           mkdir -p "$HOME"
           nix develop --offline --no-write-lock-file --command npm --prefix web ci --offline --no-audit --no-fund
           nix develop --offline --no-write-lock-file --command npm --prefix web run build
+          T57_TEST_SHELL="$(nix develop --offline --no-write-lock-file --command bash -c 'command -v bash')"
+          export T57_TEST_SHELL
+          export PARROT_T64_BROWSER_MODULES="$PWD/web/node_modules"
           nix develop --offline --no-write-lock-file --command cargo fmt --all -- --check
           pids=()
           nix develop --offline --no-write-lock-file --command python3 -B -m pytest -n auto tests/skills/queue tests/ci &
           pids+=("$!")
           (
             nix develop --offline --no-write-lock-file --command cargo clippy --workspace --all-targets --locked -- -D warnings
+            nix develop --offline --no-write-lock-file --command cargo build --locked -p parrot-storage --example t17-crash-probe
+            export T17_CRASH_PROBE_BINARY="$CARGO_TARGET_DIR/debug/examples/t17-crash-probe"
             nix develop --offline --no-write-lock-file --command cargo nextest run --workspace --locked --test-threads "$RUST_TEST_THREADS" --no-fail-fast
             nix develop --offline --no-write-lock-file --command cargo test --workspace --doc --locked
             case "$(uname -s)" in
