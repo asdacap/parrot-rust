@@ -168,7 +168,6 @@ pub trait Tools: Send + Sync {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromotedInput {
     pub input_id: String,
-    pub message_id: String,
     pub message: Message,
 }
 

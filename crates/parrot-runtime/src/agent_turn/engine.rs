@@ -429,7 +429,6 @@ where
             };
             inputs.push(parrot_core::PromotedInput {
                 input_id: promotion.input.id,
-                message_id: promotion.input.message_id,
                 message: provider_message(&message).into(),
             });
             state.conversation.add(message);

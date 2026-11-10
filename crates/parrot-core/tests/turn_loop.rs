@@ -1031,7 +1031,6 @@ impl States for MemoryState {
                     self.append_turn_message(message.clone());
                     PromotedInput {
                         input_id: input.input_id,
-                        message_id: input.message_id,
                         message,
                     }
                 })
