@@ -831,13 +831,6 @@ impl ContextStatus for ScopedModeStatus {
     ) -> BoxFuture<'a, ContextResult<String>> {
         Box::pin(async move { self.context()?.observe(context, cancellation).await })
     }
-    fn observe_fitted<'a>(
-        &'a self,
-        estimate: &'a (dyn Fn(&str) -> ContextResult<ContextSnapshot> + Send + Sync),
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move { self.context()?.observe_fitted(estimate, cancellation).await })
-    }
 }
 
 struct ScopedImages<S: RestrictableAccessSnapshot + 'static>(std::marker::PhantomData<fn() -> S>);
