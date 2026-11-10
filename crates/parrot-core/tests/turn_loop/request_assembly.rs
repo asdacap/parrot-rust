@@ -274,14 +274,14 @@ fn three_inputs_render_raw_system_state_with_configured_scalar_and_minijinja_tem
     );
     state
         .template_engines
-        .insert("context.agent-scratch".into(), "minijinja".into());
+        .insert(ConfigKey::AgentScratchTemplate, "minijinja".into());
     state.skill_templates.lock().unwrap().extend([
         (
-            "context.agent-scratch".into(),
+            ConfigKey::AgentScratchTemplate,
             "{{ title }}{% for item in items %}[{{ item }}]{% endfor %}".into(),
         ),
         (
-            "context.agent-history".into(),
+            ConfigKey::AgentHistoryTemplate,
             "configured {content}".into(),
         ),
     ]);
@@ -333,9 +333,9 @@ fn provider_model_guidance_and_raw_alias_augmentation_form_one_ordered_section()
         ];
         state
             .template_engines
-            .insert("context.model-aliases".into(), "minijinja".into());
+            .insert(ConfigKey::ModelAliasesTemplate, "minijinja".into());
         state.skill_templates.lock().unwrap().insert(
-            "context.model-aliases".into(),
+            ConfigKey::ModelAliasesTemplate,
             "{% for alias in aliases %}{{ alias.name }}={{ alias.model }} [{{ alias.usage }}]{% endfor %}".into(),
         );
 

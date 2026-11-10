@@ -927,7 +927,7 @@ impl parrot_core::States for EpochStates<'_> {
                 key => self
                     .templates
                     .get_template(
-                        key.get_prompt_template_id()
+                        crate::prompt_context::get_prompt_template_id(key)
                             .ok_or_else(|| parrot_core::Error::unsupported("configuration"))?,
                     )
                     .map(ConfigValue::PromptTemplate)

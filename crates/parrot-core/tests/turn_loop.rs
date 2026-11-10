@@ -401,7 +401,7 @@ struct MemoryState {
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
     prompts: Arc<Mutex<MemoryPromptData>>,
-    skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
+    skill_templates: Arc<Mutex<BTreeMap<ConfigKey, String>>>,
     recorded_input_contexts: Vec<DerivedContext>,
     tools: MemoryTools,
     provider: MemoryProvider,
@@ -444,7 +444,7 @@ struct MemoryState {
     system_prompts: Vec<(String, String)>,
     prompt_templates: Vec<(String, ConfigKey)>,
     template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
-    template_engines: BTreeMap<String, String>,
+    template_engines: BTreeMap<ConfigKey, String>,
 }
 impl MemoryState {
     fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
@@ -489,35 +489,35 @@ impl MemoryState {
             prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
                 (
-                    "agent-session.context-reminder".into(),
+                    ConfigKey::ContextReminderTemplate,
                     "configured reminder".into(),
                 ),
                 (
-                    "agent-session.context-limit-reminder".into(),
+                    ConfigKey::ContextLimitReminderTemplate,
                     "configured reminder".into(),
                 ),
                 (
-                    "agent-session.truncated-tool-call".into(),
+                    ConfigKey::TruncatedToolCallTemplate,
                     "truncated tool calls".into(),
                 ),
                 (
-                    "agent-session.invalid-tool-call".into(),
+                    ConfigKey::InvalidToolCallTemplate,
                     "invalid tool calls".into(),
                 ),
                 (
-                    "agent-session.final-request".into(),
+                    ConfigKey::FinalRequestTemplate,
                     "Finish the current turn.".into(),
                 ),
                 (
-                    "context.skill-selected".into(),
+                    ConfigKey::SkillSelectedTemplate,
                     "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
                 ),
                 (
-                    "context.skill-unavailable".into(),
+                    ConfigKey::SkillUnavailableTemplate,
                     "<skill-unavailable>\n<name>{name}</name>\n<message>{message}</message>\n</skill-unavailable>".into(),
                 ),
                 (
-                    "context.skill-too-large".into(),
+                    ConfigKey::SkillTooLargeTemplate,
                     "<skill-too-large>\n<name>{name}</name>\n<path>{path}</path>\n<message>The skill instructions exceed the {limit_bytes}-byte injection limit and were not loaded.</message>\n</skill-too-large>".into(),
                 ),
             ].into())),
@@ -740,18 +740,17 @@ impl States for MemoryState {
                     ))
                 }
                 key => {
-                    let key = key
-                        .get_prompt_template_id()
-                        .ok_or_else(|| Error::unsupported("configuration"))?;
-                    if key == "agent-session.context-reminder"
-                        || key == "agent-session.context-limit-reminder"
-                    {
+                    if matches!(
+                        key,
+                        ConfigKey::ContextReminderTemplate
+                            | ConfigKey::ContextLimitReminderTemplate
+                    ) {
                         self.trace.step("reminder", self.fail_at)?;
                     }
                     self.trace.step("render_template", self.fail_at)?;
                     let templates = self.skill_templates.lock().unwrap();
                     let text = templates
-                        .get(key)
+                        .get(&key)
                         .ok_or_else(|| Error::failed("unknown template"))?;
                     let allowed = [
                         "name",
@@ -779,11 +778,11 @@ impl States for MemoryState {
                     .map(str::to_owned);
                     let engine = self
                         .template_engines
-                        .get(key)
+                        .get(&key)
                         .map_or("scalar", String::as_str);
                     Ok(ConfigValue::PromptTemplate(Arc::new(
                         PromptTemplate::compile(
-                            &format!("prompt_templates.{key}"),
+                            &format!("test.{key:?}"),
                             text,
                             engine,
                             &allowed,

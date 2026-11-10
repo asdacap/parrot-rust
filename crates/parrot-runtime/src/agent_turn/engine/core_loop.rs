@@ -403,9 +403,11 @@ where
                 key => self
                     .backend
                     .templates
-                    .get_template(key.get_prompt_template_id().ok_or_else(|| {
-                        TurnError::Service("unsupported template configuration key".into())
-                    })?)
+                    .get_template(
+                        crate::prompt_context::get_prompt_template_id(key).ok_or_else(|| {
+                            TurnError::Service("unsupported template configuration key".into())
+                        })?,
+                    )
                     .map(ConfigValue::PromptTemplate)
                     .map_err(|error| {
                         TurnError::Prompt(crate::prompt_context::PromptError::Template(

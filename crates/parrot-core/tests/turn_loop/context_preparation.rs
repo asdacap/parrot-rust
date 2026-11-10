@@ -227,7 +227,7 @@ fn final_phase_sends_the_configured_steer() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.maximum = 1;
     state.skill_templates.lock().unwrap().insert(
-        "agent-session.final-request".into(),
+        ConfigKey::FinalRequestTemplate,
         "Finish using the available information.".into(),
     );
 
@@ -617,12 +617,12 @@ fn pending_context_reminders_use_configured_template_overrides() {
                 Some(parrot_core::ContextLimit::Tokens(800));
         }
         let key = if override_limit {
-            "agent-session.context-limit-reminder"
+            ConfigKey::ContextLimitReminderTemplate
         } else {
-            "agent-session.context-reminder"
+            ConfigKey::ContextReminderTemplate
         };
         state.skill_templates.lock().unwrap().insert(
-            key.into(),
+            key,
             "Prepared reminder at {percentage}% with {estimated_tokens} tokens.".into(),
         );
 
@@ -643,12 +643,12 @@ fn retry_messages_use_configured_template_overrides() {
     for (reply, key, content) in [
         (
             Reply::truncated("cut"),
-            "agent-session.truncated-tool-call",
+            ConfigKey::TruncatedToolCallTemplate,
             "Retry the incomplete tool call.",
         ),
         (
             Reply::invalid("bad"),
-            "agent-session.invalid-tool-call",
+            ConfigKey::InvalidToolCallTemplate,
             "Retry the invalid tool call.",
         ),
     ] {
@@ -657,7 +657,7 @@ fn retry_messages_use_configured_template_overrides() {
             .skill_templates
             .lock()
             .unwrap()
-            .insert(key.into(), content.into());
+            .insert(key, content.into());
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         let requests = state.provider.requests.lock().unwrap();

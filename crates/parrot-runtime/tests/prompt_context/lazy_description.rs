@@ -55,10 +55,16 @@ async fn raw_template_getters_return_literal_state_with_a_broken_template() {
             serde_json::Value::String("literal {path}".into())
         )]
     );
-    prompt
-        .read_core_prompt_bindings(&cancellation)
-        .await
-        .unwrap();
+    assert_eq!(
+        prompt
+            .read_core_prompt_bindings(&cancellation)
+            .await
+            .unwrap(),
+        [(
+            "test:broken-template".into(),
+            parrot_core::ConfigKey::AgentScratchTemplate
+        )]
+    );
     assert!(matches!(
         prompt.build(&selection(), &cancellation).await,
         Err(PromptError::Template(_))
