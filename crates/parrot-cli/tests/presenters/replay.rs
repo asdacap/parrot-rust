@@ -85,8 +85,8 @@ fn replay_completion_after_root_started_is_busy_once() {
     replay_completion_case(Payload::TurnStarted(wire::TurnStarted::default()), true);
 }
 #[test]
-fn replay_completion_after_root_ended_is_idle_once() {
-    replay_completion_case(Payload::TurnEnded(wire::TurnEnded::default()), false);
+fn replay_completion_after_root_ended_is_busy_once() {
+    replay_completion_case(Payload::TurnEnded(wire::TurnEnded::default()), true);
 }
 #[test]
 fn replay_completion_after_root_mode_completed_is_idle_once() {
