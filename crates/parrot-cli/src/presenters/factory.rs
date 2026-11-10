@@ -20,6 +20,8 @@ impl ToolPresenterRegistry {
         let generic: Arc<dyn ToolPresenter> = Arc::new(generic::GenericToolPresenter);
         let presenters: Vec<Arc<dyn ToolPresenter>> = vec![
             Arc::new(answer::AnswerToolPresenter),
+            Arc::new(ask::AskToolPresenter),
+            Arc::new(reply::ReplyToolPresenter),
             Arc::new(agent_send::AgentSendToolPresenter),
             Arc::new(agent_spawn::AgentSpawnToolPresenter),
             Arc::new(agent_status::AgentStatusToolPresenter),

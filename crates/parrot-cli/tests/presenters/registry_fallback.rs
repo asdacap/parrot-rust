@@ -216,6 +216,32 @@ fn actual_registry_get_agent_tasks_invalid_and_nested_execution_state_fall_back(
 }
 
 #[test]
+fn actual_registry_ask_and_reply_invalid_arguments_preserve_generic_output() {
+    let registry = ToolPresenterRegistry::standard(vec![]);
+    for (tool, target) in [("ask", "name"), ("reply", "request_id")] {
+        for args in [
+            serde_json::json!({}),
+            serde_json::json!({target: "recipient"}),
+            serde_json::json!({"message": "hello"}),
+            serde_json::json!({target: null, "message": "hello"}),
+            serde_json::json!({target: 42, "message": "hello"}),
+            serde_json::json!({target: " ", "message": "hello"}),
+            serde_json::json!({target: "recipient", "message": false}),
+            serde_json::json!({target: "recipient", "message": " "}),
+        ] {
+            let args = args.to_string();
+            let call = ToolCallPresentation::new(tool, &args);
+            assert_eq!(
+                live(registry.present_live(&call, 0).unwrap()),
+                live(GenericToolPresenter.present_live(&call, 0).unwrap()),
+                "{tool}: {args}",
+            );
+            fallback(&registry, tool, &args, "opaque result");
+        }
+    }
+}
+
+#[test]
 fn actual_registry_write_stdin_specialization_never_echoes_sensitive_input_or_results() {
     let registry = ToolPresenterRegistry::standard(vec![]);
     for (args, expected) in [

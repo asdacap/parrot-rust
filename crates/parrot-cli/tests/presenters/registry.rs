@@ -259,6 +259,8 @@ fn actual_factory_registers_every_source_presenter_once() {
         .collect::<std::collections::BTreeSet<_>>();
     let expected = [
         "answer",
+        "ask",
+        "reply",
         "agent_send",
         "agent_spawn",
         "agent_status",
