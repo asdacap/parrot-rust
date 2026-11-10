@@ -243,9 +243,11 @@ without selecting or rendering skills. Core parses skill mentions, reads metadat
 through `States::get_skills`, and deduplicates stable identities before reading
 bodies through `States::read_skill_content`. Native backing owns catalog lookup
 and authorized file reads. Core owns skill-context formatting, limits, and loaded
-paths. `States` exposes raw system-prompt text, template identities and arguments,
-AGENTS files, model guidance, identity, standing instructions, and catalog metadata.
-These getters do not expand templates. Core reads that state and renders the ordered
+paths. `States` exposes raw system-prompt text including selected alias augmentation,
+template identities and arguments, AGENTS files, identity, standing instructions,
+and catalog metadata. `Provider` exposes model alias descriptions and the selected
+model profile's literal system prompt. These getters do not expand templates.
+Core reads those inputs and renders the ordered
 instruction sections using concrete templates from `States::get_config`. `ConfigKey`
 selects turn, context, compaction, or prompt-template configuration. The turn entry
 points accept `States`, `Tools`, `Provider`, `EventPublisher`, and the runtime's cancellation token.

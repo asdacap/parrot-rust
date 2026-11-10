@@ -14,7 +14,7 @@ pub fn render_agents_files(
 
 pub fn render_model_prompt(
     aliases: &[ModelAliasDescription],
-    guidance: &(Option<String>, Option<String>),
+    guidance: &Option<String>,
     templates: &PromptTemplateCatalog,
 ) -> PromptResult<(String, String)> {
     let template = templates

@@ -135,16 +135,16 @@ impl SessionPrompt {
             .read_model_aliases(selection)
     }
 
-    pub async fn read_model_guidance(
+    pub async fn read_model_system_prompt(
         &self,
         selection: &ResolvedModelSelection,
         cancellation: &dyn Cancellation,
-    ) -> PromptResult<(Option<String>, Option<String>)> {
+    ) -> PromptResult<Option<String>> {
         Ok(self
             .lock(cancellation)
             .await?
             .prompt
-            .read_model_guidance(selection))
+            .read_model_system_prompt(selection))
     }
 
     pub async fn read_skill_catalog(

@@ -236,6 +236,8 @@ impl Tools for MemoryTools {
 
 #[derive(Clone)]
 struct MemoryProvider {
+    model_aliases: Vec<parrot_core::ModelAliasDescription>,
+    model_system_prompt: Option<String>,
     trace: Trace,
     replies: Arc<Mutex<VecDeque<Reply>>>,
     fail_at: Arc<Mutex<Option<&'static str>>>,
@@ -246,6 +248,14 @@ struct MemoryProvider {
     cancellation: Arc<CancellationSource>,
 }
 impl Provider for MemoryProvider {
+    fn read_model_aliases(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
+        Box::pin(async move { Ok(self.model_aliases.clone()) })
+    }
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async move { Ok(self.model_system_prompt.clone()) })
+    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -431,6 +441,7 @@ struct MemoryState {
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
     compacting: Arc<AtomicBool>,
+    system_prompts: Vec<(String, String)>,
     prompt_templates: Vec<(String, ConfigKey)>,
     template_arguments: BTreeMap<String, Vec<(String, serde_json::Value)>>,
     template_engines: BTreeMap<String, String>,
@@ -521,6 +532,8 @@ impl MemoryState {
                 flags: Arc::default(),
             },
             provider: MemoryProvider {
+                model_aliases: Vec::new(),
+                model_system_prompt: None,
                 trace,
                 replies: Arc::new(Mutex::new(replies.into_iter().collect())),
                 fail_at: Arc::default(),
@@ -566,6 +579,7 @@ impl MemoryState {
             budget_writes: 0,
             compaction,
             compacting,
+            system_prompts: Vec::new(),
             prompt_templates: Vec::new(),
             template_arguments: BTreeMap::new(),
             template_engines: BTreeMap::new(),
@@ -907,7 +921,9 @@ impl States for MemoryState {
             if !compacting {
                 request.rendered_instructions.push(instructions.clone());
             }
-            Ok(vec![("memory:instructions".into(), instructions)])
+            let mut sections = self.system_prompts.clone();
+            sections.push(("memory:instructions".into(), instructions));
+            Ok(sections)
         })
     }
     fn read_template_arguments<'a>(
@@ -924,17 +940,6 @@ impl States for MemoryState {
     }
     fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async { Ok(Vec::new()) })
-    }
-    fn read_model_aliases(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async { Ok(None) })
     }
     fn read_agent_identity(
         &self,
@@ -1973,6 +1978,14 @@ fn tools_and_provider_operate_without_states() {
 
 struct EchoProvider(MemoryProvider);
 impl Provider for EchoProvider {
+    fn read_model_aliases(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
+        self.0.read_model_aliases()
+    }
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        self.0.read_model_system_prompt()
+    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,

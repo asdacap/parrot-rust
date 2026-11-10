@@ -88,6 +88,14 @@ pub struct CompletionFeedback {
 /// Invokes models using the core protocol while owning transport and stream cleanup.
 /// Unsupported invocation and estimation capabilities return explicit errors.
 pub trait Provider: Send + Sync {
+    /// Reads alias definitions and resolved usage without formatting their descriptions.
+    fn read_model_aliases(&self) -> BoxFuture<'_, Result<Vec<ModelAliasDescription>, Error>> {
+        Box::pin(async { Err(Error::unsupported("Provider.read_model_aliases")) })
+    }
+    /// Reads the selected model profile's literal system prompt.
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Err(Error::unsupported("Provider.read_model_system_prompt")) })
+    }
     /// Estimates exactly the supplied request using model-specific token costs.
     fn estimate_input_tokens(
         &self,
@@ -335,8 +343,9 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.report_compaction_progress")) })
     }
 
-    /// Reads configured literal prompts and their namespace keys, retaining native
-    /// request bindings and sampling raw epoch inputs without rendering templates.
+    /// Reads configured literal prompts, including selected alias augmentation, and their
+    /// namespace keys. Retains native request bindings and samples raw epoch inputs
+    /// without rendering templates.
     fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_system_prompts")) })
     }
@@ -350,18 +359,6 @@ pub trait States: Send + Sync {
     /// Reads sampled AGENTS paths and unwrapped file contents.
     fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_agents_files")) })
-    }
-    /// Reads alias definitions and resolved usage without formatting their descriptions.
-    fn read_model_aliases(&self) -> BoxFuture<'_, Result<Vec<ModelAliasDescription>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_model_aliases")) })
-    }
-    /// Reads the selected model profile's literal system prompt.
-    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_model_system_prompt")) })
-    }
-    /// Reads the selected alias's literal system-prompt augmentation.
-    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_alias_system_prompt")) })
     }
     /// Reads the supplied agent identity and scope without formatting either value.
     fn read_agent_identity(
