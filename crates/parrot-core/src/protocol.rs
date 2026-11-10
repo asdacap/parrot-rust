@@ -36,12 +36,6 @@ pub enum Outcome {
     BudgetExhausted,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RetryReason {
-    TruncatedToolCalls,
-    InvalidToolCalls,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionFeedback {
     pub messages: Vec<String>,
@@ -114,6 +108,21 @@ pub trait Preparation: Send {
     fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error>;
     /// Renders current instructions while retaining native request-scoped bindings.
     fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
+    /// Observes readiness and retains an optional steer or status prompt for fitting,
+    /// without appending or publishing it. Source-specific cadence and rendering stay native.
+    fn get_pending_prompt<'a>(
+        &'a mut self,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<Option<Message>, Error>>;
+    /// Acknowledges the retained prompt using the fitted or persisted context,
+    /// without appending or publishing it.
+    fn acknowledge_prompt<'a>(
+        &'a mut self,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), Error>>;
+    /// Prepares ordered exit-blocker messages after accepted mutations have settled.
+    /// Any nonempty list blocks completion, even when its messages are empty strings.
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>>;
     /// Estimates exactly the supplied request content using native tokenizer and
     /// provider-specific costs, without choosing context or output limits.
     fn estimate_input_tokens<'a>(
@@ -169,21 +178,12 @@ pub trait States: Send {
     /// Persists supplied steer content and applies it to the conversation.
     /// Repeated calls in the same final phase do not append or publish duplicate notices.
     fn record_steer<'a>(&'a mut self, content: &'a str) -> BoxFuture<'a, Result<(), Error>>;
-    /// Observes readiness and retains an optional steer or status prompt for fitting,
-    /// without appending or publishing it. Source-specific cadence and rendering stay native.
-    fn get_pending_prompt<'a>(
-        &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<Message>, Error>>;
-    /// Durably appends the retained prompt idempotently, updating conversation only
-    /// when inserted and retaining its native receipt without publishing it yet.
+    /// Durably appends the prompt retained by preparation idempotently, updating
+    /// conversation only when inserted and retaining its native publication receipt.
     fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>>;
-    /// Acknowledges the retained prompt using the fitted or persisted context before
-    /// uncancelled publication, publishing nothing when insertion was a duplicate.
-    fn acknowledge_prompt<'a>(
-        &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), Error>>;
+    /// Publishes the retained receipt uncancelled after preparation acknowledges it.
+    /// Publishes nothing when insertion was a duplicate.
+    fn publish_pending_prompt(&mut self) -> BoxFuture<'_, Result<(), Error>>;
     /// Reads the current provider-visible conversation after context preparation.
     fn read_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>>;
     /// Reads one coherent summary, durable tail, ownership and checkpoint snapshot,
@@ -199,21 +199,18 @@ pub trait States: Send {
         definitions: &'a [ToolDefinition],
         result: Result<Option<crate::compaction::FittedCompaction>, Error>,
     ) -> BoxFuture<'a, Result<ContextCompaction, Error>>;
-    /// Records why a malformed or truncated tool response must be retried.
-    fn record_retry(
-        &mut self,
-        reason: RetryReason,
+    /// Records supplied retry content after a malformed or truncated tool response.
+    fn record_retry<'a>(
+        &'a mut self,
+        content: &'a str,
         attempt: i32,
-    ) -> BoxFuture<'_, Result<(), Error>>;
+    ) -> BoxFuture<'a, Result<(), Error>>;
     /// Durably records the assistant's tool calls and returns their correlation
     /// for execution without preparing executable bindings or a live batch.
     fn record_tool_calls<'a>(
         &'a mut self,
         response: &'a ProviderResponse,
     ) -> BoxFuture<'a, Result<ToolCallReceipt, Error>>;
-    /// Reads ordered exit-blocker messages after accepted mutations have settled.
-    /// Any nonempty list blocks completion, even when its messages are empty strings.
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>>;
     /// Records the retained candidate once and all blocker messages in supplied order
     /// before applying them to the conversation. Returns no completion decision.
     fn record_completion_feedback(

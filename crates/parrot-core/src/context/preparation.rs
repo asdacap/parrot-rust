@@ -79,7 +79,7 @@ pub(crate) async fn prepare_request(
         context = ContextSnapshot::estimate(estimate, &configuration);
         context.ensure_input_fits()?;
     }
-    if let Some(prompt) = states.get_pending_prompt(&context).await? {
+    if let Some(prompt) = preparation.request.get_pending_prompt(&context).await? {
         let mut candidate = messages.clone();
         candidate.push(prompt);
         let estimate = preparation
@@ -110,7 +110,11 @@ pub(crate) async fn prepare_request(
             } else {
                 inserted
             };
-            states.acknowledge_prompt(&acknowledged).await?;
+            preparation
+                .request
+                .acknowledge_prompt(&acknowledged)
+                .await?;
+            states.publish_pending_prompt().await?;
         }
     }
     let messages = states.read_messages().await?;

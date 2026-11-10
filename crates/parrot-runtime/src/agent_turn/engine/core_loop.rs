@@ -4,8 +4,8 @@ use parrot_core::{
     ContextConfiguration as CoreContextConfiguration,
     ContextReminderCheckpoint as CoreContextReminderCheckpoint,
     ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorCode, ErrorKind,
-    ProviderRequest, ProviderResponse, RetryReason, States as CoreStates, TokenCalibration,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
+    ProviderRequest, ProviderResponse, States as CoreStates, TokenCalibration, ToolCall,
+    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult, ToolStatus, TurnOptions,
 };
 
 struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
@@ -13,8 +13,6 @@ struct RuntimeStates<'a, S: AccessSnapshot, T: TurnTools<S>> {
     binding: &'a TurnBinding<S>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
-    pending_prompt: Option<PendingPrompt>,
-    exit_blocker_sources: Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>,
     persistence_key: Option<TurnKey>,
 }
 
@@ -29,6 +27,7 @@ struct RuntimePreparation<'a, S: AccessSnapshot, T: TurnTools<S>> {
     backend: &'a RuntimeBackend<S, T>,
     binding: &'a TurnBinding<S>,
     cancellation: &'a dyn Cancellation,
+    work: &'a dyn DrainWork,
 }
 
 impl<S, T> parrot_core::Preparation for RuntimePreparation<'_, S, T>
@@ -74,6 +73,129 @@ where
                 .build(&selection.model, cancellation)
                 .await
                 .map_err(ContextError::from)?)
+        })
+    }
+    fn get_pending_prompt<'a>(
+        &'a mut self,
+        context: &'a CoreContextSnapshot,
+    ) -> BoxFuture<'a, Result<Option<parrot_core::Message>, CoreError>> {
+        adapt_operation(async move {
+            *self
+                .binding
+                .pending_prompt
+                .lock()
+                .expect("pending prompt poisoned") = None;
+            let mut state = self.backend.state.lock().await;
+            let selection = self.binding.capture_selection()?;
+            let mut cadence = state.context.capture_context_cadence();
+            if !cadence.is_restored() {
+                cadence.restore(state.context.read_context_checkpoint().await?);
+            }
+            let observation = cadence.observe(
+                context,
+                &selection.model.canonical_model.selector(),
+                state.conversation.len() as i64,
+            );
+            state.context.write_context_cadence(cadence);
+            let Some(percentage) = observation
+                .map_err(CoreError::from)
+                .map_err(TurnError::Core)?
+            else {
+                return Ok(None);
+            };
+            let content = state.context.render_reminder(
+                &crate::compaction::ContextSnapshot {
+                    estimated_tokens: context.estimated_tokens,
+                    context_limit: context.context_limit,
+                    usage_percent: context.usage_percent,
+                    trigger_percent: context.trigger_percent,
+                    input_limit: context.input_limit,
+                    trigger_tokens: context.trigger_tokens,
+                    has_context_limit_override: context.has_context_limit_override,
+                },
+                percentage,
+            )?;
+            let message = sessions::Message::system(&content).into();
+            *self
+                .binding
+                .pending_prompt
+                .lock()
+                .expect("pending prompt poisoned") = Some(PendingPrompt {
+                checkpoint: CoreContextReminderCheckpoint {
+                    canonical_model: selection.model.canonical_model.selector(),
+                    context_limit: context.context_limit,
+                    percentage,
+                },
+                content,
+                observed_percentage: context.usage_percent.unwrap_or_default(),
+                published: None,
+            });
+            Ok(Some(message))
+        })
+    }
+    fn acknowledge_prompt<'a>(
+        &'a mut self,
+        context: &'a CoreContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let canonical_model = self
+                .binding
+                .pending_prompt
+                .lock()
+                .expect("pending prompt poisoned")
+                .as_ref()
+                .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?
+                .checkpoint
+                .canonical_model
+                .clone();
+            let mut state = self.backend.state.lock().await;
+            let mut cadence = state.context.capture_context_cadence();
+            cadence
+                .acknowledge(context, &canonical_model, state.conversation.len() as i64)
+                .map_err(CoreError::from)
+                .map_err(TurnError::Core)?;
+            state.context.write_context_cadence(cadence);
+            Ok(())
+        })
+    }
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
+        adapt_operation(async move {
+            let _guard = self.backend.state.lock().await;
+            self.binding
+                .exit_blocker_sources
+                .lock()
+                .expect("completion sources poisoned")
+                .clear();
+            let mut sources = Vec::new();
+            self.work
+                .join_mutations()
+                .await
+                .map_err(|error| TurnError::Service(error.to_string()))?;
+            let mut blockers = Vec::new();
+            for source in &self.backend.completion_sources {
+                if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
+                    blockers.push(reminder);
+                    sources.push((source.clone(), CompletionFeedbackKind::PendingAsks));
+                }
+            }
+            for source in &self.backend.completion_sources {
+                if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
+                    blockers.push(reminder);
+                    sources.push((source.clone(), CompletionFeedbackKind::ActiveWork));
+                }
+            }
+            for source in &self.backend.completion_sources {
+                if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
+                    blockers.push(reminder);
+                    sources.push((source.clone(), CompletionFeedbackKind::ExitReminders));
+                }
+            }
+            *self
+                .binding
+                .exit_blocker_sources
+                .lock()
+                .expect("completion sources poisoned") = sources;
+            Ok(blockers)
         })
     }
     fn estimate_input_tokens<'a>(
@@ -343,12 +465,17 @@ struct CapturedTools<T> {
 
 struct TurnBinding<S: AccessSnapshot> {
     selection: std::sync::Mutex<Option<TurnSelection<S>>>,
+    pending_prompt: std::sync::Mutex<Option<PendingPrompt>>,
+    exit_blocker_sources:
+        std::sync::Mutex<Vec<(Arc<dyn CompletionStateSource>, CompletionFeedbackKind)>>,
 }
 
 impl<S: AccessSnapshot> TurnBinding<S> {
     fn new() -> Self {
         Self {
             selection: std::sync::Mutex::new(None),
+            pending_prompt: std::sync::Mutex::new(None),
+            exit_blocker_sources: std::sync::Mutex::new(Vec::new()),
         }
     }
     fn bind(&self, selection: TurnSelection<S>) {
@@ -430,8 +557,6 @@ where
             binding,
             cancellation,
             work,
-            pending_prompt: None,
-            exit_blocker_sources: Vec::new(),
             persistence_key: None,
         }
     }
@@ -490,6 +615,7 @@ where
                 backend,
                 binding: &binding,
                 cancellation,
+                work,
             };
             let provider = RuntimeProvider {
                 backend,
@@ -836,61 +962,14 @@ where
             Ok(())
         })
     }
-    fn get_pending_prompt<'a>(
-        &'a mut self,
-        context: &'a CoreContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<parrot_core::Message>, CoreError>> {
-        adapt_operation(async move {
-            self.pending_prompt = None;
-            let mut state = self.backend.state.lock().await;
-            let selection = self.binding.capture_selection()?;
-            let mut cadence = state.context.capture_context_cadence();
-            if !cadence.is_restored() {
-                cadence.restore(state.context.read_context_checkpoint().await?);
-            }
-            let observation = cadence.observe(
-                context,
-                &selection.model.canonical_model.selector(),
-                state.conversation.len() as i64,
-            );
-            state.context.write_context_cadence(cadence);
-            let Some(percentage) = observation
-                .map_err(CoreError::from)
-                .map_err(TurnError::Core)?
-            else {
-                return Ok(None);
-            };
-            let content = state.context.render_reminder(
-                &crate::compaction::ContextSnapshot {
-                    estimated_tokens: context.estimated_tokens,
-                    context_limit: context.context_limit,
-                    usage_percent: context.usage_percent,
-                    trigger_percent: context.trigger_percent,
-                    input_limit: context.input_limit,
-                    trigger_tokens: context.trigger_tokens,
-                    has_context_limit_override: context.has_context_limit_override,
-                },
-                percentage,
-            )?;
-            let message = sessions::Message::system(&content).into();
-            self.pending_prompt = Some(PendingPrompt {
-                checkpoint: CoreContextReminderCheckpoint {
-                    canonical_model: selection.model.canonical_model.selector(),
-                    context_limit: context.context_limit,
-                    percentage,
-                },
-                content,
-                observed_percentage: context.usage_percent.unwrap_or_default(),
-                published: None,
-            });
-            Ok(Some(message))
-        })
-    }
     fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, CoreError>> {
         adapt_operation(async move {
-            let pending = self
+            let mut pending = self
+                .binding
                 .pending_prompt
-                .as_mut()
+                .lock()
+                .expect("pending prompt poisoned")
+                .take()
                 .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?;
             let mut guard = self.backend.state.lock().await;
             let state = &mut *guard;
@@ -903,31 +982,24 @@ where
                     pending.observed_percentage,
                 )
                 .await?;
-            Ok(pending.published.is_some())
+            let inserted = pending.published.is_some();
+            *self
+                .binding
+                .pending_prompt
+                .lock()
+                .expect("pending prompt poisoned") = Some(pending);
+            Ok(inserted)
         })
     }
-    fn acknowledge_prompt<'a>(
-        &'a mut self,
-        context: &'a CoreContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), CoreError>> {
+    fn publish_pending_prompt(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             let pending = self
+                .binding
                 .pending_prompt
+                .lock()
+                .expect("pending prompt poisoned")
                 .take()
                 .ok_or_else(|| TurnError::Service("pending prompt is unavailable".into()))?;
-            {
-                let mut state = self.backend.state.lock().await;
-                let mut cadence = state.context.capture_context_cadence();
-                cadence
-                    .acknowledge(
-                        context,
-                        &pending.checkpoint.canonical_model,
-                        state.conversation.len() as i64,
-                    )
-                    .map_err(CoreError::from)
-                    .map_err(TurnError::Core)?;
-                state.context.write_context_cadence(cadence);
-            }
             if let Some(published) = pending.published {
                 ContextEmitter {
                     backend: self.backend,
@@ -1017,19 +1089,15 @@ where
             })
         })
     }
-    fn record_retry(
-        &mut self,
-        reason: RetryReason,
+    fn record_retry<'a>(
+        &'a mut self,
+        content: &'a str,
         attempt: i32,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
         adapt_operation(async move {
-            let message = match reason {
-                RetryReason::TruncatedToolCalls => &self.backend.notices.truncated,
-                RetryReason::InvalidToolCalls => &self.backend.notices.invalid,
-            };
             let mut state = self.backend.state.lock().await;
             self.backend
-                .retry_notice(&mut state, message, attempt, self.cancellation)
+                .retry_notice(&mut state, content, attempt, self.cancellation)
                 .await
         })
     }
@@ -1065,39 +1133,6 @@ where
             })
         })
     }
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
-        adapt_operation(async move {
-            let _guard = self.backend.state.lock().await;
-            self.exit_blocker_sources.clear();
-            self.work
-                .join_mutations()
-                .await
-                .map_err(|error| TurnError::Service(error.to_string()))?;
-            let mut blockers = Vec::new();
-            for source in &self.backend.completion_sources {
-                if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
-                    blockers.push(reminder);
-                    self.exit_blocker_sources
-                        .push((source.clone(), CompletionFeedbackKind::PendingAsks));
-                }
-            }
-            for source in &self.backend.completion_sources {
-                if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
-                    blockers.push(reminder);
-                    self.exit_blocker_sources
-                        .push((source.clone(), CompletionFeedbackKind::ActiveWork));
-                }
-            }
-            for source in &self.backend.completion_sources {
-                if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
-                    blockers.push(reminder);
-                    self.exit_blocker_sources
-                        .push((source.clone(), CompletionFeedbackKind::ExitReminders));
-                }
-            }
-            Ok(blockers)
-        })
-    }
     fn record_completion_feedback(
         &mut self,
         feedback: CoreCompletionFeedback,
@@ -1107,9 +1142,14 @@ where
             let mut guard = backend.state.lock().await;
             let state = &mut *guard;
             let mut candidate = Some(feedback.candidate.clone());
-            for ((source, kind), message) in
-                self.exit_blocker_sources.drain(..).zip(&feedback.messages)
-            {
+            let sources = std::mem::take(
+                &mut *self
+                    .binding
+                    .exit_blocker_sources
+                    .lock()
+                    .expect("completion sources poisoned"),
+            );
+            for ((source, kind), message) in sources.into_iter().zip(&feedback.messages) {
                 source
                     .record_completion_feedback(
                         &CompletionFeedback {

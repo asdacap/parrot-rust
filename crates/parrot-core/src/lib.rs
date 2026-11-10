@@ -126,9 +126,10 @@ pub async fn run_turn<'a>(
         };
         compacted_oversized = false;
         if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
-            states
-                .record_retry(RetryReason::TruncatedToolCalls, attempt)
-                .await?;
+            let content = preparation
+                .request
+                .render_template("agent-session.truncated-tool-call", &[])?;
+            states.record_retry(&content, attempt).await?;
             continue;
         }
         if response
@@ -136,9 +137,10 @@ pub async fn run_turn<'a>(
             .iter()
             .any(|call| serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err())
         {
-            states
-                .record_retry(RetryReason::InvalidToolCalls, attempt)
-                .await?;
+            let content = preparation
+                .request
+                .render_template("agent-session.invalid-tool-call", &[])?;
+            states.record_retry(&content, attempt).await?;
             continue;
         }
         if !response.tool_calls.is_empty() {
@@ -155,7 +157,7 @@ pub async fn run_turn<'a>(
             }
             continue;
         }
-        let messages = states.get_exit_blockers().await?;
+        let messages = preparation.request.get_exit_blockers().await?;
         if messages.is_empty() {
             return Ok(Outcome::Completed(states.complete_turn(&response).await?));
         }

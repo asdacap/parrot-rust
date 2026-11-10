@@ -314,7 +314,10 @@ fn exit_blockers_retain_the_candidate_and_continue_without_pending_input() {
         Reply::final_response("candidate"),
         Reply::final_response("answer"),
     ]);
-    state.exit_blockers.push_back(vec!["work remains".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     assert_eq!(state.completion_feedback.len(), 1);

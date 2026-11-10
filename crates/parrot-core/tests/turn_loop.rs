@@ -3,8 +3,8 @@ use parrot_core::{
     ContextConfiguration, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
     ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, FinishReason,
     InputAdmission, Message, Outcome, PendingMessage, Preparation, PromotedInput, Provider,
-    ProviderRequest, ProviderResponse, Reasoning, RetryReason, Role, Skill, SkillContent,
-    SkillMention, SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
+    ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention,
+    SkillReference, States, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog,
     ToolDefinition, ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions, run, run_turn,
@@ -256,10 +256,24 @@ struct MemoryRequestData {
     renderings: VecDeque<RenderedContext>,
 }
 
+#[derive(Default)]
+struct MemoryPromptData {
+    exit_blockers: VecDeque<Vec<String>>,
+    checkpoint: Option<ContextReminderCheckpoint>,
+    cadence_writes: Vec<ContextCadence>,
+    rendered_reminders: Vec<(ContextSnapshot, i32)>,
+    pending_prompts: VecDeque<Message>,
+    pending_prompt: Option<Message>,
+    pending_reminder: Option<(ContextReminderCheckpoint, String, i32)>,
+    acknowledged_prompts: Vec<ContextSnapshot>,
+    prompt_inserted: bool,
+}
+
 #[derive(Clone)]
 struct MemoryPreparation {
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
+    prompts: Arc<Mutex<MemoryPromptData>>,
     skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
     fail_at: Option<&'static str>,
 }
@@ -271,14 +285,14 @@ struct MemoryState {
     skill_reads: Mutex<Vec<String>>,
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
+    prompts: Arc<Mutex<MemoryPromptData>>,
     skill_templates: Arc<Mutex<BTreeMap<String, String>>>,
     recorded_input_contexts: Vec<DerivedContext>,
     tools: MemoryTools,
     provider: MemoryProvider,
-    exit_blockers: VecDeque<Vec<String>>,
     completion_feedback: Vec<CompletionFeedback>,
     final_requests: Vec<usize>,
-    retries: Vec<(RetryReason, i32)>,
+    retries: Vec<(String, i32)>,
     recorded_tools: Vec<ProviderResponse>,
     applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
@@ -288,19 +302,10 @@ struct MemoryState {
     include_router_metadata: bool,
     compactions: VecDeque<CompactedContext>,
     compacted_definitions: Vec<Vec<ToolDefinition>>,
-    checkpoint: Option<ContextReminderCheckpoint>,
-    cadence_writes: Vec<ContextCadence>,
-    reminder: String,
-    rendered_reminders: Mutex<Vec<(ContextSnapshot, i32)>>,
     reminder_appends: Vec<(ContextReminderCheckpoint, String, i32)>,
     append_reminder: bool,
     reminder_publications: usize,
-    pending_prompts: VecDeque<Message>,
-    pending_prompt: Option<Message>,
-    pending_reminder: Option<(ContextReminderCheckpoint, String, i32)>,
     recorded_prompts: Vec<Message>,
-    acknowledged_prompts: Vec<ContextSnapshot>,
-    prompt_inserted: bool,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(PendingMessage, Message)>,
     next_input: usize,
@@ -317,6 +322,9 @@ struct MemoryState {
     fail_at: Option<&'static str>,
 }
 impl MemoryState {
+    fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
+        self.prompts.lock().unwrap()
+    }
     fn request(&self) -> std::sync::MutexGuard<'_, MemoryRequestData> {
         self.request.lock().unwrap()
     }
@@ -324,6 +332,7 @@ impl MemoryState {
         MemoryPreparation {
             trace: self.trace.clone(),
             request: self.request.clone(),
+            prompts: self.prompts.clone(),
             skill_templates: self.skill_templates.clone(),
             fail_at: self.fail_at,
         }
@@ -359,7 +368,24 @@ impl MemoryState {
             skill_lookups: Mutex::default(),
             skill_reads: Mutex::default(),
             request,
+            prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
+                (
+                    "agent-session.context-reminder".into(),
+                    "configured reminder".into(),
+                ),
+                (
+                    "agent-session.context-limit-reminder".into(),
+                    "configured reminder".into(),
+                ),
+                (
+                    "agent-session.truncated-tool-call".into(),
+                    "truncated tool calls".into(),
+                ),
+                (
+                    "agent-session.invalid-tool-call".into(),
+                    "invalid tool calls".into(),
+                ),
                 (
                     "agent-session.final-request".into(),
                     "Finish the current turn.".into(),
@@ -393,7 +419,6 @@ impl MemoryState {
                 fail_at: Arc::default(),
                 requests: Arc::default(),
             },
-            exit_blockers: VecDeque::new(),
             completion_feedback: Vec::new(),
             final_requests: Vec::new(),
             retries: Vec::new(),
@@ -406,19 +431,10 @@ impl MemoryState {
             include_router_metadata: false,
             compactions: VecDeque::new(),
             compacted_definitions: Vec::new(),
-            checkpoint: None,
-            cadence_writes: Vec::new(),
-            reminder: "configured reminder".into(),
-            rendered_reminders: Mutex::default(),
             reminder_appends: Vec::new(),
             append_reminder: true,
             reminder_publications: 0,
-            pending_prompts: VecDeque::new(),
-            pending_prompt: None,
-            pending_reminder: None,
             recorded_prompts: Vec::new(),
-            acknowledged_prompts: Vec::new(),
-            prompt_inserted: false,
             last_turn: None,
             pending_messages: VecDeque::new(),
             next_input: 0,
@@ -583,6 +599,17 @@ impl MemoryState {
         ))
     }
 }
+impl MemoryPreparation {
+    fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
+        self.prompts.lock().unwrap()
+    }
+    fn request(&self) -> std::sync::MutexGuard<'_, MemoryRequestData> {
+        self.request.lock().unwrap()
+    }
+    fn step(&self, name: &'static str) -> Result<(), Error> {
+        self.trace.step(name, self.fail_at)
+    }
+}
 impl Preparation for MemoryPreparation {
     fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error> {
         self.trace.step("render_template", self.fail_at)?;
@@ -633,6 +660,127 @@ impl Preparation for MemoryPreparation {
                 tokens,
             });
             Ok(tokens)
+        })
+    }
+    fn get_pending_prompt<'a>(
+        &'a mut self,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<Option<Message>, Error>> {
+        Box::pin(async move {
+            self.step("pending_prompt")?;
+            self.prompts().pending_prompt = None;
+            self.prompts().pending_reminder = None;
+            self.prompts().prompt_inserted = false;
+            let pending = self.prompts().pending_prompts.front().cloned();
+            if let Some(prompt) = pending {
+                self.prompts().pending_prompt = Some(prompt.clone());
+                return Ok(Some(prompt));
+            }
+            self.step("context_cadence")?;
+            let mut cadence = self.request().context.cadence.clone();
+            if !cadence.is_restored() {
+                self.step("checkpoint")?;
+                cadence.restore(self.prompts().checkpoint.clone());
+            }
+            let (canonical_model, message_count) = {
+                let request = self.request();
+                (
+                    request.context.configuration.model.canonical_model.clone(),
+                    request.messages.len() as i64,
+                )
+            };
+            let observation = cadence.observe(context, &canonical_model, message_count);
+            self.step("cadence")?;
+            self.prompts().cadence_writes.push(cadence.clone());
+            self.request().context.cadence = cadence;
+            let Some(percentage) = observation? else {
+                return Ok(None);
+            };
+            self.step("reminder")?;
+            self.prompts()
+                .rendered_reminders
+                .push((context.clone(), percentage));
+            let mut arguments = vec![
+                ("percentage".into(), percentage.to_string()),
+                (
+                    "estimated_tokens".into(),
+                    context.estimated_tokens.to_string(),
+                ),
+                ("context_limit".into(), context.context_limit.to_string()),
+                (
+                    "notification_interval".into(),
+                    ContextCadence::NOTIFICATION_INTERVAL.to_string(),
+                ),
+                ("trigger".into(), context.trigger_percent.to_string()),
+            ];
+            if context.has_context_limit_override {
+                arguments.push((
+                    "trigger_tokens".into(),
+                    context
+                        .trigger_tokens
+                        .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+                ));
+            }
+            let content = self.render_template(
+                if context.has_context_limit_override {
+                    "agent-session.context-limit-reminder"
+                } else {
+                    "agent-session.context-reminder"
+                },
+                &arguments,
+            )?;
+            let canonical_model = self
+                .request()
+                .context
+                .configuration
+                .model
+                .canonical_model
+                .clone();
+            self.prompts().pending_reminder = Some((
+                ContextReminderCheckpoint {
+                    canonical_model,
+                    context_limit: context.context_limit,
+                    percentage,
+                },
+                content.clone(),
+                context.usage_percent.unwrap_or_default(),
+            ));
+            self.prompts().pending_prompt = Some(Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.clone())],
+                ..Message::default()
+            });
+            Ok(self.prompts().pending_prompt.clone())
+        })
+    }
+    fn acknowledge_prompt<'a>(
+        &'a mut self,
+        context: &'a ContextSnapshot,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            self.step("acknowledge_prompt")?;
+            self.prompts().acknowledged_prompts.push(context.clone());
+            if self.prompts().pending_reminder.is_some() {
+                let mut cadence = self.request().context.cadence.clone();
+                let (canonical_model, message_count) = {
+                    let request = self.request();
+                    (
+                        request.context.configuration.model.canonical_model.clone(),
+                        request.messages.len() as i64,
+                    )
+                };
+                cadence.acknowledge(context, &canonical_model, message_count)?;
+                self.step("cadence")?;
+                self.prompts().cadence_writes.push(cadence.clone());
+                self.request().context.cadence = cadence;
+            }
+            Ok(())
+        })
+    }
+    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+        Box::pin(async move {
+            self.step("exit_blockers")?;
+            Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
         })
     }
 }
@@ -813,117 +961,46 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn get_pending_prompt<'a>(
-        &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<Option<Message>, Error>> {
-        Box::pin(async move {
-            self.step("pending_prompt")?;
-            self.pending_prompt = None;
-            self.pending_reminder = None;
-            self.prompt_inserted = false;
-            if let Some(prompt) = self.pending_prompts.front() {
-                self.pending_prompt = Some(prompt.clone());
-                return Ok(self.pending_prompt.clone());
-            }
-            self.step("context_cadence")?;
-            let mut cadence = self.request().context.cadence.clone();
-            if !cadence.is_restored() {
-                self.step("checkpoint")?;
-                cadence.restore(self.checkpoint.clone());
-            }
-            let (canonical_model, message_count) = {
-                let request = self.request();
-                (
-                    request.context.configuration.model.canonical_model.clone(),
-                    request.messages.len() as i64,
-                )
-            };
-            let observation = cadence.observe(context, &canonical_model, message_count);
-            self.step("cadence")?;
-            self.cadence_writes.push(cadence.clone());
-            self.request().context.cadence = cadence;
-            let Some(percentage) = observation? else {
-                return Ok(None);
-            };
-            self.step("reminder")?;
-            self.rendered_reminders
-                .lock()
-                .unwrap()
-                .push((context.clone(), percentage));
-            let canonical_model = self
-                .request()
-                .context
-                .configuration
-                .model
-                .canonical_model
-                .clone();
-            self.pending_reminder = Some((
-                ContextReminderCheckpoint {
-                    canonical_model,
-                    context_limit: context.context_limit,
-                    percentage,
-                },
-                self.reminder.clone(),
-                context.usage_percent.unwrap_or_default(),
-            ));
-            self.pending_prompt = Some(Message {
-                role: Role::System,
-                contents: vec![Content::Text(self.reminder.clone())],
-                ..Message::default()
-            });
-            Ok(self.pending_prompt.clone())
-        })
-    }
     fn record_pending_prompt(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async move {
             self.step("record_prompt")?;
-            if let Some(reminder) = self.pending_reminder.clone() {
+            let reminder = self.prompts().pending_reminder.clone();
+            if let Some(reminder) = reminder {
                 self.step("append_reminder")?;
                 self.reminder_appends.push(reminder.clone());
                 if !self.append_reminder {
                     return Ok(false);
                 }
-                self.checkpoint = Some(reminder.0);
+                self.prompts().checkpoint = Some(reminder.0);
             } else {
-                self.pending_prompts.pop_front().unwrap();
+                self.prompts().pending_prompts.pop_front().unwrap();
             }
-            let message = self.pending_prompt.clone().unwrap();
+            let message = self.prompts().pending_prompt.clone().unwrap();
             self.recorded_prompts.push(message.clone());
             self.request().messages.push(message.clone());
             self.append_turn_message(message);
-            self.prompt_inserted = true;
+            self.prompts().prompt_inserted = true;
             Ok(true)
         })
     }
-    fn acknowledge_prompt<'a>(
-        &'a mut self,
-        context: &'a ContextSnapshot,
-    ) -> BoxFuture<'a, Result<(), Error>> {
+    fn publish_pending_prompt(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            self.step("acknowledge_prompt")?;
-            self.acknowledged_prompts.push(context.clone());
-            if self.pending_reminder.take().is_some() {
-                let mut cadence = self.request().context.cadence.clone();
-                let (canonical_model, message_count) = {
-                    let request = self.request();
-                    (
-                        request.context.configuration.model.canonical_model.clone(),
-                        request.messages.len() as i64,
-                    )
-                };
-                cadence.acknowledge(context, &canonical_model, message_count)?;
-                self.step("cadence")?;
-                self.cadence_writes.push(cadence.clone());
-                self.request().context.cadence = cadence;
-                if self.prompt_inserted {
+            let (reminder, inserted) = {
+                let mut prompts = self.prompts();
+                prompts.pending_prompt = None;
+                (
+                    prompts.pending_reminder.take().is_some(),
+                    prompts.prompt_inserted,
+                )
+            };
+            if inserted {
+                if reminder {
                     self.reminder_publications += 1;
                     self.step("publish_reminder")?;
+                } else {
+                    self.step("publish_prompt")?;
                 }
-            } else if self.prompt_inserted {
-                self.step("publish_prompt")?;
             }
-            self.pending_prompt = None;
             Ok(())
         })
     }
@@ -1007,14 +1084,21 @@ impl States for MemoryState {
             })
         })
     }
-    fn record_retry(
-        &mut self,
-        reason: RetryReason,
+    fn record_retry<'a>(
+        &'a mut self,
+        content: &'a str,
         attempt: i32,
-    ) -> BoxFuture<'_, Result<(), Error>> {
+    ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             self.step("retry")?;
-            self.retries.push((reason, attempt));
+            self.retries.push((content.into(), attempt));
+            let message = Message {
+                role: Role::System,
+                contents: vec![Content::Text(content.into())],
+                ..Message::default()
+            };
+            self.request().messages.push(message.clone());
+            self.append_turn_message(message);
             Ok(())
         })
     }
@@ -1039,12 +1123,6 @@ impl States for MemoryState {
             Ok(ToolCallReceipt {
                 assistant_sequence: i64::try_from(self.recorded_tools.len()).unwrap(),
             })
-        })
-    }
-    fn get_exit_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
-        Box::pin(async move {
-            self.step("exit_blockers")?;
-            Ok(self.exit_blockers.pop_front().unwrap_or_default())
         })
     }
     fn record_completion_feedback(
@@ -1134,8 +1212,8 @@ fn invalid_and_truncated_tool_responses_retry_without_recording_or_executing_cal
     assert_eq!(
         state.retries,
         [
-            (RetryReason::TruncatedToolCalls, 1),
-            (RetryReason::InvalidToolCalls, 2),
+            ("truncated tool calls".into(), 1),
+            ("invalid tool calls".into(), 2),
         ]
     );
     assert!(
@@ -1231,7 +1309,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
                 Ok(Outcome::BudgetExhausted)
             }
         );
-        assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+        assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
         assert_eq!(
             state.request().rendered_instructions.len(),
             if disable_limits { 2 } else { 1 }
@@ -1330,10 +1408,11 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
     ]);
     state.maximum = 2;
     state
+        .prompts()
         .exit_blockers
         .push_back(vec!["unfinished goal".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+    assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
     assert_eq!(
         state
             .trace
@@ -1363,7 +1442,10 @@ fn cleared_completion_blockers_close_only_the_final_candidate() {
         Reply::final_response("candidate"),
         Reply::final_response("candidate2"),
     ]);
-    state.exit_blockers.push_back(vec!["answer the ask".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["answer the ask".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("candidate2".into())));
     assert_eq!(state.request().rendered_instructions.len(), 2);
     assert_eq!(state.completion_feedback.len(), 1);
@@ -1401,8 +1483,14 @@ fn successive_blocker_lists_retain_each_candidate_and_preserve_continuation() {
         Reply::final_response("candidate2"),
         Reply::final_response("answer"),
     ]);
-    state.exit_blockers.push_back(vec!["answer the ask".into()]);
-    state.exit_blockers.push_back(vec!["work remains".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["answer the ask".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.request().rendered_instructions.len(), 3);
     assert_eq!(state.completion_feedback.len(), 2);
@@ -1476,7 +1564,10 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     ]);
     state.maximum = 0;
     state.model = "unused/state-model".into();
-    state.exit_blockers.push_back(vec!["work remains".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["work remains".into()]);
     let tools = state.tools.clone();
     let provider = state.provider.clone();
     let source = state.cancellation.clone();
@@ -1512,7 +1603,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     );
     assert_eq!(state.request().rendered_instructions.len(), 5);
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 5);
-    assert_eq!(state.retries, [(RetryReason::InvalidToolCalls, 1)]);
+    assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
     assert_eq!(state.applied_results.len(), 1);
     assert_eq!(state.completion_feedback.len(), 1);
     assert!(provider.requests.lock().unwrap().iter().all(|request| {
@@ -1654,7 +1745,10 @@ fn adapter_errors_stop_at_the_failing_effect() {
         let mut state = MemoryState::new([reply]);
         state.fail_at = Some(stage);
         if stage == "completion_feedback" {
-            state.exit_blockers.push_back(vec!["answer the ask".into()]);
+            state
+                .prompts()
+                .exit_blockers
+                .push_back(vec!["answer the ask".into()]);
         }
         assert_eq!(state.run(), Err(Error::failed(stage)), "{stage}");
         assert_eq!(state.trace.values().last().unwrap(), stage);
@@ -1715,7 +1809,10 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
         Reply::tools("call7"),
     ]);
     state.maximum = 2;
-    state.exit_blockers.push_back(vec!["work remains".into()]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["work remains".into()]);
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.request().rendered_instructions.len(), 9);
     let catalogs = state.capture_catalogs();

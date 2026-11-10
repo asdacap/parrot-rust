@@ -148,8 +148,6 @@ pub struct RuntimeBackend<S: AccessSnapshot, T: TurnTools<S>> {
 }
 struct Notices {
     runaway: String,
-    truncated: String,
-    invalid: String,
     restored: String,
     interrupted: String,
 }
@@ -198,8 +196,6 @@ where
         };
         let notices = Notices {
             runaway: render("agent-session.runaway")?,
-            truncated: render("agent-session.truncated-tool-call")?,
-            invalid: render("agent-session.invalid-tool-call")?,
             restored: render("agent-session.tools-restored")?,
             interrupted: render("agent-session.interrupted-note")?,
         };

@@ -11,14 +11,17 @@ fn pending_steer_and_status_prompts_are_fitted_without_a_context_reminder() {
             provider_content: "{\"native\":true}".into(),
             ..Message::default()
         };
-        state.pending_prompts.push_back(prompt.clone());
+        state.prompts().pending_prompts.push_back(prompt.clone());
         state.request().estimate_script = [100, 150, 160, 160].into();
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert!(state.rendered_reminders.lock().unwrap().is_empty());
+        assert!(state.prompts().rendered_reminders.is_empty());
         assert!(state.reminder_appends.is_empty());
         assert_eq!(state.recorded_prompts, [prompt.clone()]);
-        assert_eq!(state.acknowledged_prompts[0].estimated_tokens, 160);
+        assert_eq!(
+            state.prompts().acknowledged_prompts[0].estimated_tokens,
+            160
+        );
         let request = state.request();
         let estimates = &request.estimates;
         assert_eq!(estimates[1].messages.last(), Some(&prompt));
@@ -52,11 +55,11 @@ fn pending_prompt_is_recorded_when_context_capacity_is_unknown() {
         contents: vec![Content::Text("pending status".into())],
         ..Message::default()
     };
-    state.pending_prompts.push_back(prompt.clone());
+    state.prompts().pending_prompts.push_back(prompt.clone());
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.recorded_prompts, [prompt.clone()]);
-    assert!(!state.acknowledged_prompts[0].is_available());
+    assert!(!state.prompts().acknowledged_prompts[0].is_available());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].messages.last(),
         Some(&prompt)
@@ -68,7 +71,7 @@ fn pending_prompt_is_recorded_when_context_capacity_is_unknown() {
 fn oversized_pending_status_prompt_compacts_without_recording_or_acknowledging_it() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.prime_context(100);
-    state.pending_prompts.push_back(Message {
+    state.prompts().pending_prompts.push_back(Message {
         role: Role::System,
         contents: vec![Content::Text("oversized status".into())],
         ..Message::default()
@@ -90,7 +93,7 @@ fn oversized_pending_status_prompt_compacts_without_recording_or_acknowledging_i
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.compacted_definitions.len(), 1);
     assert!(state.recorded_prompts.is_empty());
-    assert!(state.acknowledged_prompts.is_empty());
+    assert!(state.prompts().acknowledged_prompts.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].messages,
         messages
@@ -106,7 +109,7 @@ fn pending_prompt_failures_stop_before_later_effects() {
         "publish_prompt",
     ] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-        state.pending_prompts.push_back(Message {
+        state.prompts().pending_prompts.push_back(Message {
             role: Role::System,
             contents: vec![Content::Text("pending status".into())],
             ..Message::default()
@@ -280,7 +283,7 @@ fn separate_context_reads_use_compaction_configuration_calibration_and_cadence()
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.compacted_definitions.len(), 1);
-    assert_eq!(state.cadence_writes, [cadence]);
+    assert_eq!(state.prompts().cadence_writes, [cadence]);
     assert!(!state.trace.values().iter().any(|step| step == "checkpoint"));
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
@@ -360,7 +363,7 @@ fn post_compaction_raw_input_failure_precedes_checkpoint_or_provider_effects() {
         "The compacted conversation exceeds the selected model input limit."
     );
     assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(state.cadence_writes.is_empty());
+    assert!(state.prompts().cadence_writes.is_empty());
     assert!(!state.trace.values().iter().any(|step| step == "checkpoint"));
 }
 
@@ -373,7 +376,7 @@ fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage
     assert_eq!(state.reminder_appends.len(), 1);
     assert_eq!(state.reminder_appends[0].0.percentage, 50);
     assert_eq!(state.reminder_appends[0].2, 55);
-    let rendered = state.rendered_reminders.lock().unwrap();
+    let rendered = state.prompts().rendered_reminders.clone();
     assert_eq!(rendered[0].0.usage_percent, Some(55));
     assert_eq!(rendered[0].1, 50);
     let request = state.request();
@@ -385,7 +388,7 @@ fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage
     assert_eq!(requests[0].messages, estimates.last().unwrap().messages);
     assert_eq!(
         requests[0].messages.last().unwrap().contents,
-        [Content::Text(state.reminder.clone())]
+        [Content::Text("configured reminder".into())]
     );
     let trace = state.trace.values();
     assert!(
@@ -447,7 +450,7 @@ fn cadence_is_acknowledged_before_failed_reminder_publication_and_provider_is_no
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert_eq!(state.reminder_publications, 1);
     assert_eq!(state.request().messages.len(), 2);
-    assert_eq!(state.checkpoint.as_ref().unwrap().percentage, 50);
+    assert_eq!(state.prompts().checkpoint.as_ref().unwrap().percentage, 50);
     let mut cadence = state.request().context.cadence.clone();
     assert_eq!(
         cadence.observe(
@@ -531,7 +534,7 @@ fn crossing_reminder_candidate_compacts_without_append_or_a_second_cadence_obser
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.reminder_appends.is_empty());
     assert_eq!(state.reminder_publications, 0);
-    assert_eq!(state.cadence_writes.len(), 1);
+    assert_eq!(state.prompts().cadence_writes.len(), 1);
     assert_eq!(state.request().rendered_instructions.len(), 1);
     assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
     let compacted = state.recorded_compactions[0]
@@ -554,7 +557,7 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
     state.request().estimated_input_tokens = i64::MAX;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.compacted_definitions.is_empty());
-    assert!(state.rendered_reminders.lock().unwrap().is_empty());
+    assert!(state.prompts().rendered_reminders.is_empty());
     assert!(state.reminder_appends.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
@@ -594,7 +597,7 @@ fn reminder_append_failure_keeps_observed_band_without_acknowledging_or_publishi
     assert_eq!(state.run(), Err(Error::failed("append_reminder")));
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert!(state.reminder_appends.is_empty());
-    assert!(state.checkpoint.is_none());
+    assert!(state.prompts().checkpoint.is_none());
     assert_eq!(state.request().messages.len(), 1);
     assert_eq!(state.reminder_publications, 0);
     let mut cadence = state.request().context.cadence.clone();
@@ -627,6 +630,68 @@ fn restored_cadence_is_saved_even_when_the_observation_is_invalid() {
         "canonical model must not be empty or whitespace"
     );
     assert!(state.request().context.cadence.is_restored());
-    assert_eq!(state.cadence_writes.len(), 1);
+    assert_eq!(state.prompts().cadence_writes.len(), 1);
     assert!(state.provider.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn pending_context_reminders_use_preparation_template_overrides() {
+    for override_limit in [false, true] {
+        let mut state = MemoryState::new([Reply::final_response("answer")]);
+        state.prime_context(490);
+        state.request().estimated_input_tokens = 550;
+        if override_limit {
+            state.request().context.configuration.context_limit =
+                Some(parrot_core::ContextLimit::Tokens(800));
+        }
+        let key = if override_limit {
+            "agent-session.context-limit-reminder"
+        } else {
+            "agent-session.context-reminder"
+        };
+        state.skill_templates.lock().unwrap().insert(
+            key.into(),
+            "Prepared reminder at {percentage}% with {estimated_tokens} tokens.".into(),
+        );
+
+        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+        let requests = state.provider.requests.lock().unwrap();
+        assert!(requests[0].messages.iter().any(|message| {
+            message.role == Role::System
+                && message.contents
+                    == [Content::Text(
+                        "Prepared reminder at 50% with 550 tokens.".into(),
+                    )]
+        }));
+    }
+}
+
+#[test]
+fn retry_messages_use_preparation_template_overrides() {
+    for (reply, key, content) in [
+        (
+            Reply::truncated("cut"),
+            "agent-session.truncated-tool-call",
+            "Retry the incomplete tool call.",
+        ),
+        (
+            Reply::invalid("bad"),
+            "agent-session.invalid-tool-call",
+            "Retry the invalid tool call.",
+        ),
+    ] {
+        let mut state = MemoryState::new([reply, Reply::final_response("answer")]);
+        state
+            .skill_templates
+            .lock()
+            .unwrap()
+            .insert(key.into(), content.into());
+
+        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+        let requests = state.provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].messages.iter().any(|message| {
+            message.role == Role::System && message.contents == [Content::Text(content.into())]
+        }));
+    }
 }
