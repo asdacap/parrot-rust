@@ -322,10 +322,38 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
             .iter()
             .any(|item| item.message.tool_call_id == "t76-combined-wait")
     );
+    let wait_finished = durable
+        .iter()
+        .find(|row| {
+            row.event.has_tool_finished()
+                && row.event.tool_finished().tool_call_id == "t76-combined-wait"
+        })
+        .unwrap();
+    let completion_sequences = [
+        "Shell process 't76-combined-process' completed.",
+        "t76-combined-child-complete",
+    ]
+    .map(|content| {
+        durable
+            .iter()
+            .find(|row| {
+                row.event.agent_session_id == root.identity().session.session_id
+                    && row.event.has_input_admitted()
+                    && row.event.input_admitted().content.contains(content)
+            })
+            .unwrap()
+            .sequence
+    });
+    assert!(
+        completion_sequences
+            .iter()
+            .any(|sequence| *sequence < wait_finished.sequence)
+    );
+    // Completions admitted before wait registration have no retained wake cause.
     for (call, expected) in [
         ("t76-combined-spawn", "combined-child"),
         ("t76-combined-question", "t76-combined-answer"),
-        ("t76-combined-wait", "wait interrupted due to"),
+        ("t76-combined-wait", "wait interrupted"),
     ] {
         let result = history
             .iter()
