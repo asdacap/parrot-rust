@@ -26,9 +26,9 @@ impl CompletionStateSource for BlockCompletion {
             Ok(None)
         })
     }
-    fn record_completion_feedback<'a>(
+    fn record_completion_blocker_feedback<'a>(
         &'a self,
-        feedback: &'a CompletionFeedback,
+        feedback: &'a CompletionBlockerFeedback,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
@@ -201,7 +201,7 @@ struct OrderedSource {
     trace: Arc<Trace>,
     retries: AtomicUsize,
     retains_candidate: bool,
-    feedback: Arc<Mutex<Vec<(String, CompletionFeedback)>>>,
+    feedback: Arc<Mutex<Vec<(String, CompletionBlockerFeedback)>>>,
 }
 impl CompletionStateSource for OrderedSource {
     fn get_pending_ask_reminder<'a>(
@@ -232,13 +232,13 @@ impl CompletionStateSource for OrderedSource {
             Ok(None)
         })
     }
-    fn record_completion_feedback<'a>(
+    fn record_completion_blocker_feedback<'a>(
         &'a self,
-        feedback: &'a CompletionFeedback,
+        feedback: &'a CompletionBlockerFeedback,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
-            assert_eq!(feedback.kind, CompletionFeedbackKind::ActiveWork);
+            assert_eq!(feedback.kind, CompletionBlockerFeedbackKind::ActiveWork);
             assert_eq!(feedback.candidate.is_some(), self.retains_candidate);
             assert_eq!(feedback.message, format!("{} completion retry", self.name));
             assert!(self.retries.fetch_sub(1, Ordering::SeqCst) > 0);
@@ -340,7 +340,7 @@ async fn completion_observations_collect_all_sources_in_order_and_retain_once_be
     assert!(
         feedback
             .iter()
-            .all(|(_, feedback)| feedback.kind == CompletionFeedbackKind::ActiveWork)
+            .all(|(_, feedback)| feedback.kind == CompletionBlockerFeedbackKind::ActiveWork)
     );
     assert_eq!(
         feedback

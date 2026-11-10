@@ -261,9 +261,9 @@ impl CompletionStateSource for CallbackBinding {
             source.get_exit_reminder(cancellation).await
         })
     }
-    fn record_completion_feedback<'a>(
+    fn record_completion_blocker_feedback<'a>(
         &'a self,
-        feedback: &'a CompletionFeedback,
+        feedback: &'a CompletionBlockerFeedback,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
@@ -274,7 +274,7 @@ impl CompletionStateSource for CallbackBinding {
                 .clone()
                 .expect("fixture completion source must bind before admission");
             source
-                .record_completion_feedback(feedback, cancellation)
+                .record_completion_blocker_feedback(feedback, cancellation)
                 .await
         })
     }
@@ -1446,8 +1446,8 @@ async fn retained_feedback_publication_failure_or_cancellation_preserves_committ
             broker: root.broker.clone(),
             publisher: publisher.clone() as Arc<Publisher>,
         };
-        let feedback = CompletionFeedback {
-            kind: CompletionFeedbackKind::ExitReminders,
+        let feedback = CompletionBlockerFeedback {
+            kind: CompletionBlockerFeedbackKind::ExitReminders,
             message: callback
                 .get_exit_reminder(&NeverCancelled)
                 .await
@@ -1459,7 +1459,7 @@ async fn retained_feedback_publication_failure_or_cancellation_preserves_committ
             }),
         };
         let result = callback
-            .record_completion_feedback(&feedback, &NeverCancelled)
+            .record_completion_blocker_feedback(&feedback, &NeverCancelled)
             .await;
         assert!(match result {
             Err(TurnError::Publication(OperationError::Cancelled)) => cancel,
@@ -1520,11 +1520,11 @@ async fn real_append_failure_prevents_active_and_retained_feedback_publication()
             .await
             .unwrap();
         let callback = root.callback.0.lock().unwrap().clone().unwrap();
-        let feedback = CompletionFeedback {
+        let feedback = CompletionBlockerFeedback {
             kind: if retained {
-                CompletionFeedbackKind::ExitReminders
+                CompletionBlockerFeedbackKind::ExitReminders
             } else {
-                CompletionFeedbackKind::ActiveWork
+                CompletionBlockerFeedbackKind::ActiveWork
             },
             message: if retained {
                 callback.get_exit_reminder(&NeverCancelled).await
@@ -1540,7 +1540,7 @@ async fn real_append_failure_prevents_active_and_retained_feedback_publication()
         };
         assert!(matches!(
             callback
-                .record_completion_feedback(&feedback, &NeverCancelled)
+                .record_completion_blocker_feedback(&feedback, &NeverCancelled)
                 .await,
             Err(TurnError::Storage(_))
         ));

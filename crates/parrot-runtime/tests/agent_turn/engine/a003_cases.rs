@@ -41,13 +41,13 @@ impl CompletionStateSource for ReminderCompletion {
                 .map_err(|error| TurnError::Service(error.to_string()))
         })
     }
-    fn record_completion_feedback<'a>(
+    fn record_completion_blocker_feedback<'a>(
         &'a self,
-        feedback: &'a CompletionFeedback,
+        feedback: &'a CompletionBlockerFeedback,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
-            assert_eq!(feedback.kind, CompletionFeedbackKind::ExitReminders);
+            assert_eq!(feedback.kind, CompletionBlockerFeedbackKind::ExitReminders);
             assert!(feedback.candidate.is_some());
             let publisher = self.bindings.lock().unwrap().clone().unwrap().publisher;
             let mut event = Event::new();

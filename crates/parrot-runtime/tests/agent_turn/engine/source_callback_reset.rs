@@ -20,13 +20,13 @@ impl CompletionStateSource for RetryOnce {
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move { Ok(None) })
     }
-    fn record_completion_feedback<'a>(
+    fn record_completion_blocker_feedback<'a>(
         &'a self,
-        feedback: &'a CompletionFeedback,
+        feedback: &'a CompletionBlockerFeedback,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move {
-            assert_eq!(feedback.kind, CompletionFeedbackKind::ActiveWork);
+            assert_eq!(feedback.kind, CompletionBlockerFeedbackKind::ActiveWork);
             assert_eq!(feedback.message, "source retry");
             assert!(feedback.candidate.is_some());
             assert!(self.0.swap(false, Ordering::SeqCst));
@@ -126,9 +126,9 @@ impl CompletionStateSource for BlockOnce {
             Ok(None)
         })
     }
-    fn record_completion_feedback<'a>(
+    fn record_completion_blocker_feedback<'a>(
         &'a self,
-        feedback: &'a CompletionFeedback,
+        feedback: &'a CompletionBlockerFeedback,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), TurnError>> {
         Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })

@@ -1,5 +1,5 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionFeedback, ConfigKey, ConfigValue, Content,
+    BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConfigValue, Content,
     ContextCompaction, ContextConfiguration, ContextModel, ContextReminderCheckpoint,
     ContextSnapshot, ConversationAddition, ConversationEvent, ConversationOrigin,
     ConversationPersistence, ConversationReceipt, ConversationTurn, Delivery, DerivedContext,
@@ -416,7 +416,7 @@ struct MemoryState {
     recorded_input_contexts: Vec<DerivedContext>,
     tools: MemoryTools,
     provider: MemoryProvider,
-    completion_feedback: Vec<CompletionFeedback>,
+    completion_blocker_feedback: Vec<CompletionBlockerFeedback>,
     final_requests: Vec<usize>,
     retries: Vec<(String, i32)>,
     recorded_tools: Vec<Message>,
@@ -553,7 +553,7 @@ impl MemoryState {
                 compacting: compacting.clone(),
                 cancellation: cancellation.clone(),
             },
-            completion_feedback: Vec::new(),
+            completion_blocker_feedback: Vec::new(),
             final_requests: Vec::new(),
             retries: Vec::new(),
             recorded_tools: Vec::new(),
@@ -853,9 +853,9 @@ impl States for MemoryState {
                     self.status_steered.push((content, standing.clone()));
                     self.status_standing = standing.clone();
                 }
-                ConversationPersistence::CompletionFeedback(feedback) => {
-                    self.step("completion_feedback")?;
-                    self.completion_feedback.push(feedback.clone());
+                ConversationPersistence::CompletionBlockerFeedback(feedback) => {
+                    self.step("completion_blocker_feedback")?;
+                    self.completion_blocker_feedback.push(feedback.clone());
                 }
                 ConversationPersistence::CloseTurn { .. } => {
                     self.step("complete")?;
@@ -868,7 +868,7 @@ impl States for MemoryState {
                         | ConversationPersistence::ToolResult { .. }
                         | ConversationPersistence::ToolImages { .. }
                         | ConversationPersistence::CloseTurn { .. }
-                        | ConversationPersistence::CompletionFeedback(_)
+                        | ConversationPersistence::CompletionBlockerFeedback(_)
                         | ConversationPersistence::Append {
                             origin: ConversationOrigin::Model,
                             ..
@@ -1637,7 +1637,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 5);
     assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
     assert_eq!(state.applied_results.len(), 1);
-    assert_eq!(state.completion_feedback.len(), 1);
+    assert_eq!(state.completion_blocker_feedback.len(), 1);
     assert!(provider.requests.lock().unwrap().iter().all(|request| {
         request.model == options.model
             && request.reasoning == options.reasoning
@@ -1756,12 +1756,15 @@ fn adapter_errors_stop_at_the_failing_effect() {
         ("execute", Reply::tools("response")),
         ("record_results", Reply::tools("response")),
         ("exit_blockers", Reply::final_response("response")),
-        ("completion_feedback", Reply::final_response("response")),
+        (
+            "completion_blocker_feedback",
+            Reply::final_response("response"),
+        ),
         ("complete", Reply::final_response("response")),
     ] {
         let mut state = MemoryState::new([reply]);
         state.fail_at = Some(stage);
-        if stage == "completion_feedback" {
+        if stage == "completion_blocker_feedback" {
             state
                 .prompts()
                 .exit_blockers
@@ -1845,9 +1848,11 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
             .iter()
             .all(|flags| flags.final_phase)
     );
-    assert_eq!(state.completion_feedback.len(), 1);
+    assert_eq!(state.completion_blocker_feedback.len(), 1);
     assert_eq!(
-        state.completion_feedback[0].candidate.assistant_text,
+        state.completion_blocker_feedback[0]
+            .candidate
+            .assistant_text,
         "candidate"
     );
     assert_eq!(

@@ -10,10 +10,12 @@ fn ordered_blocker_messages_are_recorded_together_and_retain_the_candidate_once(
     state.prompts().exit_blockers.push_back(messages.clone());
     assert_eq!(state.run(), Err(Error::failed("stop after feedback")));
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
-    assert_eq!(state.completion_feedback.len(), 1);
-    assert_eq!(state.completion_feedback[0].messages, messages);
+    assert_eq!(state.completion_blocker_feedback.len(), 1);
+    assert_eq!(state.completion_blocker_feedback[0].messages, messages);
     assert_eq!(
-        state.completion_feedback[0].candidate.assistant_text,
+        state.completion_blocker_feedback[0]
+            .candidate
+            .assistant_text,
         "candidate"
     );
     let turn = state.last_turn.as_ref().unwrap();
@@ -64,7 +66,7 @@ fn an_empty_blocker_list_closes_the_candidate_without_reading_another_snapshot()
         Ok(Outcome::Completed("accepted answer".into()))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
-    assert!(state.completion_feedback.is_empty());
+    assert!(state.completion_blocker_feedback.is_empty());
     assert_eq!(state.prompts().exit_blockers.len(), 1);
     assert_eq!(
         state
@@ -101,10 +103,12 @@ fn nonempty_lists_with_empty_messages_still_require_a_retry() {
         state.prompts().exit_blockers.push_back(messages.clone());
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert_eq!(state.request().rendered_instructions.len(), 2);
-        assert_eq!(state.completion_feedback.len(), 1);
-        assert_eq!(state.completion_feedback[0].messages, messages);
+        assert_eq!(state.completion_blocker_feedback.len(), 1);
+        assert_eq!(state.completion_blocker_feedback[0].messages, messages);
         assert_eq!(
-            state.completion_feedback[0].candidate.assistant_text,
+            state.completion_blocker_feedback[0]
+                .candidate
+                .assistant_text,
             "candidate"
         );
     }
@@ -131,9 +135,9 @@ fn every_blocker_list_retains_the_exact_candidate_and_forces_continuation() {
         assert_eq!(state.run(), Err(Error::failed("forced request")));
         assert_eq!(state.request().rendered_instructions.len(), 2);
         assert!(state.pending_messages.is_empty());
-        assert_eq!(state.completion_feedback.len(), 1);
-        assert_eq!(state.completion_feedback[0].messages, messages);
-        assert_eq!(state.completion_feedback[0].candidate, candidate);
+        assert_eq!(state.completion_blocker_feedback.len(), 1);
+        assert_eq!(state.completion_blocker_feedback[0].messages, messages);
+        assert_eq!(state.completion_blocker_feedback[0].candidate, candidate);
         let turn = state.last_turn.as_ref().unwrap();
         assert_eq!(
             turn.result.as_ref().unwrap().provider_content,
@@ -182,7 +186,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
     );
     assert_eq!(
         state
-            .completion_feedback
+            .completion_blocker_feedback
             .iter()
             .map(|feedback| feedback.messages.clone())
             .collect::<Vec<_>>(),
@@ -190,7 +194,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
     );
     assert_eq!(
         state
-            .completion_feedback
+            .completion_blocker_feedback
             .iter()
             .map(|feedback| feedback.candidate.assistant_text.as_str())
             .collect::<Vec<_>>(),
@@ -235,7 +239,7 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
         .exit_blockers
         .push_back(vec!["unfinished".into()]);
     state.maximum = 1;
-    state.fail_at = Some("completion_feedback");
+    state.fail_at = Some("completion_blocker_feedback");
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
@@ -248,10 +252,10 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
             &provider,
             CancellationToken::new(provider.cancellation.as_ref())
         )),
-        Err(Error::failed("completion_feedback"))
+        Err(Error::failed("completion_blocker_feedback"))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
-    assert!(state.completion_feedback.is_empty());
+    assert!(state.completion_blocker_feedback.is_empty());
     let turn = state.last_turn.as_ref().unwrap();
     assert_eq!(turn.messages.len(), 1);
     assert_eq!(turn.messages[0].role, Role::User);
@@ -266,7 +270,10 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
         1
     );
     assert!(!state.trace.values().iter().any(|step| step == "complete"));
-    assert_eq!(state.trace.values().last().unwrap(), "completion_feedback");
+    assert_eq!(
+        state.trace.values().last().unwrap(),
+        "completion_blocker_feedback"
+    );
     assert!(state.budget.admit(1).is_none());
 }
 
@@ -294,7 +301,7 @@ fn blocker_read_errors_stop_before_recording_closure_or_budget_reset() {
         Err(Error::failed("exit_blockers"))
     );
     assert_eq!(state.request().rendered_instructions.len(), 1);
-    assert!(state.completion_feedback.is_empty());
+    assert!(state.completion_blocker_feedback.is_empty());
     assert_eq!(state.prompts().exit_blockers.len(), 1);
     assert_eq!(state.last_turn.as_ref().unwrap().messages.len(), 1);
     assert_eq!(

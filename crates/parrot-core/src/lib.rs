@@ -253,10 +253,12 @@ async fn execute_turn(
         states
             .apply_conversation_addition(ConversationAddition {
                 messages: additions,
-                persistence: ConversationPersistence::CompletionFeedback(CompletionFeedback {
-                    messages,
-                    candidate: response,
-                }),
+                persistence: ConversationPersistence::CompletionBlockerFeedback(
+                    CompletionBlockerFeedback {
+                        messages,
+                        candidate: response,
+                    },
+                ),
             })
             .await?;
         state.restart();
