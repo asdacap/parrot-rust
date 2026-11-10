@@ -222,8 +222,11 @@ impl SystemPrompt for CountingPrompt {
     fn renew_epoch(&mut self) {
         self.0 += 1;
     }
-    fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
-        Ok(self.0.to_string())
+    fn read_system_prompts(
+        &mut self,
+        _: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![("test:count".into(), self.0.to_string())])
     }
 }
 #[test]
@@ -250,12 +253,12 @@ fn each_materialization_has_independent_epoch_state_and_renewal_forwards() {
 }
 #[test]
 fn composite_filters_blank_sections_without_trimming_configured_text() {
-    let mut prompt = CompositeSystemPrompt::new(vec![
+    let mut prompt: Box<dyn SystemPrompt> = Box::new(CompositeSystemPrompt::new(vec![
         Box::new(StaticSystemPrompt("  retained\n".into())),
         Box::new(StaticSystemPrompt("\n\t\u{0085}\u{2028}".into())),
         Box::new(StaticSystemPrompt(String::new())),
         Box::new(StaticSystemPrompt("tail".into())),
-    ]);
+    ]));
     assert_eq!(prompt.build(&selection()).unwrap(), "  retained\n\n\ntail");
 }
 #[test]
@@ -274,7 +277,10 @@ fn actual_template_errors_propagate_and_never_return_partial_composite_output() 
     )
     .unwrap();
     assert!(matches!(
-        provider.materialize(&identity()),
+        provider
+            .materialize(&identity())
+            .unwrap()
+            .build(&selection()),
         Err(PromptError::Template(_))
     ));
 }
@@ -353,12 +359,15 @@ fn custom_templates_receive_literal_supplied_paths_cli_and_subagents() {
 fn identity_uses_real_template_and_preserves_supplied_scope_without_resolving_it() {
     let templates = templates("");
     assert_eq!(
-        AgentIdentityDescription {
-            scope_text: "root scope".into(),
-            ..identity()
-        }
-        .context(&templates)
-        .unwrap(),
+        render_agent_identity(
+            &AgentIdentityDescription {
+                scope_text: "root scope".into(),
+                ..identity()
+            },
+            &templates
+        )
+        .unwrap()
+        .1,
         "root scope"
     );
     let child = AgentIdentityDescription {
@@ -370,7 +379,7 @@ fn identity_uses_real_template_and_preserves_supplied_scope_without_resolving_it
         scope_text: "### supplied scope\nread-only text".into(),
     };
     assert_eq!(
-        child.context(&templates).unwrap(),
+        render_agent_identity(&child, &templates).unwrap().1,
         "Child agent session: child-id\nParent agent session: parent-id\nParent agent name: parent-name\nChild agent name: worker\nChild agent depth: 2\n\n### supplied scope\nread-only text"
     );
 }

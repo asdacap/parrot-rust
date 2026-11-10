@@ -101,13 +101,43 @@ pub struct DerivedContext {
     pub loaded_paths: Vec<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct AgentIdentityDescription {
+    pub session_id: String,
+    pub parent_session_id: String,
+    pub parent_session_name: String,
+    pub agent_name: String,
+    pub depth: i32,
+    pub scope_text: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModelAliasDescription {
+    pub name: String,
+    pub model: String,
+    pub usage: String,
+    pub model_usage: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkillCatalogEntry {
+    pub name: String,
+    pub description: String,
+    pub discovery_path: String,
+    pub enabled: bool,
+    pub prompt_visible: bool,
+}
+
 /// Prepares request content without recording conversation effects or invoking a model.
 pub trait Preparation: Send {
     /// Expands one configured prompt template from supplied string arguments.
     /// Does not look up or select skills, read their content, or persist context.
     fn render_template(&self, key: &str, arguments: &[(String, String)]) -> Result<String, Error>;
-    /// Renders current instructions while retaining native request-scoped bindings.
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>>;
+    /// Renders system instructions from raw state without recording conversation effects.
+    fn render_instructions<'a>(
+        &'a mut self,
+        states: &'a mut dyn States,
+    ) -> BoxFuture<'a, Result<String, Error>>;
     /// Observes readiness and retains an optional steer or status prompt for fitting,
     /// without appending or publishing it. Source-specific cadence and rendering stay native.
     fn get_pending_prompt<'a>(
@@ -135,6 +165,31 @@ pub trait Preparation: Send {
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
 pub trait States: Send {
+    /// Reads configured literal prompts and their namespace keys, retaining native
+    /// request bindings and sampling raw epoch inputs without rendering templates.
+    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>>;
+    /// Reads namespace keys and configured template catalog keys without expansion.
+    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>>;
+    /// Reads literal template arguments for the supplied registered source.
+    fn read_template_arguments<'a>(
+        &'a self,
+        source_key: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>>;
+    /// Reads sampled AGENTS paths and unwrapped file contents.
+    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>>;
+    /// Reads alias definitions and resolved usage without formatting their descriptions.
+    fn read_model_aliases(&self) -> BoxFuture<'_, Result<Vec<ModelAliasDescription>, Error>>;
+    /// Reads the selected model profile's literal system prompt.
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>>;
+    /// Reads the selected alias's literal system-prompt augmentation.
+    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>>;
+    /// Reads the supplied agent identity and scope without formatting either value.
+    fn read_agent_identity(&self)
+    -> BoxFuture<'_, Result<Option<AgentIdentityDescription>, Error>>;
+    /// Reads the current unwrapped standing instruction.
+    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>>;
+    /// Reads current catalog metadata without rendering entries or applying prompt budgets.
+    fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>>;
     /// Durably records and applies the complete returned batch before continuing.
     fn record_tool_results<'a>(
         &'a mut self,

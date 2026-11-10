@@ -255,12 +255,15 @@ impl SystemPrompt for GatedPrompt {
             Ok(())
         })
     }
-    fn build(
+    fn read_system_prompts(
         &mut self,
         _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<String> {
+    ) -> PromptResult<Vec<(String, String)>> {
         assert!(self.sampled.load(Ordering::SeqCst) > 0);
-        Ok(sampled_instructions(self.sampled.load(Ordering::SeqCst)))
+        Ok(vec![(
+            "test:instructions".into(),
+            sampled_instructions(self.sampled.load(Ordering::SeqCst)),
+        )])
     }
 }
 

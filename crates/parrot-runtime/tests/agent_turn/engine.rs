@@ -604,12 +604,15 @@ impl SystemPrompt for Prompt {
             Ok(())
         })
     }
-    fn build(
+    fn read_system_prompts(
         &mut self,
         _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<String> {
+    ) -> PromptResult<Vec<(String, String)>> {
         assert!(self.sampled, "prompt build raced awaited epoch");
-        Ok("sampled epoch instructions".into())
+        Ok(vec![(
+            "test:instructions".into(),
+            "sampled epoch instructions".into(),
+        )])
     }
 }
 struct Skills(Arc<Trace>);

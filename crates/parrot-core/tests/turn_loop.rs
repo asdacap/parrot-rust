@@ -623,19 +623,22 @@ impl Preparation for MemoryPreparation {
                 text.replace(&format!("{{{name}}}"), value)
             }))
     }
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, Error>> {
+    fn render_instructions<'a>(
+        &'a mut self,
+        states: &'a mut dyn States,
+    ) -> BoxFuture<'a, Result<String, Error>> {
         Box::pin(async move {
+            let prompts = states.read_system_prompts().await?;
             self.trace.step("render", self.fail_at)?;
-            let mut request = self.request.lock().unwrap();
-            if let Some(rendered) = request.renderings.pop_front() {
-                request.instructions = rendered.instructions;
-                request.context.configuration.model.maximum_output_tokens =
-                    rendered.maximum_output_tokens;
-                request.messages = rendered.messages;
-            }
-            let instructions = request.instructions.clone();
-            request.rendered_instructions.push(instructions);
-            Ok(request.instructions.clone())
+            let instructions = prompts
+                .into_iter()
+                .map(|(_, text)| text)
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            self.request()
+                .rendered_instructions
+                .push(instructions.clone());
+            Ok(instructions)
         })
     }
     fn estimate_input_tokens<'a>(
@@ -786,6 +789,58 @@ impl Preparation for MemoryPreparation {
 }
 
 impl States for MemoryState {
+    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async move {
+            self.step("instruction_state")?;
+            let mut request = self.request();
+            if let Some(rendered) = request.renderings.pop_front() {
+                request.instructions = rendered.instructions;
+                request.context.configuration.model.maximum_output_tokens =
+                    rendered.maximum_output_tokens;
+                request.messages = rendered.messages;
+            }
+            Ok(vec![(
+                "memory:instructions".into(),
+                request.instructions.clone(),
+            )])
+        })
+    }
+    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn read_template_arguments<'a>(
+        &'a self,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn read_model_aliases(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn read_agent_identity(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, Error>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async { Ok(String::new()) })
+    }
+    fn read_skill_catalog(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, Error>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],
@@ -1164,6 +1219,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
         [
             "catalog",
             "promote",
+            "instruction_state",
             "render",
             "messages",
             "context_configuration",
@@ -1182,6 +1238,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "execute",
             "record_results",
             "promote",
+            "instruction_state",
             "render",
             "messages",
             "context_configuration",

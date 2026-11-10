@@ -1,6 +1,6 @@
 use super::{
     AgentIdentityDescription, PromptError, PromptResult, SystemPrompt, SystemPromptProvider,
-    normalize_skill_path, render,
+    normalize_skill_path,
 };
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation, OperationError},
@@ -10,7 +10,6 @@ use parrot_domain::contracts::{
     security::SecurityProvider,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
-use parrot_provider::routing::aliases::ResolvedModelSelection;
 use std::{path::PathBuf, sync::Arc};
 
 pub struct AgentsPromptProvider<
@@ -73,7 +72,7 @@ struct AgentsPrompt<R: AuthorizedReadService, P: SecurityProvider<Snapshot = R::
     reader: Arc<R>,
     security: Arc<P>,
     templates: Arc<PromptTemplateCatalog>,
-    sampled: Option<String>,
+    sampled: Option<Vec<(String, String)>>,
 }
 impl<R: AuthorizedReadService, P: SecurityProvider<Snapshot = R::Security>> AgentsPrompt<R, P> {
     async fn file(
@@ -144,25 +143,22 @@ where
                     found.insert(0, file);
                 }
             }
-            let mut sections = Vec::new();
-            for (path, content) in found {
-                sections.push(render(
-                    &self.templates,
-                    "context.agents-file",
-                    &[
-                        ("path".into(), path.to_string_lossy().into_owned().into()),
-                        ("content".into(), content.into()),
-                    ],
-                )?);
-            }
-            self.sampled = Some(sections.join("\n\n"));
+            self.sampled = Some(
+                found
+                    .into_iter()
+                    .map(|(path, content)| (path.to_string_lossy().into_owned(), content))
+                    .collect(),
+            );
             Ok(())
         })
     }
-    fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
+    fn read_agents_files(&self) -> PromptResult<Vec<(String, String)>> {
         self.sampled.clone().ok_or_else(|| {
             PromptError::Context("The system context has not been sampled for this epoch.".into())
         })
+    }
+    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
+        (source_key == "runtime:system-context:07a-agents").then_some(self.templates.as_ref())
     }
 }
 

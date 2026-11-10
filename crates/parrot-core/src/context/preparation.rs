@@ -57,7 +57,7 @@ pub(crate) async fn prepare_request(
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let mut instructions = preparation.request.render_instructions().await?;
+    let mut instructions = preparation.request.render_instructions(states).await?;
     let mut messages = states.read_messages().await?;
     let mut configuration = states.read_context_configuration().await?;
     let calibration = states.read_token_calibration().await?;

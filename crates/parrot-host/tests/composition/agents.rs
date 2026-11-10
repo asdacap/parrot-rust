@@ -283,8 +283,14 @@ mod fixture {
         ) -> BoxFuture<'a, PromptResult<()>> {
             Box::pin(async { Ok(()) })
         }
-        fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
-            Ok("offline retained-wait fixture".into())
+        fn read_system_prompts(
+            &mut self,
+            _: &ResolvedModelSelection,
+        ) -> PromptResult<Vec<(String, String)>> {
+            Ok(vec![(
+                "test:instructions".into(),
+                "offline retained-wait fixture".into(),
+            )])
         }
     }
     struct Skills;

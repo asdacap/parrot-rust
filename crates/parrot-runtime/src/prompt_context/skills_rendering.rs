@@ -1,10 +1,28 @@
 use super::{PromptError, PromptResult, SkillMetadata, render};
+use parrot_core::SkillCatalogEntry;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
 pub const MAXIMUM_CATALOG_BYTES: usize = 64 * 1024;
 
 pub fn render_skill_catalog(
     skills: &[SkillMetadata],
+    templates: &PromptTemplateCatalog,
+) -> PromptResult<String> {
+    let entries = skills
+        .iter()
+        .map(|skill| SkillCatalogEntry {
+            name: skill.name.clone(),
+            description: skill.description.clone(),
+            discovery_path: skill.discovery_path.clone(),
+            enabled: skill.enabled,
+            prompt_visible: skill.prompt_visible,
+        })
+        .collect::<Vec<_>>();
+    render_catalog_entries(&entries, templates)
+}
+
+pub(super) fn render_catalog_entries(
+    skills: &[SkillCatalogEntry],
     templates: &PromptTemplateCatalog,
 ) -> PromptResult<String> {
     let available: Vec<_> = skills

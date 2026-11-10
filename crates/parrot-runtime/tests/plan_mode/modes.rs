@@ -129,16 +129,22 @@ fn lazy_mode_profile_retains_raw_policy_and_all_metadata_across_prepare_complete
     struct ModePrompt(SessionMode<Policy>);
     impl SystemPrompt for ModePrompt {
         fn renew_epoch(&mut self) {}
-        fn build(
+        fn read_system_prompts(
             &mut self,
             _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-        ) -> parrot_runtime::prompt_context::PromptResult<String> {
-            self.0.profile().prompt().map_err(|error| {
-                parrot_runtime::prompt_context::PromptError::Context(error.to_string())
-            })
+        ) -> parrot_runtime::prompt_context::PromptResult<Vec<(String, String)>> {
+            self.0
+                .profile()
+                .prompt()
+                .map(|text| vec![("test:mode".into(), text)])
+                .map_err(|error| {
+                    parrot_runtime::prompt_context::PromptError::Context(error.to_string())
+                })
         }
     }
-    let mut composed = CompositeSystemPrompt::new(vec![Box::new(ModePrompt(mode.clone()))]);
+    let mut composed: Box<dyn SystemPrompt> = Box::new(CompositeSystemPrompt::new(vec![Box::new(
+        ModePrompt(mode.clone()),
+    )]));
     assert_eq!(composed.build(&model()).unwrap(), before);
     composed.renew_epoch();
     mode.prepare().unwrap();

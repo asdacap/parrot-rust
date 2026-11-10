@@ -1,47 +1,8 @@
-use super::{PromptResult, StaticSystemPrompt, SystemPrompt, SystemPromptProvider, render};
+use super::{PromptResult, SystemPrompt, SystemPromptProvider};
+pub use parrot_core::AgentIdentityDescription;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::{Value, json};
 use std::sync::Arc;
-
-/// Identity and scope text already supplied by the session owner. No scope lookup occurs here.
-#[derive(Clone, Debug, Default)]
-pub struct AgentIdentityDescription {
-    pub session_id: String,
-    pub parent_session_id: String,
-    pub parent_session_name: String,
-    pub agent_name: String,
-    pub depth: i32,
-    pub scope_text: String,
-}
-impl AgentIdentityDescription {
-    pub fn context(&self, templates: &PromptTemplateCatalog) -> PromptResult<String> {
-        if self.depth == 0 {
-            return Ok(self.scope_text.clone());
-        }
-        let identity = render(
-            templates,
-            "system.agent-identity",
-            &[
-                ("session_id".into(), self.session_id.clone().into()),
-                (
-                    "parent_session_id".into(),
-                    self.parent_session_id.clone().into(),
-                ),
-                (
-                    "parent_session_name".into(),
-                    self.parent_session_name.clone().into(),
-                ),
-                ("agent_name".into(), self.agent_name.clone().into()),
-                ("depth".into(), self.depth.to_string().into()),
-            ],
-        )?;
-        Ok(if self.scope_text.is_empty() {
-            identity
-        } else {
-            format!("{identity}\n\n{}", self.scope_text)
-        })
-    }
-}
 
 /// This enum describes source rule spelling only. It grants no access.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,7 +50,7 @@ pub struct MaterializedContext {
     pub security: SecurityDescription,
 }
 
-/// Captures explicit arguments at construction; actual template rendering occurs once per materialization.
+/// Captures literal template arguments without expanding the template.
 pub struct TemplateSystemPromptProvider {
     key: String,
     template: String,
@@ -116,14 +77,37 @@ impl SystemPromptProvider for TemplateSystemPromptProvider {
         &self.key
     }
     fn materialize(&self, _: &AgentIdentityDescription) -> PromptResult<Box<dyn SystemPrompt>> {
-        Ok(Box::new(StaticSystemPrompt(render(
-            &self.templates,
-            &self.template,
-            &self.arguments,
-        )?)))
+        Ok(Box::new(TemplateSystemPrompt {
+            key: self.key.clone(),
+            template: self.template.clone(),
+            arguments: self.arguments.clone(),
+            templates: self.templates.clone(),
+        }))
     }
 }
-// SecurityProfilePrompt renders lazily and retains its first result across epochs.
+struct TemplateSystemPrompt {
+    key: String,
+    template: String,
+    arguments: Vec<(String, Value)>,
+    templates: Arc<PromptTemplateCatalog>,
+}
+impl SystemPrompt for TemplateSystemPrompt {
+    fn renew_epoch(&mut self) {}
+    fn read_prompt_templates(&self) -> Vec<(String, String)> {
+        vec![(self.key.clone(), self.template.clone())]
+    }
+    fn read_template_arguments(&self, source_key: &str) -> Vec<(String, Value)> {
+        if source_key == self.key {
+            self.arguments.clone()
+        } else {
+            Vec::new()
+        }
+    }
+    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
+        (source_key == self.key).then_some(self.templates.as_ref())
+    }
+}
+
 pub struct SecurityProfilePromptProvider {
     rules: Vec<SecurityRuleDescription>,
     sandbox_enabled: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -142,11 +126,6 @@ impl SecurityProfilePromptProvider {
         }
     }
 }
-struct SecurityDescriptionPrompt {
-    templates: Arc<PromptTemplateCatalog>,
-    arguments: Vec<(String, Value)>,
-    rendered: Option<PromptResult<String>>,
-}
 impl SystemPromptProvider for SecurityProfilePromptProvider {
     fn key(&self) -> &str {
         "runtime:system-context:16-security-profile"
@@ -157,30 +136,17 @@ impl SystemPromptProvider for SecurityProfilePromptProvider {
             .iter()
             .map(|rule| json!({"path": escape_rule_path(&rule.path), "action": rule.action.as_str()}))
             .collect::<Vec<_>>();
-        Ok(Box::new(SecurityDescriptionPrompt {
+        Ok(Box::new(TemplateSystemPrompt {
+            key: self.key().into(),
+            template: "context.security-profile".into(),
             templates: self.templates.clone(),
             arguments: vec![
                 ("rules".into(), rules.into()),
                 ("sandbox_enabled".into(), (self.sandbox_enabled)().into()),
             ],
-            rendered: None,
         }))
     }
 }
-impl SystemPrompt for SecurityDescriptionPrompt {
-    fn renew_epoch(&mut self) {}
-    fn build(
-        &mut self,
-        _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<String> {
-        self.rendered
-            .get_or_insert_with(|| {
-                render(&self.templates, "context.security-profile", &self.arguments)
-            })
-            .clone()
-    }
-}
-
 pub struct SessionIdentityPromptProvider(Arc<PromptTemplateCatalog>);
 impl SessionIdentityPromptProvider {
     pub fn new(templates: Arc<PromptTemplateCatalog>) -> Self {
@@ -195,7 +161,25 @@ impl SystemPromptProvider for SessionIdentityPromptProvider {
         &self,
         identity: &AgentIdentityDescription,
     ) -> PromptResult<Box<dyn SystemPrompt>> {
-        Ok(Box::new(StaticSystemPrompt(identity.context(&self.0)?)))
+        Ok(Box::new(SessionIdentityPrompt {
+            identity: identity.clone(),
+            templates: self.0.clone(),
+        }))
+    }
+}
+
+struct SessionIdentityPrompt {
+    identity: AgentIdentityDescription,
+    templates: Arc<PromptTemplateCatalog>,
+}
+impl SystemPrompt for SessionIdentityPrompt {
+    fn renew_epoch(&mut self) {}
+    fn read_agent_identity(&self) -> Option<AgentIdentityDescription> {
+        Some(self.identity.clone())
+    }
+    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
+        (source_key == "runtime:system-context:14-session-identity")
+            .then_some(self.templates.as_ref())
     }
 }
 

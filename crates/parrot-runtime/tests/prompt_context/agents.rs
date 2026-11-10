@@ -156,6 +156,35 @@ fn fixture() -> (Arc<Reader>, Arc<Policy>) {
 }
 
 #[tokio::test]
+async fn agents_sampling_and_raw_reads_do_not_expand_templates() {
+    let (reader, policy) = fixture();
+    let provider = AgentsPromptProvider::new(
+        "/work/sub",
+        "/config",
+        reader,
+        policy,
+        templates("prompt_templates:\n  context.agents-file:\n    engine: minijinja\n    template: '{{ 1 / 0 }}'\n"),
+    )
+    .unwrap();
+    let prompt = SessionPrompt::new(provider.materialize(&identity()).unwrap());
+
+    prompt.ensure_epoch(&Never).await.unwrap();
+    assert_eq!(
+        prompt.read_agents_files(&Never).await.unwrap(),
+        [
+            ("/config/AGENTS.md".into(), "global".into()),
+            ("/AGENTS.md".into(), "root".into()),
+            ("/work/AGENTS.md".into(), "parent".into()),
+            ("/work/sub/AGENTS.md".into(), "child".into()),
+        ]
+    );
+    assert!(matches!(
+        prompt.build(&selection(), &Never).await,
+        Err(PromptError::Template(_))
+    ));
+}
+
+#[tokio::test]
 async fn agents_global_then_ancestry_order_and_epoch_resampling_are_actual_reads() {
     let (reader, policy) = fixture();
     let provider = AgentsPromptProvider::new(
@@ -262,8 +291,14 @@ impl SystemPrompt for SamplingPrompt {
             }
         })
     }
-    fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
-        Ok(self.id.to_string())
+    fn read_system_prompts(
+        &mut self,
+        _: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![(
+            format!("test:sampling:{}", self.id),
+            self.id.to_string(),
+        )])
     }
 }
 #[tokio::test]

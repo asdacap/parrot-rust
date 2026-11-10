@@ -243,8 +243,12 @@ without selecting or rendering skills. Core parses skill mentions, reads metadat
 through `States::get_skills`, and deduplicates stable identities before reading
 bodies through `States::read_skill_content`. Native backing owns catalog lookup
 and authorized file reads. Core owns skill-context formatting, limits, and loaded
-paths. `Preparation` supplies instruction construction, token estimates, and
-primitive configured-template expansion. Core records the derived skill context
+paths. `States` exposes raw system-prompt text, template identities and arguments,
+AGENTS files, model guidance, identity, standing instructions, and catalog metadata.
+These getters do not expand templates. `Preparation::render_instructions` reads
+that state and renders the ordered instruction sections. State retains request
+status bindings and sampled epoch inputs. Preparation also supplies token estimates
+and primitive configured-template expansion. Core records the derived skill context
 through `States::record_input_context` before request-budget admission. Nonempty
 selected skill context follows its input. The placement fixture supplies raw
 records and proves core preparation, per-turn body-read deduplication, exact

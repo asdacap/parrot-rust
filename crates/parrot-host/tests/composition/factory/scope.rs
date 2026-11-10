@@ -351,14 +351,20 @@ impl SystemPromptProvider for RoutingPrompt {
 }
 impl SystemPrompt for RoutingPrompt {
     fn renew_epoch(&mut self) {}
-    fn build(&mut self, selection: &ResolvedModelSelection) -> PromptResult<String> {
+    fn read_system_prompts(
+        &mut self,
+        selection: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
         self.0.lock().unwrap().push(selection.clone());
-        Ok(format!(
-            "routing selector={} canonical={} revision={}",
-            selection.requested_selector.value,
-            selection.canonical_model.selector(),
-            selection.routing_snapshot.revision
-        ))
+        Ok(vec![(
+            "fixture:live-routing".into(),
+            format!(
+                "routing selector={} canonical={} revision={}",
+                selection.requested_selector.value,
+                selection.canonical_model.selector(),
+                selection.routing_snapshot.revision
+            ),
+        )])
     }
 }
 #[derive(Default)]
@@ -380,14 +386,20 @@ impl SystemPromptProvider for BlockingStatusPrompt {
 }
 impl SystemPrompt for BlockingStatusPrompt {
     fn renew_epoch(&mut self) {}
-    fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
-        Ok("actual status live-build barrier".into())
+    fn read_system_prompts(
+        &mut self,
+        _: &ResolvedModelSelection,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(vec![(
+            "fixture:status-live-build".into(),
+            "actual status live-build barrier".into(),
+        )])
     }
-    fn build_live<'a>(
+    fn read_system_prompts_live<'a>(
         &'a mut self,
         selection: &'a ResolvedModelSelection,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<String>> {
+    ) -> BoxFuture<'a, PromptResult<Vec<(String, String)>>> {
         Box::pin(async move {
             self.0.entered.notify_one();
             // Actual live work must finish cleanup even after its observer leaves.
@@ -402,7 +414,7 @@ impl SystemPrompt for BlockingStatusPrompt {
             cancellation
                 .check()
                 .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
-            self.build(selection)
+            self.read_system_prompts(selection)
         })
     }
 }

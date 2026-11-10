@@ -1,15 +1,15 @@
 use super::{
     AgentIdentityDescription, PromptError, PromptResult, SkillCatalog, SkillMetadata,
     SkillSnapshot, SystemPrompt, SystemPromptProvider, normalize_skill_match_path,
-    normalize_skill_path, render_skill_catalog,
+    normalize_skill_path, render_skill_catalog_entries,
 };
+use parrot_core::SkillCatalogEntry;
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation, OperationError},
     filesystem::{AuthorizedReadService, FileReadErrorKind, LinkPolicy, ReadRequest},
     security::SecurityProvider,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
-use parrot_provider::routing::aliases::ResolvedModelSelection;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 
@@ -24,8 +24,7 @@ pub struct AgentSkills<
     templates: Arc<PromptTemplateCatalog>,
     working_directory: String,
     snapshot: Arc<SkillSnapshot>,
-    catalog_rendering: Option<(Arc<SkillSnapshot>, String)>,
-    catalog_view: Arc<RwLock<Option<PromptResult<String>>>>,
+    catalog_view: Arc<RwLock<Option<Vec<SkillCatalogEntry>>>>,
     turn_active: bool,
 }
 impl<R, P> AgentSkills<R, P>
@@ -53,7 +52,6 @@ where
                 errors: Vec::new(),
                 root_locations: Vec::new(),
             }),
-            catalog_rendering: None,
             catalog_view: Arc::new(RwLock::new(None)),
             turn_active: false,
         })
@@ -67,7 +65,7 @@ where
             .map_err(super::agents::read_error)?;
         self.turn_active = true;
         self.snapshot = snapshot;
-        let _ = self.publish_catalog(self.snapshot.clone());
+        self.publish_catalog(self.snapshot.clone());
         Ok(())
     }
     async fn ensure_turn(&mut self, cancellation: &dyn Cancellation) -> PromptResult<()> {
@@ -77,6 +75,13 @@ where
         Ok(())
     }
     pub async fn build_catalog(&mut self, cancellation: &dyn Cancellation) -> PromptResult<String> {
+        let entries = self.read_catalog(cancellation).await?;
+        render_skill_catalog_entries(&entries, &self.templates).map(|(_, text)| text)
+    }
+    pub async fn read_catalog(
+        &mut self,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<SkillCatalogEntry>> {
         let snapshot = if self.turn_active {
             self.snapshot.clone()
         } else {
@@ -86,22 +91,27 @@ where
                 .await
                 .map_err(super::agents::read_error)?
         };
-        self.publish_catalog(snapshot)
+        Ok(self.publish_catalog(snapshot))
     }
-    fn publish_catalog(&mut self, snapshot: Arc<SkillSnapshot>) -> PromptResult<String> {
-        let rendered = match &self.catalog_rendering {
-            Some((previous, text)) if Arc::ptr_eq(previous, &snapshot) => Ok(text.clone()),
-            _ => render_skill_catalog(&snapshot.skills, &self.templates),
-        };
-        if let Ok(text) = &rendered {
-            self.catalog_rendering = Some((snapshot, text.clone()));
-        }
+    fn publish_catalog(&mut self, snapshot: Arc<SkillSnapshot>) -> Vec<SkillCatalogEntry> {
+        let entries = snapshot
+            .skills
+            .iter()
+            .map(|skill| SkillCatalogEntry {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                discovery_path: skill.discovery_path.clone(),
+                enabled: skill.enabled,
+                prompt_visible: skill.prompt_visible,
+            })
+            .collect::<Vec<_>>();
         *self
             .catalog_view
             .write()
-            .expect("skill catalog view lock poisoned") = Some(rendered.clone());
-        rendered
+            .expect("skill catalog view lock poisoned") = Some(entries.clone());
+        entries
     }
+
     pub async fn get_skills(
         &mut self,
         references: &[parrot_core::SkillReference],
@@ -145,7 +155,7 @@ where
                 .refresh(&security, cancellation)
                 .await
                 .map_err(super::agents::read_error)?;
-            let _ = self.publish_catalog(self.snapshot.clone());
+            self.publish_catalog(self.snapshot.clone());
         }
         Ok(references
             .iter()
@@ -215,16 +225,21 @@ pub struct AgentSkillPromptProvider<
     P: SecurityProvider<Snapshot = R::Security>,
 > {
     skills: Arc<Mutex<AgentSkills<R, P>>>,
-    catalog_view: Arc<RwLock<Option<PromptResult<String>>>>,
+    catalog_view: Arc<RwLock<Option<Vec<SkillCatalogEntry>>>>,
+    templates: Arc<PromptTemplateCatalog>,
 }
 impl<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Security>>
     AgentSkillPromptProvider<R, P>
 {
     pub async fn new(skills: Arc<Mutex<AgentSkills<R, P>>>) -> Self {
-        let catalog_view = skills.lock().await.catalog_view.clone();
+        let guard = skills.lock().await;
+        let catalog_view = guard.catalog_view.clone();
+        let templates = guard.templates.clone();
+        drop(guard);
         Self {
             skills,
             catalog_view,
+            templates,
         }
     }
 }
@@ -241,12 +256,14 @@ where
         Ok(Box::new(SkillPrompt {
             skills: self.skills.clone(),
             catalog_view: self.catalog_view.clone(),
+            templates: self.templates.clone(),
         }))
     }
 }
 struct SkillPrompt<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Security>> {
     skills: Arc<Mutex<AgentSkills<R, P>>>,
-    catalog_view: Arc<RwLock<Option<PromptResult<String>>>>,
+    catalog_view: Arc<RwLock<Option<Vec<SkillCatalogEntry>>>>,
+    templates: Arc<PromptTemplateCatalog>,
 }
 impl<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Security>> SystemPrompt
     for SkillPrompt<R, P>
@@ -257,15 +274,14 @@ impl<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Securi
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, PromptResult<()>> {
         Box::pin(async move {
-            self.skills.lock().await.build_catalog(cancellation).await?;
+            self.skills.lock().await.read_catalog(cancellation).await?;
             Ok(())
         })
     }
-    fn build_live<'a>(
+    fn read_skill_catalog_live<'a>(
         &'a mut self,
-        _: &'a ResolvedModelSelection,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<String>> {
+    ) -> BoxFuture<'a, PromptResult<Vec<SkillCatalogEntry>>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| PromptError::Cancelled)?;
             let mut skills = tokio::select! {
@@ -274,18 +290,21 @@ impl<R: AuthorizedReadService + ?Sized, P: SecurityProvider<Snapshot = R::Securi
                 skills = self.skills.lock() => skills,
             };
             cancellation.check().map_err(|_| PromptError::Cancelled)?;
-            skills.build_catalog(cancellation).await
+            skills.read_catalog(cancellation).await
         })
     }
-    fn build(&mut self, _: &ResolvedModelSelection) -> PromptResult<String> {
+    fn read_skill_catalog(&self) -> PromptResult<Vec<SkillCatalogEntry>> {
         self.catalog_view
             .read()
             .expect("skill catalog view lock poisoned")
             .clone()
-            .unwrap_or_else(|| {
-                Err(PromptError::Context(
+            .ok_or_else(|| {
+                PromptError::Context(
                     "The skill catalogue has not been sampled for this epoch.".into(),
-                ))
+                )
             })
+    }
+    fn get_template_catalog(&self, source_key: &str) -> Option<&PromptTemplateCatalog> {
+        (source_key == "runtime:system-context:09b-skills").then_some(self.templates.as_ref())
     }
 }

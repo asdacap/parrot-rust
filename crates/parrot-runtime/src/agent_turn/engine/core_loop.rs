@@ -55,24 +55,58 @@ where
                 .into()
             })
     }
-    fn render_instructions(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
-        adapt_operation(async move {
-            let backend = self.backend;
-            let mut guard = backend.state.lock().await;
-            let state = &mut *guard;
-            let selection = self.binding.capture_selection()?;
-            state.request_status = Some(backend.status.bind(&selection));
-            let cancellation = self.cancellation;
-            cancellation.check().map_err(|_| ContextError::Cancelled)?;
-            state
-                .context
-                .ensure_epoch(&backend.prompt, cancellation)
-                .await?;
-            Ok(backend
-                .prompt
-                .build(&selection.model, cancellation)
-                .await
-                .map_err(ContextError::from)?)
+    fn render_instructions<'a>(
+        &'a mut self,
+        states: &'a mut dyn CoreStates,
+    ) -> BoxFuture<'a, Result<String, CoreError>> {
+        Box::pin(async move {
+            use crate::prompt_context::{
+                render_agent_identity, render_agents_files, render_model_prompt,
+                render_skill_catalog_entries, render_standing_instruction,
+                render_system_prompt_sections,
+            };
+            let templates = &self.backend.templates;
+            let render_error =
+                |error| CoreError::from(TurnError::Context(ContextError::Prompt(error)));
+            let mut sections = states.read_system_prompts().await?;
+            for (source_key, template) in states.read_prompt_templates().await? {
+                let arguments = states.read_template_arguments(&source_key).await?;
+                let content = templates
+                    .render(&template, &arguments, &NeverCancelled)
+                    .map_err(|error| {
+                        render_error(crate::prompt_context::PromptError::Template(
+                            error.to_string(),
+                        ))
+                    })?;
+                sections.push((source_key, content));
+            }
+            sections.push(
+                render_agents_files(&states.read_agents_files().await?, templates)
+                    .map_err(render_error)?,
+            );
+            sections.push(
+                render_model_prompt(
+                    &states.read_model_aliases().await?,
+                    &(
+                        states.read_model_system_prompt().await?,
+                        states.read_alias_system_prompt().await?,
+                    ),
+                    templates,
+                )
+                .map_err(render_error)?,
+            );
+            if let Some(identity) = states.read_agent_identity().await? {
+                sections.push(render_agent_identity(&identity, templates).map_err(render_error)?);
+            }
+            sections.push(
+                render_standing_instruction(&states.read_standing_instruction().await?, templates)
+                    .map_err(render_error)?,
+            );
+            sections.push(
+                render_skill_catalog_entries(&states.read_skill_catalog().await?, templates)
+                    .map_err(render_error)?,
+            );
+            Ok(render_system_prompt_sections(sections))
         })
     }
     fn get_pending_prompt<'a>(
@@ -793,6 +827,133 @@ where
     T: TurnTools<S> + 'static,
     T::Snapshot: 'static,
 {
+    fn read_system_prompts(&mut self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
+        adapt_operation(async move {
+            let backend = self.backend;
+            let selection = self.binding.capture_selection()?;
+            {
+                let mut state = backend.state.lock().await;
+                state.request_status = Some(backend.status.bind(&selection));
+                self.cancellation
+                    .check()
+                    .map_err(|_| ContextError::Cancelled)?;
+                state
+                    .context
+                    .ensure_epoch(&backend.prompt, self.cancellation)
+                    .await?;
+            }
+            backend
+                .prompt
+                .read_system_prompts(&selection.model, self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_prompt_templates(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .read_prompt_templates(self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_template_arguments<'a>(
+        &'a self,
+        source_key: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<(String, serde_json::Value)>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .read_template_arguments(source_key, self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_agents_files(&self) -> BoxFuture<'_, Result<Vec<(String, String)>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .read_agents_files(self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_model_aliases(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::ModelAliasDescription>, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            self.backend
+                .prompt
+                .read_model_aliases(&selection.model, self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_model_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            self.backend
+                .prompt
+                .read_model_guidance(&selection.model, self.cancellation)
+                .await
+                .map(|(model, _)| model)
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_alias_system_prompt(&self) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
+        adapt_operation(async move {
+            let selection = self.binding.capture_selection()?;
+            self.backend
+                .prompt
+                .read_model_guidance(&selection.model, self.cancellation)
+                .await
+                .map(|(_, alias)| alias)
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_agent_identity(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<parrot_core::AgentIdentityDescription>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .read_agent_identity(self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_standing_instruction(&self) -> BoxFuture<'_, Result<String, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .read_standing_instruction(self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
+    fn read_skill_catalog(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .prompt
+                .read_skill_catalog(self.cancellation)
+                .await
+                .map_err(ContextError::from)
+                .map_err(Into::into)
+        })
+    }
     fn record_tool_results<'a>(
         &'a mut self,
         results: &'a [ToolResult],

@@ -1,6 +1,64 @@
 use super::*;
 
 #[test]
+fn state_supplies_fresh_instructions_to_an_independent_preparation() {
+    let mut state = MemoryState::new([
+        Reply::final_response("candidate"),
+        Reply::final_response("answer"),
+    ]);
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["retry".into()]);
+    state.request().renderings = ["first state instructions", "updated state instructions"]
+        .into_iter()
+        .map(|instructions| RenderedContext {
+            instructions: instructions.into(),
+            maximum_output_tokens: 100,
+            messages: Vec::new(),
+        })
+        .collect();
+    let mut preparation = state.preparation();
+    preparation.request = MemoryState::new([]).request;
+    preparation.request().instructions = "not the state instructions".into();
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+    let options = state.capture_options();
+    let mut budget = TurnBudget::new(state.unlimited);
+    let mut compaction = MemoryCompaction::new(
+        state.compaction_plan.clone(),
+        state.summary_provider.clone(),
+    );
+    let cancellation = state.cancellation.clone();
+    let is_cancelled = || cancellation.is_cancelled();
+    let cancelled = || cancellation.cancelled();
+
+    assert_eq!(
+        finish(run(
+            &mut state,
+            &mut parrot_core::PreparationDependencies {
+                request: &mut preparation,
+                compaction: &mut compaction.dependencies(),
+            },
+            &tools,
+            &provider,
+            &options,
+            &mut budget,
+            CancellationToken::new(&is_cancelled, &cancelled),
+        )),
+        Ok(Outcome::Completed("answer".into()))
+    );
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].instructions, "first state instructions");
+    assert_eq!(requests[1].instructions, "updated state instructions");
+    assert_eq!(
+        preparation.request().instructions,
+        "not the state instructions"
+    );
+}
+
+#[test]
 fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparation() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.model = "provider/model-with-options".into();
@@ -189,7 +247,7 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
 
 #[test]
 fn context_preparation_and_message_read_errors_stop_before_provider_invocation() {
-    for stage in ["render", "messages"] {
+    for stage in ["instruction_state", "render", "messages"] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
         state.fail_at = Some(stage);
         assert_eq!(state.run(), Err(Error::failed(stage)));

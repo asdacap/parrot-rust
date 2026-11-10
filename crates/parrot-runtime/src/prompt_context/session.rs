@@ -1,6 +1,8 @@
 use super::{PromptError, PromptResult, SystemPrompt};
+use parrot_core::{AgentIdentityDescription, ModelAliasDescription, SkillCatalogEntry};
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_provider::routing::aliases::ResolvedModelSelection;
+use serde_json::Value;
 use tokio::sync::{Mutex, MutexGuard};
 
 /// The one live prompt product and its epoch. Guards cover sampling/building,
@@ -45,6 +47,100 @@ impl SessionPrompt {
         state.prompt.sample_epoch(cancellation).await?;
         state.sampled = true;
         Ok(())
+    }
+
+    pub async fn read_system_prompts(
+        &self,
+        selection: &ResolvedModelSelection,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<(String, String)>> {
+        self.lock(cancellation)
+            .await?
+            .prompt
+            .read_system_prompts_live(selection, cancellation)
+            .await
+    }
+
+    pub async fn read_prompt_templates(
+        &self,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<(String, String)>> {
+        Ok(self
+            .lock(cancellation)
+            .await?
+            .prompt
+            .read_prompt_templates())
+    }
+
+    pub async fn read_agents_files(
+        &self,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<(String, String)>> {
+        self.lock(cancellation).await?.prompt.read_agents_files()
+    }
+
+    pub async fn read_agent_identity(
+        &self,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Option<AgentIdentityDescription>> {
+        Ok(self.lock(cancellation).await?.prompt.read_agent_identity())
+    }
+
+    pub async fn read_standing_instruction(
+        &self,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<String> {
+        Ok(self
+            .lock(cancellation)
+            .await?
+            .prompt
+            .read_standing_instruction())
+    }
+
+    pub async fn read_template_arguments(
+        &self,
+        source_key: &str,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<(String, Value)>> {
+        Ok(self
+            .lock(cancellation)
+            .await?
+            .prompt
+            .read_template_arguments(source_key))
+    }
+
+    pub async fn read_model_aliases(
+        &self,
+        selection: &ResolvedModelSelection,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<ModelAliasDescription>> {
+        self.lock(cancellation)
+            .await?
+            .prompt
+            .read_model_aliases(selection)
+    }
+
+    pub async fn read_model_guidance(
+        &self,
+        selection: &ResolvedModelSelection,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<(Option<String>, Option<String>)> {
+        Ok(self
+            .lock(cancellation)
+            .await?
+            .prompt
+            .read_model_guidance(selection))
+    }
+
+    pub async fn read_skill_catalog(
+        &self,
+        cancellation: &dyn Cancellation,
+    ) -> PromptResult<Vec<SkillCatalogEntry>> {
+        self.lock(cancellation)
+            .await?
+            .prompt
+            .read_skill_catalog_live(cancellation)
+            .await
     }
 
     pub async fn build(
