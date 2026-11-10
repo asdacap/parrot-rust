@@ -11,6 +11,7 @@ pub mod rendering;
 mod skills;
 mod status;
 pub mod template;
+mod tool_settlement;
 pub use context::*;
 pub use context_additions::*;
 pub use context_epoch::*;
@@ -18,6 +19,7 @@ pub use conversation::*;
 pub use protocol::*;
 pub use skills::{SkillMention, parse_skill_mentions};
 pub use status::*;
+pub use tool_settlement::*;
 
 /// Drains ready turns using state-backed settings and the invocation budget.
 pub async fn run(
@@ -232,13 +234,15 @@ async fn execute_turn(
             let receipt = ToolCallReceipt {
                 assistant_sequence: recorded.sequence,
             };
-            let results = tools
-                .execute(response.tool_calls.clone(), receipt, flags, cancellation)
-                .await?;
-            if results.is_empty() {
-                return Err(Error::failed("tool execution returned no results"));
-            }
-            states.record_tool_results(&results).await?;
+            execute_tools(
+                states,
+                tools,
+                response.tool_calls.clone(),
+                receipt,
+                flags,
+                cancellation,
+            )
+            .await?;
             if flags.final_phase && !budget.try_extend_settlement() {
                 return Ok(Outcome::BudgetExhausted);
             }

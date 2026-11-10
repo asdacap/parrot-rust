@@ -30,7 +30,7 @@ fn initialized_results_remain_untouched_when_core_has_no_work_or_is_cancelled() 
 }
 
 #[test]
-fn core_executes_the_complete_provider_batch_once_and_records_all_results_once() {
+fn core_executes_the_provider_batch_once_and_records_each_result_once() {
     let calls: Vec<_> = ["first", "second", "third"]
         .into_iter()
         .map(|id| ToolCall {
@@ -72,7 +72,13 @@ fn core_executes_the_complete_provider_batch_once_and_records_all_results_once()
             .into_iter()
             .filter(|step| matches!(step.as_str(), "record_tools" | "execute" | "record_results"))
             .collect::<Vec<_>>(),
-        ["record_tools", "execute", "record_results"]
+        [
+            "record_tools",
+            "execute",
+            "record_results",
+            "record_results",
+            "record_results"
+        ]
     );
     assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(state.recorded_tools.len(), 1);
@@ -199,12 +205,16 @@ impl Tools for EchoTools {
 
     fn execute<'a>(
         &'a self,
-        calls: Vec<ToolCall>,
-        _receipt: ToolCallReceipt,
-        _flags: TurnFlags,
+        request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
         Box::pin(async move {
+            let ToolExecutionRequest {
+                calls,
+                receipt: _receipt,
+                flags: _flags,
+                ..
+            } = request;
             Ok(calls
                 .into_iter()
                 .map(|call| ToolResult {
@@ -213,6 +223,7 @@ impl Tools for EchoTools {
                     text: call.arguments_json,
                     ..ToolResult::default()
                 })
+                .map(Into::into)
                 .collect())
         })
     }

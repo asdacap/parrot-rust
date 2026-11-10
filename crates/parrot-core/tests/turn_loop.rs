@@ -6,7 +6,8 @@ use parrot_core::{
     Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
     PendingMessage, PromotedInput, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
     Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, TokenCalibration,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolExecutionResult, ToolImage, ToolResult, ToolStatus,
+
     Tools, TurnOptions,
     budget::{TurnBudget, TurnFlags},
     parse_skill_mentions,
@@ -221,19 +222,23 @@ impl Tools for MemoryTools {
     }
     fn execute<'a>(
         &'a self,
-        calls: Vec<ToolCall>,
-        receipt: ToolCallReceipt,
-        flags: TurnFlags,
+        request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
         Box::pin(async move {
+            let ToolExecutionRequest {
+                calls,
+                receipt,
+                flags,
+                ..
+            } = request;
             assert!(!calls.is_empty());
             self.requests.lock().unwrap().push(calls.clone());
             self.receipts.lock().unwrap().push(receipt);
             self.flags.lock().unwrap().push(flags);
             self.trace.step("execute", *self.fail_at.lock().unwrap())?;
             if let Some(reply) = self.replies.lock().unwrap().pop_front() {
-                return Ok(reply);
+                return Ok(reply.into_iter().map(Into::into).collect());
             }
             Ok(calls
                 .into_iter()
@@ -243,6 +248,7 @@ impl Tools for MemoryTools {
                     tool_name: call.name,
                     ..ToolResult::default()
                 })
+                .map(Into::into)
                 .collect())
         })
     }
@@ -788,6 +794,12 @@ impl States for MemoryState {
                     }
                     _ => {}
                 },
+                ConversationPersistence::ToolResult { result, .. } => {
+                    self.step("record_results")?;
+                    self.applied_results.push(result.result.clone());
+                }
+                ConversationPersistence::ToolImages { .. } => {}
+                ConversationPersistence::Status { .. } => return Err(Error::unsupported("memory status persistence")),
                 ConversationPersistence::Committed(_) => {}
                 ConversationPersistence::Phase { final_phase, .. } => {
                     if !final_phase {
@@ -826,6 +838,8 @@ impl States for MemoryState {
                 if !matches!(
                     &addition.persistence,
                     ConversationPersistence::Committed(_)
+                        | ConversationPersistence::ToolResult { .. }
+                        | ConversationPersistence::ToolImages { .. }
                         | ConversationPersistence::CloseTurn { .. }
                         | ConversationPersistence::CompletionFeedback(_)
                         | ConversationPersistence::Append {
@@ -1068,31 +1082,8 @@ impl States for MemoryState {
     ) -> BoxFuture<'_, Result<Vec<parrot_core::SkillCatalogEntry>, Error>> {
         Box::pin(async { Ok(Vec::new()) })
     }
-    fn record_tool_results<'a>(
-        &'a mut self,
-        results: &'a [ToolResult],
-    ) -> BoxFuture<'a, Result<(), Error>> {
+    fn write_tool_watermark(&mut self, _through: i64) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            self.step("record_results")?;
-            let calls = &self
-                .recorded_tools
-                .last()
-                .expect("recorded tool batch")
-                .tool_calls;
-            assert_eq!(results.len(), calls.len());
-            for (result, call) in results.iter().zip(calls) {
-                assert_eq!(result.call_id, call.id);
-                assert_eq!(result.tool_name, call.name);
-            }
-            self.applied_results.extend_from_slice(results);
-            for result in results {
-                self.append_turn_message(Message {
-                    role: Role::Tool,
-                    contents: vec![Content::Text(result.text.clone())],
-                    tool_call_id: result.call_id.clone(),
-                    ..Message::default()
-                });
-            }
             if let Some(steer) = self.steers_after_results.pop_front() {
                 self.enqueue_message(Delivery::Steer, &steer);
             }
@@ -1885,17 +1876,24 @@ fn tools_and_provider_operate_without_states() {
     let source = CancellationSource::default();
     let cancellation = CancellationToken::new(&source);
     let results = finish(tools.execute(
-        calls.clone(),
-        ToolCallReceipt {
-            assistant_sequence: 41,
+        ToolExecutionRequest {
+            calls: calls.clone(),
+            receipt: ToolCallReceipt {
+                assistant_sequence: 41,
+            },
+            flags: TurnFlags { final_phase: false },
+            starts_batch: true,
+            cancel_remaining: false,
         },
-        TurnFlags { final_phase: false },
         cancellation,
     ))
     .unwrap();
     assert_eq!(*state.tools.requests.lock().unwrap(), [calls]);
     assert_eq!(
-        results,
+        results
+            .into_iter()
+            .map(|execution| execution.result)
+            .collect::<Vec<_>>(),
         [ToolResult {
             call_id: "explicit-call".into(),
             tool_name: "read".into(),

@@ -2,8 +2,8 @@ use super::*;
 use parrot_core::{
     ContextCompaction as CoreContextCompaction, ContextSnapshot as CoreContextSnapshot,
     Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse,
-    States as CoreStates, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition,
-    ToolResult, ToolStatus, TurnOptions,
+    States as CoreStates, TokenCalibration, ToolCallReceipt, ToolCatalog, ToolDefinition,
+    TurnOptions,
 };
 
 mod conversation;
@@ -675,17 +675,25 @@ where
                 .map_err(Into::into)
         })
     }
-    fn record_tool_results<'a>(
-        &'a mut self,
-        results: &'a [ToolResult],
-    ) -> BoxFuture<'a, Result<(), CoreError>> {
+    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<parrot_core::ToolRecovery, CoreError>> {
         adapt_operation(async move {
-            let mut guard = self.backend.state.lock().await;
-            let state = &mut *guard;
-            state
+            self.backend
+                .state
+                .lock()
+                .await
                 .tool_conversation
-                .complete_execution(&mut state.conversation, results)
-                .await?;
+                .read_recovery()
+                .await
+        })
+    }
+    fn write_tool_watermark(&mut self, through: i64) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.backend
+                .state
+                .lock()
+                .await
+                .tool_conversation
+                .advance_watermark(through);
             Ok(())
         })
     }
@@ -888,21 +896,18 @@ where
     }
     fn execute<'a>(
         &'a self,
-        calls: Vec<ToolCall>,
-        receipt: ToolCallReceipt,
-        flags: parrot_core::budget::TurnFlags,
+        request: parrot_core::ToolExecutionRequest,
         cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
+    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolExecutionResult>, CoreError>> {
         adapt_operation(async move {
             let backend = self.backend;
-            let assistant_sequence = receipt.assistant_sequence;
             let selection = self.binding.capture_selection()?;
             let snapshot = {
                 let guard = self.captured.lock().expect("captured tools poisoned");
                 let tools = guard
                     .as_ref()
                     .ok_or_else(|| TurnError::Service("turn tools are unavailable".into()))?;
-                if flags.final_phase {
+                if request.flags.final_phase {
                     tools.final_phase.clone()
                 } else {
                     tools.normal.clone()
@@ -914,48 +919,49 @@ where
                 .request_status
                 .clone()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            state
-                .tool_conversation
-                .begin_execution(assistant_sequence, calls.clone())?;
             let events = ContextEmitter { backend };
-            let mut results = Vec::with_capacity(calls.len());
-            let mut cancel_remaining = false;
-            while results.len() < calls.len() {
-                let chunk = backend
-                    .tools
-                    .execute(
-                        ToolExecutionChunk {
-                            assistant_sequence,
-                            starts_batch: results.is_empty(),
-                            calls: calls[results.len()..].to_vec(),
-                            cancel_remaining,
-                        },
-                        TurnResources {
-                            history: &backend.history,
-                            conversation: &mut state.conversation,
-                            context: &mut state.context,
-                            prompt: &backend.prompt,
-                            sessions: &backend.sessions,
-                            status: status.as_ref(),
-                            events: &events,
-                            usage: &backend.usage,
-                        },
-                        &selection,
-                        &snapshot,
-                        backend.selection.as_ref(),
-                        &cancellation,
-                    )
-                    .await?;
-                state
-                    .tool_conversation
-                    .record_results(&mut state.conversation, &chunk)
-                    .await?;
-                cancel_remaining |= chunk
-                    .iter()
-                    .any(|result| result.result.status == ToolStatus::Cancelled);
-                results.extend(chunk.into_iter().map(|result| result.result));
-            }
-            Ok(results)
+            let chunk = backend
+                .tools
+                .execute(
+                    ToolExecutionChunk {
+                        assistant_sequence: request.receipt.assistant_sequence,
+                        starts_batch: request.starts_batch,
+                        calls: request.calls,
+                        cancel_remaining: request.cancel_remaining,
+                    },
+                    TurnResources {
+                        history: &backend.history,
+                        conversation: &mut state.conversation,
+                        context: &mut state.context,
+                        prompt: &backend.prompt,
+                        sessions: &backend.sessions,
+                        status: status.as_ref(),
+                        events: &events,
+                        usage: &backend.usage,
+                    },
+                    &selection,
+                    &snapshot,
+                    backend.selection.as_ref(),
+                    &cancellation,
+                )
+                .await?;
+            Ok(chunk
+                .into_iter()
+                .map(|execution| parrot_core::ToolExecutionResult {
+                    result: execution.result,
+                    yielded_process: execution.yielded_process.map(|value| {
+                        parrot_core::YieldedProcess {
+                            process_id: value.process_id,
+                            name: value.name,
+                            inventory_instance_id: value.inventory_instance_id,
+                            visible_revision: value.visible_revision,
+                            stdout_path: value.stdout_path,
+                            stderr_path: value.stderr_path,
+                            activity_kind: value.activity_kind.value(),
+                        }
+                    }),
+                })
+                .collect())
         })
     }
 }

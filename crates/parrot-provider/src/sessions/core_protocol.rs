@@ -134,6 +134,9 @@ impl From<parrot_core::Content> for Content {
     fn from(content: parrot_core::Content) -> Self {
         match content {
             parrot_core::Content::Text(text) => Self::Text(text),
+            parrot_core::Content::Artifact(_) => {
+                panic!("artifact content must be materialized before provider conversion")
+            }
             parrot_core::Content::Image {
                 path,
                 url,

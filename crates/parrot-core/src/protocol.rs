@@ -1,4 +1,3 @@
-use crate::budget;
 use std::sync::Arc;
 use std::{fmt, future::Future, pin::Pin};
 
@@ -148,17 +147,13 @@ pub trait Tools: Send + Sync {
     /// Captures permitted definitions backed by the original executable identities
     /// for this turn. The final catalog is the subset permitted in the final phase.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
-    /// Executes the recorded batch using retained executable identities for the
-    /// supplied turn flags and explicit durable assistant correlation. Returns results
-    /// in call order and joins all admitted work, including on failure. Native
-    /// adapters may settle chunks durably before returning the complete batch to [`States`].
+    /// Executes one ordered prefix of the supplied calls, joining all admitted work.
+    /// Core settles the returned chunk before requesting the next prefix.
     fn execute<'a>(
         &'a self,
-        calls: Vec<ToolCall>,
-        receipt: ToolCallReceipt,
-        flags: budget::TurnFlags,
+        request: crate::ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>>;
+    ) -> BoxFuture<'a, Result<Vec<crate::ToolExecutionResult>, Error>>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -380,12 +375,13 @@ pub trait States: Send + Sync {
     fn read_skill_catalog(&self) -> BoxFuture<'_, Result<Vec<SkillCatalogEntry>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_skill_catalog")) })
     }
-    /// Durably records and applies the complete returned batch before continuing.
-    fn record_tool_results<'a>(
-        &'a mut self,
-        _results: &'a [ToolResult],
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_tool_results")) })
+    /// Reads tool calls and durable terminals after the settled watermark.
+    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<crate::ToolRecovery, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_tool_recovery")) })
+    }
+    /// Advances the session-local tool settlement watermark after successful settlement.
+    fn write_tool_watermark(&mut self, _through: i64) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.write_tool_watermark")) })
     }
     /// Reads the latest visible logical turn, including retained completion candidates.
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
@@ -479,6 +475,7 @@ pub enum Role {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Content {
     Text(String),
+    Artifact(ToolImage),
     Image {
         path: String,
         url: String,
@@ -951,6 +948,8 @@ pub enum ConfigKey {
     InterruptedTemplate,
     TruncatedToolCallTemplate,
     InvalidToolCallTemplate,
+    CrashedToolTemplate,
+    ToolErrorTemplate,
     OptionalCliUtilitiesTemplate,
     ExpectedCliUtilitiesTemplate,
     PlatformTemplate,

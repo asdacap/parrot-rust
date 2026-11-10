@@ -58,7 +58,7 @@ fn texts(request: &ProviderRequest) -> Vec<&str> {
         .flat_map(|message| &message.contents)
         .filter_map(|content| match content {
             Content::Text(text) => Some(text.as_str()),
-            Content::Image { .. } => None,
+            Content::Image { .. } | Content::Artifact(_) => None,
         })
         .collect()
 }

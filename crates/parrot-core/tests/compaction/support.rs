@@ -60,7 +60,7 @@ impl Effects {
                     .iter()
                     .map(|content| match content {
                         Content::Text(text) => text.len() as i64,
-                        Content::Image { .. } => 10,
+                        Content::Image { .. } | Content::Artifact(_) => 10,
                     })
                     .sum::<i64>()
             })

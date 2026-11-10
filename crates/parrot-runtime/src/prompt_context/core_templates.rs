@@ -52,6 +52,11 @@ const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
         ConfigKey::ExpectedCliUtilitiesTemplate,
         "context.expected-cli-utilities",
     ),
+    (
+        ConfigKey::CrashedToolTemplate,
+        "agent-session.crashed-tool-result",
+    ),
+    (ConfigKey::ToolErrorTemplate, "tool-result.error"),
     (ConfigKey::PlatformTemplate, "context.platform"),
     (
         ConfigKey::WorkingDirectoryTemplate,

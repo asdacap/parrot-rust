@@ -96,11 +96,9 @@ impl Tools for CancellingCatalog {
 
     fn execute<'a>(
         &'a self,
-        _calls: Vec<ToolCall>,
-        _receipt: ToolCallReceipt,
-        _flags: TurnFlags,
+        _request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
         Box::pin(async { panic!("cancellation after initialization must prevent tool execution") })
     }
 }
@@ -135,12 +133,16 @@ impl Tools for JoiningTools {
 
     fn execute<'a>(
         &'a self,
-        calls: Vec<ToolCall>,
-        _receipt: ToolCallReceipt,
-        _flags: TurnFlags,
+        request: ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
         Box::pin(async move {
+            let ToolExecutionRequest {
+                calls,
+                receipt: _receipt,
+                flags: _flags,
+                ..
+            } = request;
             assert_eq!(calls.len(), 1);
             assert!(!cancellation.is_cancelled());
             let (release, work) = mpsc::sync_channel(1);
@@ -205,12 +207,16 @@ impl Tools for CancellingTools {
 
     fn execute<'a>(
         &'a self,
-        calls: Vec<ToolCall>,
-        _receipt: ToolCallReceipt,
-        _flags: TurnFlags,
+        request: ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolExecutionResult>, Error>> {
         Box::pin(async move {
+            let ToolExecutionRequest {
+                calls,
+                receipt: _receipt,
+                flags: _flags,
+                ..
+            } = request;
             assert!(!cancellation.is_cancelled());
             self.0.cancel();
             assert!(cancellation.is_cancelled());
@@ -223,6 +229,7 @@ impl Tools for CancellingTools {
                     text: "tool-owned cancellation result".into(),
                     ..ToolResult::default()
                 })
+                .map(Into::into)
                 .collect())
         })
     }

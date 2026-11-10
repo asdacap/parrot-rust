@@ -62,6 +62,14 @@ pub enum ConversationPersistence {
         event: ConversationEvent,
     },
     CompletionFeedback(CompletionFeedback),
+    ToolResult {
+        assistant_sequence: i64,
+        result: crate::ToolExecutionResult,
+        recovered: bool,
+    },
+    ToolImages {
+        assistant_sequence: i64,
+    },
     CloseTurn {
         finish_reason: FinishReason,
     },
