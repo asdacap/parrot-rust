@@ -88,9 +88,7 @@ use parrot_runtime::{
         ForkHistoryMode, SchedulerConfig, TaskConfiguration, TaskDiagnostic, TaskDiagnostics,
         TaskSession,
     },
-    tool_settlement::{
-        SharedSecurity, ToolFactory, ToolInventory, ToolExecutionConfig,
-    },
+    tool_settlement::{SharedSecurity, ToolExecutionConfig, ToolFactory, ToolInventory},
 };
 use parrot_storage::{
     artifacts::{compaction::CompactionGroupBlobStore, output_blobs::ToolOutputBlobStore},
@@ -205,7 +203,7 @@ where
 /// The two-phase cell breaks only constructor cycles. Admission binds the real
 /// catalog exactly once; observing an unbound cell is an error, never an empty
 /// or successful substitute catalog.
-struct BoundCatalog<S: RestrictableAccessSnapshot + 'static>(OnceLock<Arc<CatalogAdapter<S>>>);
+pub struct BoundCatalog<S: RestrictableAccessSnapshot + 'static>(OnceLock<Arc<CatalogAdapter<S>>>);
 impl<S: RestrictableAccessSnapshot + 'static> BoundCatalog<S> {
     fn new() -> Self {
         Self(OnceLock::new())
@@ -1517,20 +1515,20 @@ where
                 let activity = Arc::new(AgentSessionActivity::new(self.config.clock.clone()));
                 let bound_catalog = Arc::new(BoundCatalog::new());
                 let tool_execution = ToolExecutionConfig {
-                        path_variables: environment.materialize().clone(),
+                    path_variables: environment.materialize().clone(),
 
-                        templates: self.user.templates.clone(),
-                        output_blobs: blobs.clone(),
-                        publisher: publisher.clone(),
-                        activity: activity.clone(),
-                        diagnostics: log.clone(),
-                        image_bytes_per_cycle: self
-                            .config
-                            .configuration
-                            .runtime
-                            .request_limits
-                            .image_bytes_per_tool_cycle,
-                    };
+                    templates: self.user.templates.clone(),
+                    output_blobs: blobs.clone(),
+                    publisher: publisher.clone(),
+                    activity: activity.clone(),
+                    diagnostics: log.clone(),
+                    image_bytes_per_cycle: self
+                        .config
+                        .configuration
+                        .runtime
+                        .request_limits
+                        .image_bytes_per_tool_cycle,
+                };
                 let settlement = bound_catalog.clone();
                 let compact = &self.config.configuration.runtime.compaction;
                 let settings = CompactionSettings {
@@ -1641,7 +1639,7 @@ where
                             router: self.config.router.clone(),
                         }),
                         tools: settlement,
-                    tool_execution,
+                        tool_execution,
                         prompt,
                         skills: skills.skills,
                         context: ContextController::new(

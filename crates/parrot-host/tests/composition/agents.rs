@@ -62,8 +62,8 @@ mod fixture {
         event_broker::EventBroker,
         prompt_context::{PromptResult, SystemPrompt},
         tool_settlement::{
-            self, SharedSecurity, ToolDiagnostics, ToolFactory, ToolFailure, ToolHandle,
-            ToolInventory, ToolMetadata, ToolOutput, ToolExecutionConfig,
+            self, SharedSecurity, ToolDiagnostics, ToolExecutionConfig, ToolFactory, ToolFailure,
+            ToolHandle, ToolInventory, ToolMetadata, ToolOutput,
         },
     };
     use parrot_storage::{
@@ -629,31 +629,31 @@ mod fixture {
             );
             let waiting = Arc::new(Semaphore::new(0));
             let tool_execution = ToolExecutionConfig {
-                    path_variables: Default::default(),
+                path_variables: Default::default(),
 
-                    templates: templates.clone(),
-                    output_blobs: Arc::new(
-                        ToolOutputBlobStore::for_session(
-                            self.histories
-                                .repository
-                                .events()
-                                .database()
-                                .selected_root(),
-                            "scratch",
-                            Arc::new(Names),
-                        )
-                        .unwrap(),
-                    ),
-                    publisher: broker.clone(),
-                    activity: activity.clone(),
-                    diagnostics: Arc::new(Diagnostics),
-                    image_bytes_per_cycle: 0,
-                };
+                templates: templates.clone(),
+                output_blobs: Arc::new(
+                    ToolOutputBlobStore::for_session(
+                        self.histories
+                            .repository
+                            .events()
+                            .database()
+                            .selected_root(),
+                        "scratch",
+                        Arc::new(Names),
+                    )
+                    .unwrap(),
+                ),
+                publisher: broker.clone(),
+                activity: activity.clone(),
+                diagnostics: Arc::new(Diagnostics),
+                image_bytes_per_cycle: 0,
+            };
             let tools = Arc::new(RetainedFactory::new(
-                        bridge.clone(),
-                        provider.router(),
-                        waiting.clone(),
-                    ));
+                bridge.clone(),
+                provider.router(),
+                waiting.clone(),
+            ));
             let statistics = prepared
                 .history
                 .repository()

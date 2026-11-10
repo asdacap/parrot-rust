@@ -34,7 +34,7 @@ use parrot_runtime::{
         AgentAskDelivery, AgentAskTemplates, AgentAsks, InteractionError, InteractionErrorKind,
         PendingAgentAsk, QuestionBroker,
     },
-    tool_settlement::{SharedSecurity, ToolFactory},
+    tool_settlement::SharedSecurity,
 };
 use parrot_storage::{
     conversation::{HistoryForkBoundary, HistoryForkSelection},
@@ -46,7 +46,8 @@ use parrot_tools::agents::{
     status::{StatusChild, StatusProcess, StatusSnapshot},
 };
 
-pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S, dyn ToolFactory<S>>>;
+pub type RuntimeSession<S> =
+    AgentSession<RuntimeBackend<S, super::factory::scope::BoundCatalog<S>>>;
 
 /// Registered beside the actual runtime session in its owning scope. These are
 /// the same activity and work observations supplied to the drain, not copies.
