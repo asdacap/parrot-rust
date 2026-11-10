@@ -1,8 +1,5 @@
 use super::*;
-use parrot_core::{
-    ConversationAddition, ConversationEvent, ConversationOrigin as CoreOrigin,
-    ConversationPersistence, ConversationReceipt, Message,
-};
+use parrot_core::{ConversationEvent, ConversationOrigin as CoreOrigin, Message};
 
 pub(super) fn render_event(mut event: Event, content: ConversationEvent) -> Event {
     match content {
@@ -56,7 +53,7 @@ fn render_role(role: parrot_core::Role) -> MessageRole {
     }
 }
 
-fn render_origin(origin: CoreOrigin) -> ConversationOrigin {
+pub(super) fn render_origin(origin: CoreOrigin) -> ConversationOrigin {
     match origin {
         CoreOrigin::UserInput => ConversationOrigin::UserInput,
         CoreOrigin::Model => ConversationOrigin::Model,
@@ -65,7 +62,7 @@ fn render_origin(origin: CoreOrigin) -> ConversationOrigin {
     }
 }
 
-fn render_record(
+pub(super) fn render_record(
     message: &Message,
     origin: ConversationOrigin,
 ) -> Result<ConversationMessage, TurnError> {
@@ -110,192 +107,5 @@ fn render_record(
             provider_id: message.provider_id.clone(),
             content: message.provider_content.clone(),
         },
-    })
-}
-
-pub(super) async fn apply_conversation_addition<S, T>(
-    states: &mut RuntimeStates<'_, S, T>,
-    addition: ConversationAddition,
-) -> Result<ConversationReceipt, TurnError>
-where
-    S: AccessSnapshot + 'static,
-    T: TurnTools<S> + 'static,
-    T::Snapshot: 'static,
-{
-    let backend = states.backend;
-    let mut guard = backend.state.lock().await;
-    let state = &mut *guard;
-    let mut sequence = 0;
-    let mut publications = Vec::new();
-    let cancellation = states.cancellation;
-    match addition.persistence {
-        ConversationPersistence::Append { origin, event } => {
-            for message in &addition.messages {
-                let event = render_event(backend.event(), event.clone());
-                let item = backend
-                    .history
-                    .append_conversation(
-                        event.clone(),
-                        render_record(message, render_origin(origin))?,
-                    )
-                    .await?;
-                sequence = item.sequence;
-                publications.push(event);
-            }
-        }
-        ConversationPersistence::Committed(publication) => {
-            let event = render_event(
-                Event {
-                    id: publication.event_id,
-                    agent_session_id: publication.agent_session_id,
-                    ..Event::new()
-                },
-                publication.event,
-            );
-            publications.push(event);
-        }
-        persistence @ (ConversationPersistence::Phase { .. }
-        | ConversationPersistence::Reminder { .. }
-        | ConversationPersistence::Status { .. }) => {
-            return crate::compaction::apply_conversation_addition(
-                &backend.history,
-                &mut state.conversation,
-                &mut state.context.initial_status_pending,
-                ConversationAddition {
-                    messages: addition.messages,
-                    persistence,
-                },
-                &ContextEmitter { backend },
-                cancellation,
-            )
-            .await
-            .map_err(Into::into);
-        }
-        persistence @ (ConversationPersistence::ToolResult { .. }
-        | ConversationPersistence::ToolImages { .. }) => {
-            return state
-                .tool_conversation
-                .apply_conversation_addition(
-                    &mut state.conversation,
-                    ConversationAddition {
-                        messages: addition.messages,
-                        persistence,
-                    },
-                )
-                .await;
-        }
-        ConversationPersistence::CompletionFeedback(feedback) => {
-            let mut candidate = Some(feedback.candidate);
-            let sources = std::mem::take(
-                &mut *states
-                    .binding
-                    .exit_blocker_sources
-                    .lock()
-                    .expect("completion sources poisoned"),
-            );
-            for ((source, kind), message) in sources.into_iter().zip(feedback.messages) {
-                source
-                    .record_completion_feedback(
-                        &CompletionFeedback {
-                            kind,
-                            message,
-                            candidate: candidate.take(),
-                        },
-                        cancellation,
-                    )
-                    .await?;
-            }
-        }
-        ConversationPersistence::CloseTurn { finish_reason } => {
-            states
-                .work
-                .join_mutations()
-                .await
-                .map_err(|error| TurnError::Service(error.to_string()))?;
-            let key = states
-                .persistence_key
-                .as_ref()
-                .ok_or_else(|| TurnError::Service("turn start is unavailable".into()))?;
-            let totals = backend.usage.capture().own.totals;
-            let mut event = backend.event();
-            let completed: sessions::Completion = ProviderResponse {
-                finish_reason,
-                ..Default::default()
-            }
-            .into();
-            event.set_turn_ended(protocol::TurnEnded {
-                finish_reason: completed.finish_reason,
-                input_tokens: totals.input_tokens,
-                output_tokens: totals.output_tokens,
-                ..Default::default()
-            });
-            let record = render_record(&addition.messages[0], ConversationOrigin::Model)?;
-            let mut live = Vec::new();
-            for message in addition.messages {
-                live.push(crate::compaction::materialize_message(&backend.history, message).await?);
-            }
-            let result = backend
-                .history
-                .repository()
-                .events()
-                .close_turn_and_publish(
-                    key.clone(),
-                    event,
-                    Some(record),
-                    &PublisherRef(backend.publisher.as_ref()),
-                    cancellation,
-                    |receipt| {
-                        if receipt.closure == TurnClosure::NewlyClosed {
-                            for message in live {
-                                state.conversation.add(message);
-                            }
-                        }
-                    },
-                )
-                .await;
-            let committed = match &result {
-                Ok(receipt) => Some(receipt),
-                Err(CloseTurnError::Publication { committed, .. }) => Some(committed.as_ref()),
-                _ => None,
-            };
-            if let Some(receipt) = committed {
-                backend.history.refresh().await?;
-                if receipt.closure == TurnClosure::AlreadyClosed {
-                    state.conversation.reload().await?;
-                }
-            }
-            let receipt = result.map_err(|error| match error {
-                CloseTurnError::AdmissionCancelled => TurnError::Cancelled,
-                CloseTurnError::Repository(error) => error.into(),
-                CloseTurnError::Publication { error, .. } => TurnError::Publication(error),
-            })?;
-            return Ok(ConversationReceipt {
-                inserted: receipt.closure == TurnClosure::NewlyClosed,
-                sequence: 0,
-            });
-        }
-    }
-    for message in addition.messages {
-        if message.role == parrot_core::Role::Assistant {
-            let text: String = message
-                .contents
-                .iter()
-                .filter_map(|content| match content {
-                    parrot_core::Content::Text(text) => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect();
-            backend.activity.assistant_message(&text);
-        }
-        state
-            .conversation
-            .add(crate::compaction::materialize_message(&backend.history, message).await?);
-    }
-    for event in publications {
-        backend.publish(event, cancellation).await?;
-    }
-    Ok(ConversationReceipt {
-        inserted: true,
-        sequence,
     })
 }

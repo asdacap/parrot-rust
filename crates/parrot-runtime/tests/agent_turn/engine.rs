@@ -1,4 +1,5 @@
 //! T46 integration: the actual session drain, SQLite/JSONL history, context and provider pool.
+use crate::tool_execution_support::tool_execution_config;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -20,6 +21,7 @@ use parrot_provider::{
     },
     sessions::{self, Completion, Error, EventStream, Provider, Request, Session},
 };
+use parrot_runtime::tool_settlement::*;
 use parrot_runtime::{
     active_work::exit_reminders::ExitReminders,
     agent_turn::{
@@ -271,6 +273,7 @@ impl Fixture {
         let output = Arc::new(Output::default());
         let activity = Arc::new(Activity::new(trace.clone()));
         let backend = RuntimeBackend::new(RuntimeConfig {
+            tool_execution: tool_execution_config(&self.history, templates.clone(), erased.clone()),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
                 ..Default::default()
@@ -350,7 +353,7 @@ struct RuntimeOverrides {
     state: Option<Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>>,
     parent_completion: Option<Arc<dyn ParentCompletion>>,
 }
-type Backend = RuntimeBackend<Security, Tools>;
+type Backend = RuntimeBackend<Security>;
 struct Runtime {
     session: AgentSession<Backend>,
     publisher: Arc<Publisher>,
@@ -467,61 +470,122 @@ impl SelectionSource<Security> for Selection {
         Ok(())
     }
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Tools {
     trace: Arc<Trace>,
-    inline_prepare: AtomicBool,
-    inline_compact: AtomicBool,
-    prompt_cancelled: AtomicBool,
-    executions: AtomicUsize,
+    inline_prepare: Arc<AtomicBool>,
+    inline_compact: Arc<AtomicBool>,
+    prompt_cancelled: Arc<AtomicBool>,
+    executions: Arc<AtomicUsize>,
     definitions: Vec<sessions::Tool>,
-    materializations: AtomicUsize,
-    execution_gate: Mutex<Option<Arc<Gate>>>,
+    materializations: Arc<AtomicUsize>,
+    execution_gate: Arc<Mutex<Option<Arc<Gate>>>>,
 }
-impl TurnTools<Security> for Tools {
-    type Snapshot = Vec<sessions::Tool>;
-    fn materialize(&self) -> Result<Self::Snapshot, TurnError> {
-        self.materializations.fetch_add(1, Ordering::SeqCst);
-        Ok(self.definitions.clone())
+impl Tools {
+    fn with_names(names: &[&str]) -> Self {
+        Self {
+            definitions: names
+                .iter()
+                .map(|name| sessions::Tool {
+                    name: (*name).into(),
+                    description: String::new(),
+                    parameters_json: "{}".into(),
+                })
+                .collect(),
+            ..Self::default()
+        }
     }
-    fn permitted(
-        &self,
-        snapshot: &Self::Snapshot,
-        selection: &TurnSelection<Security>,
-    ) -> Result<Self::Snapshot, TurnError> {
-        Ok(snapshot
+}
+fn inventory(
+    handles: Vec<ToolHandle<Security>>,
+    definitions: &[sessions::Tool],
+) -> ToolInventory<Security> {
+    ToolInventory {
+        supported: vec![true; handles.len()],
+        tools: handles,
+        definitions: definitions
             .iter()
-            .filter(|tool| selection.profile.is_tool_permitted(&tool.name))
-            .cloned()
-            .collect())
+            .map(
+                |definition| parrot_domain::values::tools::ConfiguredToolDefinition {
+                    description: definition.description.clone(),
+                    parameters_json: definition.parameters_json.clone(),
+                },
+            )
+            .collect(),
     }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
-        snapshot
+}
+impl ToolFactory<Security> for Tools {
+    fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
+        self.materializations.fetch_add(1, Ordering::SeqCst);
+        Ok(inventory(
+            self.definitions
+                .iter()
+                .map(|definition| {
+                    ToolHandle::Borrowed(Arc::new(FixtureTool {
+                        metadata: ToolMetadata {
+                            name: definition.name.clone(),
+                            aliases: vec![],
+                        },
+                        tools: self.clone(),
+                        final_phase: true,
+                        text: "fake tool result",
+                        observations: None,
+                    }))
+                })
+                .collect(),
+            &self.definitions,
+        ))
     }
-    fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
-        snapshot.clone()
+}
+type ToolObservations = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+struct FixtureTool {
+    metadata: ToolMetadata,
+    tools: Tools,
+    final_phase: bool,
+    text: &'static str,
+    observations: Option<ToolObservations>,
+}
+impl BorrowedTool<Security> for FixtureTool {
+    fn definition(&self) -> &ToolMetadata {
+        &self.metadata
     }
-    fn execute<'a>(
+    fn enabled_after_interruption(&self) -> bool {
+        self.final_phase
+    }
+    fn invoke<'a>(
         &'a self,
-        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
-        resources: TurnResources<'a>,
-        selection: &'a TurnSelection<Security>,
-        _: &'a Self::Snapshot,
-        _: &'a dyn SelectionSource<Security>,
+        _: ToolInvocation,
+        context: BorrowedToolContext<'a, Security>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
+    ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
-            self.executions.fetch_add(1, Ordering::SeqCst);
-            let gate = self.execution_gate.lock().unwrap().take();
-            if let Some(gate) = gate {
-                gate.wait(cancellation).await.map_err(TurnError::Provider)?;
+            self.tools.executions.fetch_add(1, Ordering::SeqCst);
+            if let Some(observations) = &self.observations {
+                observations.lock().unwrap().push((
+                    context.selection.profile.id.clone(),
+                    context
+                        .definitions
+                        .iter()
+                        .map(|tool| tool.name.clone())
+                        .collect(),
+                ));
             }
-            if self.inline_compact.swap(false, Ordering::SeqCst) {
+            let gate = self.tools.execution_gate.lock().unwrap().take();
+            if let Some(gate) = gate {
+                gate.wait(cancellation).await.map_err(|error| {
+                    OperationError::Failed(ToolFailure::new(
+                        error.to_string(),
+                        parrot_storage::diagnostics::FailureKind::InvalidOperation,
+                    ))
+                })?;
+            }
+            let resources = context.resources;
+            if self.tools.inline_compact.swap(false, Ordering::SeqCst) {
                 let result = resources
                     .context
                     .compact(
                         EpochInput {
-                            selection: &selection.model,
+                            selection: &context.selection.model,
                             tools: &[],
                             conversation: resources.conversation,
                             prompt: resources.prompt,
@@ -532,16 +596,27 @@ impl TurnTools<Security> for Tools {
                         None,
                         cancellation,
                     )
-                    .await?;
+                    .await
+                    .map_err(|error| {
+                        let error = TurnError::Context(error);
+                        if error.is_cancelled() {
+                            OperationError::Cancelled
+                        } else {
+                            OperationError::Failed(ToolFailure::new(
+                                error.to_string(),
+                                parrot_storage::diagnostics::FailureKind::InvalidOperation,
+                            ))
+                        }
+                    })?;
                 assert!(result.reduced);
-                self.trace.push("inline-compacted");
+                self.tools.trace.push("inline-compacted");
             }
-            if self.inline_prepare.swap(false, Ordering::SeqCst) {
+            if self.tools.inline_prepare.swap(false, Ordering::SeqCst) {
                 let epoch = resources
                     .context
                     .prepare_epoch(
                         EpochInput {
-                            selection: &selection.model,
+                            selection: &context.selection.model,
                             tools: &[],
                             conversation: resources.conversation,
                             prompt: resources.prompt,
@@ -551,22 +626,23 @@ impl TurnTools<Security> for Tools {
                         },
                         cancellation,
                     )
-                    .await?;
-                self.trace.push(format!("inline:{}", epoch.instructions));
+                    .await
+                    .map_err(|error| {
+                        let error = TurnError::Context(error);
+                        if error.is_cancelled() {
+                            OperationError::Cancelled
+                        } else {
+                            OperationError::Failed(ToolFailure::new(
+                                error.to_string(),
+                                parrot_storage::diagnostics::FailureKind::InvalidOperation,
+                            ))
+                        }
+                    })?;
+                self.tools
+                    .trace
+                    .push(format!("inline:{}", epoch.instructions));
             }
-            Ok(request
-                .calls
-                .into_iter()
-                .map(|call| parrot_core::ToolResult {
-                    call_id: call.id,
-                    tool_name: call.name,
-                    status: parrot_core::ToolStatus::Finished,
-                    text: "fake tool result".into(),
-                    error_message: String::new(),
-                    images: Vec::new(),
-                    metadata: None,
-                })
-                .collect())
+            Ok(ToolOutput::text(self.text))
         })
     }
 }
@@ -1008,7 +1084,7 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
 #[tokio::test]
 async fn borrowed_tool_context_prepare_runs_inline_and_is_used_by_the_next_provider() {
     let fixture = Fixture::new();
-    let tools = Arc::new(Tools::default());
+    let tools = Arc::new(Tools::with_names(&["prepare_context"]));
     tools.inline_prepare.store(true, Ordering::SeqCst);
     let trace = tools.trace.clone();
     let mut first = Step::complete("");

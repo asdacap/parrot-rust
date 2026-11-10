@@ -1,3 +1,4 @@
+use super::{RuntimeProvider, StreamEffects};
 use std::{
     collections::VecDeque,
     io,
@@ -9,6 +10,10 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    agent_turn::provider_call::{OutputWriter, ProviderActivity, ProviderCallError, ProviderUsage},
+    event_broker::{BrokerError, EventBroker},
+};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -19,12 +24,6 @@ use parrot_domain::{
     protocol::messages::parrot::{self as protocol, Event},
 };
 use parrot_provider::sessions::{self, Completion, Error, EventStream, Request, Session, ToolCall};
-use parrot_runtime::{
-    agent_turn::provider_call::{
-        OutputWriter, ProviderActivity, ProviderCall, ProviderCallError, ProviderUsage,
-    },
-    event_broker::{BrokerError, EventBroker},
-};
 use parrot_storage::{
     conversation::{AgentHistoryView, ConversationRepository},
     database::SessionDatabase,
@@ -463,15 +462,19 @@ async fn batches_fragments_by_source_stream_and_returns_the_whole_last_completio
         state.clone(),
     );
     let request = request();
-    let actual = ProviderCall {
-        history: &fixture.history,
-        publisher: &publisher,
-        event_id: &ids,
-        output: &output,
-        activity: &activity,
-        usage: &mut usage,
-    }
-    .stream(&session, request.clone(), &NeverCancelled)
+    let actual = RuntimeProvider::stream(
+        StreamEffects {
+            history: &fixture.history,
+            publisher: &publisher,
+            event_id: &ids,
+            output: &output,
+            activity: &activity,
+        },
+        &mut usage,
+        &session,
+        request.clone(),
+        &NeverCancelled,
+    )
     .await
     .unwrap();
     assert_eq!(actual, last);
@@ -574,15 +577,14 @@ async fn stalled_next_flushes_held_suffix_without_restarting_or_detaching_the_re
         vec![text("opening"), text(" held"), Step::Stall],
         state.clone(),
     );
-    let mut call = ProviderCall {
+    let effects = StreamEffects {
         history: &fixture.history,
         publisher: &publisher,
         event_id: &ids,
         output: &output,
         activity: &activity,
-        usage: &mut usage,
     };
-    let future = call.stream(&session, request(), &NeverCancelled);
+    let future = RuntimeProvider::stream(effects, &mut usage, &session, request(), &NeverCancelled);
     fn assert_send<T: Send>(_: &T) {}
     assert_send(&future);
     let (result, ()) = tokio::join!(future, async {
@@ -618,17 +620,17 @@ async fn cancellation_keeps_held_fragments_and_awaits_actual_stream_close() {
     );
     let token = Token::default();
     let returned = AtomicBool::new(false);
-    let mut call = ProviderCall {
+    let effects = StreamEffects {
         history: &fixture.history,
         publisher: &publisher,
         event_id: &ids,
         output: &output,
         activity: &activity,
-        usage: &mut usage,
     };
     let (result, ()) = tokio::join!(
         async {
-            let result = call.stream(&session, request(), &token).await;
+            let result =
+                RuntimeProvider::stream(effects, &mut usage, &session, request(), &token).await;
             returned.store(true, Ordering::SeqCst);
             result
         },
@@ -674,20 +676,22 @@ async fn stream_failure_keeps_suffix_and_original_provider_body_until_close_fini
         vec![text("a"), text("b"), Step::Fail(error.clone())],
         state.clone(),
     );
-    let mut call = ProviderCall {
+    let effects = StreamEffects {
         history: &fixture.history,
         publisher: &publisher,
         event_id: &ids,
         output: &output,
         activity: &activity,
-        usage: &mut usage,
     };
-    let (result, ()) = tokio::join!(call.stream(&session, request(), &NeverCancelled), async {
-        state.wait_for_close().await;
-        assert_eq!(publisher.retained().len(), 2);
-        assert_eq!(output.text(), "ab");
-        state.close_release.add_permits(1);
-    });
+    let (result, ()) = tokio::join!(
+        RuntimeProvider::stream(effects, &mut usage, &session, request(), &NeverCancelled),
+        async {
+            state.wait_for_close().await;
+            assert_eq!(publisher.retained().len(), 2);
+            assert_eq!(output.text(), "ab");
+            state.close_release.add_permits(1);
+        }
+    );
     let Err(ProviderCallError::Provider(actual)) = result else {
         panic!("provider failure expected");
     };
@@ -730,15 +734,19 @@ async fn retry_flushes_output_marks_attempt_and_empty_data_does_not_end_header_p
         ],
         state.clone(),
     );
-    let result = ProviderCall {
-        history: &fixture.history,
-        publisher: &publisher,
-        event_id: &ids,
-        output: &output,
-        activity: &activity,
-        usage: &mut usage,
-    }
-    .stream(&session, request(), &NeverCancelled)
+    let result = RuntimeProvider::stream(
+        StreamEffects {
+            history: &fixture.history,
+            publisher: &publisher,
+            event_id: &ids,
+            output: &output,
+            activity: &activity,
+        },
+        &mut usage,
+        &session,
+        request(),
+        &NeverCancelled,
+    )
     .await
     .unwrap();
     assert_eq!(result, sessions::Event::Completed(Completion::default()));
@@ -815,15 +823,19 @@ async fn retry_after_text_without_more_text_does_not_add_an_extra_final_newline(
         ],
         state.clone(),
     );
-    ProviderCall {
-        history: &fixture.history,
-        publisher: &publisher,
-        event_id: &ids,
-        output: &output,
-        activity: &activity,
-        usage: &mut usage,
-    }
-    .stream(&session, request(), &NeverCancelled)
+    RuntimeProvider::stream(
+        StreamEffects {
+            history: &fixture.history,
+            publisher: &publisher,
+            event_id: &ids,
+            output: &output,
+            activity: &activity,
+        },
+        &mut usage,
+        &session,
+        request(),
+        &NeverCancelled,
+    )
     .await
     .unwrap();
     assert_eq!(output.text(), "a\n[retry]\n");
@@ -860,15 +872,19 @@ async fn storage_publication_output_and_usage_failures_all_close_the_real_stream
             ]
         };
         let session = FakeSession::new(steps, state.clone());
-        let result = ProviderCall {
-            history: &fixture.history,
-            publisher: &publisher,
-            event_id: &ids,
-            output: &output,
-            activity: &activity,
-            usage: &mut usage,
-        }
-        .stream(&session, request(), &NeverCancelled)
+        let result = RuntimeProvider::stream(
+            StreamEffects {
+                history: &fixture.history,
+                publisher: &publisher,
+                event_id: &ids,
+                output: &output,
+                activity: &activity,
+            },
+            &mut usage,
+            &session,
+            request(),
+            &NeverCancelled,
+        )
         .await;
         match boundary {
             "storage" | "usage" => assert!(matches!(result, Err(ProviderCallError::Storage(_)))),
@@ -902,15 +918,19 @@ async fn close_failure_is_awaited_and_does_not_skip_idle_activity_or_newline() {
     let session = FakeSession::new(vec![text("a")], state.clone());
     session.stream.lock().unwrap().as_mut().unwrap().close_error =
         Some(Error::Io("close failed".into()));
-    let result = ProviderCall {
-        history: &fixture.history,
-        publisher: &publisher,
-        event_id: &ids,
-        output: &output,
-        activity: &activity,
-        usage: &mut usage,
-    }
-    .stream(&session, request(), &NeverCancelled)
+    let result = RuntimeProvider::stream(
+        StreamEffects {
+            history: &fixture.history,
+            publisher: &publisher,
+            event_id: &ids,
+            output: &output,
+            activity: &activity,
+        },
+        &mut usage,
+        &session,
+        request(),
+        &NeverCancelled,
+    )
     .await;
     assert!(
         matches!(result, Err(ProviderCallError::Provider(Error::Io(message))) if message == "close failed")
@@ -929,7 +949,7 @@ async fn close_failure_is_awaited_and_does_not_skip_idle_activity_or_newline() {
 
 #[tokio::test]
 async fn compaction_retry_helper_commits_before_publication_without_stream_dependencies() {
-    use parrot_runtime::agent_turn::provider_call::emit_retry;
+    use crate::agent_turn::provider_call::emit_retry;
 
     let fixture = Fixture::new();
     let publisher = fixture.publisher();

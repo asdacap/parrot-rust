@@ -132,24 +132,39 @@ verdict is still pending; no acceptance stamp is invented here.
 
 ## Runtime API and composition
 
-`RuntimeBackend<S, T>::new(RuntimeConfig<S, T>)` asynchronously builds a real
-history/provider backend; `AgentSession<RuntimeBackend<S, T>>` supplies the
-session-owned drain. It is not another repository, compactor, activity tracker,
-provider implementation or settlement engine.
+`RuntimeBackend<S>::new(RuntimeConfig<S>)` asynchronously builds a real
+history/provider backend; `AgentSession<RuntimeBackend<S>>` supplies the
+session-owned drain. It supplies dependencies to the concrete core implementations,
+not an execution API that they call.
+
+`RuntimeStates`, `RuntimeTools`, and `RuntimeProvider` implement the core contracts
+with direct service dependencies. None retains a `RuntimeBackend` reference.
+`RuntimeStates` implements conversation mutations and input promotion.
+`RuntimeTools` implements catalog capture, chunk execution, and leaf tool invocation.
+`RuntimeProvider` implements normal and summary streams, accounting, publication,
+and awaited cleanup. The composition code in `engine/core_loop.rs` constructs
+these implementations before calling `parrot_core::run_turn`.
+
+Run `python scripts/verify-core-implementations.py` to check that these modules do
+not retain backend or inner executor proxies.
 
 | Module | Responsibility |
 | --- | --- |
 | `lifecycle.rs` | One owned drain, admission/wake, FIFO executions, incoming-input wait, scheduled work, retained mutation lifetimes, interrupt/resume and joined shutdown; domain execution/status/drain-state types. |
 | `engine.rs` | Actual durable conversation and provider-session orchestration, awaited T44 prompt/skills and T45 controller, supplied completion callbacks. |
 | `tool_conversation.rs` | State-owned stored-result restoration, crash errors for unfinished historical calls, explicit fresh-call staging, ordered result projection/publication and synthetic image messages. |
-| `provider_call.rs` | Consume the genuine injected stream to EOF, batch fragments, record completions, phases/retries and awaited close. |
+| `engine/core_loop/states.rs` | Implement core state operations, conversation mutations, and input promotion with direct storage and service dependencies. |
+| `engine/core_loop/tools.rs` | Retain tool snapshots, execute ordered chunks, and invoke registered ordinary or borrowed tools. |
+| `engine/core_loop/provider.rs` | Consume normal and summary streams, batch fragments, record completions and phases, and await cleanup. |
+| `provider_call.rs` | Provider errors, fragment buffers, and shared retry-publication support. |
 | `budget.rs` | Request/final-phase budget and four settlement extensions, separate from T45 token budgeting. |
 | `usage.rs` | Actual repository request/tool facts, replay-seeded live statistics and retained notifications. |
 | `services.rs` | Required injected contracts, captured selection, borrowed resources and typed errors; no successful default host. |
 | `activity.rs` | `LiveActivity` adapts the existing domain tracker and safe `TurnDiagnostics`. |
 
 `RuntimeConfig` requires a matching identity/bound history; broker and committed
-publisher; model/profile/security selection and tool adapter; prompt, skills,
+publisher; model/profile/security selection, a leaf tool factory, and
+`ToolExecutionConfig`; prompt, skills,
 controller and status binding; ordered callbacks; templates; an **already
 constructed shared** `Arc<ExitReminders<Publisher>>`; output, activity, parent
 delivery, authoritative immediate-parent-to-root statistics handles and IDs.
@@ -159,7 +174,7 @@ remain explicit even when an embedding chooses no-op policies.
 
 `TurnSelection<S>` owns a resolved model/profile and immutable `Arc<S>` snapshot.
 Exact-name allow/disabled filtering is ordinal, not authority parsed from display
-text. `TurnTools::Snapshot` is a concrete owner-chosen retained type, not a
+text. `ToolSnapshot<S>` retains the original executable tool handles, not a
 names-only reconstructed catalog. Actual budget/profile tests assert one
 materialization, per-request ordinal filtering, a captured profile during the
 turn, injected survivor-only final tools and current selection/restoration on
@@ -182,8 +197,8 @@ default, `The process crashed before the tool completed.`), with the existing
 `tool-result.error` formatting. Persistence precedes publication, and repeating
 restoration neither replaces completed results nor republishes their terminals.
 
-`States::record_tool_calls` returns a `ToolCallReceipt` containing the durable
-assistant sequence. Core passes the receipt and turn flags to
+`States::apply_conversation_addition` persists the assistant tool-call message
+and returns its durable sequence. Core passes that receipt and turn flags to
 `Tools::execute`. `RuntimeTools` owns the original executable snapshots and stages
 the live batch when execution begins. Recording does not prepare the executor.
 Each execution chunk settles durably before the next chunk starts. Final result
@@ -211,7 +226,7 @@ turn substitution. All six external scenarios PASS; the existing queued-shutdown
 assertion is now tightened to `unwrap_err().is_cancelled()` and passes focused
 verification; no additional shutdown scenario was needed (R13).
 
-`TurnTools::execute` receives explicit calls and returns an ordered execution
+`RuntimeTools::execute` receives explicit calls and returns an ordered execution
 chunk; it does not discover pending calls or project their conversation results.
 State records each returned chunk before the next starts, so borrowed tools see
 earlier settled results. `TurnResources<'_>` lends inline tools the already-owned
@@ -221,6 +236,14 @@ call the external wrapper, or relock backend state**. The passing real-controlle
 fake-tool tests persist one compaction, remove seed-prefix context, feed the
 summary into the next provider request within one turn and join interrupted
 summary cleanup. This is a borrowed-controller proof, not production adapters.
+
+Two legacy inline-summary cancellation cases in
+`tests/agent_turn/engine/context_cancellation.rs` remain ignored. They relied on
+the removed fake `TurnTools` executor propagating a summary cancellation directly
+to the turn. Actual registered tool execution already settles that error as a
+cancelled tool result. Their assertions remain unchanged rather than changing
+production behavior to reproduce the fake executor. Caller-interruption tests
+continue to exercise interrupted-turn cleanup.
 
 **Production retained Tool/SessionControl bridge remains OPEN:** P07 T60/T61a
 and P08 T62 must preserve identity/routing, serialize external mutation, use
@@ -300,7 +323,7 @@ branches now have focused durable-drain proofs. Batch count/order is accepted
 by HIGH as direct `len()` plus awaited emit-before-reconcile composition, not a
 new mandatory three-call campaign.
 
-`ProviderCall::stream` consumes to EOF and returns the full last Completed event.
+`RuntimeProvider::stream` consumes to EOF and returns the full last Completed event.
 It batches source-stream text/reasoning and flushes a held suffix at500ms even
 while next-read stalls, without detaching/restarting it. Retry flushes/reset
 phases; empty data does not clear headers. Cleanup flushes and stream close are

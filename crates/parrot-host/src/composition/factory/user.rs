@@ -52,7 +52,6 @@ use parrot_runtime::{
         AgentSkills, PromptResult, SkillCatalog, SkillMetadata, SkillSnapshot, StandingInstruction,
     },
     task_scheduler::{TaskConcurrencyBudget, TaskScheduler},
-    tool_settlement::ToolSettlement,
 };
 use parrot_storage::{
     conversation::{AgentHistoryView, ConversationRepository, HistoryProjection},
@@ -76,7 +75,7 @@ use std::{
 };
 use tokio::sync::{Mutex as AsyncMutex, oneshot};
 
-pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S, ToolSettlement<S>>>;
+pub type RuntimeSession<S> = AgentSession<RuntimeBackend<S>>;
 pub type ScopeBinder<S> = Arc<dyn Fn(&Arc<Scope<S>>) -> ChildResult<()> + Send + Sync>;
 type RuntimeTaskScheduler<S> =
     TaskScheduler<S, parrot_tools::task_artifacts::TaskArtifactParserAdapter>;

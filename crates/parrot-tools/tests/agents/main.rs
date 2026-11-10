@@ -5,6 +5,8 @@ mod runtime_agents;
 pub mod runtime_support;
 mod schema;
 mod status;
+#[path = "../../../parrot-runtime/tests/tool_execution_support.rs"]
+mod tool_execution_support;
 mod tools;
 
 use std::path::Path;

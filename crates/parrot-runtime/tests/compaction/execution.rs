@@ -1287,7 +1287,7 @@ async fn provider_response_body_stays_concrete_and_does_not_traverse_wrapped_cau
 }
 
 #[tokio::test]
-async fn cancelled_blob_and_missing_file_image_keep_storage_failure_without_provider_call() {
+async fn cancelled_compaction_and_missing_file_image_stop_before_provider_call() {
     use parrot_storage::artifacts::compaction::CompactionErrorKind;
     let mut fixture = Fixture::new(1000, vec![]);
     let mut history = tool_group(&"oversized".repeat(1000));
@@ -1297,9 +1297,7 @@ async fn cancelled_blob_and_missing_file_image_keep_storage_failure_without_prov
         .compact(&compactor(500), &history)
         .await
         .unwrap_err();
-    assert!(
-        matches!(error, CompactionError::Blob(error) if error.kind == CompactionErrorKind::Cancelled)
-    );
+    assert!(matches!(error, CompactionError::Cancelled));
     assert!(fixture.blob_files().is_empty() && fixture.requests().is_empty());
     fixture.close().await;
 

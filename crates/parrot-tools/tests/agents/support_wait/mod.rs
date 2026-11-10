@@ -1,5 +1,5 @@
 //! Test-only composition: real SQLite/JSONL, RuntimeBackend, AgentSession,
-//! ToolSettlement and WaitService. This is not the production P08 adapter.
+//! native tool execution and WaitService. This is not the production P08 adapter.
 use std::{
     collections::{BTreeMap, VecDeque},
     future::Future,
@@ -53,8 +53,8 @@ use parrot_runtime::{
     event_broker::EventBroker,
     prompt_context::{PromptResult, SystemPrompt},
     tool_settlement::{
-        self, SharedSecurity, ToolDiagnostics, ToolFactory, ToolFailure, ToolHandle, ToolInventory,
-        ToolMetadata, ToolOutput, ToolSettlement, ToolSettlementConfig,
+        self, SharedSecurity, ToolDiagnostics, ToolExecutionConfig, ToolFactory, ToolFailure,
+        ToolHandle, ToolInventory, ToolMetadata, ToolOutput,
     },
 };
 use parrot_storage::{
@@ -378,7 +378,7 @@ impl SelectionSource<Security> for Selection {
     }
 }
 
-pub(super) type Backend = RuntimeBackend<Security, ToolSettlement<Security>>;
+pub(super) type Backend = RuntimeBackend<Security>;
 
 /// A caller-bound test bridge for precisely the Wait operation. Other operations
 /// deliberately fail if used; no canned successful runtime results are supplied.
@@ -507,7 +507,7 @@ fn wait_tool(bridge: Arc<WaitBridge>) -> WaitTool {
 
 /// Only the associated-type conversion is test-local; ordinary Tool execution,
 /// Started/Finished events, terminal commit and conversation projection use the
-/// actual runtime ToolSettlement implementation.
+/// actual runtime Tools implementation.
 struct RetainedTool {
     metadata: ToolMetadata,
     tool: WaitTool,
@@ -570,7 +570,7 @@ impl Tool for RetainedTool {
         })
     }
 }
-struct Factory(Arc<RetainedTool>);
+pub(super) struct Factory(Arc<RetainedTool>);
 impl ToolFactory<Security> for Factory {
     fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
         Ok(ToolInventory {
@@ -662,27 +662,25 @@ impl Harness {
         );
         let activity = Arc::new(AgentSessionActivity::new(Arc::new(TestClock)));
         let bridge = Arc::new(WaitBridge::default());
-        let tools = Arc::new(
-            ToolSettlement::new(ToolSettlementConfig {
-                path_variables: Default::default(),
-                factory: Arc::new(Factory(Arc::new(RetainedTool {
-                    metadata: ToolMetadata {
-                        name: "wait".into(),
-                        aliases: vec![],
-                    },
-                    tool: wait_tool(bridge.clone()),
-                }))),
-                templates: templates.clone(),
-                output_blobs: Arc::new(
-                    ToolOutputBlobStore::for_session(&root, "scratch", Arc::new(Names)).unwrap(),
-                ),
-                publisher: broker.clone(),
-                activity: activity.clone(),
-                diagnostics: Arc::new(Diagnostics),
-                image_bytes_per_cycle: 0,
-            })
-            .unwrap(),
-        );
+        let tool_execution = ToolExecutionConfig {
+            path_variables: Default::default(),
+
+            templates: templates.clone(),
+            output_blobs: Arc::new(
+                ToolOutputBlobStore::for_session(&root, "scratch", Arc::new(Names)).unwrap(),
+            ),
+            publisher: broker.clone(),
+            activity: activity.clone(),
+            diagnostics: Arc::new(Diagnostics),
+            image_bytes_per_cycle: 0,
+        };
+        let tools = Arc::new(Factory(Arc::new(RetainedTool {
+            metadata: ToolMetadata {
+                name: "wait".into(),
+                aliases: vec![],
+            },
+            tool: wait_tool(bridge.clone()),
+        })));
         let provider = Scripted::default();
         let backend = RuntimeBackend::new(RuntimeConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
@@ -709,6 +707,7 @@ impl Harness {
                 security: Arc::new(Security(42)),
             }))),
             tools,
+            tool_execution,
             prompt: Box::new(Prompt),
             skills: Arc::new(Skills),
             context,

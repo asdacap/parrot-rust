@@ -495,6 +495,7 @@ impl MemoryState {
             request: request.clone(),
             prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
+                (ConfigKey::OversizedToolGroupTemplate, "{path}".into()),
                 (
                     ConfigKey::ContextReminderTemplate,
                     "configured reminder".into(),
@@ -958,11 +959,11 @@ impl States for MemoryState {
             )
         })
     }
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [Message],
+        contents: &'a [u8],
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {
@@ -972,7 +973,7 @@ impl States for MemoryState {
                     .lock()
                     .unwrap()
                     .effects
-                    .spill_group(messages, cancellation),
+                    .write_to_scratch(contents, cancellation),
             )
         })
     }

@@ -1,12 +1,12 @@
 //! Actual drain requests for the source token-budget and captured-profile predicates.
-//! Settlement here is the existing injected fixture, not the production T47 bridge.
+//! Registered leaf tools exercise production catalog filtering and execution.
 use super::*;
 
 struct BudgetTools {
     inner: Tools,
     definitions: Vec<sessions::Tool>,
     materializations: AtomicUsize,
-    executions: Mutex<Vec<(String, Vec<String>)>>,
+    executions: ToolObservations,
 }
 impl BudgetTools {
     fn new(names: &[&str]) -> Arc<Self> {
@@ -21,58 +21,35 @@ impl BudgetTools {
                 })
                 .collect(),
             materializations: AtomicUsize::new(0),
-            executions: Mutex::new(Vec::new()),
+            executions: Arc::new(Mutex::new(Vec::new())),
         })
     }
 }
-impl TurnTools<Security> for BudgetTools {
-    type Snapshot = Vec<sessions::Tool>;
-    fn materialize(&self) -> Result<Self::Snapshot, TurnError> {
+impl ToolFactory<Security> for BudgetTools {
+    fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
         self.materializations.fetch_add(1, Ordering::SeqCst);
-        Ok(self.definitions.clone())
-    }
-    fn permitted(
-        &self,
-        snapshot: &Self::Snapshot,
-        selection: &TurnSelection<Security>,
-    ) -> Result<Self::Snapshot, TurnError> {
-        self.inner.permitted(snapshot, selection)
-    }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
-        snapshot
-    }
-    fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
-        snapshot
-            .iter()
-            .filter(|tool| tool.name == "survivor")
-            .cloned()
-            .collect()
-    }
-    fn execute<'a>(
-        &'a self,
-        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
-        resources: TurnResources<'a>,
-        selection: &'a TurnSelection<Security>,
-        snapshot: &'a Self::Snapshot,
-        capture: &'a dyn SelectionSource<Security>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
-        self.executions.lock().unwrap().push((
-            selection.profile.id.clone(),
-            snapshot.iter().map(|tool| tool.name.clone()).collect(),
-        ));
-        self.inner.execute(
-            request,
-            resources,
-            selection,
-            snapshot,
-            capture,
-            cancellation,
-        )
+        Ok(inventory(
+            self.definitions
+                .iter()
+                .map(|definition| {
+                    ToolHandle::Borrowed(Arc::new(FixtureTool {
+                        metadata: ToolMetadata {
+                            name: definition.name.clone(),
+                            aliases: vec![],
+                        },
+                        tools: self.inner.clone(),
+                        final_phase: definition.name == "survivor",
+                        text: "fake tool result",
+                        observations: Some(self.executions.clone()),
+                    }))
+                })
+                .collect(),
+            &self.definitions,
+        ))
     }
 }
 struct BudgetRuntime {
-    session: AgentSession<RuntimeBackend<Security, BudgetTools>>,
+    session: AgentSession<RuntimeBackend<Security>>,
     selection: Arc<Selection>,
     activity: Arc<Activity>,
 }
@@ -153,6 +130,11 @@ impl BudgetRuntime {
         let context =
             ContextController::new(compactor, fixture.history.clone(), blobs, templates.clone());
         let backend = RuntimeBackend::new(RuntimeConfig {
+            tool_execution: tool_execution_config(
+                &fixture.history,
+                templates.clone(),
+                publisher.clone(),
+            ),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
                 ..Default::default()

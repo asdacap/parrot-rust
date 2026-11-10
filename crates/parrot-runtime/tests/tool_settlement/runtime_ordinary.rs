@@ -181,28 +181,22 @@ async fn actual_runtime_executes_whole_mixed_batch_with_parallel_and_sequential_
     gates[1].entered().await;
     assert!(tools[2].calls.lock().unwrap().is_empty());
     assert!(tools[3].calls.lock().unwrap().is_empty());
-    assert!(settlement::terminal_ids(&fixture.events().await).is_empty());
+    assert!(terminal_ids(&fixture.events().await).is_empty());
     gates[1].open();
     gates[0].open();
     gates[2].entered().await;
-    assert_eq!(
-        settlement::terminal_ids(&fixture.events().await),
-        ["a", "b"]
-    );
+    assert_eq!(terminal_ids(&fixture.events().await), ["a", "b"]);
     assert!(tools[3].calls.lock().unwrap().is_empty());
     gates[2].open();
     gates[3].entered().await;
-    assert_eq!(
-        settlement::terminal_ids(&fixture.events().await),
-        ["a", "b", "serial"]
-    );
+    assert_eq!(terminal_ids(&fixture.events().await), ["a", "b", "serial"]);
     gates[3].open();
     assert_eq!(
         bounded(sent.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
     );
     assert_eq!(
-        settlement::terminal_ids(&fixture.events().await),
+        terminal_ids(&fixture.events().await),
         ["a", "b", "serial", "tail"]
     );
     let requests = provider.requests.lock().unwrap().clone();

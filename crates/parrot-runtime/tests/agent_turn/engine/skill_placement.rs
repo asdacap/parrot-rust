@@ -58,59 +58,27 @@ impl TurnSkills for StoredSkills {
     }
 }
 
-/// The injected executor returns the original test's fixed SettledTool result.
 struct SettledTools;
-impl TurnTools<Security> for SettledTools {
-    type Snapshot = Vec<sessions::Tool>;
-    fn materialize(&self) -> Result<Self::Snapshot, TurnError> {
-        Ok(vec![])
-    }
-    fn permitted(
-        &self,
-        snapshot: &Self::Snapshot,
-        _: &TurnSelection<Security>,
-    ) -> Result<Self::Snapshot, TurnError> {
-        Ok(snapshot.clone())
-    }
-    fn definitions<'a>(&self, snapshot: &'a Self::Snapshot) -> &'a [sessions::Tool] {
-        snapshot
-    }
-    fn enabled_after_interruption(&self, snapshot: &Self::Snapshot) -> Self::Snapshot {
-        snapshot.clone()
-    }
-    fn execute<'a>(
-        &'a self,
-        request: parrot_runtime::agent_turn::services::ToolExecutionChunk,
-        resources: TurnResources<'a>,
-        _: &'a TurnSelection<Security>,
-        _: &'a Self::Snapshot,
-        _: &'a dyn SelectionSource<Security>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Vec<parrot_core::ToolResult>, TurnError>> {
-        Box::pin(async move {
-            let mut results = Vec::new();
-            for call in request.calls {
-                let mut started = Event::new();
-                started.id = id();
-                started.agent_session_id = "agent".into();
-                started.set_tool_started(protocol::ToolStarted {
-                    tool_call_id: call.id.clone(),
-                    tool_name: call.name.clone(),
-                    ..Default::default()
-                });
-                resources.events.emit(started, cancellation).await?;
-                results.push(parrot_core::ToolResult {
-                    call_id: call.id,
-                    tool_name: call.name,
-                    status: parrot_core::ToolStatus::Finished,
-                    text: "settled".into(),
-                    error_message: String::new(),
-                    images: Vec::new(),
-                    metadata: None,
-                });
-            }
-            Ok(results)
-        })
+impl ToolFactory<Security> for SettledTools {
+    fn materialize(&self) -> Result<ToolInventory<Security>, TurnError> {
+        let definitions = vec![sessions::Tool {
+            name: "settled".into(),
+            description: String::new(),
+            parameters_json: "{}".into(),
+        }];
+        Ok(inventory(
+            vec![ToolHandle::Borrowed(Arc::new(FixtureTool {
+                metadata: ToolMetadata {
+                    name: "settled".into(),
+                    aliases: vec![],
+                },
+                tools: Tools::default(),
+                final_phase: true,
+                text: "settled",
+                observations: None,
+            }))],
+            &definitions,
+        ))
     }
 }
 
@@ -121,7 +89,7 @@ async fn skill_session(
     first_path: &str,
     second_path: &str,
     templates: Arc<PromptTemplateCatalog>,
-) -> AgentSession<RuntimeBackend<Security, SettledTools>> {
+) -> AgentSession<RuntimeBackend<Security>> {
     let broker = Arc::new(EventBroker::new());
     let trace = Arc::new(Trace::default());
     let publisher: Arc<RuntimePublisher> = Arc::new(Publisher {
@@ -148,6 +116,11 @@ async fn skill_session(
     let instructions =
         format!("Available Markdown skills:\n- $first ({first_path})\n- $second ({second_path})");
     let backend = RuntimeBackend::new(RuntimeConfig {
+        tool_execution: tool_execution_config(
+            &fixture.history,
+            templates.clone(),
+            publisher.clone(),
+        ),
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
             ..Default::default()
@@ -191,7 +164,7 @@ async fn skill_session(
 }
 
 async fn send_skill_input(
-    session: &AgentSession<RuntimeBackend<Security, SettledTools>>,
+    session: &AgentSession<RuntimeBackend<Security>>,
     prompt: &str,
 ) -> parrot_runtime::agent_turn::lifecycle::SendResult {
     bounded(session.send(

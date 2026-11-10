@@ -1,19 +1,11 @@
 //! T47: retained tools reconciled through actual SQLite/JSONL and the T46 drain.
+use parrot_runtime as runtime_crate;
 mod fixture;
 use fixture::*;
-mod harness;
-use harness::*;
-mod admission;
-mod budget_scope;
-mod crash_process;
-mod focused;
-mod images;
-mod owned_recovery;
-mod parallel_images;
+mod common;
+use common::*;
 mod runtime;
 mod runtime_ordinary;
-mod settlement;
-mod snapshot;
 
 #[tokio::test]
 async fn fixture_reopens_real_sqlite_and_agent_history() {

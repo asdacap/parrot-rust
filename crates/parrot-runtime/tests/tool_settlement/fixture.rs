@@ -1,3 +1,4 @@
+use super::runtime_crate as parrot_runtime;
 pub use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
@@ -27,10 +28,7 @@ pub use parrot_runtime::{
 };
 pub use parrot_storage::{
     artifacts::compaction::CompactionGroupBlobStore,
-    conversation::{
-        AgentConversation, AgentHistoryView, ConversationMessage, ConversationRepository,
-        MessageRole,
-    },
+    conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
     database::SessionDatabase,
     events::{ConversationPart, EventRepository, NeverCancelled},
     history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
@@ -173,25 +171,7 @@ impl Fixture {
             .push_back((item.sequence, fresh_calls));
         item.sequence
     }
-    pub async fn seed(&self) {
-        for index in 0..6 {
-            for role in [MessageRole::User, MessageRole::Assistant] {
-                let mut event = Event::new();
-                event.id = id();
-                event.agent_session_id = "agent".into();
-                self.history
-                    .append_conversation(
-                        event,
-                        ConversationMessage::text(
-                            role,
-                            format!("seed-{index}-{}", "x ".repeat(200)),
-                        ),
-                    )
-                    .await
-                    .unwrap();
-            }
-        }
-    }
+
     pub fn controller(&self) -> ContextController {
         let templates = templates();
         let compactor = Compactor::new(
@@ -218,9 +198,7 @@ impl Fixture {
     pub async fn events(&self) -> Vec<Event> {
         self.repository.events().replay().await.unwrap()
     }
-    pub async fn conversation(&self) -> AgentConversation {
-        AgentConversation::new(self.history.clone()).await.unwrap()
-    }
+
     pub fn jsonl(&self) -> String {
         std::fs::read_to_string(self.path.join("agent.jsonl")).unwrap()
     }

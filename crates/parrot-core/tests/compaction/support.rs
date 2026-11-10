@@ -45,7 +45,8 @@ pub fn plan(groups: &[&str]) -> CompactionPlan {
 #[derive(Default)]
 pub struct Effects {
     pub progress: Mutex<Vec<CompactionProgress>>,
-    pub spills: Mutex<Vec<Vec<Message>>>,
+    pub scratch_writes: Mutex<Vec<Vec<u8>>>,
+    pub files: std::collections::BTreeMap<String, Vec<u8>>,
     pub contexts: Arc<Mutex<Vec<ProviderRequest>>>,
     pub context_failure: Option<(usize, Error)>,
 }
@@ -102,17 +103,17 @@ impl Effects {
         self.estimate_tokens(messages)
     }
 
-    pub fn spill_group<'a, 'c>(
+    pub fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [Message],
+        contents: &'a [u8],
         _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {
         Box::pin(async move {
-            self.spills.lock().unwrap().push(messages.to_vec());
-            Ok(vec![message("blob")])
+            self.scratch_writes.lock().unwrap().push(contents.to_vec());
+            Ok("blob".into())
         })
     }
 
@@ -203,19 +204,49 @@ impl parrot_core::Provider for Provider {
 impl parrot_core::States for Effects {
     fn get_config(
         &self,
-        _: parrot_core::ConfigKey,
+        key: parrot_core::ConfigKey,
     ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, Error>> {
-        Box::pin(async { Err(Error::unsupported("test compaction configuration")) })
+        Box::pin(async move {
+            match key {
+                parrot_core::ConfigKey::OversizedToolGroupTemplate => {
+                    Ok(parrot_core::ConfigValue::PromptTemplate(Arc::new(
+                        parrot_core::PromptTemplate::compile(
+                            "test.compaction-notice",
+                            "{path}",
+                            "scalar",
+                            &["path".into()],
+                            &["path".into()],
+                        )?,
+                    )))
+                }
+                _ => Err(Error::unsupported("test compaction configuration")),
+            }
+        })
     }
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        messages: &'a [Message],
+        contents: &'a [u8],
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {
-        self.spill_group(messages, cancellation)
+        self.write_to_scratch(contents, cancellation)
+    }
+    fn read_file<'a, 'c>(
+        &'a self,
+        path: &'a str,
+        _: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| Error::failed("file not found"))
+        })
     }
     fn report_compaction_progress<'a, 'c>(
         &'a self,

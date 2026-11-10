@@ -2,7 +2,7 @@
 mod budget;
 mod execution;
 pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
-pub(crate) use execution::{CompactionEstimates, SummaryProviderAdapter};
+pub(crate) use execution::{CompactionEstimates, SummaryText, read_file};
 mod context;
 mod conversation;
 pub use context::{

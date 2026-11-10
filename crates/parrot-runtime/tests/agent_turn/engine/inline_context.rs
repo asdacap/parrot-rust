@@ -13,7 +13,7 @@ async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_ne
  {
     let fixture = Fixture::new();
     fixture.seed().await;
-    let tools = Arc::new(Tools::default());
+    let tools = Arc::new(Tools::with_names(&["compact_context"]));
     tools.inline_compact.store(true, Ordering::SeqCst);
     let trace = tools.trace.clone();
     let provider = Scripted::new(vec![
@@ -96,7 +96,7 @@ async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_ne
 async fn interrupt_joins_actual_inline_compaction_cancellation_without_self_queue_or_second_turn() {
     let fixture = Fixture::new();
     fixture.seed().await;
-    let tools = Arc::new(Tools::default());
+    let tools = Arc::new(Tools::with_names(&["compact_context"]));
     tools.inline_compact.store(true, Ordering::SeqCst);
     let summary = Gate::new();
     let mut step = Step::complete("never commit summary");
