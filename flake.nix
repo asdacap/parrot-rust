@@ -44,6 +44,7 @@
         packages = with pkgs;
           [
             alejandra
+            cargo-nextest
             clang
             coreutils
             git
@@ -51,7 +52,7 @@
             perl
             pkg-config
             protobuf
-            python3
+            (python3.withPackages (python: [python.pytest python.pytest-xdist]))
             rust
             sccache
           ]

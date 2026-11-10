@@ -65,7 +65,7 @@ if ! "$artifact_only"; then
   (
     cd "$repo_root"
     PARROT_TEST_BINARY="$prefix/bin/parrot" cargo test --offline --locked \
-      -p parrot-cli --test local_production -- --nocapture --test-threads=1
+      -p parrot-cli --test local_production -- --nocapture
   ) 2>&1 | tee "$smoke_dir/local-production.log"
   printf 'local_application_smoke: passed (%s)\n' "$target"
 fi

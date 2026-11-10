@@ -15,7 +15,6 @@ jobs:
     name: ${{ matrix.profile }}
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - profile: linux
@@ -52,28 +51,52 @@ jobs:
           set -euo pipefail
           export CARGO_HOME="${PARROT_CI_CACHE_ROOT:?runner must supply its dependency cache}/$PARROT_CI_CACHE_KEY/cargo-home"
           export PARROT_CARGO_HOME="$CARGO_HOME"
-          export CARGO_TARGET_DIR="$PARROT_CI_CACHE_ROOT/$PARROT_CI_CACHE_KEY/target"
+          target_root="$PARROT_CI_CACHE_ROOT/$PARROT_CI_CACHE_KEY/target/${{ matrix.profile }}"
+          export CARGO_TARGET_DIR="$target_root/workspace"
+          export CARGO_BUILD_JOBS="$(getconf _NPROCESSORS_ONLN)"
+          export RUST_TEST_THREADS="$CARGO_BUILD_JOBS"
           export npm_config_cache="$PARROT_CI_CACHE_ROOT/$PARROT_CI_CACHE_KEY/npm"
-          export CARGO_NET_OFFLINE=true npm_config_offline=true
+          export CARGO_NET_OFFLINE=true npm_config_offline=true PYTHONDONTWRITEBYTECODE=1
           export HOME="$RUNNER_TEMP/parrot-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.profile }}"
           mkdir -p "$HOME"
           nix develop --offline --no-write-lock-file --command npm --prefix web ci --offline --no-audit --no-fund
-          nix develop --offline --no-write-lock-file --command python3 -B -m unittest discover -s tests/skills/queue -p 'test_*.py'
-          nix develop --offline --no-write-lock-file --command cargo fmt --all -- --check
-          nix develop --offline --no-write-lock-file --command cargo clippy --workspace --all-targets --locked -- -D warnings
-          nix develop --offline --no-write-lock-file --command cargo test --workspace --locked
-          nix develop --offline --no-write-lock-file --command cargo test --manifest-path tests/contracts/Cargo.toml --locked
-          nix develop --offline --no-write-lock-file --command npm --prefix web test
           nix develop --offline --no-write-lock-file --command npm --prefix web run build
-          case "$(uname -s)" in
-            Linux)
-              nix develop --offline --no-write-lock-file --command cargo test --locked -p parrot-tools --test sandbox_linux -- --include-ignored
-              nix develop --offline --no-write-lock-file --command cargo test --locked -p parrot-cli --test terminal_input native::
-              ;;
-            Darwin)
-              nix develop --offline --no-write-lock-file --command bash crates/parrot-tools/tests/sandbox/macos/run-native.sh
-              nix develop --offline --no-write-lock-file --command bash crates/parrot-cli/tests/terminal_input/native_macos
-              ;;
-          esac
+          nix develop --offline --no-write-lock-file --command cargo fmt --all -- --check
+          pids=()
+          nix develop --offline --no-write-lock-file --command python3 -B -m pytest -n auto tests/skills/queue tests/ci &
+          pids+=("$!")
+          (
+            nix develop --offline --no-write-lock-file --command cargo clippy --workspace --all-targets --locked -- -D warnings
+            nix develop --offline --no-write-lock-file --command cargo nextest run --workspace --locked --test-threads "$RUST_TEST_THREADS" --no-fail-fast
+            nix develop --offline --no-write-lock-file --command cargo test --workspace --doc --locked
+            case "$(uname -s)" in
+              Linux)
+                nix develop --offline --no-write-lock-file --command cargo nextest run --locked -p parrot-tools --test sandbox_linux --run-ignored all --test-threads "$RUST_TEST_THREADS"
+                nix develop --offline --no-write-lock-file --command cargo nextest run --locked -p parrot-cli --test terminal_input --test-threads "$RUST_TEST_THREADS" native::
+                ;;
+              Darwin)
+                nix develop --offline --no-write-lock-file --command bash crates/parrot-tools/tests/sandbox/macos/run-native.sh
+                nix develop --offline --no-write-lock-file --command bash crates/parrot-cli/tests/terminal_input/native_macos
+                ;;
+            esac
+          ) &
+          pids+=("$!")
+          (
+            export CARGO_TARGET_DIR="$target_root/contracts"
+            nix develop --offline --no-write-lock-file --command cargo nextest run --manifest-path tests/contracts/Cargo.toml --locked --test-threads "$RUST_TEST_THREADS" --no-fail-fast
+            nix develop --offline --no-write-lock-file --command cargo test --manifest-path tests/contracts/Cargo.toml --doc --locked
+          ) &
+          pids+=("$!")
+          nix develop --offline --no-write-lock-file --command npm --prefix web test &
+          pids+=("$!")
+          result=0
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+              result=1
+            fi
+          done
+          if ((result)); then
+            exit "$result"
+          fi
           prefix="$(nix build --offline --no-write-lock-file --no-link --print-out-paths '.#${{ matrix.package }}')"
           bash scripts/package-smoke --prefix "$prefix" --target '${{ matrix.target }}'
