@@ -56,6 +56,15 @@ fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_res
         .unwrap_err();
     assert_eq!(write.code, ErrorCode::InvalidOperation);
     assert!(write.message.contains("write_turn_budget"));
+    let scratch =
+        finish(states.write_to_scratch(b"contents", parrot_core::CancellationToken::uncancelled()))
+            .unwrap_err();
+    assert_eq!(scratch.code, ErrorCode::InvalidOperation);
+    assert!(scratch.message.contains("write_to_scratch"));
+    let file = finish(states.read_file("image.png", parrot_core::CancellationToken::uncancelled()))
+        .unwrap_err();
+    assert_eq!(file.code, ErrorCode::InvalidOperation);
+    assert!(file.message.contains("read_file"));
 }
 
 #[test]

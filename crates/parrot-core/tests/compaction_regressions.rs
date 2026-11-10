@@ -66,11 +66,11 @@ impl States for RecordedEffects {
         Box::pin(async { Err(Error::unsupported("test state configuration")) })
     }
 
-    fn spill_group<'a, 'c>(
+    fn write_to_scratch<'a, 'c>(
         &'a self,
-        _: &'a [Message],
+        _: &'a [u8],
         _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<Message>, Error>>
+    ) -> BoxFuture<'a, Result<String, Error>>
     where
         'c: 'a,
     {

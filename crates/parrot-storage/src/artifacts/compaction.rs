@@ -212,6 +212,11 @@ fn encode_base64(bytes: &[u8]) -> String {
     encoded
 }
 
+enum ScratchContents<'a> {
+    Artifact(Value),
+    Bytes(&'a [u8]),
+}
+
 pub struct CompactionGroupBlobStore {
     blob_directory: PathBuf,
     agent_directory: PathBuf,
@@ -317,10 +322,32 @@ impl CompactionGroupBlobStore {
         group: &CompactionGroup,
         cancellation: &dyn Cancellation,
     ) -> Result<PathBuf, CompactionError> {
+        self.persist_contents(
+            || group.to_artifact().map(ScratchContents::Artifact),
+            cancellation,
+        )
+    }
+
+    /// Writes the exact supplied bytes and returns their published scratch path.
+    pub fn write_to_scratch(
+        &mut self,
+        contents: &[u8],
+        cancellation: &dyn Cancellation,
+    ) -> Result<PathBuf, CompactionError> {
+        self.persist_contents(|| Ok(ScratchContents::Bytes(contents)), cancellation)
+    }
+
+    fn persist_contents<'a>(
+        &mut self,
+        prepare: impl FnOnce() -> Result<ScratchContents<'a>, CompactionError>,
+        cancellation: &dyn Cancellation,
+    ) -> Result<PathBuf, CompactionError> {
         self.validate_blob_directory()?;
         check(cancellation)?;
+        let supported = cfg!(any(target_os = "linux", target_os = "macos"));
         #[cfg(test)]
-        if self.unsupported_platform {
+        let supported = supported && !self.unsupported_platform;
+        if !supported {
             return Err(CompactionError::new(
                 CompactionErrorKind::UnsupportedPlatform,
                 "Race-safe compaction group persistence is unavailable on this platform.",
@@ -328,7 +355,7 @@ impl CompactionGroupBlobStore {
         }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            let artifact = group.to_artifact()?;
+            let contents = prepare()?;
             let directory = native::open_directory(&self.blob_directory)?;
             #[cfg(test)]
             if let Some(hook) = &self.hooks.after_blob_directory_opened {
@@ -343,7 +370,7 @@ impl CompactionGroupBlobStore {
                 let force_named = false;
                 if !force_named {
                     if let Some(file) = native::try_open_temporary_file(&directory)? {
-                        return self.persist_file(&directory, file, None, &artifact, cancellation);
+                        return self.persist_file(&directory, file, None, &contents, cancellation);
                     }
                 }
             }
@@ -357,13 +384,19 @@ impl CompactionGroupBlobStore {
                 &directory,
                 file,
                 Some(staging_name),
-                &artifact,
+                &contents,
                 cancellation,
             )
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
-            let _ = group;
+            let contents = prepare()?;
+            match contents {
+                ScratchContents::Artifact(artifact) => drop(artifact),
+                ScratchContents::Bytes(contents) => {
+                    let _ = contents;
+                }
+            }
             Err(CompactionError::new(
                 CompactionErrorKind::UnsupportedPlatform,
                 "Race-safe compaction group persistence is unavailable on this platform.",
@@ -398,7 +431,7 @@ impl CompactionGroupBlobStore {
         directory: &std::fs::File,
         mut file: std::fs::File,
         staging_name: Option<String>,
-        artifact: &Value,
+        contents: &ScratchContents<'_>,
         cancellation: &dyn Cancellation,
     ) -> Result<PathBuf, CompactionError> {
         let mut identity = None;
@@ -411,7 +444,30 @@ impl CompactionGroupBlobStore {
             if let Some(hook) = &self.hooks.after_file_created {
                 hook();
             }
-            serialize(&mut file, artifact, cancellation)?;
+            match contents {
+                ScratchContents::Artifact(artifact) => {
+                    serialize(&mut file, artifact, cancellation)?
+                }
+                ScratchContents::Bytes(contents) => {
+                    let mut writer = CancellableWriter {
+                        file: io::BufWriter::new(&mut file),
+                        cancellation,
+                    };
+                    writer
+                        .write_all(contents)
+                        .and_then(|()| writer.flush())
+                        .map_err(|error| {
+                            if cancellation.is_cancelled() {
+                                CompactionError::new(
+                                    CompactionErrorKind::Cancelled,
+                                    "A task was canceled.",
+                                )
+                            } else {
+                                CompactionError::io("write scratch contents", error)
+                            }
+                        })?;
+                }
+            }
             self.require_current(directory)?;
             if identity.is_none() {
                 identity = Some(native::identify(&file, false, self)?);

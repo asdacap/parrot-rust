@@ -97,7 +97,7 @@ fn no_plan_invokes_neither_provider_nor_progress() {
     let provider = Provider::default();
     assert_eq!(run(None, &mut effects, &provider), Ok(None));
     assert!(effects.progress.lock().unwrap().is_empty());
-    assert!(effects.spills.lock().unwrap().is_empty());
+    assert!(effects.scratch_writes.lock().unwrap().is_empty());
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
@@ -221,14 +221,25 @@ fn initial_spills_commit_in_source_order_before_a_later_ineligible_group_fails()
         name: "tool".into(),
         arguments_json: "{}".into(),
     });
-    let original = plan.groups[0].messages.clone();
+
     let mut effects = Effects::default();
     let provider = Provider::default();
     assert_eq!(
         run(Some(plan), &mut effects, &provider),
         Err(CompactionFailure::GroupExceedsBudget.into())
     );
-    assert_eq!(*effects.spills.lock().unwrap(), [original]);
+    let writes = effects.scratch_writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
+    assert_eq!(
+        artifact,
+        serde_json::json!({ "messages": [{
+            "role": "Assistant",
+            "contents": [{ "kind": "Text", "text": "too large first tool group", "image": "", "media_type": "" }],
+            "tool_calls": [{ "id": "call", "name": "tool", "arguments_json": "{}" }],
+            "tool_call_id": ""
+        }] })
+    );
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
@@ -242,19 +253,115 @@ fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
         name: "tool".into(),
         arguments_json: " { \"x\" : 1.00 } ".into(),
     });
-    let original = plan.groups[1].messages.clone();
+
     let mut effects = Effects::default();
     let provider = Provider::new([
         SummaryResponse::Summary("123456789012".into()),
         SummaryResponse::Summary("done".into()),
     ]);
     run(Some(plan), &mut effects, &provider).unwrap().unwrap();
-    assert_eq!(*effects.spills.lock().unwrap(), [original]);
+    let writes = effects.scratch_writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
+    assert_eq!(
+        artifact,
+        serde_json::json!({ "messages": [{
+            "role": "Assistant",
+            "contents": [{ "kind": "Text", "text": "other-14-bytes!", "image": "", "media_type": "" }],
+            "tool_calls": [{ "id": "call", "name": "tool", "arguments_json": " { \"x\" : 1.00 } " }],
+            "tool_call_id": ""
+        }] })
+    );
     let requests = provider.requests.lock().unwrap();
     assert_eq!(
         texts(&requests[1]),
         ["instructions", "prefix:123456789012", "blob"]
     );
+}
+
+#[test]
+fn oversized_groups_write_json_with_inline_or_file_image_bytes_before_rendering_the_path() {
+    for inline in [false, true] {
+        let mut plan = plan(&["oversized tool call", "tail"]);
+        plan.input_budget = 5;
+        plan.groups[0].messages[0].role = Role::Assistant;
+        plan.groups[0].messages[0].tool_calls.push(ToolCall {
+            id: "call".into(),
+            name: "tool".into(),
+            arguments_json: " { \"x\" : 1.00 } ".into(),
+        });
+        plan.groups[0].messages.push(parrot_core::Message {
+            role: Role::Tool,
+            tool_call_id: "call".into(),
+            contents: vec![Content::Image {
+                path: "image.bin".into(),
+                url: String::new(),
+                media_type: "image/test".into(),
+                width: 1,
+                height: 1,
+                bytes: inline.then(|| vec![0, 1, 255]),
+            }],
+            ..parrot_core::Message::default()
+        });
+        let mut effects = Effects::default();
+        if !inline {
+            effects.files.insert("image.bin".into(), vec![0, 1, 255]);
+        }
+        let provider = Provider::new([SummaryResponse::Summary("done".into())]);
+        run(Some(plan), &mut effects, &provider).unwrap().unwrap();
+        let writes = effects.scratch_writes.lock().unwrap();
+        assert_eq!(writes.len(), 1);
+        let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
+        assert_eq!(
+            artifact["messages"][0]["tool_calls"][0]["arguments_json"],
+            " { \"x\" : 1.00 } "
+        );
+        assert_eq!(artifact["messages"][1]["role"], "Tool");
+        assert_eq!(artifact["messages"][1]["tool_call_id"], "call");
+        assert_eq!(artifact["messages"][1]["contents"][0]["image"], "AAH/");
+        assert_eq!(
+            artifact["messages"][1]["contents"][0]["media_type"],
+            "image/test"
+        );
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(texts(&requests[0]), ["instructions", "blob"]);
+        assert_eq!(requests[0].messages[1].role, Role::System);
+    }
+}
+
+#[test]
+fn cancelled_group_serialization_does_not_write_scratch_or_invoke_the_provider() {
+    struct Cancelled;
+
+    impl parrot_core::Cancellation for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+
+        fn cancelled(&self) -> parrot_core::BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    let mut plan = plan(&["oversized tool group", "tail"]);
+    plan.input_budget = 5;
+    plan.groups[0].messages[0].role = Role::Assistant;
+    plan.groups[0].messages[0].tool_calls.push(ToolCall {
+        id: "call".into(),
+        name: "tool".into(),
+        arguments_json: "{}".into(),
+    });
+    let mut effects = Effects::default();
+    let provider = Provider::default().with_estimates(&effects);
+    let result = finish(compact(
+        Some(plan),
+        &mut effects,
+        &provider,
+        CancellationToken::new(&Cancelled),
+    ));
+    assert_eq!(result, Err(Error::cancelled()));
+    assert!(effects.scratch_writes.lock().unwrap().is_empty());
+    assert!(provider.requests.lock().unwrap().is_empty());
 }
 
 #[test]

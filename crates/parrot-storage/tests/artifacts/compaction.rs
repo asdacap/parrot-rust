@@ -347,6 +347,39 @@ fn missing_source_image_fails_before_publication_without_leaving_a_blob() {
 }
 
 #[test]
+fn scratch_write_preserves_raw_bytes_and_returns_the_published_path() {
+    for named in [false, true] {
+        let directory = Directory::new();
+        let mut store = directory.store(&["scratch.json", "empty.json"], named);
+        let contents = b"not JSON\0\xff\xfe\n";
+        let path = store.write_to_scratch(contents, &Token::default()).unwrap();
+        assert_eq!(path, directory.blobs.join("scratch.json"));
+        assert_eq!(fs::read(&path).unwrap(), contents);
+        let empty_path = store.write_to_scratch(&[], &Token::default()).unwrap();
+        assert_eq!(empty_path, directory.blobs.join("empty.json"));
+        assert!(fs::read(&empty_path).unwrap().is_empty());
+        assert_eq!(entries(&directory.blobs), ["empty.json", "scratch.json"]);
+    }
+}
+
+#[test]
+fn cancelled_scratch_write_removes_staging_and_final_files() {
+    for named in [false, true] {
+        let directory = Directory::new();
+        let token = Arc::new(Token::default());
+        let cancel = token.clone();
+        let mut store = directory.store(&["canceled-scratch.json"], named);
+        store.hooks.after_file_created = Some(Box::new(move || cancel.cancel()));
+        let error = store
+            .write_to_scratch(&[0, 255, 1], token.as_ref())
+            .unwrap_err();
+        assert_eq!(error.kind, CompactionErrorKind::Cancelled);
+        assert!(error.cleanup_failures.is_empty());
+        assert!(entries(&directory.blobs).is_empty());
+    }
+}
+
+#[test]
 fn pre_cancelled_persist_creates_no_artifact() {
     for named in [false, true] {
         let directory = Directory::new();

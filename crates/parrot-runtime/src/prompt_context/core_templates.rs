@@ -3,6 +3,10 @@ use parrot_core::ConfigKey;
 
 const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
     (ConfigKey::AgentsFileTemplate, "context.agents-file"),
+    (
+        ConfigKey::OversizedToolGroupTemplate,
+        "compaction.oversized-tool-group-notice",
+    ),
     (ConfigKey::AgentIdentityTemplate, "system.agent-identity"),
     (
         ConfigKey::StandingInstructionTemplate,
