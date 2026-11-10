@@ -263,7 +263,11 @@ impl EnhancedSessionPresenter {
                     {
                         ImmediateScrollbackValue::process(&pending.content)
                     } else {
-                        ImmediateScrollbackValue::user(&pending.content)
+                        let content = self
+                            .activity
+                            .format_task_update_notice(&published.agent_session_id, &pending)
+                            .unwrap_or(pending.content);
+                        ImmediateScrollbackValue::user(&content)
                     };
                     update.commits.push(Arc::new(value));
                 }
