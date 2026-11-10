@@ -556,6 +556,174 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
 }
 
 #[test]
+fn task_update_notice_shows_execution_assignments_only_in_the_ui() {
+    use wire::AgentTaskProgressStatus::{
+        AGENT_TASK_PROGRESS_STATUS_PENDING as Pending,
+        AGENT_TASK_PROGRESS_STATUS_RUNNING as Running,
+        AGENT_TASK_PROGRESS_STATUS_SUCCEEDED as Succeeded,
+    };
+    for replaying in [false, true] {
+        let mut presenter = EnhancedSessionPresenter::new(160, false, replaying);
+        presenter.observe(&start("root")).unwrap();
+        presenter.observe(&child("root")).unwrap();
+        let snapshot = wire::AgentTaskProgressSnapshot {
+            revision: 1,
+            root_nodes: [
+                ("finished", Succeeded, "child"),
+                ("final-review", Running, ""),
+                ("package-check", Running, "child"),
+                ("publish", Pending, ""),
+            ]
+            .into_iter()
+            .map(|(name, status, agent)| wire::AgentTaskProgressNode {
+                name: name.into(),
+                description: "Do not display task descriptions here".into(),
+                status: status.into(),
+                agent_session_id: agent.into(),
+                ..Default::default()
+            })
+            .collect(),
+            ..Default::default()
+        };
+        presenter
+            .observe(&event(
+                "root",
+                Payload::ToolSnapshot(wire::ToolSnapshot {
+                    kind: "agent_task_progress".into(),
+                    revision: 1,
+                    final_chunk: true,
+                    data: snapshot.write_to_bytes().unwrap(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        let content = "AgentTask states changed by your update:\n- finished: succeeded";
+        for (id, source) in [
+            ("notification", wire::InputSource::INPUT_SOURCE_NOTIFICATION),
+            ("user", wire::InputSource::INPUT_SOURCE_UNSPECIFIED),
+        ] {
+            let admission = event(
+                "root",
+                Payload::InputAdmitted(wire::InputAdmitted {
+                    input_id: id.into(),
+                    content: content.into(),
+                    delivery: wire::Delivery::DELIVERY_STEER.into(),
+                    source: source.into(),
+                    ..Default::default()
+                }),
+            );
+            presenter.observe(&admission).unwrap();
+            let promoted = presenter
+                .observe(&event(
+                    "root",
+                    Payload::InputPromoted(wire::InputPromoted {
+                        input_id: id.into(),
+                        ..Default::default()
+                    }),
+                ))
+                .unwrap();
+            let output = commits(&promoted.commits, 160);
+            if source == wire::InputSource::INPUT_SOURCE_UNSPECIFIED {
+                assert!(!output.contains("Next execution:"), "{output}");
+                continue;
+            }
+            assert!(output.contains("Next execution:"), "{output}");
+            assert!(
+                output.contains("final-review: self, run in this conversation"),
+                "{output}"
+            );
+            assert!(
+                output.contains("package-check: dedicated agent worker, started automatically"),
+                "{output}"
+            );
+            assert!(output.contains("publish: pending, not started"), "{output}");
+            assert!(!output.contains("finished: dedicated"), "{output}");
+            assert!(
+                !output.contains("Do not display task descriptions here"),
+                "{output}"
+            );
+        }
+    }
+}
+
+#[test]
+fn task_update_notice_distinguishes_completed_pending_and_unavailable_progress() {
+    use wire::AgentTaskProgressStatus::{
+        AGENT_TASK_PROGRESS_STATUS_FAILED as Failed, AGENT_TASK_PROGRESS_STATUS_PENDING as Pending,
+        AGENT_TASK_PROGRESS_STATUS_SUCCEEDED as Succeeded,
+    };
+    for status in [None, Some(Succeeded), Some(Failed), Some(Pending)] {
+        let mut presenter = configured(160);
+        presenter.observe(&start("root")).unwrap();
+        if let Some(status) = status {
+            let snapshot = wire::AgentTaskProgressSnapshot {
+                revision: 1,
+                root_nodes: vec![wire::AgentTaskProgressNode {
+                    name: "remaining".into(),
+                    status: status.into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            presenter
+                .observe(&event(
+                    "root",
+                    Payload::ToolSnapshot(wire::ToolSnapshot {
+                        kind: "agent_task_progress".into(),
+                        revision: 1,
+                        final_chunk: true,
+                        data: snapshot.write_to_bytes().unwrap(),
+                        ..Default::default()
+                    }),
+                ))
+                .unwrap();
+        }
+        presenter
+            .observe(&event(
+                "root",
+                Payload::InputAdmitted(wire::InputAdmitted {
+                    input_id: "notice".into(),
+                    content: "AgentTask states changed by your update:\n- finished: succeeded"
+                        .into(),
+                    delivery: wire::Delivery::DELIVERY_STEER.into(),
+                    source: wire::InputSource::INPUT_SOURCE_NOTIFICATION.into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        let promoted = presenter
+            .observe(&event(
+                "root",
+                Payload::InputPromoted(wire::InputPromoted {
+                    input_id: "notice".into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        let output = commits(&promoted.commits, 160);
+        match status {
+            None => assert!(!output.contains("Next execution:"), "{output}"),
+            Some(Succeeded) => {
+                assert!(output.contains("None. All tasks are complete."), "{output}")
+            }
+            Some(_) => {
+                assert!(
+                    output.contains("No visible task is currently running."),
+                    "{output}"
+                );
+                assert!(!output.contains("All tasks are complete"), "{output}");
+                if status == Some(Pending) {
+                    assert!(
+                        output.contains("remaining: pending, not started"),
+                        "{output}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn steer_remains_pending_across_turn_boundaries_until_its_own_promotion() {
     let mut presenter = configured(120);
     presenter.observe(&start("root")).unwrap();
