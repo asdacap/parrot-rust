@@ -197,7 +197,11 @@ where
         };
         let notices = Notices {
             runaway: render("agent-session.runaway")?,
-            interrupted_result: render("agent-session.interrupted-result")?,
+            interrupted_result: config
+                .tool_execution
+                .templates
+                .render("agent-session.interrupted-result", &[], &NeverCancelled)
+                .map_err(|error| TurnError::Service(error.to_string()))?,
         };
         Ok(Arc::new(Self {
             identity: config.identity,
