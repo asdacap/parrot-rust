@@ -459,6 +459,10 @@ prompt_templates:
     template: 'error: {message}'
     allowed_arguments: [message]
     required_arguments: [message]
+  tool-result.path-variable-note:
+    template: 'tip: the same path can be written as {short}. Use it in path arguments to shorten later tool calls.'
+    allowed_arguments: [short]
+    required_arguments: [short]
   tool-result.image-budget-exceeded:
     template: 'The image upload budget of {limit_bytes} original bytes for this tool-call cycle has been exceeded. This and all later image reads in this cycle are rejected. Retry in a new tool-call cycle.'
     allowed_arguments: [limit_bytes]

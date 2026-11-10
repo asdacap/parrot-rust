@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 
 /// Materialized agent path variables only; this value performs no resolution or authorization.
 #[derive(Clone, Debug, Default)]
@@ -55,5 +55,29 @@ impl WorkspacePaths {
         }
         output.push_str(&path[copied..]);
         output
+    }
+
+    /// The `$NAME` or `$NAME/suffix` shorthand for an expanded path under the
+    /// longest matching variable root, or none when no root matches.
+    pub fn shorten(&self, path: &str) -> Option<String> {
+        let file = Path::new(path);
+        let mut matched: Option<(usize, String)> = None;
+        for (name, root) in &self.variables {
+            let Ok(suffix) = file.strip_prefix(root) else {
+                continue;
+            };
+            if matched
+                .as_ref()
+                .is_none_or(|(length, _)| root.len() > *length)
+            {
+                let display = if suffix.as_os_str().is_empty() {
+                    format!("${name}")
+                } else {
+                    format!("${name}/{}", suffix.display())
+                };
+                matched = Some((root.len(), display));
+            }
+        }
+        matched.map(|(_, display)| display)
     }
 }

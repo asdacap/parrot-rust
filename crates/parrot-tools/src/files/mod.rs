@@ -183,6 +183,43 @@ impl<'a> Formatter<'a> {
             format!("markdown outline (line: heading):\n{outline}\n"),
         )
     }
+
+    fn note(&self, short: &str) -> OperationResult<String, FileToolError> {
+        self.render(
+            "tool-result.path-variable-note",
+            "short",
+            short,
+            format!(
+                "tip: the same path can be written as {short}. Use it in path arguments to shorten later tool calls."
+            ),
+        )
+    }
+}
+
+/// Appends the path-variable advisory to a successful result when the input
+/// path sits under a variable root and the agent did not already use the
+/// `$NAME` shorthand for it.
+fn append_short_path_note(
+    paths: &WorkspacePaths,
+    input_path: &str,
+    formatter: &Formatter<'_>,
+    result: FileToolResult,
+) -> OperationResult<FileToolResult, FileToolError> {
+    if input_path.contains('$') {
+        return Ok(result);
+    }
+    let Some(short) = paths.shorten(input_path) else {
+        return Ok(result);
+    };
+    let note = formatter.note(&short)?;
+    let mut result = result;
+    if !result.text.is_empty() {
+        if !result.text.ends_with('\n') {
+            result.text.push('\n');
+        }
+        result.text.push_str(&note);
+    }
+    Ok(result)
 }
 
 fn file_error(
