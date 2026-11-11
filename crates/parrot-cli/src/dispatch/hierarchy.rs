@@ -4,13 +4,13 @@ use std::collections::{HashMap, HashSet};
 
 use parrot_domain::protocol::messages::parrot::{Event, event::Payload};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 struct SessionNode {
     name: String,
     parent: String,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AgentSessionHierarchy {
     sessions: HashMap<String, SessionNode>,
     root_session_id: Option<String>,
