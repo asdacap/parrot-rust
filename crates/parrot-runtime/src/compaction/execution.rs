@@ -156,7 +156,7 @@ impl Compactor {
         cancellation: &dyn Cancellation,
     ) -> Result<Option<CompactionResult>, CompactionError> {
         let plan = self.prepare_plan(selected, target, input)?;
-        let estimates = CompactionEstimates::new(self, selected);
+        let estimates = CompactionEstimates::new(selected);
         self.run_plan(
             plan,
             estimates,
@@ -182,8 +182,8 @@ impl Compactor {
         let input_data = input.capture_input();
         let definitions: Vec<parrot_core::ToolDefinition> =
             input.tools.iter().cloned().map(Into::into).collect();
-        let estimates = CompactionEstimates::new(self, selected);
-        let provider = super::planning::PlanningProvider::new(self.planner(), &estimates.selected);
+        let estimates = CompactionEstimates::new(selected);
+        let provider = super::planning::PlanningProvider::new(&estimates.selected);
         CompactionPlan::select(&input_data, &definitions, &configuration, &provider)
             .map_err(CompactionError::from)
     }
@@ -271,44 +271,17 @@ pub(crate) struct CompactionResources<'a> {
 }
 
 pub(crate) struct CompactionEstimates {
-    planner: Arc<CompactionPlanner>,
     selected: ProviderModel,
 }
 
 impl CompactionEstimates {
-    pub(crate) fn new(compactor: &Compactor, selected: &ResolvedModelSelection) -> Self {
+    pub(crate) fn new(selected: &ResolvedModelSelection) -> Self {
         Self {
-            planner: compactor.planner.clone(),
             selected: selected.canonical_model.clone(),
         }
     }
 
-    pub(crate) fn estimate_tokens(
-        &self,
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, CompactionError> {
-        let messages: Vec<Message> = messages.iter().cloned().map(Into::into).collect();
-        CompactionPlanner::estimate_tokens(&self.selected, &messages).map_err(CompactionError::from)
-    }
-
-    pub(crate) fn estimate_summary_tokens(
-        &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[parrot_core::Message],
-    ) -> Result<i64, CompactionError> {
-        let messages: Vec<Message> = next_group.iter().cloned().map(Into::into).collect();
-        self.planner
-            .estimate_summary_request_tokens(
-                &self.selected,
-                preceding_summary,
-                chunk_tokens,
-                &messages,
-            )
-            .map_err(CompactionError::from)
-    }
-
-    pub(crate) fn estimate_context_tokens(
+    pub(crate) fn estimate_input_tokens(
         &self,
         instructions: &str,
         definitions: &[parrot_core::ToolDefinition],
@@ -466,29 +439,7 @@ impl<O: CompactionObserver, E: From<CompactionError> + Send> parrot_core::Provid
         messages: &[parrot_core::Message],
     ) -> Result<i64, parrot_core::Error> {
         self.estimates
-            .estimate_context_tokens(instructions, definitions, messages)
-            .map_err(|error| {
-                let diagnostic = describe_error(&error);
-                self.errors.capture(error.into(), diagnostic)
-            })
-    }
-    fn estimate_tokens(
-        &self,
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        self.estimates.estimate_tokens(messages).map_err(|error| {
-            let diagnostic = describe_error(&error);
-            self.errors.capture(error.into(), diagnostic)
-        })
-    }
-    fn estimate_summary_tokens(
-        &self,
-        preceding: &str,
-        tokens: i64,
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        self.estimates
-            .estimate_summary_tokens(preceding, tokens, messages)
+            .estimate_input_tokens(instructions, definitions, messages)
             .map_err(|error| {
                 let diagnostic = describe_error(&error);
                 self.errors.capture(error.into(), diagnostic)

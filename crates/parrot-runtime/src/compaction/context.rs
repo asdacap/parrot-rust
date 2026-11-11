@@ -310,7 +310,7 @@ impl ContextController {
             .cloned()
             .map(Into::into)
             .collect::<Vec<_>>();
-        let estimates = CompactionEstimates::new(&self.compactor, input.selection);
+        let estimates = CompactionEstimates::new(input.selection);
         let errors = NativeErrors::new();
         let templates = self.templates.clone();
         let controller = tokio::sync::Mutex::new(self);
@@ -394,7 +394,7 @@ impl ContextController {
             .capture_compaction_configuration(input.selection, target);
         let definitions: Vec<parrot_core::ToolDefinition> =
             input.tools.iter().cloned().map(Into::into).collect();
-        let estimates = CompactionEstimates::new(&self.compactor, input.selection);
+        let estimates = CompactionEstimates::new(input.selection);
         let errors = NativeErrors::new();
         let templates = self.templates.clone();
         let (prepared, result) = {
@@ -1179,26 +1179,6 @@ impl EpochProvider<'_> {
 }
 
 impl parrot_core::Provider for EpochProvider<'_> {
-    fn estimate_tokens(
-        &self,
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        self.estimates
-            .estimate_tokens(messages)
-            .map_err(|error| self.capture_error(error))
-    }
-
-    fn estimate_summary_tokens(
-        &self,
-        preceding: &str,
-        tokens: i64,
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        self.estimates
-            .estimate_summary_tokens(preceding, tokens, messages)
-            .map_err(|error| self.capture_error(error))
-    }
-
     fn summarize<'a, 'c>(
         &'a self,
         request: parrot_core::ProviderRequest,
@@ -1225,7 +1205,7 @@ impl parrot_core::Provider for EpochProvider<'_> {
         messages: &[parrot_core::Message],
     ) -> Result<i64, parrot_core::Error> {
         self.estimates
-            .estimate_context_tokens(instructions, definitions, messages)
+            .estimate_input_tokens(instructions, definitions, messages)
             .map_err(|error| self.capture_error(error))
     }
 }

@@ -93,6 +93,32 @@ pub async fn compact(
     .map(Some)
 }
 
+impl CompactionPlan {
+    fn compose_summary_messages<'m>(
+        &self,
+        preceding_summary: &str,
+        messages: impl IntoIterator<Item = &'m Message>,
+    ) -> Vec<Message> {
+        let mut request_messages = vec![Message {
+            role: Role::System,
+            contents: vec![Content::Text(self.summary_instructions.clone())],
+            ..Message::default()
+        }];
+        if !preceding_summary.is_empty() {
+            request_messages.push(Message {
+                role: Role::System,
+                contents: vec![Content::Text(format!(
+                    "{}{preceding_summary}",
+                    self.summary_prefix
+                ))],
+                ..Message::default()
+            });
+        }
+        request_messages.extend(messages.into_iter().cloned());
+        request_messages
+    }
+}
+
 struct CompactionRunner<'a, 'c> {
     plan: &'a CompactionPlan,
     states: &'a mut dyn States,
@@ -108,10 +134,11 @@ impl CompactionRunner<'_, '_> {
         let mut provider_groups = Vec::with_capacity(pending.len());
         let mut substituted = vec![false; pending.len()];
         for (index, group) in pending.iter().enumerate() {
-            let messages = if self
-                .provider
-                .estimate_summary_tokens("", 0, &group.messages)?
-                > plan.input_budget
+            let messages = if self.provider.estimate_input_tokens(
+                "",
+                &[],
+                &plan.compose_summary_messages("", &group.messages),
+            )? > plan.input_budget
             {
                 if !group.can_spill() {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
@@ -119,7 +146,12 @@ impl CompactionRunner<'_, '_> {
                 substituted[index] = true;
                 let notice =
                     scratch::spill_group(self.states, &group.messages, self.cancellation).await?;
-                if self.provider.estimate_summary_tokens("", 0, &notice)? > plan.input_budget {
+                if self.provider.estimate_input_tokens(
+                    "",
+                    &[],
+                    &plan.compose_summary_messages("", &notice),
+                )? > plan.input_budget
+                {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
                 }
                 notice
@@ -131,22 +163,25 @@ impl CompactionRunner<'_, '_> {
         let mut progress = CompactionProgress::default();
         let mut summary = String::new();
         let mut chunk = Vec::new();
-        let mut chunk_tokens = 0;
         for (index, mut messages) in provider_groups.into_iter().enumerate() {
             if !chunk.is_empty()
-                && self
-                    .provider
-                    .estimate_summary_tokens(&summary, chunk_tokens, &messages)?
-                    > plan.input_budget
+                && self.provider.estimate_input_tokens(
+                    "",
+                    &[],
+                    &plan.compose_summary_messages(
+                        &summary,
+                        chunk.iter().flatten().chain(&messages),
+                    ),
+                )? > plan.input_budget
             {
                 summary = self.fold_groups(&summary, &chunk, &mut progress).await?;
                 chunk.clear();
-                chunk_tokens = 0;
             }
-            if self
-                .provider
-                .estimate_summary_tokens(&summary, chunk_tokens, &messages)?
-                > plan.input_budget
+            if self.provider.estimate_input_tokens(
+                "",
+                &[],
+                &plan.compose_summary_messages(&summary, chunk.iter().flatten().chain(&messages)),
+            )? > plan.input_budget
             {
                 if !pending[index].can_spill() || substituted[index] {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
@@ -155,17 +190,18 @@ impl CompactionRunner<'_, '_> {
                     scratch::spill_group(self.states, &pending[index].messages, self.cancellation)
                         .await?;
                 substituted[index] = true;
-                if self
-                    .provider
-                    .estimate_summary_tokens(&summary, chunk_tokens, &messages)?
-                    > plan.input_budget
+                if self.provider.estimate_input_tokens(
+                    "",
+                    &[],
+                    &plan.compose_summary_messages(
+                        &summary,
+                        chunk.iter().flatten().chain(&messages),
+                    ),
+                )? > plan.input_budget
                 {
                     return Err(CompactionFailure::GroupExceedsBudget.into());
                 }
             }
-            chunk_tokens = chunk_tokens
-                .checked_add(self.provider.estimate_tokens(&messages)?)
-                .ok_or_else(|| Error::from(CompactionFailure::TokenOverflow))?;
             chunk.push(messages);
         }
         if !chunk.is_empty() {
@@ -223,22 +259,9 @@ impl CompactionRunner<'_, '_> {
             progress.total_groups += 1;
             self.report_progress(*progress).await?;
             self.check_cancellation()?;
-            let mut messages = vec![Message {
-                role: Role::System,
-                contents: vec![Content::Text(self.plan.summary_instructions.clone())],
-                ..Message::default()
-            }];
-            if !preceding_summary.is_empty() {
-                messages.push(Message {
-                    role: Role::System,
-                    contents: vec![Content::Text(format!(
-                        "{}{preceding_summary}",
-                        self.plan.summary_prefix
-                    ))],
-                    ..Message::default()
-                });
-            }
-            messages.extend(pending.iter().flatten().cloned());
+            let messages = self
+                .plan
+                .compose_summary_messages(preceding_summary, pending.iter().flatten());
             let request = ProviderRequest {
                 model: self.plan.model.clone(),
                 messages,

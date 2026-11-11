@@ -322,25 +322,6 @@ impl Provider for MemoryProvider {
         });
         Ok(tokens)
     }
-    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
-        self.compaction
-            .lock()
-            .unwrap()
-            .effects
-            .estimate_tokens(messages)
-    }
-    fn estimate_summary_tokens(
-        &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[Message],
-    ) -> Result<i64, Error> {
-        self.compaction
-            .lock()
-            .unwrap()
-            .effects
-            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
-    }
     fn summarize<'a, 'c>(
         &'a self,
         request: ProviderRequest,
@@ -1891,18 +1872,6 @@ impl Provider for EchoProvider {
     ) -> Result<i64, Error> {
         self.0
             .estimate_input_tokens(instructions, definitions, messages)
-    }
-    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
-        self.0.estimate_tokens(messages)
-    }
-    fn estimate_summary_tokens(
-        &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[Message],
-    ) -> Result<i64, Error> {
-        self.0
-            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
     }
     fn summarize<'a, 'c>(
         &'a self,

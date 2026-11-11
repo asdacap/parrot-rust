@@ -16,18 +16,6 @@ pub trait Provider: Send + Sync {
     ) -> Result<i64, Error> {
         Err(Error::unsupported("Provider.estimate_input_tokens"))
     }
-    fn estimate_tokens(&self, _messages: &[Message]) -> Result<i64, Error> {
-        Err(Error::unsupported("Provider.estimate_tokens"))
-    }
-    /// Estimates preceding summary, accumulated chunk, and the next atomic group.
-    fn estimate_summary_tokens(
-        &self,
-        _preceding_summary: &str,
-        _chunk_tokens: i64,
-        _next_group: &[Message],
-    ) -> Result<i64, Error> {
-        Err(Error::unsupported("Provider.estimate_summary_tokens"))
-    }
     /// Collects a private summary stream without publishing its generated content.
     fn summarize<'a, 'c>(
         &'a self,

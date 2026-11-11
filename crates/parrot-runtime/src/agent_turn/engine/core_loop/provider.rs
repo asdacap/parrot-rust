@@ -16,7 +16,6 @@ pub(super) struct RuntimeProvider<'a> {
     pub(super) event_id: &'a (dyn Fn() -> String + Send + Sync),
     pub(super) output: &'a dyn SessionOutput,
     pub(super) activity: &'a dyn SessionActivity,
-    pub(super) compactor: &'a crate::compaction::Compactor,
     pub(super) state: &'a Mutex<State>,
     pub(super) events: ContextEmitter<'a>,
 }
@@ -44,23 +43,8 @@ impl parrot_core::Provider for RuntimeProvider<'_> {
         definitions: &[ToolDefinition],
         messages: &[parrot_core::Message],
     ) -> Result<i64, CoreError> {
-        crate::compaction::CompactionEstimates::new(self.compactor, &self.model)
-            .estimate_context_tokens(instructions, definitions, messages)
-            .map_err(Into::into)
-    }
-    fn estimate_tokens(&self, messages: &[parrot_core::Message]) -> Result<i64, CoreError> {
-        crate::compaction::CompactionEstimates::new(self.compactor, &self.model)
-            .estimate_tokens(messages)
-            .map_err(Into::into)
-    }
-    fn estimate_summary_tokens(
-        &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[parrot_core::Message],
-    ) -> Result<i64, CoreError> {
-        crate::compaction::CompactionEstimates::new(self.compactor, &self.model)
-            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
+        crate::compaction::CompactionEstimates::new(&self.model)
+            .estimate_input_tokens(instructions, definitions, messages)
             .map_err(Into::into)
     }
     fn summarize<'a, 'c>(
