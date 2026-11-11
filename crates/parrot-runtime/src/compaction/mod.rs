@@ -20,6 +20,4 @@ pub use parrot_domain::values::{
     accounting::RetainedAgentBudget,
     context::{ContextCompactionPolicy, ContextSize, ContextSnapshot, TokenEstimator},
 };
-pub use planning::{
-    CompactionGroup, CompactionPlanner, CompactionSettings, PlanningInput, group_messages,
-};
+pub use planning::{CompactionGroup, CompactionPlanner, CompactionSettings, PlanningInput};
