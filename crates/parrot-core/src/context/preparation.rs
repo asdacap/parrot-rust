@@ -33,6 +33,7 @@ pub(crate) async fn compact_context(
         &configuration,
         states,
         provider,
+        publisher,
         cancellation,
     )
     .await;

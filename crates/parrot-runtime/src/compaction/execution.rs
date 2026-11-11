@@ -204,6 +204,9 @@ impl Compactor {
         let mut states = CompactionStates {
             templates: &self.templates,
             blobs: std::sync::Mutex::new(resources.blobs),
+            errors: &errors,
+        };
+        let publisher = ObserverPublisher {
             observer: resources.observer,
             errors: &errors,
         };
@@ -211,6 +214,7 @@ impl Compactor {
             plan,
             &mut states,
             &provider,
+            &publisher,
             CancellationToken::new(resources.cancellation),
         )
         .await
@@ -379,7 +383,6 @@ impl From<parrot_core::Error> for CompactionError {
 struct CompactionStates<'a> {
     templates: &'a PromptTemplateCatalog,
     blobs: std::sync::Mutex<&'a mut CompactionGroupBlobStore>,
-    observer: &'a dyn CompactionObserver,
     errors: &'a NativeErrors<CompactionError>,
 }
 
@@ -433,26 +436,6 @@ impl parrot_core::States for CompactionStates<'_> {
                 let diagnostic = describe_error(&error);
                 self.errors.capture(error, diagnostic)
             })
-        })
-    }
-
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        progress: CompactionProgress,
-        cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.observer
-                .observe_progress(progress_event(progress), &cancellation)
-                .await
-                .map_err(CompactionError::from)
-                .map_err(|error| {
-                    let diagnostic = describe_error(&error);
-                    self.errors.capture(error, diagnostic)
-                })
         })
     }
 }
@@ -630,6 +613,57 @@ impl CompactionObserver for BorrowedObserver<'_> {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), sessions::Error>> {
         self.0.observe_progress(progress, cancellation)
+    }
+}
+
+struct ObserverPublisher<'a> {
+    observer: &'a dyn CompactionObserver,
+    errors: &'a NativeErrors<CompactionError>,
+}
+
+impl parrot_core::EventPublisher for ObserverPublisher<'_> {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async {
+            Err(parrot_core::Error::unsupported(
+                "ObserverPublisher.on_epoch_started",
+            ))
+        })
+    }
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async {
+            Err(parrot_core::Error::unsupported(
+                "ObserverPublisher.report_compaction_started",
+            ))
+        })
+    }
+    fn report_compaction_failed(
+        &self,
+        _message: String,
+    ) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async {
+            Err(parrot_core::Error::unsupported(
+                "ObserverPublisher.report_compaction_failed",
+            ))
+        })
+    }
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        progress: CompactionProgress,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.observer
+                .observe_progress(progress_event(progress), &cancellation)
+                .await
+                .map_err(CompactionError::from)
+                .map_err(|error| {
+                    let diagnostic = describe_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
     }
 }
 

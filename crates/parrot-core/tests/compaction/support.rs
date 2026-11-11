@@ -1,5 +1,6 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, Content, Error, Message, ProviderRequest, Reasoning, Role,
+    BoxFuture, CancellationToken, Content, Error, EventPublisher, Message, ProviderRequest,
+    Reasoning, Role,
     compaction::{CompactionGroup, CompactionPlan, CompactionProgress, SummaryResponse},
 };
 use std::{
@@ -44,7 +45,7 @@ pub fn plan(groups: &[&str]) -> CompactionPlan {
 
 #[derive(Default)]
 pub struct Effects {
-    pub progress: Mutex<Vec<CompactionProgress>>,
+    pub progress: Arc<Mutex<Vec<CompactionProgress>>>,
     pub scratch_writes: Mutex<Vec<Vec<u8>>>,
     pub files: std::collections::BTreeMap<String, Vec<u8>>,
     pub contexts: Arc<Mutex<Vec<ProviderRequest>>>,
@@ -116,22 +117,7 @@ impl Effects {
             Ok("blob".into())
         })
     }
-
-    pub fn report_progress<'a, 'c>(
-        &'a self,
-        progress: CompactionProgress,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.progress.lock().unwrap().push(progress);
-            Ok(())
-        })
-    }
 }
-
 #[derive(Clone, Default)]
 pub struct Provider {
     pub replies: Arc<Mutex<VecDeque<Result<SummaryResponse, Error>>>>,
@@ -248,14 +234,41 @@ impl parrot_core::States for Effects {
                 .ok_or_else(|| Error::failed("file not found"))
         })
     }
+}
+
+pub struct ProgressPublisher {
+    pub progress: Arc<Mutex<Vec<CompactionProgress>>>,
+}
+
+impl EventPublisher for ProgressPublisher {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("ProgressPublisher.on_epoch_started")) })
+    }
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "ProgressPublisher.report_compaction_started",
+            ))
+        })
+    }
+    fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "ProgressPublisher.report_compaction_failed",
+            ))
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: CompactionProgress,
-        cancellation: CancellationToken<'c>,
+        _: CancellationToken<'c>,
     ) -> BoxFuture<'a, Result<(), Error>>
     where
         'c: 'a,
     {
-        self.report_progress(progress, cancellation)
+        Box::pin(async move {
+            self.progress.lock().unwrap().push(progress);
+            Ok(())
+        })
     }
 }

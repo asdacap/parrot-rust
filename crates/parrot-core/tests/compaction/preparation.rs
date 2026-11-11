@@ -66,6 +66,20 @@ impl EventPublisher for PreparationEventPublisher {
             Ok(())
         })
     }
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        _: parrot_core::CompactionProgress,
+        _: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "PreparationEventPublisher.report_compaction_progress",
+            ))
+        })
+    }
 }
 
 impl States for Preparation {

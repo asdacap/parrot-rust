@@ -434,31 +434,6 @@ where
         )
     }
 
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        progress: parrot_core::compaction::CompactionProgress,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), CoreError>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            crate::compaction::CompactionObserver::observe_progress(
-                &self.events,
-                protocol::CompactionProgressEvent {
-                    phase: protocol::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
-                    completed_groups: progress.completed_groups as u64,
-                    total_groups: progress.total_groups as u64,
-                    ..protocol::CompactionProgressEvent::new()
-                },
-                &cancellation,
-            )
-            .await
-            .map_err(crate::compaction::CompactionError::from)
-            .map_err(Into::into)
-        })
-    }
-
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;

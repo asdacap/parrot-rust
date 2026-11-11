@@ -36,4 +36,12 @@ pub trait EventPublisher: Send + Sync {
     fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction failure without request cancellation.
     fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>>;
+    /// Publishes aggregate compaction progress without disclosing generated content.
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        progress: super::compaction::CompactionProgress,
+        cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'c: 'a;
 }

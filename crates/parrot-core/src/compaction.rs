@@ -1,7 +1,7 @@
 pub use crate::CompactionFailure;
 use crate::{
-    BoxFuture, CancellationToken, Content, Error, ErrorCode, ErrorDetail, Message, Provider,
-    ProviderRequest, Role, States,
+    BoxFuture, CancellationToken, Content, Error, ErrorCode, ErrorDetail, EventPublisher, Message,
+    Provider, ProviderRequest, Role, States,
 };
 pub use crate::{
     CompactionGroup, CompactionHistoryGroup, CompactionInput, CompactionPlan, CompactionProgress,
@@ -75,6 +75,7 @@ pub async fn compact(
     plan: Option<CompactionPlan>,
     states: &mut dyn States,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<Option<CompactionResult>, Error> {
     let Some(plan) = plan else {
@@ -84,6 +85,7 @@ pub async fn compact(
         plan: &plan,
         states,
         provider,
+        publisher,
         cancellation,
     }
     .run()
@@ -95,6 +97,7 @@ struct CompactionRunner<'a, 'c> {
     plan: &'a CompactionPlan,
     states: &'a mut dyn States,
     provider: &'a dyn Provider,
+    publisher: &'a dyn EventPublisher,
     cancellation: CancellationToken<'c>,
 }
 
@@ -197,7 +200,7 @@ impl CompactionRunner<'_, '_> {
 
     async fn report_progress(&self, progress: CompactionProgress) -> Result<(), Error> {
         self.check_cancellation()?;
-        self.states
+        self.publisher
             .report_compaction_progress(progress, self.cancellation)
             .await
     }

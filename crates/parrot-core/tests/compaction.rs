@@ -43,10 +43,14 @@ fn run(
     provider: &Provider,
 ) -> Result<Option<parrot_core::compaction::CompactionResult>, Error> {
     let provider = provider.with_estimates(effects);
+    let publisher = support::ProgressPublisher {
+        progress: effects.progress.clone(),
+    };
     finish(compact(
         plan,
         effects,
         &provider,
+        &publisher,
         parrot_core::CancellationToken::uncancelled(),
     ))
 }
@@ -353,10 +357,14 @@ fn cancelled_group_serialization_does_not_write_scratch_or_invoke_the_provider()
     });
     let mut effects = Effects::default();
     let provider = Provider::default().with_estimates(&effects);
+    let publisher = support::ProgressPublisher {
+        progress: effects.progress.clone(),
+    };
     let result = finish(compact(
         Some(plan),
         &mut effects,
         &provider,
+        &publisher,
         CancellationToken::new(&Cancelled),
     ));
     assert_eq!(result, Err(Error::cancelled()));

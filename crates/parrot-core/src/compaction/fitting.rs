@@ -3,8 +3,8 @@ use super::{
     FittedCompaction, compact,
 };
 use crate::{
-    CancellationToken, Content, ContextConfiguration, ContextSnapshot, Error, Message, Provider,
-    ProviderRequest, Role, States, ToolDefinition,
+    CancellationToken, Content, ContextConfiguration, ContextSnapshot, Error, EventPublisher,
+    Message, Provider, ProviderRequest, Role, States, ToolDefinition,
 };
 use std::future::Future;
 
@@ -108,10 +108,11 @@ pub async fn compact_conversation(
     configuration: &CompactionConfiguration,
     states: &mut dyn States,
     provider: &dyn Provider,
+    publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<Option<FittedCompaction>, Error> {
     let plan = CompactionPlan::select(input, definitions, configuration, provider)?;
-    let result = compact(plan, states, provider, cancellation).await?;
+    let result = compact(plan, states, provider, publisher, cancellation).await?;
     fit_compaction(
         input,
         definitions,

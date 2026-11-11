@@ -1,4 +1,3 @@
-use super::compaction::CompactionProgress;
 use super::config::{ConfigKey, ConfigValue};
 use super::context::{
     ContextCompaction, ContextReminderCheckpoint, ContextSnapshot, TokenCalibration,
@@ -101,18 +100,6 @@ pub trait States: Send + Sync {
     {
         Box::pin(async { Err(Error::unsupported("States.read_file")) })
     }
-    /// Publishes aggregate summary progress without disclosing generated content.
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        _progress: CompactionProgress,
-        _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async { Err(Error::unsupported("States.report_compaction_progress")) })
-    }
-
     /// Captures the complete provider-rendered system prompt and native request bindings.
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async { Err(Error::unsupported("States.capture_system_prompt")) })

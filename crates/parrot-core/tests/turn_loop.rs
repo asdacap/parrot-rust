@@ -51,6 +51,7 @@ use compaction_dependencies::MemoryCompaction;
 struct MemoryEventPublisher {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
     compacting: Arc<AtomicBool>,
+    compaction: Arc<Mutex<MemoryCompaction>>,
 }
 
 impl EventPublisher for MemoryEventPublisher {
@@ -79,6 +80,26 @@ impl EventPublisher for MemoryEventPublisher {
             Ok(())
         })
     }
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        progress: parrot_core::CompactionProgress,
+        _: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            self.compaction
+                .lock()
+                .unwrap()
+                .effects
+                .progress
+                .lock()
+                .unwrap()
+                .push(progress);
+            Ok(())
+        })
+    }
 }
 
 async fn run(
@@ -90,6 +111,7 @@ async fn run(
     let publisher = MemoryEventPublisher {
         events: states.events.clone(),
         compacting: states.compacting.clone(),
+        compaction: states.compaction.clone(),
     };
     parrot_core::run(states, tools, provider, &publisher, cancellation).await
 }
@@ -103,6 +125,7 @@ async fn run_turn(
     let publisher = MemoryEventPublisher {
         events: states.events.clone(),
         compacting: states.compacting.clone(),
+        compaction: states.compaction.clone(),
     };
     parrot_core::run_turn(states, tools, provider, &publisher, cancellation).await
 }
@@ -1021,24 +1044,6 @@ impl States for MemoryState {
                     .unwrap()
                     .effects
                     .write_to_scratch(contents, cancellation),
-            )
-        })
-    }
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        progress: parrot_core::CompactionProgress,
-        cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            finish(
-                self.compaction
-                    .lock()
-                    .unwrap()
-                    .effects
-                    .report_progress(progress, cancellation),
             )
         })
     }

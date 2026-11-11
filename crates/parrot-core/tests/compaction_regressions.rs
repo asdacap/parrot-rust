@@ -1,6 +1,6 @@
 use parrot_core::{
     BoxFuture, CancellationToken, ConfigKey, ConfigValue, Content, Error, ErrorCode, ErrorDetail,
-    ErrorKind, Message, Provider, ProviderRequest, Role, States,
+    ErrorKind, EventPublisher, Message, Provider, ProviderRequest, Role, States,
     compaction::{
         CompactionFailure, CompactionGroup, CompactionPlan, CompactionProgress, CompactionResult,
         PlanningError, SummaryResponse, compact,
@@ -76,7 +76,31 @@ impl States for RecordedEffects {
     {
         panic!("these complete user groups must never spill")
     }
+}
 
+struct RecordedPublisher {
+    trace: Arc<Mutex<Vec<&'static str>>>,
+    fail_at: Option<&'static str>,
+}
+
+impl EventPublisher for RecordedPublisher {
+    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("RecordedPublisher.on_epoch_started")) })
+    }
+    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "RecordedPublisher.report_compaction_started",
+            ))
+        })
+    }
+    fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "RecordedPublisher.report_compaction_failed",
+            ))
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: CompactionProgress,
@@ -192,6 +216,7 @@ impl Provider for ScriptedSummaryProvider {
 
 struct Fixture {
     effects: RecordedEffects,
+    publisher: RecordedPublisher,
     provider: ScriptedSummaryProvider,
     plan: CompactionPlan,
 }
@@ -201,6 +226,10 @@ impl Fixture {
         let trace = Arc::new(Mutex::new(Vec::new()));
         Self {
             effects: RecordedEffects {
+                trace: trace.clone(),
+                fail_at: None,
+            },
+            publisher: RecordedPublisher {
                 trace: trace.clone(),
                 fail_at: None,
             },
@@ -242,11 +271,13 @@ impl Fixture {
 
     fn run(&mut self) -> Result<Option<CompactionResult>, Error> {
         self.provider.fail_at = self.effects.fail_at;
+        self.publisher.fail_at = self.effects.fail_at;
         let source = SummaryCancellation(&self.provider.cancelled);
         finish(compact(
             Some(self.plan.clone()),
             &mut self.effects,
             &self.provider,
+            &self.publisher,
             CancellationToken::new(&source),
         ))
     }

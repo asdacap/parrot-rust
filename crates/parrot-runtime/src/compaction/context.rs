@@ -459,6 +459,7 @@ impl ContextController {
                 &configuration,
                 &mut states,
                 &provider,
+                &publisher,
                 parrot_core::CancellationToken::new(cancellation),
             )
             .await
@@ -691,6 +692,26 @@ impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
                 .await
                 .fail_epoch_compaction(message, self.events)
                 .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        progress: parrot_core::CompactionProgress,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), parrot_core::Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            ContextObserver(self.events)
+                .observe_progress(progress_event(progress), &cancellation)
+                .await
+                .map_err(CompactionError::from)
+                .map_err(ContextError::Compaction)
                 .map_err(|error| {
                     let diagnostic = describe_context_error(&error);
                     self.errors.capture(error, diagnostic)
@@ -1059,22 +1080,6 @@ impl parrot_core::States for EpochStates<'_> {
     {
         Box::pin(async move {
             crate::compaction::read_file(path, &cancellation)
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        progress: parrot_core::CompactionProgress,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.events
-                .observe_progress(progress_event(progress), &cancellation)
-                .await
-                .map_err(CompactionError::from)
                 .map_err(|error| self.capture_error(error))
         })
     }

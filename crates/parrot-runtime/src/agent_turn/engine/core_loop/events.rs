@@ -52,4 +52,23 @@ impl parrot_core::EventPublisher for RuntimeEventPublisher<'_> {
                 .map_err(Into::into)
         })
     }
+    fn report_compaction_progress<'a, 'c>(
+        &'a self,
+        progress: parrot_core::CompactionProgress,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<(), CoreError>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            crate::compaction::CompactionObserver::observe_progress(
+                &self.events,
+                crate::compaction::progress_event(progress),
+                &cancellation,
+            )
+            .await
+            .map_err(crate::compaction::CompactionError::from)
+            .map_err(Into::into)
+        })
+    }
 }
