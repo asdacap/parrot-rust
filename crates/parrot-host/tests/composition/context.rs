@@ -1,6 +1,7 @@
 //! The pre-existing T47 fixtures construct actual SQLite history, ContextController,
 //! native tool execution and RuntimeBackend. Their fake provider has no network/credentials.
 use parrot_runtime as runtime_crate;
+use std::time::SystemTime;
 
 #[allow(dead_code, unused_imports)]
 #[path = "../../../parrot-runtime/tests/tool_settlement/fixture.rs"]
@@ -590,7 +591,15 @@ fn status_bridge() -> StatusBridge {
 fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> StatusBridge {
     let ancillary = Arc::new(StatusAncillary {
         other: Ancillary,
-        runtime: Arc::new(RuntimeStatus::new(templates(), Arc::new(TestClock), vec![]).unwrap()),
+        runtime: Arc::new(
+            RuntimeStatus::new(
+                templates(),
+                Arc::new(TestClock),
+                SystemTime::UNIX_EPOCH,
+                vec![],
+            )
+            .unwrap(),
+        ),
         statistics: AgentSessionStatistics::default(),
         observed: Mutex::new(vec![]),
         prompt_probe,

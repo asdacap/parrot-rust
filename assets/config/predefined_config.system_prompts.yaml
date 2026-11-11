@@ -233,9 +233,11 @@ prompt_templates:
     allowed_arguments: [profile, model, parent_session_id, parent_session_name, has_parent, has_parent_name]
     required_arguments: [profile, model, parent_session_id, parent_session_name, has_parent, has_parent_name]
   status.generated-time:
-    template: 'Generated at: {time}'
-    allowed_arguments: [time]
-    required_arguments: [time]
+    template: |-
+      Generated at: {time}
+      Session duration: {duration}
+    allowed_arguments: [time, duration]
+    required_arguments: [time, duration]
   status.context:
     engine: scriban
     template: 'Context: {{ if available }}{{ usage }}% used{{ else }}unavailable{{ end }} ({{ estimated_tokens }} estimated tokens / {{ context_limit }} limit); reminders every {{ cadence }}%; automatic compaction at {{ trigger }}%.'

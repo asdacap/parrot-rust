@@ -23,6 +23,7 @@ use std::{
     collections::BTreeMap,
     future::Future,
     sync::atomic::{AtomicUsize, Ordering},
+    time::SystemTime,
 };
 
 fn event(id: &str) -> wire::Event {
@@ -602,6 +603,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
         fast_mode: Arc::new(parrot_provider::sessions::FastMode::new(false)),
         standing: StandingInstruction::new(catalog.clone()),
         statistics: lease.events.get_runtime_statistics().await.unwrap(),
+        started_at: SystemTime::UNIX_EPOCH,
         root_identity: AgentIdentity::root("root".into(), "main".into(), catalog),
         modes: Arc::new(
             UserSessionModes::new(

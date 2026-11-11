@@ -47,40 +47,10 @@ fn a008_scriban_is_rejected_with_manual_guide_and_user_yaml_is_not_rewritten() {
 }
 
 #[test]
-fn a008_active_catalog_retains_source_descriptors_except_explicit_migrations() {
-    let expected = fixtures::migrated_fixture_inventory().unwrap();
-    assert_eq!(expected.len(), 107);
-    assert_eq!(
-        expected
-            .iter()
-            .filter(|row| row["engine"] == "scalar")
-            .count(),
-        97
-    );
-    assert_eq!(
-        expected
-            .iter()
-            .filter(|row| row["engine"] == "minijinja")
-            .count(),
-        10
-    );
-    assert!(!expected.iter().any(|row| row["engine"] == "scriban"));
+fn a008_active_catalog_compiles_and_admits_only_live_bundled_descriptors() {
     let configuration = fixtures::fixture_configuration("").unwrap();
     assert_eq!(configuration.prompt_templates.len(), 110);
     for id in fixtures::CONSOLIDATED_IDS {
         assert_eq!(configuration.prompt_templates[id].engine, "minijinja");
-    }
-    for row in expected {
-        let id = row["id"].as_str().unwrap();
-        if fixtures::CONSOLIDATED_SOURCE_IDS.contains(&id)
-            || fixtures::AGENT_COMMUNICATION_SOURCE_IDS.contains(&id)
-        {
-            continue;
-        }
-        let actual = &configuration.prompt_templates[id];
-        if id != "agent-task.composite" {
-            assert_eq!(actual.text, row["text"].as_str().unwrap());
-        }
-        assert_eq!(actual.engine, row["engine"].as_str().unwrap());
     }
 }

@@ -76,7 +76,13 @@ struct RealReminderStatus(Arc<RuntimeStatus>);
 impl RealReminderStatus {
     fn new() -> Arc<Self> {
         Arc::new(Self(Arc::new(
-            RuntimeStatus::new(templates(), Arc::new(FixedStatusClock), vec![]).unwrap(),
+            RuntimeStatus::new(
+                templates(),
+                Arc::new(FixedStatusClock),
+                SystemTime::UNIX_EPOCH,
+                vec![],
+            )
+            .unwrap(),
         )))
     }
 }
@@ -898,14 +904,25 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         bounded(first.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
     );
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            !requests[0]
+                .messages
+                .iter()
+                .any(|message| message.role == sessions::Role::System
+                    && message.content().contains("notification band"))
+        );
+    }
     assert!(
-        !fixture
+        fixture
             .history
             .standing_statuses()
             .await
             .unwrap()
             .unwrap_or_default()
-            .contains_key(&parrot_core::StatusKey::new("runtime:context-reminder"))
+            .contains_key(&parrot_core::StatusKey::new("runtime:context"))
     );
 
     let second = runtime
@@ -921,7 +938,7 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         .await
         .unwrap()
         .unwrap_or_default();
-    assert!(standing.contains_key(&parrot_core::StatusKey::new("runtime:context-reminder")));
+    assert!(standing.contains_key(&parrot_core::StatusKey::new("runtime:context")));
     let reminder = {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
@@ -969,7 +986,7 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
             .await
             .unwrap()
             .unwrap_or_default()
-            .contains_key(&parrot_core::StatusKey::new("runtime:context-reminder"))
+            .contains_key(&parrot_core::StatusKey::new("runtime:context"))
     );
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 3);
     assert!(

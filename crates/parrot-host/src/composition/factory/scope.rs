@@ -1476,6 +1476,7 @@ where
                     RuntimeStatus::new(
                         self.user.templates.clone(),
                         self.config.clock.clone(),
+                        self.user.started_at,
                         vec![
                             Arc::new(RuntimeTreeStatusProvider {
                                 source: Arc::new(ScopedTree(Arc::downgrade(&registry))),

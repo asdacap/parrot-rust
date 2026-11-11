@@ -1,3 +1,4 @@
+use chrono::{Local, TimeZone};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, Cancelled, Clock, OperationError},
@@ -351,6 +352,7 @@ async fn registry_propagates_actual_caller_cancellation_without_fabricating_a_se
         Box::new(GeneratedTimeStatusProvider {
             templates: templates.clone(),
             clock: clock(),
+            started_at: SystemTime::UNIX_EPOCH,
         }),
         Box::new(ContextStatusProvider {
             templates: templates.clone(),
@@ -389,12 +391,13 @@ async fn context_reports_available_unavailable_and_override_windows_exactly() {
         } else {
             "unavailable".into()
         };
-        assert_eq!(
-            observation.text,
-            format!(
-                "Context: {usage} ({tokens} estimated tokens / {formatted_limit} limit); reminders every 10%; automatic compaction at 90%."
-            )
+        let mut expected = format!(
+            "Context: {usage} ({tokens} estimated tokens / {formatted_limit} limit); reminders every 10%; automatic compaction at 90%."
         );
+        if estimated == 1500 {
+            expected.push_str("\n\nContext usage entered the 100% notification band (1500 estimated tokens / 1000 configured limit). Notifications occur every 10%; automatic compaction triggers strictly above 90%.");
+        }
+        assert_eq!(observation.text, expected);
     }
     for (trigger, expected) in [(Some(100_000), "100000"), (None, "unavailable")] {
         let mut snapshot = ContextSnapshot::new(100_000, 1_000_000, Some(10), 10);
@@ -558,38 +561,63 @@ async fn profile_reports_only_a_nonblank_prompt() {
     }
 }
 #[tokio::test]
-async fn generated_time_resamples_current_utc_and_preserves_seven_tick_digits() {
-    for (time, expected) in [
-        (
-            SystemTime::UNIX_EPOCH + Duration::from_secs(86_400),
-            "1970-01-02T00:00:00.0000000+00:00",
-        ),
-        (
-            SystemTime::UNIX_EPOCH + Duration::from_nanos(123_456_789),
-            "1970-01-01T00:00:00.1234567+00:00",
-        ),
-        (
-            SystemTime::UNIX_EPOCH - Duration::from_millis(1),
-            "1969-12-31T23:59:59.9990000+00:00",
-        ),
-        (
-            SystemTime::UNIX_EPOCH + Duration::from_secs(951_782_400),
-            "2000-02-29T00:00:00.0000000+00:00",
-        ),
+async fn generated_time_steers_per_five_minute_bucket_with_local_time_and_duration() {
+    let epoch = SystemTime::UNIX_EPOCH;
+    for (now, started_at, bucket) in [
+        (epoch + Duration::from_secs(299), epoch, 0),
+        (epoch + Duration::from_secs(300), epoch, 1),
+        (epoch + Duration::from_secs(86_400), epoch, 288),
     ] {
         let provider = GeneratedTimeStatusProvider {
             templates: catalog(""),
-            clock: Arc::new(FixedClock(time)),
+            clock: Arc::new(FixedClock(now)),
+            started_at,
+        };
+        let observation = provider.observe(&query(), &NeverCancelled).await.unwrap();
+        let expected_time = Local
+            .timestamp_opt(now.duration_since(epoch).unwrap().as_secs() as i64, 0)
+            .single()
+            .unwrap()
+            .format("%Y-%m-%d %H:%M")
+            .to_string();
+        let minutes = now.duration_since(started_at).unwrap().as_secs() / 60;
+        let hours = minutes / 60;
+        let expected_duration = if hours > 0 {
+            format!("{hours}h {:02}m", minutes % 60)
+        } else {
+            format!("{minutes}m")
         };
         assert_eq!(
-            provider
-                .observe(&query(), &NeverCancelled)
-                .await
-                .unwrap()
-                .text,
-            format!("Generated at: {expected}")
+            observation.text,
+            format!("Generated at: {expected_time}\nSession duration: {expected_duration}")
         );
+        assert!(observation.is_auto_update);
+        assert_eq!(observation.hash, format!("generated-time:{bucket}"));
     }
+}
+
+#[tokio::test]
+async fn generated_time_text_changes_within_one_bucket_without_moving_the_hash() {
+    let epoch = SystemTime::UNIX_EPOCH;
+    let first = GeneratedTimeStatusProvider {
+        templates: catalog(""),
+        clock: Arc::new(FixedClock(epoch + Duration::from_secs(100))),
+        started_at: epoch,
+    }
+    .observe(&query(), &NeverCancelled)
+    .await
+    .unwrap();
+    let second = GeneratedTimeStatusProvider {
+        templates: catalog(""),
+        clock: Arc::new(FixedClock(epoch + Duration::from_secs(299))),
+        started_at: epoch,
+    }
+    .observe(&query(), &NeverCancelled)
+    .await
+    .unwrap();
+    assert_ne!(first.text, second.text);
+    assert_eq!(first.hash, second.hash);
+    assert!(first.is_auto_update);
 }
 fn usage_key(effort: Option<&str>) -> AgentUsageKey {
     AgentUsageKey::from_request("provider", "model", effort.map(str::to_owned))
@@ -894,6 +922,7 @@ async fn runtime_status_preserves_additional_context_order_exclusions_and_per_ca
     let runtime = RuntimeStatus::new(
         catalog(""),
         clock(),
+        SystemTime::UNIX_EPOCH,
         vec![Scripted::new("runtime:queues", "Runtime:\n- agent: main")],
     )
     .unwrap();
@@ -907,8 +936,19 @@ async fn runtime_status_preserves_additional_context_order_exclusions_and_per_ca
         )
         .await
         .unwrap();
-    assert!(full.starts_with("profile prompt\n\nGenerated at: 1970-01-02T00:00:00.0000000+00:00"));
-    assert!(full.contains("\n\nRuntime:\n- agent: main\n\nContext: 12% used"));
+    let expected_time = Local
+        .timestamp_opt(86_400, 0)
+        .single()
+        .unwrap()
+        .format("%Y-%m-%d %H:%M")
+        .to_string();
+    assert!(
+        full.starts_with(
+            format!("profile prompt\n\nContext: 12% used (123 estimated tokens / 1k limit); reminders every 10%; automatic compaction at 90%.\n\nGenerated at: {expected_time}\nSession duration: 24h 00m")
+                .as_str()
+        )
+    );
+    assert!(full.contains("\n\nRuntime:\n- agent: main\n\nActive profile: build"));
     assert!(full.ends_with("\n\nActive profile: build\nModel: provider/model"));
     let (first, second) = tokio::join!(
         runtime.observe_runtime(
@@ -933,6 +973,7 @@ async fn runtime_status_preserves_additional_context_order_exclusions_and_per_ca
             "Active profile:",
             "Model:",
             "Generated at:",
+            "notification band",
         ] {
             assert!(!text.contains(excluded));
         }
@@ -952,7 +993,7 @@ async fn runtime_status_preserves_additional_context_order_exclusions_and_per_ca
 }
 #[tokio::test]
 async fn status_rejects_invalid_profile_keys() {
-    let runtime = RuntimeStatus::new(catalog(""), clock(), vec![]).unwrap();
+    let runtime = RuntimeStatus::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap();
     let mut bad = query();
     bad.profile = "bad profile".into();
     assert!(
@@ -977,6 +1018,7 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
         RuntimeStatus::new(
             catalog(""),
             clock(),
+            SystemTime::UNIX_EPOCH,
             vec![Scripted::new("runtime:queues", "Runtime:\n- agent: main")],
         )
         .unwrap(),
@@ -996,8 +1038,10 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
         )
         .await
         .unwrap();
-    assert!(first.starts_with("profile prompt\n\nGenerated at: "));
-    assert!(first.contains("Runtime:\n- agent: main\n\nContext: 10% used"));
+    assert!(first.starts_with("profile prompt\n\nContext: 10% used (100 estimated tokens / 1k limit); reminders every 10%; automatic compaction at 90%.\n\nGenerated at: "));
+    assert!(
+        first.contains("Runtime:\n- agent: main\n\nActive profile: build\nModel: provider/model")
+    );
     assert!(first.ends_with("Active profile: build\nModel: provider/model"));
     assert!(!first.contains("80% used"));
     assert!(second.contains("80% used"));
@@ -1299,32 +1343,51 @@ async fn registry_runtime_tree_source_missing_process_service_is_error_not_silen
     .await;
 }
 #[tokio::test]
-async fn context_reminder_slot_selects_band_template_and_identity() {
-    let runtime = Arc::new(RuntimeStatus::new(catalog(""), clock(), vec![]).unwrap());
+async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
+    let runtime =
+        Arc::new(RuntimeStatus::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap());
     let snapshot = ContextSnapshot::new(550, 1000, Some(55), 90);
-    let reminder_key = parrot_core::StatusKey::new("runtime:context-reminder");
+    let context_key = parrot_core::StatusKey::new("runtime:context");
 
     let bound = runtime.bind_context(query(), "profile prompt".into());
     let offering = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
-    let reminder = offering.get(&reminder_key).unwrap();
-    assert_eq!(
-        reminder.hash,
-        "context-reminder:provider/model:1000:false:50"
-    );
-    assert!(reminder.is_auto_update);
+    let context = offering.get(&context_key).unwrap();
+    assert_eq!(context.hash, "context:provider/model:1000:false:50");
+    assert!(context.is_auto_update);
     assert!(
-        reminder
+        context
+            .text
+            .contains("Context: 55% used (550 estimated tokens / 1k limit)")
+    );
+    assert!(
+        context
             .text
             .contains("Context usage entered the 50% notification band (550 estimated tokens / 1000 configured limit)")
     );
 
+    // Below the band threshold the reminder disappears while the usage line
+    // stays, and the hash records the inactive band.
     let early = ContextSnapshot::new(490, 1000, Some(49), 90);
     let offering = bound.slots(&early, &NeverCancelled).await.unwrap();
-    assert!(!offering.contains_key(&reminder_key));
+    let context = offering.get(&context_key).unwrap();
+    assert_eq!(context.hash, "context:provider/model:1000:false:none");
+    assert!(context.text.contains("Context: 49% used"));
+    assert!(!context.text.contains("notification band"));
 
+    // Usage changes inside one band leave the hash unchanged.
+    let within = ContextSnapshot::new(590, 1000, Some(59), 90);
+    let offering = bound.slots(&within, &NeverCancelled).await.unwrap();
+    let context = offering.get(&context_key).unwrap();
+    assert_eq!(context.hash, "context:provider/model:1000:false:50");
+    assert!(context.text.contains("Context: 59% used"));
+
+    // A missing usage observation also records the inactive band.
     let unknown = ContextSnapshot::new(550, 1000, None, 90);
     let offering = bound.slots(&unknown, &NeverCancelled).await.unwrap();
-    assert!(!offering.contains_key(&reminder_key));
+    let context = offering.get(&context_key).unwrap();
+    assert_eq!(context.hash, "context:provider/model:1000:false:none");
+    assert!(context.text.contains("unavailable"));
+    assert!(!context.text.contains("notification band"));
 
     let override_snapshot = ContextSnapshot {
         estimated_tokens: 550,
@@ -1339,13 +1402,15 @@ async fn context_reminder_slot_selects_band_template_and_identity() {
         .slots(&override_snapshot, &NeverCancelled)
         .await
         .unwrap();
-    let reminder = offering.get(&reminder_key).unwrap();
-    assert_eq!(
-        reminder.hash,
-        "context-reminder:provider/model:10000:true:50"
+    let context = offering.get(&context_key).unwrap();
+    assert_eq!(context.hash, "context:provider/model:10000:true:50");
+    assert!(
+        context
+            .text
+            .contains("Context: 55% (550 / 10k tokens); auto-compact: >8000 tokens.")
     );
     assert!(
-        reminder
+        context
             .text
             .contains("notification band (550 estimated tokens / 10000 model context window)")
     );
@@ -1354,6 +1419,6 @@ async fn context_reminder_slot_selects_band_template_and_identity() {
     other.requested_model = "other/model".into();
     let other_bound = runtime.bind_context(other, "profile prompt".into());
     let offering = other_bound.slots(&snapshot, &NeverCancelled).await.unwrap();
-    let reminder = offering.get(&reminder_key).unwrap();
-    assert_eq!(reminder.hash, "context-reminder:other/model:1000:false:50");
+    let context = offering.get(&context_key).unwrap();
+    assert_eq!(context.hash, "context:other/model:1000:false:50");
 }

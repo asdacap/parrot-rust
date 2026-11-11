@@ -1,5 +1,6 @@
 //! Source-ordered, independently sampled runtime status sections.
 
+use chrono::{Local, TimeZone};
 use parrot_core::ContextReminderCheckpoint;
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError},
@@ -12,7 +13,14 @@ use parrot_domain::{
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::{Map, Value, json};
-use std::{error::Error, fmt, future::poll_fn, sync::Arc, task::Poll, time::SystemTime};
+use std::{
+    error::Error,
+    fmt,
+    future::poll_fn,
+    sync::Arc,
+    task::Poll,
+    time::{Duration, SystemTime},
+};
 
 pub type StatusResult<T> = Result<T, OperationError<StatusError>>;
 
@@ -346,6 +354,7 @@ impl StatusProvider for SelectionStatusProvider {
 
 pub struct GeneratedTimeStatusProvider {
     pub clock: Arc<dyn Clock>,
+    pub started_at: SystemTime,
     pub templates: Arc<PromptTemplateCatalog>,
 }
 impl StatusProvider for GeneratedTimeStatusProvider {
@@ -359,134 +368,206 @@ impl StatusProvider for GeneratedTimeStatusProvider {
     ) -> BoxFuture<'a, StatusResult<StatusObservation>> {
         Box::pin(async move {
             check(cancellation)?;
-            let time = format_utc(self.clock.utc_now()).map_err(OperationError::Failed)?;
-            // The rendered time is recomputed by every fresh assembly, so the
-            // stable identity never changes and this slot never triggers steering.
+            let now = self.clock.utc_now();
+            // The bucket, not the rendered text, is the steering identity: the
+            // text changes on every render, while the hash only moves when the
+            // clock crosses a five-minute boundary.
+            let bucket = epoch_seconds(now).div_euclid(300);
+            let time = format_local_minute(now).map_err(OperationError::Failed)?;
+            let duration = format_duration(now.duration_since(self.started_at).unwrap_or_default());
             render(
                 &self.templates,
                 "status.generated-time",
-                Map::from_iter([("time".into(), time.into())]),
+                Map::from_iter([
+                    ("time".into(), time.into()),
+                    ("duration".into(), duration.into()),
+                ]),
                 cancellation,
             )
-            .map(|observation| observation.with_identity("generated-time:recomputed", false))
+            .map(|observation| observation.with_identity(format!("generated-time:{bucket}"), true))
         })
     }
 }
-// Gregorian civil-date conversion, with the source DateTime range and fixed
-// seven fractional digits of DateTimeOffset.ToString("O"). No local timezone.
-fn format_utc(time: SystemTime) -> Result<String, StatusError> {
-    let ticks = match time.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(duration) => duration.as_nanos() as i128 / 100,
-        Err(error) => -((error.duration().as_nanos() as i128 + 99) / 100),
+fn epoch_seconds(time: SystemTime) -> i64 {
+    let (sign, duration) = match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => (1, duration),
+        Err(error) => (-1, error.duration()),
     };
-    let seconds = ticks.div_euclid(10_000_000);
-    let fraction = ticks.rem_euclid(10_000_000);
-    let days = seconds.div_euclid(86_400);
-    let within_day = seconds.rem_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let mut year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_prime = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
-    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
-    year += i128::from(month <= 2);
-    if !(1..=9999).contains(&year) {
-        return Err(StatusError::new("UTC time is outside the DateTime range"));
-    }
-    Ok(format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{fraction:07}+00:00",
-        within_day / 3600,
-        within_day / 60 % 60,
-        within_day % 60
-    ))
+    sign * i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
 }
-
-/// One reminder slot observation: a provider-facing notice that context usage
-/// entered a notification band. The identity hash records the band, so the
-/// steering machinery injects the reminder once per band and the standing
-/// comparison gates repeats across tool followups and restarts.
-pub struct ContextReminderStatusProvider {
-    pub query: StatusQuery,
-    pub snapshot: ContextSnapshot,
-    pub templates: Arc<PromptTemplateCatalog>,
+fn format_local_minute(time: SystemTime) -> Result<String, StatusError> {
+    let (sign, duration) = match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => (1, duration),
+        Err(error) => (-1, error.duration()),
+    };
+    let seconds = sign * i64::try_from(duration.as_secs()).unwrap_or(i64::MAX);
+    let local = Local
+        .timestamp_opt(seconds, duration.subsec_nanos())
+        .single()
+        .ok_or_else(|| StatusError::new("local time is out of the supported range"))?;
+    Ok(local.format("%Y-%m-%d %H:%M").to_string())
 }
-impl StatusProvider for ContextReminderStatusProvider {
-    fn key(&self) -> &str {
-        "runtime:context-reminder"
-    }
-    fn observe<'a>(
-        &'a self,
-        _query: &'a StatusQuery,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, StatusResult<StatusObservation>> {
-        Box::pin(async move {
-            check(cancellation)?;
-            let snapshot = &self.snapshot;
-            let interval = ContextReminderCheckpoint::NOTIFICATION_INTERVAL;
-            let Some(band) = snapshot
-                .usage_percent
-                .filter(|_| snapshot.context_limit > 0)
-                .map(|usage| usage / interval * interval)
-                .filter(|band| *band >= 50)
-            else {
-                return Ok(StatusObservation::default());
-            };
-            let mut model = json!({
-                "percentage": band.to_string(),
-                "estimated_tokens": snapshot.estimated_tokens.to_string(),
-                "context_limit": snapshot.context_limit.to_string(),
-                "notification_interval": interval.to_string(),
-                "trigger": snapshot.trigger_percent.to_string(),
-            })
-            .as_object()
-            .expect("context reminder model is object")
-            .clone();
-            if snapshot.has_context_limit_override {
-                model.insert(
-                    "trigger_tokens".into(),
-                    snapshot
-                        .trigger_tokens
-                        .map_or_else(|| "unavailable".into(), |tokens| tokens.to_string())
-                        .into(),
-                );
-            }
-            render(
-                &self.templates,
-                if snapshot.has_context_limit_override {
-                    "agent-session.context-limit-reminder"
-                } else {
-                    "agent-session.context-reminder"
-                },
-                model,
-                cancellation,
-            )
-            .map(|observation| {
-                observation.with_identity(
-                    format!(
-                        "context-reminder:{}:{}:{}:{}",
-                        self.query.requested_model,
-                        snapshot.context_limit,
-                        snapshot.has_context_limit_override,
-                        band
-                    ),
-                    true,
-                )
-            })
-        })
+fn format_duration(elapsed: Duration) -> String {
+    let minutes = elapsed.as_secs() / 60;
+    let hours = minutes / 60;
+    if hours > 0 {
+        format!("{hours}h {:02}m", minutes % 60)
+    } else {
+        format!("{minutes}m")
     }
 }
 
+fn notification_band(snapshot: &ContextSnapshot) -> Option<i32> {
+    let interval = ContextReminderCheckpoint::NOTIFICATION_INTERVAL;
+    snapshot
+        .usage_percent
+        .filter(|_| snapshot.context_limit > 0)
+        .map(|usage| usage / interval * interval)
+        .filter(|band| *band >= 50)
+}
+
+fn context_hash(query: &StatusQuery, snapshot: &ContextSnapshot, band: Option<i32>) -> String {
+    format!(
+        "context:{}:{}:{}:{}",
+        query.requested_model,
+        snapshot.context_limit,
+        snapshot.has_context_limit_override,
+        band.map(|band| band.to_string())
+            .unwrap_or_else(|| "none".into())
+    )
+}
+
+fn usage_model(snapshot: &ContextSnapshot) -> Map<String, Value> {
+    let mut model = json!({
+        "available": snapshot.is_available() && snapshot.usage_percent.is_some(), "estimated_tokens": format_tokens(snapshot.estimated_tokens),
+        "context_limit": format_tokens(i64::from(snapshot.context_limit)),
+        "cadence": ContextReminderCheckpoint::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
+    }).as_object().unwrap().clone();
+    if let Some(usage) = snapshot.usage_percent {
+        model.insert("usage".into(), usage.to_string().into());
+    } else {
+        model.insert("usage".into(), "".into());
+    }
+    if snapshot.has_context_limit_override {
+        model.insert(
+            "trigger_tokens".into(),
+            snapshot
+                .trigger_tokens
+                .map_or_else(|| "unavailable".into(), |tokens| tokens.to_string())
+                .into(),
+        );
+    }
+    model
+}
+
+fn reminder_model(snapshot: &ContextSnapshot, band: i32) -> Map<String, Value> {
+    let mut model = json!({
+        "percentage": band.to_string(),
+        "estimated_tokens": snapshot.estimated_tokens.to_string(),
+        "context_limit": snapshot.context_limit.to_string(),
+        "notification_interval": ContextReminderCheckpoint::NOTIFICATION_INTERVAL.to_string(),
+        "trigger": snapshot.trigger_percent.to_string(),
+    })
+    .as_object()
+    .expect("context reminder model is object")
+    .clone();
+    if snapshot.has_context_limit_override {
+        model.insert(
+            "trigger_tokens".into(),
+            snapshot
+                .trigger_tokens
+                .map_or_else(|| "unavailable".into(), |tokens| tokens.to_string())
+                .into(),
+        );
+    }
+    model
+}
+
+fn render_usage_line(
+    snapshot: &ContextSnapshot,
+    templates: &Arc<PromptTemplateCatalog>,
+    cancellation: &dyn Cancellation,
+) -> StatusResult<StatusObservation> {
+    render(
+        templates,
+        if snapshot.has_context_limit_override {
+            "status.context-limit"
+        } else {
+            "status.context"
+        },
+        usage_model(snapshot),
+        cancellation,
+    )
+}
+
+fn render_reminder(
+    snapshot: &ContextSnapshot,
+    band: i32,
+    templates: &Arc<PromptTemplateCatalog>,
+    cancellation: &dyn Cancellation,
+) -> StatusResult<StatusObservation> {
+    render(
+        templates,
+        if snapshot.has_context_limit_override {
+            "agent-session.context-limit-reminder"
+        } else {
+            "agent-session.context-reminder"
+        },
+        reminder_model(snapshot, band),
+        cancellation,
+    )
+}
+
+/// One slot observation covering context usage and, when a notification band
+/// is active, the band reminder appended under the usage line. The identity
+/// hash records the band, so the steering machinery refreshes the slot once
+/// per band and the standing comparison gates repeats across tool followups
+/// and restarts. Without an active band the hash records "none" and stays
+/// stable across usage changes.
 pub struct ContextStatusProvider {
     pub snapshot: ContextSnapshot,
     pub templates: Arc<PromptTemplateCatalog>,
 }
 impl StatusProvider for ContextStatusProvider {
     fn key(&self) -> &str {
-        "runtime:queues-context"
+        "runtime:context"
+    }
+    fn observe<'a>(
+        &'a self,
+        query: &'a StatusQuery,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, StatusResult<StatusObservation>> {
+        Box::pin(async move {
+            check(cancellation)?;
+            let usage = render_usage_line(&self.snapshot, &self.templates, cancellation)?;
+            let hash = context_hash(query, &self.snapshot, notification_band(&self.snapshot));
+            match notification_band(&self.snapshot) {
+                None => Ok(usage.with_identity(hash, true)),
+                Some(band) => {
+                    let reminder =
+                        render_reminder(&self.snapshot, band, &self.templates, cancellation)?;
+                    Ok(StatusObservation {
+                        available: usage.available && reminder.available,
+                        text: format!("{}\n\n{}", usage.text, reminder.text),
+                        hash,
+                        is_auto_update: true,
+                    })
+                }
+            }
+        })
+    }
+}
+
+/// Usage-line-only observation for the runtime-tree view, which never renders
+/// the band reminder. The stable identity never changes and this slot never
+/// triggers steering.
+struct ContextUsageStatusProvider {
+    snapshot: ContextSnapshot,
+    templates: Arc<PromptTemplateCatalog>,
+}
+impl StatusProvider for ContextUsageStatusProvider {
+    fn key(&self) -> &str {
+        "runtime:context"
     }
     fn observe<'a>(
         &'a self,
@@ -495,37 +576,8 @@ impl StatusProvider for ContextStatusProvider {
     ) -> BoxFuture<'a, StatusResult<StatusObservation>> {
         Box::pin(async move {
             check(cancellation)?;
-            let snapshot = &self.snapshot;
-            let mut model = json!({
-                "available": snapshot.is_available(), "estimated_tokens": format_tokens(snapshot.estimated_tokens),
-                "context_limit": format_tokens(i64::from(snapshot.context_limit)),
-                "cadence": ContextReminderCheckpoint::NOTIFICATION_INTERVAL.to_string(), "trigger": snapshot.trigger_percent.to_string(),
-            }).as_object().unwrap().clone();
-            if let Some(usage) = snapshot.usage_percent {
-                model.insert("usage".into(), usage.to_string().into());
-            }
-            if snapshot.has_context_limit_override {
-                model.insert(
-                    "trigger_tokens".into(),
-                    snapshot
-                        .trigger_tokens
-                        .map_or_else(|| "unavailable".into(), |tokens| tokens.to_string())
-                        .into(),
-                );
-            }
-            render(
-                &self.templates,
-                if snapshot.has_context_limit_override {
-                    "status.context-limit"
-                } else {
-                    "status.context"
-                },
-                model,
-                cancellation,
-            )
-            // The usage rendering is refitted by every fresh assembly, so the
-            // stable identity never changes and this slot never triggers steering.
-            .map(|observation| observation.with_identity("context-usage:recomputed", false))
+            render_usage_line(&self.snapshot, &self.templates, cancellation)
+                .map(|observation| observation.with_identity("context-usage:activity", false))
         })
     }
 }
@@ -632,12 +684,14 @@ impl RuntimeStatus {
     pub fn new(
         templates: Arc<PromptTemplateCatalog>,
         clock: Arc<dyn Clock>,
+        started_at: SystemTime,
         providers: Vec<Arc<dyn StatusProvider>>,
     ) -> Result<Self, StatusError> {
         let activity = StatusRegistry::new(providers.clone())?;
         let mut full: Vec<Arc<dyn StatusProvider>> = vec![
             Arc::new(GeneratedTimeStatusProvider {
                 clock,
+                started_at,
                 templates: templates.clone(),
             }),
             Arc::new(SelectionStatusProvider {
@@ -657,7 +711,7 @@ impl RuntimeStatus {
         context: ContextSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
-        let context_provider = ContextStatusProvider {
+        let context_provider = ContextUsageStatusProvider {
             snapshot: context,
             templates: self.templates.clone(),
         };
@@ -686,8 +740,7 @@ impl RuntimeStatus {
         context: &ContextSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<Vec<StatusSlot>> {
-        let reminder_provider = ContextReminderStatusProvider {
-            query: query.clone(),
+        let context_provider = ContextStatusProvider {
             snapshot: context.clone(),
             templates: self.templates.clone(),
         };
@@ -698,7 +751,7 @@ impl RuntimeStatus {
                     key: format!("profile:{}", query.profile),
                     prompt: profile_prompt.to_owned(),
                 }),
-                &[&reminder_provider],
+                &[&context_provider],
                 cancellation,
             )
             .await
@@ -715,21 +768,11 @@ impl RuntimeStatus {
             prompt: profile_prompt.to_owned(),
         };
         let context_provider = ContextStatusProvider {
-            snapshot: context.clone(),
-            templates: self.templates.clone(),
-        };
-        let reminder_provider = ContextReminderStatusProvider {
-            query: query.clone(),
             snapshot: context,
             templates: self.templates.clone(),
         };
         self.full
-            .observe(
-                query,
-                Some(&profile),
-                &[&context_provider, &reminder_provider],
-                cancellation,
-            )
+            .observe(query, Some(&profile), &[&context_provider], cancellation)
             .await
     }
 }

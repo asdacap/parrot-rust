@@ -1542,6 +1542,7 @@ dependencies = [
 name = "parrot-runtime"
 version = "0.0.0-dev"
 dependencies = [
+ "chrono",
  "parrot-core",
  "parrot-domain",
  "parrot-foundation",

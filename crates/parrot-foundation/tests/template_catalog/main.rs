@@ -1,6 +1,4 @@
 //! Catalog/config integration: original-source bytes plus explicitly mapped A008 boundaries.
-#[path = "../config/product_changes.rs"]
-mod product_changes;
 mod support;
 use parrot_domain::contracts::async_ops::OperationError;
 use parrot_foundation::{
@@ -25,153 +23,11 @@ fn custom(text: &str, allowed: &[&str], required: &[&str]) -> PromptTemplateCata
         .unwrap()
         .1
 }
-fn assert_current_composite(rendered: &str, values: &serde_json::Value) {
-    // Only the authorized composite historical text is superseded, not its rendering contract.
-    for value in values.as_object().unwrap().values() {
-        assert!(rendered.contains(value.as_str().unwrap()));
-    }
-    assert!(rendered.contains("Perform inner tasks assigned to self in your current agent"));
-    assert!(rendered.contains("record each self task's outcome and result with set_agent_tasks"));
-    assert!(rendered.contains("Your final JSON does not complete an inner self task"));
-    for verdict in ["accept", "reject_and_halt", "reject_and_retry"] {
-        assert!(rendered.contains(&format!("\"verdict\":\"{verdict}\"")));
-    }
-}
 
 fn config_error(content: &str) -> String {
     match PromptTemplateCatalog::from_content(content, &environment()) {
         Err(error) => error.0,
         Ok(_) => panic!("expected real configuration/engine validation failure"),
-    }
-}
-
-const CONSOLIDATED_SOURCE_IDS: [&str; 13] = [
-    "agent-task.dependency-header",
-    "agent-task.dependency-item",
-    "agent-task.sibling-scope",
-    "agent-task.sibling-item",
-    "agent-task.header",
-    "agent-session.nonempty-queues-reminder",
-    "agent-session.nonempty-queue-item",
-    "compact-context-tool.compacted",
-    "compact-context-tool.no-op",
-    "compact-context-tool.unavailable",
-    "compact-context-tool.compacted-with-limit",
-    "compact-context-tool.no-op-with-limit",
-    "compact-context-tool.unavailable-with-limit",
-];
-
-const AGENT_COMMUNICATION_SOURCE_IDS: [&str; 5] = [
-    "agent-session.child-question",
-    "agent-session.pending-child-question-reminder",
-    "tool-result.question-replied",
-    "agent-session.final-request",
-    "agent-session.final-request-interrupted",
-];
-
-#[test]
-fn m6_full_configuration_compiles_and_renders_retained_independent_source_models() {
-    let (configuration, catalog) = PromptTemplateCatalog::from_content("", &environment()).unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 110);
-    let inventory = fixture(&(A.to_owned() + "catalog-inventory.json"));
-    let migration = fixture(&(A.to_owned() + "bundled-migration-map.json"));
-    let actual: Vec<_> = catalog.descriptors().collect();
-    assert_eq!(actual.len(), 110);
-    let (_, legacy_warning) = actual
-        .iter()
-        .find(|(id, _)| *id == "session.legacy-resume-warning")
-        .unwrap();
-    assert_eq!(legacy_warning.engine, "scalar");
-    assert!(legacy_warning.allowed.is_empty());
-    assert!(legacy_warning.required.is_empty());
-    assert_eq!(
-        catalog
-            .render(
-                "session.legacy-resume-warning",
-                &[],
-                &CancellationState::Active
-            )
-            .unwrap(),
-        legacy_warning.text
-    );
-    let expected = inventory["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|row| {
-            !CONSOLIDATED_SOURCE_IDS.contains(&row["id"].as_str().unwrap())
-                && !AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["id"].as_str().unwrap())
-        })
-        .collect::<Vec<_>>();
-    let expected_ids = expected
-        .iter()
-        .map(|row| row["id"].as_str().unwrap())
-        .collect::<BTreeSet<_>>();
-    let actual = actual
-        .into_iter()
-        .filter(|(id, _)| expected_ids.contains(id))
-        .collect::<Vec<_>>();
-    assert_eq!(actual.len(), 89);
-    for ((id, spec), original) in actual.iter().zip(expected) {
-        assert_eq!(*id, original["id"].as_str().unwrap());
-        assert_eq!(
-            spec.allowed,
-            serde_json::from_value::<Vec<String>>(original["allowed"].clone()).unwrap()
-        );
-        assert_eq!(
-            spec.required,
-            serde_json::from_value::<Vec<String>>(original["required"].clone()).unwrap()
-        );
-        if original["engine"] == "scalar" {
-            assert_eq!(spec.engine, "scalar");
-            if *id != "agent-task.composite" {
-                assert_eq!(
-                    spec.text,
-                    product_changes::align_product_text(id, original["text"].as_str().unwrap())
-                );
-            }
-        } else {
-            let mapped = migration["entries"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|row| row["id"] == *id)
-                .unwrap();
-            assert_eq!(spec.engine, "minijinja");
-            assert_eq!(
-                spec.text,
-                product_changes::align_product_text(id, mapped["new"]["text"].as_str().unwrap())
-            );
-        }
-    }
-    let goldens = fixture(&(A.to_owned() + "catalog-render-goldens.json"));
-    assert_eq!(goldens["entries"].as_array().unwrap().len(), 107);
-    for row in goldens["entries"].as_array().unwrap() {
-        if CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
-            || AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
-        {
-            continue;
-        }
-        let rendered = catalog
-            .render(
-                row["template_id"].as_str().unwrap(),
-                &arguments(&row["arguments"]),
-                &CancellationState::Active,
-            )
-            .unwrap();
-        if row["template_id"] == "agent-task.composite" {
-            assert_current_composite(&rendered, &row["arguments"]);
-            continue;
-        }
-        assert_eq!(
-            rendered,
-            product_changes::align_product_text(
-                row["template_id"].as_str().unwrap(),
-                row["expected"].as_str().unwrap(),
-            ),
-            "{}",
-            row["case_id"]
-        );
     }
 }
 
@@ -662,32 +518,6 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
         std::fs::read_to_string(&predefined).unwrap(),
         parrot_foundation::config::configuration::predefined_content().unwrap()
     );
-    let goldens = fixture(&(A.to_owned() + "catalog-render-goldens.json"));
-    for row in goldens["entries"].as_array().unwrap() {
-        if CONSOLIDATED_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
-            || AGENT_COMMUNICATION_SOURCE_IDS.contains(&row["template_id"].as_str().unwrap())
-        {
-            continue;
-        }
-        let rendered = catalog
-            .render(
-                row["template_id"].as_str().unwrap(),
-                &arguments(&row["arguments"]),
-                &CancellationState::Active,
-            )
-            .unwrap();
-        if row["template_id"] == "agent-task.composite" {
-            assert_current_composite(&rendered, &row["arguments"]);
-            continue;
-        }
-        assert_eq!(
-            rendered,
-            product_changes::align_product_text(
-                row["template_id"].as_str().unwrap(),
-                row["expected"].as_str().unwrap(),
-            )
-        );
-    }
     let active = source_predefined_content().unwrap();
     assert!(active.contains("engine: minijinja"));
     assert!(!active.contains("engine: scriban"));

@@ -31,7 +31,7 @@ cookie_store = { version = "=0.21.1", default-features = false }
 [workspace.package]
 version = "0.0.0-dev"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.99"
 
 [profile.dev]
 debug = "line-tables-only"

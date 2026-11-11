@@ -10,6 +10,7 @@ parrot-domain = { path = "../parrot-domain" }
 parrot-foundation = { path = "../parrot-foundation" }
 parrot-provider = { path = "../parrot-provider" }
 parrot-storage = { path = "../parrot-storage" }
+chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
 protobuf = "=3.7.2"
 serde_json = "=1.0.138"
 sha2 = "=0.10.8"

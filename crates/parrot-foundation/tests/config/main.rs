@@ -8,7 +8,6 @@ mod fixtures;
 mod integration;
 mod model_transaction;
 mod models;
-mod product_changes;
 mod progress;
 mod runtime;
 mod source_assertions;

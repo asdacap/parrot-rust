@@ -71,7 +71,7 @@ use std::{
         Arc, Mutex, OnceLock, Weak,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::sync::{Mutex as AsyncMutex, oneshot};
 
@@ -130,6 +130,10 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub fast_mode: Arc<parrot_provider::sessions::FastMode>,
     pub standing: StandingInstruction,
     pub statistics: Arc<UserSessionStatistics>,
+    /// Wall time captured when the user-session scope was created; feeds the
+    /// status prompt's session-duration line. In-memory only, so a daemon
+    /// restart resets the duration.
+    pub started_at: SystemTime,
     pub root_identity: Arc<AgentIdentity>,
     pub modes: Arc<UserSessionModes<S>>,
     registry: OnceLock<Weak<AgentRegistry<S>>>,
@@ -666,6 +670,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             )),
             standing: StandingInstruction::new(config.templates.clone()),
             statistics,
+            started_at: question_clock.utc_now(),
             root_identity: identity.clone(),
             modes: modes.clone(),
             registry: OnceLock::new(),
