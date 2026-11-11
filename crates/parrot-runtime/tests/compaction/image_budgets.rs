@@ -1,5 +1,6 @@
 //! Literal image-budget rows from the reviewed original CompactorAndContextTests.
 use super::*;
+use crate::group_messages;
 use parrot_provider::sessions::{Message, Role};
 
 #[tokio::test]

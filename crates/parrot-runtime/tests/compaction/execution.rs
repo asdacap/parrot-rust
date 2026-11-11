@@ -1,3 +1,4 @@
+use crate::group_messages;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -27,7 +28,7 @@ use parrot_provider::{
 };
 use parrot_runtime::compaction::{
     CompactionError, CompactionObserver, CompactionResult, CompactionSettings, Compactor,
-    PlanningError, PlanningInput, group_messages,
+    PlanningError, PlanningInput,
 };
 use parrot_storage::artifacts::compaction::CompactionGroupBlobStore;
 use std::{

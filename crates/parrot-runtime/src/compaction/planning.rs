@@ -18,26 +18,6 @@ pub struct CompactionGroup<'a> {
     pub is_complete: bool,
 }
 
-/// As in source Groups: an assistant call owns only the immediately following tool messages.
-/// These synthetic positional watermarks are not repository sequence numbers.
-pub fn group_messages(messages: &[Message]) -> Vec<CompactionGroup<'_>> {
-    let converted: Vec<_> = messages.iter().cloned().map(Into::into).collect();
-    let mut offset = 0;
-    core::group_messages(&converted)
-        .into_iter()
-        .map(|group| {
-            let start = offset;
-            offset += group.messages.len();
-            CompactionGroup {
-                messages: &messages[start..offset],
-                end_watermark: group.end_watermark,
-                has_checkpoint_before: group.has_checkpoint_before,
-                is_complete: group.is_complete,
-            }
-        })
-        .collect()
-}
-
 #[derive(Clone, Debug)]
 pub struct CompactionSettings {
     pub trigger_percent: i32,

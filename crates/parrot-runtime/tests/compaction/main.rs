@@ -25,6 +25,24 @@ use std::{
     },
 };
 
+pub(crate) fn group_messages(messages: &[Message]) -> Vec<CompactionGroup<'_>> {
+    let converted: Vec<_> = messages.iter().cloned().map(Into::into).collect();
+    let mut offset = 0;
+    parrot_core::compaction::group_messages(&converted)
+        .into_iter()
+        .map(|group| {
+            let start = offset;
+            offset += group.messages.len();
+            CompactionGroup {
+                messages: &messages[start..offset],
+                end_watermark: group.end_watermark,
+                has_checkpoint_before: group.has_checkpoint_before,
+                is_complete: group.is_complete,
+            }
+        })
+        .collect()
+}
+
 struct ImageProvider {
     tokens: i64,
     calculations: AtomicUsize,
