@@ -576,7 +576,7 @@ impl ContextController {
                 ..CompactionProgressEvent::new()
             });
             input.events.emit(saving, cancellation).await?;
-            let published = self.notice("status", "Status prompt injected".into())?;
+            let published = self.notice("status", format!("Status prompt injected\n{status}"))?;
             if !self
                 .history
                 .append_compaction_status(

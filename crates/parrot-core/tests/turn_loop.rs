@@ -830,7 +830,8 @@ impl States for MemoryState {
                     assert!(matches!(
                         event,
                         ConversationEvent::Notice { kind, notice }
-                            if kind == "status" && notice == "Status prompt injected"
+                            if kind == "status"
+                                && notice.starts_with("Status prompt injected\n")
                     ));
                     let content = addition.messages[0]
                         .contents

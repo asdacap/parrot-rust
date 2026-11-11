@@ -104,6 +104,7 @@ pub async fn steer_status(
         .iter()
         .map(|(key, offer)| (key.clone(), offer.hash.clone()))
         .collect();
+    let notice = format!("Status prompt injected\n{content}");
     states
         .apply_conversation_addition(ConversationAddition {
             messages: vec![Message::text(Role::System, content)],
@@ -111,7 +112,7 @@ pub async fn steer_status(
                 standing,
                 event: ConversationEvent::Notice {
                     kind: "status".into(),
-                    notice: "Status prompt injected".into(),
+                    notice,
                 },
             },
         })

@@ -376,6 +376,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         prompt: &str,
         application: Arc<Signal>,
     ) -> Result<i32, BasicFailure> {
+        writeln!(self.output, "{prompt}")?;
         let mut stream =
             PreparedSessionStream::open_live(self.client.clone(), &session.id, application.clone())
                 .await?;
