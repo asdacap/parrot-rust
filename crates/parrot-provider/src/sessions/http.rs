@@ -127,7 +127,6 @@ impl HttpDriver {
         options: StreamOptions,
         protocol: Protocol,
         provider_id: String,
-        _include_router_metadata: bool,
         trace: Option<Arc<CallTrace>>,
     ) -> Self {
         Self {

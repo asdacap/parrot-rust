@@ -150,10 +150,12 @@ async fn original_openai_image_cost_retention_and_summary_chunk_assertions() {
                 base_watermark: 0,
                 fixed_message: &fixed,
             },
-            &mut blobs,
-            &sessions,
-            &events,
-            &NeverCancelled,
+            CompactionResources {
+                blobs: &mut blobs,
+                sessions: &sessions,
+                observer: &events,
+                cancellation: &NeverCancelled,
+            },
         )
         .await
         .unwrap()

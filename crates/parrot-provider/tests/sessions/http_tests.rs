@@ -140,7 +140,6 @@ fn driver(
         },
         protocol,
         "p".into(),
-        false,
         trace,
     )
 }

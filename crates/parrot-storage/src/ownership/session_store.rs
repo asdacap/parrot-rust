@@ -668,7 +668,6 @@ pub struct SessionStore {
     clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
 impl SessionStore {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         admissions: Arc<SessionAdmissions>,
         launch_directory: PathBuf,

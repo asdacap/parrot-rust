@@ -223,7 +223,7 @@ impl WebSlashDialog {
         frame: impl FnOnce(String) -> web::slash_frame::Payload,
         cancellation: &dyn Cancellation,
     ) -> Result<web::AnswerSlashPromptRequest, Status> {
-        let prompt_id = random_id()?;
+        let prompt_id = random_id().map_err(|error| Status::internal(error.to_string()))?;
         let (answer, received) = oneshot::channel();
         self.prompts
             .lock()
@@ -242,10 +242,9 @@ impl WebSlashDialog {
     }
 }
 
-#[allow(clippy::result_large_err)] // returns the vendored tonic Status, which is unboxably large
-pub(super) fn random_id() -> Result<String, Status> {
+pub(super) fn random_id() -> Result<String, getrandom::Error> {
     let mut bytes = [0_u8; 16];
-    getrandom::fill(&mut bytes).map_err(|error| Status::internal(error.to_string()))?;
+    getrandom::fill(&mut bytes)?;
     // Guid.NewGuid().ToString("N"): UUID version 4 with no separators.
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;

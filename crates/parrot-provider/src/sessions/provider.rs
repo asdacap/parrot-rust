@@ -279,7 +279,6 @@ impl Core {
             self.options,
             self.protocol,
             self.id.clone(),
-            prepared.include_router_metadata,
             trace,
         ))
     }

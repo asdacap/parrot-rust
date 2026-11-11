@@ -139,30 +139,16 @@ impl Compactor {
         &self.planner
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn compact(
         &self,
         selected: &ResolvedModelSelection,
         target: Option<&ContextSize>,
         input: &PlanningInput<'_>,
-        blobs: &mut CompactionGroupBlobStore,
-        sessions: &ProviderSessions,
-        observer: &dyn CompactionObserver,
-        cancellation: &dyn Cancellation,
+        resources: CompactionResources<'_>,
     ) -> Result<Option<CompactionResult>, CompactionError> {
         let plan = self.prepare_plan(selected, target, input)?;
         let estimates = CompactionEstimates::new(selected);
-        self.run_plan(
-            plan,
-            estimates,
-            CompactionResources {
-                blobs,
-                sessions,
-                observer,
-                cancellation,
-            },
-        )
-        .await
+        self.run_plan(plan, estimates, resources).await
     }
 
     fn prepare_plan(
@@ -246,7 +232,7 @@ impl From<CompactionFailure> for CompactionError {
     }
 }
 
-pub(crate) struct CompactionResources<'a> {
+pub struct CompactionResources<'a> {
     pub blobs: &'a mut CompactionGroupBlobStore,
     pub sessions: &'a ProviderSessions,
     pub observer: &'a dyn CompactionObserver,
