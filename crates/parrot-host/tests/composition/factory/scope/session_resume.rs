@@ -1808,11 +1808,15 @@ async fn json_identity_lineage_and_status_survive_retirement_name_reuse_and_root
         "SELECT status_slots FROM conversation_item WHERE agent_session=?1 AND status_slots IS NOT NULL ORDER BY sequence",
     ).unwrap().query_map([&root_id], |row| row.get::<_, String>(0)).unwrap()
         .collect::<Result<Vec<_>, _>>().unwrap();
-    assert_eq!(records.len(), 2);
-    let standing: serde_json::Value = serde_json::from_str(records[1].as_str()).unwrap();
+    assert_eq!(
+        records.len(),
+        1,
+        "reselecting build and reopening must not duplicate unchanged status"
+    );
+    let standing: serde_json::Value = serde_json::from_str(records[0].as_str()).unwrap();
     assert!(
         standing.as_object().unwrap().contains_key("profile:build"),
-        "the newer assembly stands for the switched build profile: {standing}"
+        "the retained assembly stands for the build profile: {standing}"
     );
     println!("SCHEMA13_SESSION_ROOT={}", selected.path().display());
 }
