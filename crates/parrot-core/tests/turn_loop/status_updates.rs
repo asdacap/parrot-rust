@@ -50,7 +50,7 @@ fn time_update_omits_unchanged_profile_and_tasks_and_survives_restart() {
 }
 
 #[test]
-fn auto_update_also_includes_changed_non_auto_sections_but_not_unchanged_sections() {
+fn auto_update_includes_only_changed_auto_sections() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.status_standing = status_standing(&[
         ("profile", "p1"),
@@ -68,10 +68,10 @@ fn auto_update_also_includes_changed_non_auto_sections_but_not_unchanged_section
     assert_eq!(
         state.status_steered,
         [(
-            "selection\n\ntasks".into(),
+            "selection".into(),
             status_standing(&[
                 ("profile", "p1"),
-                ("tasks", "w2"),
+                ("tasks", "w1"),
                 ("selection", "s2"),
                 ("absent", "a1"),
             ])
@@ -80,7 +80,7 @@ fn auto_update_also_includes_changed_non_auto_sections_but_not_unchanged_section
 }
 
 #[test]
-fn non_auto_update_does_not_advance_standing_until_an_auto_update_triggers() {
+fn non_auto_update_alone_does_not_advance_standing() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.status_standing = status_standing(&[("profile", "p1"), ("tasks", "w1")]);
     state.status_offering = status_offer(&[("profile", true, "p1"), ("tasks", false, "w2")]);

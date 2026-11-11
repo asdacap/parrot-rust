@@ -60,9 +60,9 @@ pub fn status_steering_needed(offering: &StatusOffering, standing: &StatusStandi
 }
 
 /// Injects full fitted status without a standing baseline. Later auto-update
-/// changes inject only slots with changed identities, including non-auto slots
-/// that changed alongside the trigger. Each message atomically records cumulative
-/// standing identities so unchanged slots stay known across updates and restarts.
+/// changes inject only auto-update slots with changed identities.
+/// Each message atomically records cumulative standing identities so unchanged
+/// slots stay known across updates and restarts.
 /// Safe points occur between provider requests.
 pub async fn steer_status(
     states: &mut dyn States,
@@ -80,7 +80,10 @@ pub async fn steer_status(
     }
     let updates = offering
         .iter()
-        .filter(|(key, offer)| standing.is_empty() || standing.get(key) != Some(&offer.hash))
+        .filter(|(key, offer)| {
+            standing.is_empty()
+                || (offer.is_auto_update && standing.get(key) != Some(&offer.hash))
+        })
         .collect::<Vec<_>>();
     let content = if standing.is_empty() {
         let instructions = states.capture_system_prompt().await?;
