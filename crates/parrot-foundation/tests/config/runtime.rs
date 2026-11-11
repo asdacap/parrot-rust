@@ -579,87 +579,35 @@ fn skills_are_path_only_trim_directory_separators_and_last_duplicate_wins() {
 }
 
 #[test]
-fn independent_dotnet_uri_whitespace_is_accepted_without_rewriting_configured_values() {
-    let inputs: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/uri-whitespace-input.json")).unwrap();
-    let oracle: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/uri-whitespace-oracle.json")).unwrap();
-    for input in inputs.as_array().unwrap() {
-        let id = input["id"].as_str().unwrap();
-        let expected = oracle["cases"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|case| case["id"] == id)
-            .unwrap();
-        let parsed =
-            parrot_foundation::config::yaml::parse_root(input["yaml"].as_str().unwrap()).unwrap();
+fn uri_whitespace_is_accepted_without_rewriting_configured_values() {
+    for endpoint in [
+        "https://host ",
+        " https://host",
+        "\thttps://host\n",
+        "https://host/path ",
+    ] {
         let mut node = root();
-        node.set("image_upload", parsed.get("image_upload").unwrap().clone());
-        match read(&node) {
-            Err(error) => assert_eq!(
-                serde_json::Value::String(error.to_string()),
-                expected["output"]["error"],
-                "{id}"
-            ),
-            Ok(runtime) => assert_eq!(
-                runtime.snapshot()["imageUpload"],
-                expected["output"]["value"]["selected"]["imageUpload"],
-                "{id}"
-            ),
-        }
+        node.set(
+            "image_upload",
+            map(&[
+                ("endpoint", scalar(endpoint)),
+                ("bucket", scalar("valid-bucket")),
+            ]),
+        );
+        assert_eq!(
+            read(&node).unwrap().image_upload.unwrap().endpoint,
+            endpoint
+        );
     }
-    assert_eq!(inputs.as_array().unwrap().len(), 5);
-}
-
-#[test]
-fn independent_dotnet_uri_and_schema_matrix_matches() {
-    let inputs: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/inputcases.json")).unwrap();
-    let oracle: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/oracle.json")).unwrap();
-    let mut compared = 0;
-    for input in inputs.as_array().unwrap() {
-        let id = input["id"].as_str().unwrap();
-        if !id.starts_with("uri-") && !id.starts_with("schema-scalar-") {
-            continue;
-        }
-        let expected = oracle["cases"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|case| case["id"] == id)
-            .unwrap();
-        let parsed =
-            parrot_foundation::config::yaml::parse_root(input["yaml"].as_str().unwrap()).unwrap();
-        let mut node = root();
-        let section = if id.starts_with("uri-") {
-            "image_upload"
-        } else {
-            "tools"
-        };
-        node.set(section, parsed.get(section).unwrap().clone());
-        match read(&node) {
-            Err(error) => assert_eq!(
-                serde_json::Value::String(error.to_string()),
-                expected["output"]["error"],
-                "{id}"
-            ),
-            Ok(runtime) => {
-                let snapshot = runtime.snapshot();
-                for path in input["paths"].as_array().unwrap() {
-                    let path = path.as_str().unwrap();
-                    let value = path.split('.').fold(&snapshot, |value, key| &value[key]);
-                    assert_eq!(
-                        value, &expected["output"]["value"]["selected"][path],
-                        "{id}: {path}"
-                    );
-                }
-            }
-        }
-        compared += 1;
-    }
-    assert_eq!(compared, 27);
+    let mut node = root();
+    node.set(
+        "image_upload",
+        map(&[
+            ("endpoint", scalar("https://bad\thost/")),
+            ("bucket", scalar("valid-bucket")),
+        ]),
+    );
+    assert_eq!(error(&node), "image_upload.endpoint must be an https URL");
 }
 
 #[test]

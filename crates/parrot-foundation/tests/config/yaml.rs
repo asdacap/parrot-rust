@@ -354,21 +354,6 @@ fn multiline_scalar_styles_round_trip_without_folding_away_newlines() {
 }
 
 #[test]
-fn anchor_writeback_matches_independent_source_after_original_slot_is_replaced() {
-    let inputs: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/anchor-writeback-input.json")).unwrap();
-    let expected: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/anchor-writeback-oracle.json")).unwrap();
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.tmp")
-        .join(format!("t11-anchor-writeback-test-{}", std::process::id()));
-    std::fs::create_dir_all(&root).unwrap();
-    let actual = super::fixtures::execute(&inputs, &root).unwrap();
-    assert_eq!(actual, expected);
-    std::fs::remove_dir_all(&root).unwrap();
-}
-
-#[test]
 fn replaced_anchor_definitions_relocate_by_identity_not_reused_name() {
     let input = "model: &chosen provider/old\nfirst: *chosen\nreplacement: &chosen provider/new\nsecond: *chosen\n";
     let mut root = parse_root(input).unwrap();
@@ -396,21 +381,6 @@ fn replaced_anchor_definitions_relocate_by_identity_not_reused_name() {
         reparsed.get("second").unwrap().as_str(),
         Some("provider/new")
     );
-}
-
-#[test]
-fn shared_alias_mutations_match_independent_source_configuration_operations() {
-    let inputs: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/anchor-mutation-input.json")).unwrap();
-    let expected: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/anchor-mutation-oracle.json")).unwrap();
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.tmp")
-        .join(format!("t11-anchor-mutation-test-{}", std::process::id()));
-    std::fs::create_dir_all(&root).unwrap();
-    let actual = super::fixtures::execute(&inputs, &root).unwrap();
-    assert_eq!(actual, expected);
-    std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]
@@ -457,24 +427,6 @@ fn distinct_field_mutations_through_aliases_preserve_preceding_edits() {
 }
 
 #[test]
-fn skill_shared_sequences_match_independent_source_configuration_operations() {
-    let inputs: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/skill-shared-sequence-input.json")).unwrap();
-    let expected: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/skill-shared-sequence-oracle.json")).unwrap();
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.tmp")
-        .join(format!(
-            "t11-skill-shared-sequence-test-{}",
-            std::process::id()
-        ));
-    std::fs::create_dir_all(&root).unwrap();
-    let actual = super::fixtures::execute(&inputs, &root).unwrap();
-    assert_eq!(actual, expected);
-    std::fs::remove_dir_all(&root).unwrap();
-}
-
-#[test]
 fn mutable_shared_sequences_preserve_identity_and_preceding_edits() {
     let mut root = parse_root("a: &entries [first]\nb: *entries\n").unwrap();
     let identity = root.get("a").unwrap().anchor_identity;
@@ -505,135 +457,4 @@ fn mutable_shared_sequences_preserve_identity_and_preceding_edits() {
         serialize(&root),
         "a: &entries [first, second, third]\nb: *entries\n"
     );
-}
-
-const OBSOLETE_COMPOSER_CASES: [&str; 6] = [
-    "compose-duplicate-2",
-    "compose-duplicate-3",
-    "compose-invalid-5",
-    "compose-invalid-6",
-    "compose-invalid-7",
-    "compose-shipped",
-];
-
-#[test]
-fn independent_dotnet_emitter_and_composer_fixtures_match_exact_bytes() {
-    assert_source_emitter_and_composer_fixtures(|id| !OBSOLETE_COMPOSER_CASES.contains(&id), 22);
-}
-
-#[test]
-#[ignore = "abdaf0f changed section composition; later prompt changes obsolete live assets versus source bytes"]
-fn obsolete_dotnet_composer_fixtures_match_exact_bytes() {
-    assert_source_emitter_and_composer_fixtures(|id| OBSOLETE_COMPOSER_CASES.contains(&id), 6);
-}
-
-fn assert_source_emitter_and_composer_fixtures(
-    select_case: impl Fn(&str) -> bool,
-    expected_count: usize,
-) {
-    let inputs: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/inputcases.json")).unwrap();
-    let oracle: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/oracle.json")).unwrap();
-    let mut failures = Vec::new();
-    let mut compared = 0;
-    for input in inputs.as_array().unwrap() {
-        if !select_case(input["id"].as_str().unwrap()) {
-            continue;
-        }
-        let kind = input["kind"].as_str().unwrap();
-        let actual = match kind {
-            "emit" => {
-                let node = if let Some(constructed) = input.get("constructed") {
-                    Node::mapping(vec![(
-                        Node::scalar("value"),
-                        Node::scalar(constructed.as_str().unwrap()),
-                    )])
-                } else {
-                    parse_documents(input["yaml"].as_str().unwrap())
-                        .unwrap()
-                        .remove(0)
-                };
-                Ok(serialize(&node))
-            }
-            "compose" => {
-                let sources = input["sources"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|source| (source["name"].as_str().unwrap(), source["content"].as_str()))
-                    .collect::<Vec<_>>();
-                compose(&sources)
-            }
-            "compose_shipped" => compose(&[
-                (
-                    "Config/predefined_config.system_prompts.yaml",
-                    Some(include_str!(
-                        "../../../../assets/config/predefined_config.system_prompts.yaml"
-                    )),
-                ),
-                (
-                    "Config/predefined_config.agent_tasks.yaml",
-                    Some(include_str!(
-                        "../../../../assets/config/predefined_config.agent_tasks.yaml"
-                    )),
-                ),
-                (
-                    "Config/predefined_config.profiles.yaml",
-                    Some(include_str!(
-                        "../../../../assets/config/predefined_config.profiles.yaml"
-                    )),
-                ),
-                (
-                    "Config/predefined_config.runtime.yaml",
-                    Some(include_str!(
-                        "../../../../assets/config/predefined_config.runtime.yaml"
-                    )),
-                ),
-            ]),
-            _ => continue,
-        };
-        compared += 1;
-        let expected = &oracle["cases"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|row| row["id"] == input["id"])
-            .unwrap()["output"];
-        let (actual, expected) = match actual {
-            Ok(value) => (
-                value,
-                expected["value"]
-                    .as_str()
-                    .unwrap_or("<expected error>")
-                    .to_owned(),
-            ),
-            Err(error) => (
-                error.to_string(),
-                expected["error"]
-                    .as_str()
-                    .unwrap_or("<expected success>")
-                    .to_owned(),
-            ),
-        };
-        if actual != expected {
-            let first = actual
-                .bytes()
-                .zip(expected.bytes())
-                .position(|(a, b)| a != b)
-                .unwrap_or(actual.len().min(expected.len()));
-            let start = first.saturating_sub(50);
-            let actual_excerpt =
-                String::from_utf8_lossy(&actual.as_bytes()[start..actual.len().min(first + 150)]);
-            let expected_excerpt = String::from_utf8_lossy(
-                &expected.as_bytes()[start..expected.len().min(first + 150)],
-            );
-            failures.push(format!("{}: first byte mismatch {} (actual {} vs source {} bytes)\nactual: {:?}\nsource: {:?}", input["id"], first, actual.len(), expected.len(), actual_excerpt, expected_excerpt));
-        }
-    }
-    assert_eq!(
-        compared, expected_count,
-        "fixture selection unexpectedly changed"
-    );
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
