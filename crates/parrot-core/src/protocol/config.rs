@@ -13,8 +13,6 @@ pub enum ConfigKey {
     SkillUnavailableTemplate,
     SkillSelectedTemplate,
     SkillTooLargeTemplate,
-    ContextReminderTemplate,
-    ContextLimitReminderTemplate,
     OversizedToolGroupTemplate,
     FinalRequestTemplate,
     RestoredToolsTemplate,

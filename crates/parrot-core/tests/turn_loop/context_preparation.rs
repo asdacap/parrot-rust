@@ -1,64 +1,32 @@
 use super::*;
 
 #[test]
-fn context_reminder_is_selected_from_the_last_stored_reminder() {
-    for (last_percentage, estimated_tokens, expected) in [
-        (None, 490, None),
-        (None, 550, Some(50)),
-        (Some(50), 590, None),
-        (Some(50), 610, Some(60)),
-        (Some(60), 550, None),
-    ] {
-        let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.prime_context(estimated_tokens);
-        state.prompts().checkpoint = last_percentage.map(|percentage| ContextReminderCheckpoint {
-            canonical_model: "memory/model".into(),
-            context_limit: 1000,
-            percentage,
-        });
-
-        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert_eq!(
-            state
-                .reminder_appends
-                .first()
-                .map(|(checkpoint, _, _)| checkpoint.percentage),
-            expected,
-            "last reminder {last_percentage:?}, estimated tokens {estimated_tokens}",
-        );
-    }
-}
-
-#[test]
-fn stored_context_reminders_are_not_repeated_on_tool_followups_or_later_turns() {
+fn reminder_band_steering_does_not_repeat_on_tool_followups_or_later_turns() {
     let mut state = MemoryState::new([
         Reply::tools("call"),
         Reply::final_response("first answer"),
         Reply::final_response("second answer"),
     ]);
-    state.prime_context(550);
+    state.status_offering = status_offer(&[("runtime:context-reminder", true, "band-50")]);
 
     assert_eq!(state.run(), Ok(Outcome::Completed("first answer".into())));
     state.enqueue_message(Delivery::Queue, "another question");
     assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
 
-    assert_eq!(state.reminder_appends.len(), 1);
-    assert_eq!(state.reminder_publications, 1);
-    let requests = state.provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), 3);
-    for request in requests.iter() {
-        assert_eq!(
-            request
-                .messages
-                .iter()
-                .filter(|message| {
-                    message.role == Role::System
-                        && message.contents == [Content::Text("configured reminder".into())]
-                })
-                .count(),
-            1,
-        );
-    }
+    assert_eq!(
+        state.status_steered,
+        [(
+            "fitted status".into(),
+            status_standing(&[("runtime:context-reminder", "band-50")])
+        )]
+    );
+    let steered = state
+        .trace
+        .values()
+        .iter()
+        .filter(|step| *step == "steer_status")
+        .count();
+    assert_eq!(steered, 1);
 }
 
 #[test]
@@ -97,11 +65,10 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
             .unwrap()
             < trace.iter().position(|step| step == "render").unwrap()
     );
-    assert_eq!(trace.iter().filter(|step| *step == "checkpoint").count(), 2);
 }
 
 #[test]
-fn raw_and_calibrated_triggers_compact_before_reminder_lookup_and_use_returned_epoch() {
+fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
     for calibrated in [false, true] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
         state.request().context.configuration.model.context_window = 1000;
@@ -164,10 +131,7 @@ fn raw_and_calibrated_triggers_compact_before_reminder_lookup_and_use_returned_e
         assert_eq!(estimates[0].instructions, requests[0].instructions);
         assert_eq!(estimates[0].messages, requests[0].messages);
         let trace = state.trace.values();
-        assert!(
-            trace.iter().position(|step| step == "compact").unwrap()
-                < trace.iter().position(|step| step == "checkpoint").unwrap()
-        );
+        assert!(trace.iter().any(|step| step == "compact"));
     }
 }
 
@@ -204,7 +168,6 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.compacted_definitions.len(), 1);
-    assert!(state.trace.values().iter().any(|step| step == "checkpoint"));
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         200
@@ -253,7 +216,7 @@ fn equality_at_the_raw_trigger_does_not_compact_or_discard_requested_output() {
 }
 
 #[test]
-fn post_compaction_raw_input_failure_precedes_checkpoint_or_provider_effects() {
+fn post_compaction_raw_input_failure_precedes_further_provider_effects() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.request().context.configuration.model.context_window = 1000;
     state
@@ -283,122 +246,13 @@ fn post_compaction_raw_input_failure_precedes_checkpoint_or_provider_effects() {
         "The compacted conversation exceeds the selected model input limit."
     );
     assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(!state.trace.values().iter().any(|step| step == "checkpoint"));
-}
-
-#[test]
-fn reminder_append_receives_raw_usage_not_the_checkpoint_band_or_candidate_usage() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.prime_context(490);
-    state.request().estimate_script = [550, 630, 630].into();
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.reminder_appends.len(), 1);
-    assert_eq!(state.reminder_appends[0].0.percentage, 50);
-    assert_eq!(
-        state.reminder_appends[0].2,
-        ConversationEvent::Notice {
-            kind: "context_reminder".into(),
-            notice: "Context reminder injected (55% context used)".into(),
-        }
+    assert!(
+        !state
+            .trace
+            .values()
+            .iter()
+            .any(|step| step == "steer_status")
     );
-    let request = state.request();
-    let estimates = &request.estimates;
-    assert_eq!(estimates[1].tokens, 630);
-    assert_eq!(estimates[1].messages.len(), 2);
-    assert_eq!(state.reminder_publications, 1);
-    let requests = state.provider.requests.lock().unwrap();
-    assert_eq!(requests[0].messages, estimates.last().unwrap().messages);
-    assert_eq!(
-        requests[0].messages.last().unwrap().contents,
-        [Content::Text("configured reminder".into())]
-    );
-}
-
-#[test]
-fn duplicate_reminder_does_not_change_history_or_publish() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.prime_context(490);
-    state.append_reminder = false;
-    state.request().estimate_script = [550, 630, 550].into();
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.reminder_appends.len(), 1);
-    assert_eq!(state.request().messages.len(), 1);
-    assert_eq!(state.reminder_publications, 0);
-    assert_eq!(
-        state.provider.requests.lock().unwrap()[0].messages,
-        state.request().messages
-    );
-}
-
-#[test]
-fn stored_reminder_prevents_a_duplicate_after_publication_failure() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.prime_context(550);
-    state.fail_at = Some("publish_reminder");
-    assert_eq!(state.run(), Err(Error::failed("publish_reminder")));
-    assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert_eq!(state.prompts().checkpoint.as_ref().unwrap().percentage, 50);
-
-    state.fail_at = None;
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.reminder_appends.len(), 1);
-    assert_eq!(state.reminder_publications, 1);
-}
-
-#[test]
-fn reminder_rendering_failure_does_not_suppress_a_retry() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.prime_context(550);
-    state.fail_at = Some("reminder");
-    assert_eq!(state.run(), Err(Error::failed("reminder")));
-    assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(state.prompts().checkpoint.is_none());
-
-    state.fail_at = None;
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.reminder_appends.len(), 1);
-    assert_eq!(state.reminder_publications, 1);
-}
-
-#[test]
-fn crossing_reminder_candidate_compacts_without_appending_the_reminder() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.prime_context(490);
-    state.request().estimate_script = [550, 910, 100, 100].into();
-    let messages = vec![Message {
-        role: Role::System,
-        contents: vec![Content::Text("compacted".into())],
-        ..Message::default()
-    }];
-    let compacted_state = state.request().context.clone();
-    state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
-    state.summary_provider =
-        compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
-            "reminder summary".into(),
-        )]);
-    state.compactions.push_back(CompactedContext {
-        instructions: "compacted reminder candidate".into(),
-        messages: messages.clone(),
-        state: compacted_state,
-        reduced: true,
-    });
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert!(state.reminder_appends.is_empty());
-    assert_eq!(state.reminder_publications, 0);
-    assert_eq!(state.request().rendered_instructions.len(), 1);
-    assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
-    let compacted = state.recorded_compactions[0]
-        .as_ref()
-        .unwrap()
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        compacted.summary.contents,
-        [Content::Text("prefix:reminder summary".into())]
-    );
-    let requests = state.provider.requests.lock().unwrap();
-    assert_eq!(requests[0].instructions, "compacted reminder candidate");
-    assert_eq!(requests[0].messages, messages);
 }
 
 #[test]
@@ -407,7 +261,6 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
     state.request().estimated_input_tokens = i64::MAX;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert!(state.compacted_definitions.is_empty());
-    assert!(state.reminder_appends.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         32768
@@ -420,7 +273,6 @@ fn context_primitive_failures_stop_at_the_effect_without_invoking_provider_or_to
         "context_configuration",
         "token_calibration",
         "estimate",
-        "checkpoint",
         "final_request",
     ] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
@@ -432,54 +284,6 @@ fn context_primitive_failures_stop_at_the_effect_without_invoking_provider_or_to
         assert_eq!(state.trace.values().last().unwrap(), stage);
         assert!(state.provider.requests.lock().unwrap().is_empty());
         assert!(state.tools.requests.lock().unwrap().is_empty());
-    }
-}
-
-#[test]
-fn reminder_append_failure_does_not_suppress_a_retry() {
-    let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.prime_context(550);
-    state.fail_at = Some("append_reminder");
-    assert_eq!(state.run(), Err(Error::failed("append_reminder")));
-    assert!(state.provider.requests.lock().unwrap().is_empty());
-    assert!(state.prompts().checkpoint.is_none());
-    assert_eq!(state.reminder_publications, 0);
-
-    state.fail_at = None;
-    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.reminder_appends.len(), 1);
-    assert_eq!(state.reminder_publications, 1);
-}
-
-#[test]
-fn context_reminders_use_configured_template_overrides() {
-    for override_limit in [false, true] {
-        let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.prime_context(490);
-        state.request().estimated_input_tokens = 550;
-        if override_limit {
-            state.request().context.configuration.context_limit =
-                Some(parrot_core::ContextLimit::Tokens(800));
-        }
-        let key = if override_limit {
-            ConfigKey::ContextLimitReminderTemplate
-        } else {
-            ConfigKey::ContextReminderTemplate
-        };
-        state.skill_templates.lock().unwrap().insert(
-            key,
-            "Prepared reminder at {percentage}% with {estimated_tokens} tokens.".into(),
-        );
-
-        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        let requests = state.provider.requests.lock().unwrap();
-        assert!(requests[0].messages.iter().any(|message| {
-            message.role == Role::System
-                && message.contents
-                    == [Content::Text(
-                        "Prepared reminder at 50% with 550 tokens.".into(),
-                    )]
-        }));
     }
 }
 

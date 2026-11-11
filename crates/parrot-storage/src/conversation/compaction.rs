@@ -83,7 +83,9 @@ impl ConversationRepository {
             record(tx, &published, None, &(context.timestamp)())?;
             let status = projection::project(tx, &published.agent_session_id, &ConversationMessage::text(MessageRole::System, content), &(context.timestamp)())?;
             tx.execute("UPDATE conversation_item SET compaction_status_sequence = ?1 WHERE sequence = ?2;", params![status.sequence, summary_sequence])?;
-            tx.execute("UPDATE conversation_item SET context_reminder = NULL WHERE agent_session = ?1 AND context_reminder IS NOT NULL;", [&published.agent_session_id])?;
+            // Drop the context reminder standing hash, so a qualifying reminder
+            // re-fires after compaction like the retired checkpoint reset did.
+            tx.execute("UPDATE conversation_item SET status_slots = json_remove(status_slots, '$.\"runtime:context-reminder\"') WHERE agent_session = ?1 AND status_slots IS NOT NULL;", [&published.agent_session_id])?;
             Ok(true)
         }).await?;
         if appended {

@@ -30,11 +30,12 @@ pub struct ContextSnapshot {
     pub has_context_limit_override: bool,
 }
 
+/// Holds the shared context reminder notification constants.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextReminderCheckpoint {
-    pub canonical_model: String,
-    pub context_limit: i32,
-    pub percentage: i32,
+pub struct ContextReminderCheckpoint;
+
+impl ContextReminderCheckpoint {
+    pub const NOTIFICATION_INTERVAL: i32 = 10;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

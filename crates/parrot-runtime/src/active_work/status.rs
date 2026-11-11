@@ -124,7 +124,7 @@ impl StatusRegistry {
         &self,
         query: &StatusQuery,
         profile: Option<&dyn StatusProvider>,
-        additional: Option<&dyn StatusProvider>,
+        additional: &[&dyn StatusProvider],
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
         let slots = self
@@ -143,27 +143,32 @@ impl StatusRegistry {
         &self,
         query: &StatusQuery,
         profile: Option<&dyn StatusProvider>,
-        additional: Option<&dyn StatusProvider>,
+        additional: &[&dyn StatusProvider],
         cancellation: &dyn Cancellation,
     ) -> StatusResult<Vec<StatusSlot>> {
         let mut providers: Vec<&dyn StatusProvider> =
             self.providers.iter().map(Arc::as_ref).collect();
-        for (extra, subject) in [
-            (profile, "profile provider"),
-            (additional, "additional provider"),
-        ] {
-            if let Some(extra) = extra {
-                validate_key(extra.key(), subject).map_err(OperationError::Failed)?;
-                if providers
-                    .iter()
-                    .any(|provider| provider.key() == extra.key())
-                {
-                    return Err(OperationError::Failed(duplicate(extra.key())));
-                }
-                providers.push(extra);
-                providers.sort_by(|left, right| ordinal(left.key(), right.key()));
+        if let Some(extra) = profile {
+            validate_key(extra.key(), "profile provider").map_err(OperationError::Failed)?;
+            if providers
+                .iter()
+                .any(|provider| provider.key() == extra.key())
+            {
+                return Err(OperationError::Failed(duplicate(extra.key())));
             }
+            providers.push(extra);
         }
+        for &extra in additional {
+            validate_key(extra.key(), "additional provider").map_err(OperationError::Failed)?;
+            if providers
+                .iter()
+                .any(|provider| provider.key() == extra.key())
+            {
+                return Err(OperationError::Failed(duplicate(extra.key())));
+            }
+            providers.push(extra);
+        }
+        providers.sort_by(|left, right| ordinal(left.key(), right.key()));
         // Poll every observation before waiting, and join every result even after
         // an error, matching Task.WhenAll rather than serial or fail-fast sampling.
         let mut observations: Vec<_> = providers
@@ -400,6 +405,81 @@ fn format_utc(time: SystemTime) -> Result<String, StatusError> {
     ))
 }
 
+/// One reminder slot observation: a provider-facing notice that context usage
+/// entered a notification band. The identity hash records the band, so the
+/// steering machinery injects the reminder once per band and the standing
+/// comparison gates repeats across tool followups and restarts.
+pub struct ContextReminderStatusProvider {
+    pub query: StatusQuery,
+    pub snapshot: ContextSnapshot,
+    pub templates: Arc<PromptTemplateCatalog>,
+}
+impl StatusProvider for ContextReminderStatusProvider {
+    fn key(&self) -> &str {
+        "runtime:context-reminder"
+    }
+    fn observe<'a>(
+        &'a self,
+        _query: &'a StatusQuery,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, StatusResult<StatusObservation>> {
+        Box::pin(async move {
+            check(cancellation)?;
+            let snapshot = &self.snapshot;
+            let interval = ContextReminderCheckpoint::NOTIFICATION_INTERVAL;
+            let Some(band) = snapshot
+                .usage_percent
+                .filter(|_| snapshot.context_limit > 0)
+                .map(|usage| usage / interval * interval)
+                .filter(|band| *band >= 50)
+            else {
+                return Ok(StatusObservation::default());
+            };
+            let mut model = json!({
+                "percentage": band.to_string(),
+                "estimated_tokens": snapshot.estimated_tokens.to_string(),
+                "context_limit": snapshot.context_limit.to_string(),
+                "notification_interval": interval.to_string(),
+                "trigger": snapshot.trigger_percent.to_string(),
+            })
+            .as_object()
+            .expect("context reminder model is object")
+            .clone();
+            if snapshot.has_context_limit_override {
+                model.insert(
+                    "trigger_tokens".into(),
+                    snapshot
+                        .trigger_tokens
+                        .map_or_else(|| "unavailable".into(), |tokens| tokens.to_string())
+                        .into(),
+                );
+            }
+            render(
+                &self.templates,
+                if snapshot.has_context_limit_override {
+                    "agent-session.context-limit-reminder"
+                } else {
+                    "agent-session.context-reminder"
+                },
+                model,
+                cancellation,
+            )
+            .map(|observation| {
+                observation.with_identity(
+                    format!(
+                        "context-reminder:{}:{}:{}:{}",
+                        self.query.requested_model,
+                        snapshot.context_limit,
+                        snapshot.has_context_limit_override,
+                        band
+                    ),
+                    true,
+                )
+            })
+        })
+    }
+}
+
 pub struct ContextStatusProvider {
     pub snapshot: ContextSnapshot,
     pub templates: Arc<PromptTemplateCatalog>,
@@ -577,16 +657,12 @@ impl RuntimeStatus {
         context: ContextSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
+        let context_provider = ContextStatusProvider {
+            snapshot: context,
+            templates: self.templates.clone(),
+        };
         self.activity
-            .observe(
-                query,
-                None,
-                Some(&ContextStatusProvider {
-                    snapshot: context,
-                    templates: self.templates.clone(),
-                }),
-                cancellation,
-            )
+            .observe(query, None, &[&context_provider], cancellation)
             .await
     }
     pub async fn observe_statistics(
@@ -600,15 +676,21 @@ impl RuntimeStatus {
             templates: self.templates.clone(),
         })])
         .map_err(OperationError::Failed)?
-        .observe(query, None, None, cancellation)
+        .observe(query, None, &[], cancellation)
         .await
     }
     pub async fn observe_slots(
         &self,
         query: &StatusQuery,
         profile_prompt: &str,
+        context: &ContextSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<Vec<StatusSlot>> {
+        let reminder_provider = ContextReminderStatusProvider {
+            query: query.clone(),
+            snapshot: context.clone(),
+            templates: self.templates.clone(),
+        };
         self.full
             .observe_slots(
                 query,
@@ -616,7 +698,7 @@ impl RuntimeStatus {
                     key: format!("profile:{}", query.profile),
                     prompt: profile_prompt.to_owned(),
                 }),
-                None,
+                &[&reminder_provider],
                 cancellation,
             )
             .await
@@ -628,17 +710,24 @@ impl RuntimeStatus {
         context: ContextSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
+        let profile = ProfileStatusProvider {
+            key: format!("profile:{}", query.profile),
+            prompt: profile_prompt.to_owned(),
+        };
+        let context_provider = ContextStatusProvider {
+            snapshot: context.clone(),
+            templates: self.templates.clone(),
+        };
+        let reminder_provider = ContextReminderStatusProvider {
+            query: query.clone(),
+            snapshot: context,
+            templates: self.templates.clone(),
+        };
         self.full
             .observe(
                 query,
-                Some(&ProfileStatusProvider {
-                    key: format!("profile:{}", query.profile),
-                    prompt: profile_prompt.to_owned(),
-                }),
-                Some(&ContextStatusProvider {
-                    snapshot: context,
-                    templates: self.templates.clone(),
-                }),
+                Some(&profile),
+                &[&context_provider, &reminder_provider],
                 cancellation,
             )
             .await
@@ -671,11 +760,12 @@ impl crate::compaction::ContextStatus for BoundContextStatus {
 
     fn slots<'a>(
         &'a self,
+        context: &'a ContextSnapshot,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, crate::compaction::ContextResult<parrot_core::StatusOffering>> {
         Box::pin(async move {
             self.runtime
-                .observe_slots(&self.query, &self.profile_prompt, cancellation)
+                .observe_slots(&self.query, &self.profile_prompt, context, cancellation)
                 .await
                 .map_err(context_error)
                 .map(|slots| {

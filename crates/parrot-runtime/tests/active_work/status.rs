@@ -135,14 +135,14 @@ async fn observe_composes_available_status_by_key_and_resamples_providers() {
     };
     assert_eq!(
         registry
-            .observe(&query, Some(&profile), None, &NeverCancelled)
+            .observe(&query, Some(&profile), &[], &NeverCancelled)
             .await
             .unwrap(),
         "profile prompt\n\nselection 1"
     );
     assert_eq!(
         registry
-            .observe(&query, Some(&profile), None, &NeverCancelled)
+            .observe(&query, Some(&profile), &[], &NeverCancelled)
             .await
             .unwrap(),
         "profile prompt\n\nselection 2"
@@ -173,7 +173,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
                 .observe(
                     &query(),
                     Some(Scripted::new(key, "x").as_ref()),
-                    None,
+                    &[],
                     &NeverCancelled
                 )
                 .await
@@ -184,7 +184,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
                 .observe(
                     &query(),
                     None,
-                    Some(Scripted::new(key, "x").as_ref()),
+                    &[Scripted::new(key, "x").as_ref()],
                     &NeverCancelled
                 )
                 .await
@@ -196,13 +196,13 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
     let registry = StatusRegistry::new(vec![first.clone()]).unwrap();
     assert!(
         registry
-            .observe(&query(), Some(first.as_ref()), None, &NeverCancelled)
+            .observe(&query(), Some(first.as_ref()), &[], &NeverCancelled)
             .await
             .is_err()
     );
     assert!(
         registry
-            .observe(&query(), None, Some(first.as_ref()), &NeverCancelled)
+            .observe(&query(), None, &[first.as_ref()], &NeverCancelled)
             .await
             .is_err()
     );
@@ -212,7 +212,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
             .observe(
                 &query(),
                 Some(extra.as_ref()),
-                Some(extra.as_ref()),
+                &[extra.as_ref()],
                 &NeverCancelled
             )
             .await
@@ -221,7 +221,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
     assert_eq!(first.calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         registry
-            .observe(&query(), None, None, &NeverCancelled)
+            .observe(&query(), None, &[], &NeverCancelled)
             .await
             .unwrap(),
         "x"
@@ -237,7 +237,7 @@ async fn registry_preserves_utf16_ordinal_order_and_case_sensitive_namespaces() 
     .unwrap();
     assert_eq!(
         registry
-            .observe(&query(), None, None, &NeverCancelled)
+            .observe(&query(), None, &[], &NeverCancelled)
             .await
             .unwrap(),
         "upper\n\nastral\n\nbmp"
@@ -293,7 +293,7 @@ async fn registry_starts_all_observations_and_joins_errors_with_provider_source(
     .unwrap();
     let error = tokio::time::timeout(
         Duration::from_secs(2),
-        registry.observe(&query(), None, None, &NeverCancelled),
+        registry.observe(&query(), None, &[], &NeverCancelled),
     )
     .await
     .expect("serial observation deadlocked")
@@ -336,7 +336,7 @@ async fn registry_propagates_actual_caller_cancellation_without_fabricating_a_se
     let cancel = Signal::new();
     cancel.cancel();
     assert!(matches!(
-        registry.observe(&query(), None, None, &cancel).await,
+        registry.observe(&query(), None, &[], &cancel).await,
         Err(OperationError::Cancelled)
     ));
     let templates = catalog("");
@@ -1057,7 +1057,7 @@ async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_jo
         StatusRegistry::new(vec![Arc::new(ImmediateFailure { cancelled: true })]).unwrap();
     assert_eq!(
         registry
-            .observe(&query(), None, None, &NeverCancelled)
+            .observe(&query(), None, &[], &NeverCancelled)
             .await
             .unwrap_err()
             .to_string(),
@@ -1072,7 +1072,7 @@ async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_jo
     cancelled.cancel();
     assert_eq!(
         registry
-            .observe(&query(), None, None, &cancelled)
+            .observe(&query(), None, &[], &cancelled)
             .await
             .unwrap_err()
             .to_string(),
@@ -1295,4 +1295,63 @@ async fn registry_runtime_tree_source_missing_process_service_is_error_not_silen
         registry.shutdown().join().await.unwrap();
     })
     .await;
+}
+#[tokio::test]
+async fn context_reminder_slot_selects_band_template_and_identity() {
+    let runtime = Arc::new(RuntimeStatus::new(catalog(""), clock(), vec![]).unwrap());
+    let snapshot = ContextSnapshot::new(550, 1000, Some(55), 90);
+    let reminder_key = parrot_core::StatusKey::new("runtime:context-reminder");
+
+    let bound = runtime.bind_context(query(), "profile prompt".into());
+    let offering = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    let reminder = offering.get(&reminder_key).unwrap();
+    assert_eq!(
+        reminder.hash,
+        "context-reminder:provider/model:1000:false:50"
+    );
+    assert!(reminder.is_auto_update);
+    assert!(
+        reminder
+            .text
+            .contains("Context usage entered the 50% notification band (550 estimated tokens / 1000 configured limit)")
+    );
+
+    let early = ContextSnapshot::new(490, 1000, Some(49), 90);
+    let offering = bound.slots(&early, &NeverCancelled).await.unwrap();
+    assert!(!offering.contains_key(&reminder_key));
+
+    let unknown = ContextSnapshot::new(550, 1000, None, 90);
+    let offering = bound.slots(&unknown, &NeverCancelled).await.unwrap();
+    assert!(!offering.contains_key(&reminder_key));
+
+    let override_snapshot = ContextSnapshot {
+        estimated_tokens: 550,
+        context_limit: 10_000,
+        usage_percent: Some(55),
+        trigger_percent: 90,
+        input_limit: 0,
+        trigger_tokens: Some(8_000),
+        has_context_limit_override: true,
+    };
+    let offering = bound
+        .slots(&override_snapshot, &NeverCancelled)
+        .await
+        .unwrap();
+    let reminder = offering.get(&reminder_key).unwrap();
+    assert_eq!(
+        reminder.hash,
+        "context-reminder:provider/model:10000:true:50"
+    );
+    assert!(
+        reminder
+            .text
+            .contains("notification band (550 estimated tokens / 10000 model context window)")
+    );
+
+    let mut other = query();
+    other.requested_model = "other/model".into();
+    let other_bound = runtime.bind_context(other, "profile prompt".into());
+    let offering = other_bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    let reminder = offering.get(&reminder_key).unwrap();
+    assert_eq!(reminder.hash, "context-reminder:other/model:1000:false:50");
 }

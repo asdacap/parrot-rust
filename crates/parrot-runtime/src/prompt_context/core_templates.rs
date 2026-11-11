@@ -12,14 +12,6 @@ const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
     (ConfigKey::SkillSelectedTemplate, "context.skill-selected"),
     (ConfigKey::SkillTooLargeTemplate, "context.skill-too-large"),
     (
-        ConfigKey::ContextReminderTemplate,
-        "agent-session.context-reminder",
-    ),
-    (
-        ConfigKey::ContextLimitReminderTemplate,
-        "agent-session.context-limit-reminder",
-    ),
-    (
         ConfigKey::FinalRequestTemplate,
         "agent-session.final-request",
     ),

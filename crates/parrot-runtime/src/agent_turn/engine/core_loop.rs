@@ -144,6 +144,8 @@ where
                 publisher: backend.publisher.as_ref(),
                 usage: &backend.usage,
                 compactor: &backend.compactor,
+                tool_snapshot: &backend.materialized_tools,
+                tool_factory: &backend.tools,
                 event_id: &backend.event_id,
                 events: ContextEmitter::new(
                     &backend.history,
@@ -332,6 +334,8 @@ where
         publisher: backend.publisher.as_ref(),
         usage: &backend.usage,
         compactor: &backend.compactor,
+        tool_snapshot: &backend.materialized_tools,
+        tool_factory: &backend.tools,
         event_id: &backend.event_id,
         events: ContextEmitter::new(
             &backend.history,

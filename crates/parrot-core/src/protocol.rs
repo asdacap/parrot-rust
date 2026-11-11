@@ -29,7 +29,7 @@ pub use context::{
 };
 pub use conversation::{ConversationHistoryItem, ConversationState, ConversationSummary};
 pub use error::{Error, ErrorCode, ErrorDetail, ErrorKind};
-pub use event::{ContextReminder, EventPublisher};
+pub use event::EventPublisher;
 pub use message::{
     Content, ConversationTurn, Delivery, FinishReason, InputAdmission, Message, PendingMessage,
     PromotedInput, ProviderRequest, ProviderResponse, Reasoning, Role,

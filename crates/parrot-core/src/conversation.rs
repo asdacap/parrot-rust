@@ -1,6 +1,6 @@
 use crate::{
-    CompletionBlockerFeedback, Content, ContextReminderCheckpoint, ConversationState, Error,
-    FinishReason, Message, ProviderResponse, Role, States,
+    CompletionBlockerFeedback, Content, ConversationState, Error, FinishReason, Message,
+    ProviderResponse, Role, States,
 };
 
 /// Assembles summary, durable tail, checkpoints, and the current provider-visible messages.
@@ -66,10 +66,6 @@ pub enum ConversationPersistence {
     Committed(ConversationPublication),
     Phase {
         final_phase: bool,
-        event: ConversationEvent,
-    },
-    Reminder {
-        checkpoint: ContextReminderCheckpoint,
         event: ConversationEvent,
     },
     /// Persists one steered status assembly. `standing` records the per-slot

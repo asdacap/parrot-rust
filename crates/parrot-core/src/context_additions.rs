@@ -1,6 +1,6 @@
 use crate::{
-    ContextReminder, ConversationAddition, ConversationEvent, ConversationPersistence,
-    ConversationReceipt, Error, Message, Role, States,
+    ConversationAddition, ConversationEvent, ConversationPersistence, ConversationReceipt, Error,
+    Message, Role, States,
 };
 
 pub async fn add_phase_prompt(
@@ -27,27 +27,6 @@ pub async fn add_phase_prompt(
                 event: ConversationEvent::Notice {
                     kind: kind.into(),
                     notice: notice.into(),
-                },
-            },
-        })
-        .await
-}
-
-pub async fn add_context_reminder(
-    states: &mut dyn States,
-    reminder: &ContextReminder,
-) -> Result<ConversationReceipt, Error> {
-    states
-        .apply_conversation_addition(ConversationAddition {
-            messages: vec![reminder.render_message()],
-            persistence: ConversationPersistence::Reminder {
-                checkpoint: reminder.checkpoint.clone(),
-                event: ConversationEvent::Notice {
-                    kind: "context_reminder".into(),
-                    notice: format!(
-                        "Context reminder injected ({}% context used)",
-                        reminder.observed_percentage
-                    ),
                 },
             },
         })

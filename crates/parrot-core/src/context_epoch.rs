@@ -1,7 +1,6 @@
 use crate::{
     CancellationToken, ConfigKey, ContextSnapshot, Error, EventPublisher, Provider, States,
-    ToolDefinition, add_context_reminder,
-    context::{compact_context, prepare_context_reminder},
+    ToolDefinition, context::compact_context,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,27 +42,6 @@ pub async fn prepare_context_epoch(
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
         context = ContextSnapshot::estimate(estimate, &configuration);
         context.ensure_input_fits()?;
-    }
-    if let Some(reminder) = prepare_context_reminder(states, &context, &configuration).await? {
-        let mut candidate = messages.clone();
-        candidate.push(reminder.render_message());
-        let estimate = provider.estimate_input_tokens(&instructions, definitions, &candidate)?;
-        let inserted = ContextSnapshot::estimate(estimate, &configuration);
-        if inserted.exceeds_input_limit() || inserted.exceeds_trigger() {
-            let compacted =
-                compact_context(states, provider, publisher, definitions, cancellation).await?;
-            instructions = compacted.instructions;
-            reduced |= compacted.reduced;
-            messages = states.read_provider_messages().await?;
-            configuration = states
-                .get_config(ConfigKey::Context)
-                .await?
-                .into_context()?;
-            let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-            ContextSnapshot::estimate(estimate, &configuration).ensure_input_fits()?;
-        } else {
-            add_context_reminder(states, &reminder).await?;
-        }
     }
     Ok(PreparedContext {
         instructions,

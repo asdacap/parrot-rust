@@ -103,12 +103,6 @@ pub struct PendingStatus {
     pub mode: String,
     pub version: i64,
 }
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct ContextReminderCheckpoint {
-    pub canonical_model: String,
-    pub context_limit: i32,
-    pub percentage: i32,
-}
 #[derive(Clone, Debug, PartialEq)]
 pub enum AgentHistoryEntry {
     Message {

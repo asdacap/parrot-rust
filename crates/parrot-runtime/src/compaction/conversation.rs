@@ -10,7 +10,7 @@ use parrot_domain::{
 };
 use parrot_storage::{
     conversation::{AgentConversation, AgentHistoryView, ModelContent, ModelMessage},
-    events::{MessageRole, NeverCancelled, ProviderContent, ToolCall},
+    events::{MessageRole, ProviderContent, ToolCall},
 };
 
 pub async fn apply_conversation_addition(
@@ -20,10 +20,6 @@ pub async fn apply_conversation_addition(
     events: &dyn ContextEvents,
     cancellation: &dyn Cancellation,
 ) -> ContextResult<ConversationReceipt> {
-    let publish_uncancelled = matches!(
-        addition.persistence,
-        ConversationPersistence::Reminder { .. }
-    );
     let message = addition
         .messages
         .first()
@@ -50,21 +46,6 @@ pub async fn apply_conversation_addition(
             };
             (inserted, published)
         }
-        ConversationPersistence::Reminder { checkpoint, event } => {
-            let published = notice(history, event)?;
-            let inserted = history
-                .append_context_reminder(
-                    published.clone(),
-                    parrot_storage::conversation::ContextReminderCheckpoint {
-                        canonical_model: checkpoint.canonical_model,
-                        context_limit: checkpoint.context_limit,
-                        percentage: checkpoint.percentage,
-                    },
-                    content,
-                )
-                .await?;
-            (inserted, published)
-        }
         ConversationPersistence::StatusSteering { standing, event } => {
             let published = notice(history, event)?;
             history
@@ -82,11 +63,7 @@ pub async fn apply_conversation_addition(
         for message in addition.messages {
             conversation.add(materialize_message(history, message).await?);
         }
-        if publish_uncancelled {
-            events.publish(published, &NeverCancelled).await?;
-        } else {
-            events.publish(published, cancellation).await?;
-        }
+        events.publish(published, cancellation).await?;
     }
     Ok(ConversationReceipt {
         inserted,

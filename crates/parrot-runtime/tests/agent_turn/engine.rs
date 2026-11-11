@@ -743,6 +743,7 @@ impl ContextStatus for OfferingStatus {
     }
     fn slots<'a>(
         &'a self,
+        _: &'a ContextSnapshot,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
         Box::pin(async move {
