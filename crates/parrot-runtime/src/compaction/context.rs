@@ -8,9 +8,7 @@ use super::{
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_core::{
-    ContextConfiguration as CoreContextConfiguration,
-    ContextReminderCheckpoint as CoreContextReminderCheckpoint,
-    ContextSnapshot as CoreContextSnapshot,
+    ContextConfiguration as CoreContextConfiguration, ContextSnapshot as CoreContextSnapshot,
 };
 use parrot_domain::{
     contracts::{
@@ -109,10 +107,11 @@ pub trait ContextStatus: Send + Sync {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<String>>;
     /// Offers the standing status slots for a safe point: source-computed
-    /// hashes in registry order, without a usage snapshot. Defaults to no
-    /// slots, which steers nothing.
+    /// hashes in registry order, over the supplied usage snapshot. Defaults
+    /// to no slots, which steers nothing.
     fn slots<'a>(
         &'a self,
+        _context: &'a ContextSnapshot,
         _cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
         Box::pin(async { Ok(parrot_core::StatusOffering::default()) })
@@ -200,18 +199,6 @@ impl ContextController {
         self.compactor
             .planner()
             .capture_context_configuration(selection)
-    }
-
-    pub(crate) async fn get_last_context_reminder(
-        &self,
-    ) -> ContextResult<Option<CoreContextReminderCheckpoint>> {
-        Ok(self.history.latest_context_reminder().await?.map(|value| {
-            CoreContextReminderCheckpoint {
-                canonical_model: value.canonical_model,
-                context_limit: value.context_limit,
-                percentage: value.percentage,
-            }
-        }))
     }
 
     pub async fn ensure_epoch(
@@ -339,6 +326,7 @@ impl ContextController {
             conversation: input.conversation,
             prompt: input.prompt,
             selection: input.selection,
+            tools: input.tools,
             status: input.status,
             sessions: input.sessions,
             events: input.events,
@@ -423,6 +411,7 @@ impl ContextController {
                 conversation: input.conversation,
                 prompt: input.prompt,
                 selection: input.selection,
+                tools: input.tools,
                 status: input.status,
                 sessions: input.sessions,
                 events: input.events,
@@ -762,6 +751,7 @@ struct EpochStates<'a> {
     conversation: &'a mut AgentConversation,
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
+    tools: &'a [Tool],
     status: &'a dyn ContextStatus,
     sessions: &'a ProviderSessions,
     events: &'a dyn ContextEvents,
@@ -842,8 +832,27 @@ impl parrot_core::States for EpochStates<'_> {
         &self,
     ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, parrot_core::Error>> {
         Box::pin(async move {
+            let instructions = self
+                .prompt
+                .build(self.selection, self.cancellation)
+                .await
+                .map_err(|error| self.capture_error(error))?;
+            let messages = self
+                .conversation
+                .messages()
+                .iter()
+                .map(provider_message)
+                .collect::<Vec<_>>();
+            let context = {
+                let controller = self.controller.lock().await;
+                controller
+                    .compactor()
+                    .planner()
+                    .estimate_selected_context(self.selection, &instructions, self.tools, &messages)
+                    .map_err(|error| self.capture_error(error))?
+            };
             self.status
-                .slots(self.cancellation)
+                .slots(&context, self.cancellation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -911,19 +920,6 @@ impl parrot_core::States for EpochStates<'_> {
         &self,
     ) -> BoxFuture<'_, Result<parrot_core::TokenCalibration, parrot_core::Error>> {
         Box::pin(async move { Ok(self.controller.lock().await.budget.capture_state()) })
-    }
-
-    fn read_last_context_reminder_checkpoint(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<CoreContextReminderCheckpoint>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.controller
-                .lock()
-                .await
-                .get_last_context_reminder()
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
     }
 
     fn finalize_compaction<'a>(

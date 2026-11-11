@@ -359,23 +359,6 @@ impl AgentHistoryView {
             .append_retained_reminder(event, assistant, reminder)
             .await
     }
-    pub async fn latest_context_reminder(
-        &self,
-    ) -> Result<Option<ContextReminderCheckpoint>, EventError> {
-        self.repository
-            .latest_context_reminder(self.agent.clone())
-            .await
-    }
-    pub async fn append_context_reminder(
-        &self,
-        event: Event,
-        checkpoint: ContextReminderCheckpoint,
-        content: String,
-    ) -> Result<bool, EventError> {
-        self.repository
-            .append_context_reminder(event, checkpoint, content)
-            .await
-    }
     pub async fn append_final_provider_request_prompt(
         &self,
         event: Event,

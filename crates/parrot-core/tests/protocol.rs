@@ -38,13 +38,6 @@ impl Provider for UnavailableProvider {}
 #[test]
 fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_results() {
     let mut states = UnavailableState;
-    let reminder = finish(states.read_last_context_reminder_checkpoint()).unwrap_err();
-    assert_eq!(reminder.code, ErrorCode::InvalidOperation);
-    assert!(
-        reminder
-            .message
-            .contains("read_last_context_reminder_checkpoint")
-    );
     let blockers = finish(states.collect_completion_blockers()).unwrap_err();
     assert_eq!(blockers.code, ErrorCode::InvalidOperation);
     assert!(blockers.message.contains("collect_completion_blockers"));

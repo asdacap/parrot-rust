@@ -186,18 +186,6 @@ async fn append(history: &AgentHistoryView, message: ConversationMessage) {
 async fn user(history: &AgentHistoryView, text: impl Into<String>) {
     append(history, ConversationMessage::text(MessageRole::User, text)).await;
 }
-async fn reminder_count(history: &AgentHistoryView) -> usize {
-    AgentConversation::new(history.clone())
-        .await
-        .unwrap()
-        .messages()
-        .iter()
-        .filter(|message| {
-            message.role == MessageRole::System
-                && message.content().starts_with("Context usage entered")
-        })
-        .count()
-}
 fn call(id: &str) -> ToolCall {
     ToolCall {
         id: id.into(),
@@ -551,18 +539,14 @@ impl ContextEvents for Events {
                     conversation.last().unwrap().message.role,
                     MessageRole::System
                 );
-                if event.agent_notice().kind == "context_reminder" {
-                    assert!(self.history.latest_context_reminder().await?.is_some());
-                } else {
-                    assert!(
-                        [
-                            "status",
-                            "final_provider_request_prompt",
-                            "tool_availability_restored_prompt"
-                        ]
-                        .contains(&event.agent_notice().kind.as_str())
-                    );
-                }
+                assert!(
+                    [
+                        "status",
+                        "final_provider_request_prompt",
+                        "tool_availability_restored_prompt"
+                    ]
+                    .contains(&event.agent_notice().kind.as_str())
+                );
             }
             self.published.lock().unwrap().push(event);
             Ok(())

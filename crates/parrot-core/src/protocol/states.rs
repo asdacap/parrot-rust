@@ -1,7 +1,5 @@
 use super::config::{ConfigKey, ConfigValue};
-use super::context::{
-    ContextCompaction, ContextReminderCheckpoint, ContextSnapshot, TokenCalibration,
-};
+use super::context::{ContextCompaction, ContextSnapshot, TokenCalibration};
 use super::conversation::{ConversationHistoryItem, ConversationSummary};
 use super::message::{ConversationTurn, InputAdmission, Message, PendingMessage, PromotedInput};
 use super::skill::{Skill, SkillContent, SkillReference};
@@ -52,16 +50,6 @@ pub trait States: Send + Sync {
     /// Retains settlement extensions for subsequent turns in the same invocation.
     fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.set_agent_state")) })
-    }
-    /// Reads the last stored context reminder in the current compaction epoch.
-    fn read_last_context_reminder_checkpoint(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
-        Box::pin(async {
-            Err(Error::unsupported(
-                "States.read_last_context_reminder_checkpoint",
-            ))
-        })
     }
     /// Joins accepted mutations and reads ordered completion blockers.
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {

@@ -1,6 +1,10 @@
 //! Actual drain requests for the source token-budget and captured-profile predicates.
 //! Registered leaf tools exercise production catalog filtering and execution.
 use super::*;
+use parrot_domain::contracts::async_ops::{Cancelled, Clock};
+use parrot_runtime::active_work::status::RuntimeStatus;
+use parrot_runtime::active_work::status::StatusQuery;
+use std::time::{Instant, SystemTime};
 
 /// Reproduces the original first-turn initial status injection for these
 /// budget fixtures: one offered static slot steers the assembly once.
@@ -18,6 +22,7 @@ impl ContextStatus for InitialStatus {
     }
     fn slots<'a>(
         &'a self,
+        _: &'a ContextSnapshot,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
         Box::pin(async move {
@@ -38,6 +43,55 @@ impl ContextStatus for InitialStatus {
 impl TurnStatus<Security> for InitialStatus {
     fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
         Arc::new(InitialStatus(self.0.clone()))
+    }
+}
+/// The model budget inputs shared by every budget fixture composition.
+struct BudgetLimits {
+    context_window: i32,
+    maximum_input_tokens: i32,
+    maximum_output_tokens: i32,
+}
+struct FixedStatusClock;
+impl Clock for FixedStatusClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn utc_now(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(86_400)
+    }
+    fn sleep_until<'a>(
+        &'a self,
+        _: Instant,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), Cancelled>> {
+        Box::pin(async move {
+            cancellation.cancelled().await;
+            Err(Cancelled)
+        })
+    }
+}
+/// Offers the real runtime status slots, including the context reminder, so the
+/// end-to-end test exercises the actual band hash through the engine estimator.
+struct RealReminderStatus(Arc<RuntimeStatus>);
+impl RealReminderStatus {
+    fn new() -> Arc<Self> {
+        Arc::new(Self(Arc::new(
+            RuntimeStatus::new(templates(), Arc::new(FixedStatusClock), vec![]).unwrap(),
+        )))
+    }
+}
+impl TurnStatus<Security> for RealReminderStatus {
+    fn bind(&self, selection: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
+        self.0.bind_context(
+            StatusQuery {
+                session_id: "agent".into(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: selection.profile.id.clone(),
+                requested_model: "scripted/model".into(),
+            },
+            String::new(),
+        )
     }
 }
 struct BudgetTools {
@@ -95,16 +149,27 @@ impl BudgetRuntime {
     async fn new(
         fixture: &Fixture,
         provider: &Scripted,
-        context_window: i32,
-        maximum_input_tokens: i32,
-        maximum_output_tokens: i32,
+        limits: BudgetLimits,
         profile: TurnProfile,
         tools: Arc<BudgetTools>,
     ) -> Self {
+        Self::compose(fixture, provider, limits, profile, tools, |trace| {
+            Arc::new(InitialStatus(trace.clone()))
+        })
+        .await
+    }
+    async fn compose(
+        fixture: &Fixture,
+        provider: &Scripted,
+        limits: BudgetLimits,
+        profile: TurnProfile,
+        tools: Arc<BudgetTools>,
+        status: impl FnOnce(Arc<Trace>) -> Arc<dyn TurnStatus<Security>>,
+    ) -> Self {
         let mut model = Model::new("model", "scripted");
-        model.context_window = context_window;
-        model.max_input_tokens = maximum_input_tokens;
-        model.max_output_tokens = maximum_output_tokens;
+        model.context_window = limits.context_window;
+        model.max_input_tokens = limits.maximum_input_tokens;
+        model.max_output_tokens = limits.maximum_output_tokens;
         let registry = Arc::new(
             ProviderRegistry::new(
                 vec![Arc::new(provider.clone())],
@@ -195,7 +260,7 @@ impl BudgetRuntime {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context,
-            status: Arc::new(InitialStatus(trace.clone())),
+            status: status(trace.clone()),
             completion_sources: vec![],
             templates,
             reminders,
@@ -269,9 +334,11 @@ async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_w
         let runtime = BudgetRuntime::new(
             &fixture,
             &provider,
-            context_window,
-            0,
-            output_limit,
+            BudgetLimits {
+                context_window,
+                maximum_input_tokens: 0,
+                maximum_output_tokens: output_limit,
+            },
             profile(),
             BudgetTools::new(&[]),
         )
@@ -331,9 +398,11 @@ async fn actual_reported_usage_triggers_compaction_before_consuming_reserved_out
     let runtime = BudgetRuntime::new(
         &fixture,
         &provider,
-        180_000,
-        0,
-        0,
+        BudgetLimits {
+            context_window: 180_000,
+            maximum_input_tokens: 0,
+            maximum_output_tokens: 0,
+        },
         profile(),
         BudgetTools::new(&[]),
     )
@@ -416,9 +485,11 @@ async fn intermediate_usage_calibrates_later_requests_even_when_the_stream_fails
         let runtime = BudgetRuntime::new(
             &fixture,
             &provider,
-            180_000,
-            0,
-            0,
+            BudgetLimits {
+                context_window: 180_000,
+                maximum_input_tokens: 0,
+                maximum_output_tokens: 0,
+            },
             profile(),
             BudgetTools::new(&[]),
         )
@@ -490,9 +561,11 @@ async fn actual_input_and_exhausted_context_fail_before_any_provider_request_wit
         let runtime = BudgetRuntime::new(
             &fixture,
             &provider,
-            context,
-            input_limit,
-            0,
+            BudgetLimits {
+                context_window: context,
+                maximum_input_tokens: input_limit,
+                maximum_output_tokens: 0,
+            },
             profile(),
             BudgetTools::new(&[]),
         )
@@ -534,8 +607,18 @@ async fn actual_profile_allowed_and_disabled_tools_filter_every_request() {
     selected.allowed_tools = Some(vec!["settled".into(), "held".into()]);
     selected.disabled_tools = vec!["settled".into()];
     let tools = BudgetTools::new(&["settled", "held", "not-allowed", "HELD"]);
-    let runtime =
-        BudgetRuntime::new(&fixture, &provider, 100_000, 0, 0, selected, tools.clone()).await;
+    let runtime = BudgetRuntime::new(
+        &fixture,
+        &provider,
+        BudgetLimits {
+            context_window: 100_000,
+            maximum_input_tokens: 0,
+            maximum_output_tokens: 0,
+        },
+        selected,
+        tools.clone(),
+    )
+    .await;
     let sent = runtime
         .send("prompt", protocol::Delivery::DELIVERY_STEER)
         .await;
@@ -569,9 +652,11 @@ async fn scheduled_work_precedes_queued_input_and_starts_a_fresh_core_budget_sco
     let runtime = BudgetRuntime::new(
         &fixture,
         &provider,
-        100_000,
-        0,
-        0,
+        BudgetLimits {
+            context_window: 100_000,
+            maximum_input_tokens: 0,
+            maximum_output_tokens: 0,
+        },
         selected_profile,
         BudgetTools::new(&[]),
     )
@@ -679,8 +764,18 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     original.maximum_requests = 2;
     original.allowed_tools = Some(vec!["worker".into(), "survivor".into()]);
     let tools = BudgetTools::new(&["worker", "survivor", "new-tool"]);
-    let runtime =
-        BudgetRuntime::new(&fixture, &provider, 100_000, 0, 0, original, tools.clone()).await;
+    let runtime = BudgetRuntime::new(
+        &fixture,
+        &provider,
+        BudgetLimits {
+            context_window: 100_000,
+            maximum_input_tokens: 0,
+            maximum_output_tokens: 0,
+        },
+        original,
+        tools.clone(),
+    )
+    .await;
     let sent = runtime
         .send("first prompt", protocol::Delivery::DELIVERY_STEER)
         .await;
@@ -783,14 +878,17 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         Step::complete("second answer"),
         Step::complete("third answer"),
     ]);
-    let runtime = BudgetRuntime::new(
+    let runtime = BudgetRuntime::compose(
         &fixture,
         &provider,
-        10_000,
-        0,
-        2_048,
+        BudgetLimits {
+            context_window: 10_000,
+            maximum_input_tokens: 0,
+            maximum_output_tokens: 2_048,
+        },
         profile(),
         BudgetTools::new(&[]),
+        |_| RealReminderStatus::new(),
     )
     .await;
     let first = runtime
@@ -801,12 +899,13 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         ExecutionStatus::Succeeded
     );
     assert!(
-        fixture
+        !fixture
             .history
-            .latest_context_reminder()
+            .standing_statuses()
             .await
             .unwrap()
-            .is_none()
+            .unwrap_or_default()
+            .contains_key(&parrot_core::StatusKey::new("runtime:context-reminder"))
     );
 
     let second = runtime
@@ -816,20 +915,23 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         bounded(second.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
     );
-    let checkpoint = fixture
+    let standing = fixture
         .history
-        .latest_context_reminder()
+        .standing_statuses()
         .await
         .unwrap()
-        .unwrap();
-    assert_eq!(checkpoint.percentage, 50);
-    assert_eq!(checkpoint.context_limit, 10_000);
+        .unwrap_or_default();
+    assert!(standing.contains_key(&parrot_core::StatusKey::new("runtime:context-reminder")));
     let reminder = {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
         let message = requests[1].messages.last().unwrap();
         assert_eq!(message.role, sessions::Role::System);
-        assert!(!message.content().is_empty());
+        assert!(
+            message
+                .content()
+                .contains("Context usage entered the 50% notification band")
+        );
         message.content().to_owned()
     };
 
@@ -852,15 +954,22 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
                 .count(),
             1
         );
+        assert!(
+            !requests[2]
+                .messages
+                .iter()
+                .any(|message| message.role == sessions::Role::System
+                    && message.content().contains("60% notification band"))
+        );
     }
-    assert_eq!(
+    assert!(
         fixture
             .history
-            .latest_context_reminder()
+            .standing_statuses()
             .await
             .unwrap()
-            .map(|value| value.percentage),
-        Some(50)
+            .unwrap_or_default()
+            .contains_key(&parrot_core::StatusKey::new("runtime:context-reminder"))
     );
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 3);
     assert!(

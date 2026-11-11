@@ -1,9 +1,6 @@
-use crate::{
-    ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
-    TokenCalibration,
-};
+use crate::{ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, TokenCalibration};
 mod preparation;
-pub(crate) use preparation::{compact_context, prepare_context_reminder, prepare_request};
+pub(crate) use preparation::{compact_context, prepare_request};
 
 use crate::{Error, ErrorCode, ErrorKind};
 use std::fmt;
@@ -98,25 +95,6 @@ impl ContextSnapshot {
             trigger_tokens,
             has_context_limit_override: configuration.context_limit.is_some(),
         }
-    }
-
-    pub fn select_reminder_percentage(
-        &self,
-        canonical_model: &str,
-        last_reminder: Option<&ContextReminderCheckpoint>,
-    ) -> Option<i32> {
-        let interval = ContextReminderCheckpoint::NOTIFICATION_INTERVAL;
-        let percentage = self.usage_percent? / interval * interval;
-        if percentage < 50
-            || last_reminder.is_some_and(|last| {
-                last.canonical_model == canonical_model
-                    && last.context_limit == self.context_limit
-                    && last.percentage >= percentage
-            })
-        {
-            return None;
-        }
-        Some(percentage)
     }
 
     pub fn is_available(&self) -> bool {
@@ -234,8 +212,4 @@ impl From<OutputTokenError> for Error {
             detail: None,
         }
     }
-}
-
-impl ContextReminderCheckpoint {
-    pub const NOTIFICATION_INTERVAL: i32 = 10;
 }

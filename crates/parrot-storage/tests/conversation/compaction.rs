@@ -1,8 +1,9 @@
+use parrot_core::{StatusKey, StatusStanding};
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::conversation::{
-    AgentHistoryEntry, CompactionSnapshot, ContextReminderCheckpoint, ConversationMessage,
-    ConversationOrigin, ConversationRepository, MessageRole,
+    AgentHistoryEntry, CompactionSnapshot, ConversationMessage, ConversationOrigin,
+    ConversationRepository, MessageRole,
 };
 use parrot_storage::database::SessionDatabase;
 use parrot_storage::events::{EventError, EventRepository};
@@ -62,12 +63,11 @@ fn snapshot(summary: &str, watermark: i64) -> CompactionSnapshot {
         watermark,
     }
 }
-fn checkpoint(model: &str, limit: i32, percentage: i32) -> ContextReminderCheckpoint {
-    ContextReminderCheckpoint {
-        canonical_model: model.into(),
-        context_limit: limit,
-        percentage,
-    }
+fn standing(entries: &[(&str, &str)]) -> StatusStanding {
+    entries
+        .iter()
+        .map(|(key, hash)| (StatusKey::new(*key), (*hash).into()))
+        .collect()
 }
 async fn append(repo: &ConversationRepository, id: &str, role: MessageRole, content: &str) {
     let mut message = ConversationMessage::text(role, content);
@@ -252,17 +252,15 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         .last()
         .unwrap()
         .sequence;
+    repo.append_status_assembly(
+        event("assembly"),
+        standing(&[("runtime:context-reminder", "h1"), ("other", "h2")]),
+        "assembly".into(),
+    )
+    .await
+    .unwrap();
     assert!(
-        repo.append_context_reminder(
-            event("reminder"),
-            checkpoint("provider/model", 10_000, 75),
-            "reminder".into()
-        )
-        .await
-        .unwrap()
-    );
-    assert!(
-        repo.latest_context_reminder("agent".into())
+        repo.standing_statuses("agent".into())
             .await
             .unwrap()
             .is_some()
@@ -276,11 +274,15 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         .await
         .unwrap()
     );
-    assert!(
-        repo.latest_context_reminder("agent".into())
-            .await
-            .unwrap()
-            .is_none()
+    let standing = repo
+        .standing_statuses("agent".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!standing.contains_key(&StatusKey::new("runtime:context-reminder")));
+    assert_eq!(
+        standing.get(&StatusKey::new("other")).map(String::as_str),
+        Some("h2")
     );
     append(&repo, "after", MessageRole::User, "after").await;
     let context = repo
@@ -308,7 +310,7 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
             .map(|item| parrot_storage::events::types::content(&item.message.parts))
             .collect::<Vec<_>>()
             .join(","),
-        "reminder,after"
+        "assembly,after"
     );
     let ids = repo
         .events()
@@ -344,15 +346,13 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
 async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_reminder_clear() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    assert!(
-        repo.append_context_reminder(
-            event("reminder"),
-            checkpoint("provider/model", 10_000, 75),
-            "reminder".into()
-        )
-        .await
-        .unwrap()
-    );
+    repo.append_status_assembly(
+        event("assembly"),
+        standing(&[("runtime:context-reminder", "h1")]),
+        "assembly".into(),
+    )
+    .await
+    .unwrap();
     let before = repo.agent_history("agent".into()).await.unwrap();
     fail_projection(&repo).await;
     assert!(
@@ -380,8 +380,13 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
         .unwrap();
     assert_eq!(associations, 0);
     assert_eq!(
-        repo.latest_context_reminder("agent".into()).await.unwrap(),
-        Some(checkpoint("provider/model", 10_000, 75))
+        repo.standing_statuses("agent".into())
+            .await
+            .unwrap()
+            .unwrap()
+            .get(&StatusKey::new("runtime:context-reminder"))
+            .map(String::as_str),
+        Some("h1")
     );
     resume_projection(&repo).await;
     assert!(
@@ -395,27 +400,26 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
     );
     assert_eq!(count(&repo, "event").await, 1);
     assert!(
-        repo.latest_context_reminder("agent".into())
+        repo.standing_statuses("agent".into())
             .await
             .unwrap()
-            .is_none()
+            .unwrap()
+            .is_empty()
     );
     repo.events().database().close().await.unwrap();
 }
 
 #[tokio::test]
-async fn context_reminder_checkpoint_belongs_to_its_conversation_message_after_reopen() {
+async fn status_standing_belongs_to_its_assembly_message_after_reopen() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    assert!(
-        repo.append_context_reminder(
-            event("reminder"),
-            checkpoint("provider/model", 10_000, 50),
-            "rendered warning".into(),
-        )
-        .await
-        .unwrap()
-    );
+    repo.append_status_assembly(
+        event("assembly"),
+        standing(&[("runtime:context-reminder", "h1")]),
+        "rendered warning".into(),
+    )
+    .await
+    .unwrap();
     let items = repo
         .read_conversation_state("agent".into())
         .await
@@ -435,20 +439,13 @@ async fn context_reminder_checkpoint_belongs_to_its_conversation_message_after_r
     let reopened = fixture.repository();
     assert_eq!(
         reopened
-            .latest_context_reminder("agent".into())
-            .await
-            .unwrap(),
-        Some(checkpoint("provider/model", 10_000, 50))
-    );
-    assert!(
-        !reopened
-            .append_context_reminder(
-                event("duplicate"),
-                checkpoint("provider/model", 10_000, 50),
-                "duplicate".into(),
-            )
+            .standing_statuses("agent".into())
             .await
             .unwrap()
+            .unwrap()
+            .get(&StatusKey::new("runtime:context-reminder"))
+            .map(String::as_str),
+        Some("h1")
     );
     reopened
         .events()
@@ -463,7 +460,7 @@ async fn context_reminder_checkpoint_belongs_to_its_conversation_message_after_r
         .unwrap();
     assert!(
         reopened
-            .latest_context_reminder("agent".into())
+            .standing_statuses("agent".into())
             .await
             .unwrap()
             .is_none()
@@ -472,18 +469,16 @@ async fn context_reminder_checkpoint_belongs_to_its_conversation_message_after_r
 }
 
 #[tokio::test]
-async fn compaction_resets_reminders_even_when_the_message_is_retained() {
+async fn compaction_removes_the_reminder_standing_even_when_the_assembly_is_retained() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    assert!(
-        repo.append_context_reminder(
-            event("reminder"),
-            checkpoint("provider/model", 10_000, 75),
-            "retained reminder".into(),
-        )
-        .await
-        .unwrap()
-    );
+    repo.append_status_assembly(
+        event("assembly"),
+        standing(&[("runtime:context-reminder", "h1"), ("other", "h2")]),
+        "retained assembly".into(),
+    )
+    .await
+    .unwrap();
     assert!(
         repo.append_compaction_status(event("status"), snapshot("summary", 0), "compacted".into())
             .await
@@ -503,12 +498,6 @@ async fn compaction_resets_reminders_even_when_the_message_is_retained() {
                 "DELETE FROM conversation_item WHERE sequence = ?1;",
                 [status_sequence],
             )?;
-            let kind: String = tx.query_row(
-                "SELECT kind FROM conversation_item WHERE agent_session = 'agent' ORDER BY sequence LIMIT 1;",
-                [],
-                |row| row.get(0),
-            )?;
-            assert_eq!(kind, "context_reminder");
             Ok(())
         })
         .await
@@ -516,129 +505,34 @@ async fn compaction_resets_reminders_even_when_the_message_is_retained() {
     repo.save_compaction("agent".into(), snapshot("statusless summary", 1))
         .await
         .unwrap();
-    assert!(
-        repo.latest_context_reminder("agent".into())
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        repo.append_context_reminder(
-            event("next-reminder"),
-            checkpoint("provider/model", 10_000, 50),
-            "new cycle".into(),
-        )
+    let after = repo
+        .standing_statuses("agent".into())
         .await
         .unwrap()
+        .unwrap();
+    assert!(!after.contains_key(&StatusKey::new("runtime:context-reminder")));
+    assert_eq!(
+        after.get(&StatusKey::new("other")).map(String::as_str),
+        Some("h2")
     );
+    repo.append_status_assembly(
+        event("next-assembly"),
+        standing(&[("runtime:context-reminder", "h1")]),
+        "new cycle".into(),
+    )
+    .await
+    .unwrap();
     repo.save_compaction("agent".into(), snapshot("another statusless summary", 2))
         .await
         .unwrap();
     assert_eq!(
-        repo.latest_context_reminder("agent".into()).await.unwrap(),
-        Some(checkpoint("provider/model", 10_000, 50))
-    );
-    assert!(
-        !repo
-            .append_context_reminder(
-                event("duplicate"),
-                checkpoint("provider/model", 10_000, 50),
-                "duplicate".into(),
-            )
+        repo.standing_statuses("agent".into())
             .await
             .unwrap()
-    );
-    repo.events().database().close().await.unwrap();
-}
-
-#[tokio::test]
-async fn context_reminders_are_monotone_per_model_limit_and_project_only() {
-    let fixture = Fixture::new();
-    let repo = fixture.repository();
-    assert!(matches!(
-        repo.latest_context_reminder(" \t".into()).await,
-        Err(EventError::Argument(_))
-    ));
-    assert!(
-        repo.append_context_reminder(event("same"), checkpoint("A", 1000, 75), "first".into())
-            .await
             .unwrap()
-    );
-    assert!(
-        !repo
-            .append_context_reminder(event("same"), checkpoint("A", 1000, 75), "duplicate".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        !repo
-            .append_context_reminder(event("same"), checkpoint("A", 1000, 50), "lower".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        repo.append_context_reminder(event("same"), checkpoint("A", 1000, 90), "higher".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        repo.append_context_reminder(
-            event("same"),
-            checkpoint("a", 1000, 50),
-            "case-sensitive".into()
-        )
-        .await
-        .unwrap()
-    );
-    assert!(
-        repo.append_context_reminder(
-            event("same"),
-            checkpoint("A", 2000, 50),
-            "different limit".into()
-        )
-        .await
-        .unwrap()
-    );
-    assert_eq!(count(&repo, "event").await, 0);
-    assert_eq!(
-        repo.read_conversation_state("agent".into())
-            .await
-            .unwrap()
-            .items
-            .len(),
-        4
-    );
-    assert_eq!(
-        repo.latest_context_reminder("agent".into()).await.unwrap(),
-        Some(checkpoint("A", 2000, 50))
-    );
-    let before = repo.read_conversation_state("agent".into()).await.unwrap();
-    assert!(
-        repo.append_context_reminder(event("invalid"), checkpoint("A", 0, 90), "invalid".into())
-            .await
-            .is_err()
-    );
-    assert_eq!(
-        repo.read_conversation_state("agent".into()).await.unwrap(),
-        before
-    );
-    fail_projection(&repo).await;
-    assert!(
-        repo.append_context_reminder(event("same"), checkpoint("A", 2000, 90), "failed".into())
-            .await
-            .is_err()
-    );
-    assert_eq!(
-        repo.read_conversation_state("agent".into())
-            .await
-            .unwrap()
-            .items
-            .len(),
-        4
-    );
-    assert_eq!(
-        repo.latest_context_reminder("agent".into()).await.unwrap(),
-        Some(checkpoint("A", 2000, 50))
+            .get(&StatusKey::new("runtime:context-reminder"))
+            .map(String::as_str),
+        Some("h1")
     );
     repo.events().database().close().await.unwrap();
 }

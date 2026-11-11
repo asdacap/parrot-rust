@@ -1,7 +1,6 @@
 use crate::{
-    CancellationToken, ConfigKey, ContextCompaction, ContextConfiguration, ContextReminder,
-    ContextReminderCheckpoint, ContextSnapshot, Error, EventPublisher, Provider, ProviderRequest,
-    States, ToolDefinition, TurnOptions,
+    CancellationToken, ConfigKey, ContextCompaction, Error, EventPublisher, Provider,
+    ProviderRequest, States, ToolDefinition, TurnOptions,
     budget::TurnFlags,
     compaction::{compact_conversation, prepare_compaction},
     rendering::render_template,
@@ -40,60 +39,6 @@ pub(crate) async fn compact_context(
     states
         .finalize_compaction(&input.instructions, definitions, compacted)
         .await
-}
-
-pub(crate) async fn prepare_context_reminder(
-    states: &mut dyn States,
-    context: &ContextSnapshot,
-    configuration: &ContextConfiguration,
-) -> Result<Option<ContextReminder>, Error> {
-    let last_reminder = states.read_last_context_reminder_checkpoint().await?;
-    let canonical_model = &configuration.model.canonical_model;
-    let Some(percentage) =
-        context.select_reminder_percentage(canonical_model, last_reminder.as_ref())
-    else {
-        return Ok(None);
-    };
-    let mut arguments = vec![
-        ("percentage".into(), percentage.to_string().into()),
-        (
-            "estimated_tokens".into(),
-            context.estimated_tokens.to_string().into(),
-        ),
-        (
-            "context_limit".into(),
-            context.context_limit.to_string().into(),
-        ),
-        (
-            "notification_interval".into(),
-            ContextReminderCheckpoint::NOTIFICATION_INTERVAL
-                .to_string()
-                .into(),
-        ),
-        ("trigger".into(), context.trigger_percent.to_string().into()),
-    ];
-    let key = if context.has_context_limit_override {
-        arguments.push((
-            "trigger_tokens".into(),
-            context
-                .trigger_tokens
-                .map_or_else(|| "unavailable".into(), |value| value.to_string())
-                .into(),
-        ));
-        ConfigKey::ContextLimitReminderTemplate
-    } else {
-        ConfigKey::ContextReminderTemplate
-    };
-    let content = render_template(states, key, &arguments).await?;
-    Ok(Some(ContextReminder {
-        checkpoint: ContextReminderCheckpoint {
-            canonical_model: canonical_model.clone(),
-            context_limit: context.context_limit,
-            percentage,
-        },
-        content,
-        observed_percentage: context.usage_percent.unwrap_or_default(),
-    }))
 }
 
 pub(crate) async fn prepare_request(

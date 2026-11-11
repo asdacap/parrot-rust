@@ -1,6 +1,6 @@
 use parrot_core::{
-    ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint, ContextSnapshot,
-    Error, ErrorCode, ErrorKind, OutputTokenError, TokenCalibration,
+    ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, Error, ErrorCode, ErrorKind,
+    OutputTokenError, TokenCalibration,
 };
 
 struct Fixture {
@@ -322,47 +322,6 @@ fn post_compaction_fit_check_is_raw_strict_and_preserves_its_special_error() {
 }
 
 #[test]
-fn reminders_compare_current_usage_with_the_last_stored_band() {
-    let fixture = Fixture::new(100);
-    for (usage, last_percentage, expected) in [
-        (49, None, None),
-        (50, None, Some(50)),
-        (59, Some(50), None),
-        (60, Some(55), Some(60)),
-        (83, Some(60), Some(80)),
-        (50, Some(80), None),
-    ] {
-        let last = last_percentage.map(|percentage| ContextReminderCheckpoint {
-            canonical_model: "provider/model".into(),
-            context_limit: 100,
-            percentage,
-        });
-        let snapshot = ContextSnapshot::estimate(usage, &fixture.configuration);
-        assert_eq!(
-            snapshot.select_reminder_percentage("provider/model", last.as_ref()),
-            expected,
-        );
-    }
-}
-
-#[test]
-fn reminders_ignore_checkpoints_from_another_model_or_context_limit() {
-    let fixture = Fixture::new(100);
-    let snapshot = ContextSnapshot::estimate(55, &fixture.configuration);
-    for (canonical_model, context_limit) in [("other/model", 100), ("provider/model", 200)] {
-        let last = ContextReminderCheckpoint {
-            canonical_model: canonical_model.into(),
-            context_limit,
-            percentage: 90,
-        };
-        assert_eq!(
-            snapshot.select_reminder_percentage("provider/model", Some(&last)),
-            Some(50),
-        );
-    }
-}
-
-#[test]
 fn calibration_clones_keep_mutations_session_local() {
     let mut calibration = TokenCalibration::default();
     calibration.observe_usage("provider/model", 10, 20);
@@ -372,14 +331,4 @@ fn calibration_clones_keep_mutations_session_local() {
 
     assert_eq!(calibration.estimate_input_tokens("provider/model", 5), 5);
     assert_eq!(child.estimate_input_tokens("provider/model", 5), 15);
-}
-
-#[test]
-fn unavailable_context_does_not_select_a_reminder() {
-    let fixture = Fixture::new(0);
-    let snapshot = ContextSnapshot::estimate(100, &fixture.configuration);
-    assert_eq!(
-        snapshot.select_reminder_percentage("provider/model", None),
-        None
-    );
 }

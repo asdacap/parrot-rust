@@ -1,14 +1,13 @@
 use parrot_core::{
     BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConfigValue, Content,
-    ContextCompaction, ContextConfiguration, ContextModel, ContextReminderCheckpoint,
-    ContextSnapshot, ConversationAddition, ConversationEvent, ConversationOrigin,
-    ConversationPersistence, ConversationReceipt, ConversationTurn, Delivery, DerivedContext,
-    Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
-    PendingMessage, PromotedInput, PromptTemplate, Provider, ProviderRequest, ProviderResponse,
-    Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States, StatusKey,
-    StatusOffer, StatusOffering, StatusStanding, TokenCalibration, ToolCall, ToolCallReceipt,
-    ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolImage, ToolResult, ToolStatus, Tools,
-    TurnOptions,
+    ContextCompaction, ContextConfiguration, ContextModel, ContextSnapshot, ConversationAddition,
+    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
+    ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher,
+    FinishReason, InputAdmission, Message, Outcome, PendingMessage, PromotedInput, PromptTemplate,
+    Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
+    SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
+    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
+    ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
     budget::{AgentState, TurnFlags},
     parse_skill_mentions,
 };
@@ -423,7 +422,6 @@ struct MemoryRequestData {
 #[derive(Default)]
 struct MemoryPromptData {
     exit_blockers: VecDeque<Vec<String>>,
-    checkpoint: Option<ContextReminderCheckpoint>,
 }
 
 struct MemoryState {
@@ -451,9 +449,6 @@ struct MemoryState {
     include_router_metadata: bool,
     compactions: VecDeque<CompactedContext>,
     compacted_definitions: Vec<Vec<ToolDefinition>>,
-    reminder_appends: Vec<(ContextReminderCheckpoint, String, ConversationEvent)>,
-    append_reminder: bool,
-    reminder_publications: usize,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(PendingMessage, Message)>,
     next_input: usize,
@@ -524,14 +519,6 @@ impl MemoryState {
             skill_templates: Arc::new(Mutex::new([
                 (ConfigKey::OversizedToolGroupTemplate, "{path}".into()),
                 (
-                    ConfigKey::ContextReminderTemplate,
-                    "configured reminder".into(),
-                ),
-                (
-                    ConfigKey::ContextLimitReminderTemplate,
-                    "configured reminder".into(),
-                ),
-                (
                     ConfigKey::TruncatedToolCallTemplate,
                     "truncated tool calls".into(),
                 ),
@@ -588,9 +575,6 @@ impl MemoryState {
             include_router_metadata: false,
             compactions: VecDeque::new(),
             compacted_definitions: Vec::new(),
-            reminder_appends: Vec::new(),
-            append_reminder: true,
-            reminder_publications: 0,
             last_turn: None,
             pending_messages: VecDeque::new(),
             next_input: 0,
@@ -841,23 +825,6 @@ impl States for MemoryState {
                     let count = self.request().rendered_instructions.len();
                     self.final_requests.push(count);
                 }
-                ConversationPersistence::Reminder { checkpoint, event } => {
-                    self.step("append_reminder")?;
-                    let content = addition.messages[0]
-                        .contents
-                        .iter()
-                        .filter_map(|content| match content {
-                            Content::Text(text) => Some(text.as_str()),
-                            _ => None,
-                        })
-                        .collect();
-                    self.reminder_appends
-                        .push((checkpoint.clone(), content, event.clone()));
-                    if !self.append_reminder {
-                        return Ok(ConversationReceipt::default());
-                    }
-                    self.prompts().checkpoint = Some(checkpoint.clone());
-                }
                 ConversationPersistence::StatusSteering { standing, event } => {
                     self.step("steer_status")?;
                     assert!(matches!(
@@ -903,13 +870,6 @@ impl States for MemoryState {
                     self.append_turn_message(message);
                 }
             }
-            if matches!(
-                &addition.persistence,
-                ConversationPersistence::Reminder { .. }
-            ) {
-                self.reminder_publications += 1;
-                self.step("publish_reminder")?;
-            }
             Ok(ConversationReceipt {
                 inserted: true,
                 sequence,
@@ -931,13 +891,6 @@ impl States for MemoryState {
                     self.compaction.lock().unwrap().configuration.clone(),
                 )),
                 key => {
-                    if matches!(
-                        key,
-                        ConfigKey::ContextReminderTemplate
-                            | ConfigKey::ContextLimitReminderTemplate
-                    ) {
-                        self.trace.step("reminder", self.fail_at)?;
-                    }
                     self.trace.step("render_template", self.fail_at)?;
                     let templates = self.skill_templates.lock().unwrap();
                     let text = templates
@@ -995,14 +948,6 @@ impl States for MemoryState {
             }
             self.budget = state;
             Ok(())
-        })
-    }
-    fn read_last_context_reminder_checkpoint(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<ContextReminderCheckpoint>, Error>> {
-        Box::pin(async move {
-            self.trace.step("checkpoint", self.fail_at)?;
-            Ok(self.prompts().checkpoint.clone())
         })
     }
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
@@ -1267,7 +1212,6 @@ impl States for MemoryState {
                 self.request().instructions = compacted.instructions;
                 self.request().messages = compacted.messages;
                 self.request().context = compacted.state;
-                self.prompts().checkpoint = None;
                 return Ok(ContextCompaction {
                     instructions: self.request().instructions.clone(),
                     reduced: compacted.reduced,
@@ -1296,7 +1240,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "context_configuration",
             "token_calibration",
             "estimate",
-            "checkpoint",
             "messages",
             "context_configuration",
             "token_calibration",
@@ -1312,7 +1255,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "context_configuration",
             "token_calibration",
             "estimate",
-            "checkpoint",
             "messages",
             "context_configuration",
             "token_calibration",
