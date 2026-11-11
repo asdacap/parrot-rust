@@ -99,7 +99,7 @@
         mkdir -p "$out/share/parrot/licenses"
         cp -R ${web}/licenses "$out/share/parrot/licenses/web"
         mkdir -p "$out/share/parrot/licenses/rust"
-        cp ${rust}/share/doc/rust/{COPYRIGHT,LICENSE-APACHE,LICENSE-MIT} "$out/share/parrot/licenses/rust/"
+        cp -RL ${rust}/share/doc/rust/{COPYRIGHT.html,COPYRIGHT-library.html,licenses} "$out/share/parrot/licenses/rust/"
         cp ${unicodeLicense} "$out/share/parrot/licenses/UNICODE-LICENSE.txt"
         cp THIRD_PARTY_NOTICES.md "$out/share/parrot/THIRD_PARTY_NOTICES.md"
         cp packaging/README.md "$out/share/parrot/PACKAGING.md"
