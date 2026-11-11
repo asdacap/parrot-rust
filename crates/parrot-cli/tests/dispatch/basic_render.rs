@@ -132,7 +132,7 @@ fn tools_child_agents_and_compaction_render_plain_lines() {
     ]);
     assert_eq!(
         output,
-        "checking\n  tool started: read\n  tool finished: read\n  tool cancelled: write\n  tool error: shell: denied\n  agent started: explorer\n  agent finished: explorer (1m 05s)\n  agent failed: reviewer: boom\n  compaction started\n  compaction finished\n  compaction failed: boom\n"
+        "checking\n  tool started: read\n  tool finished: read\n    enhanced-only result\n  tool cancelled: write\n  tool error: shell: denied\n  agent started: explorer\n  agent finished: explorer (1m 05s)\n  agent failed: reviewer: boom\n  compaction started\n  compaction finished\n  compaction failed: boom\n"
     );
     assert!(error.is_empty());
 }
@@ -146,6 +146,109 @@ fn omitted_child_elapsed_time_uses_the_protobuf_scalar_default() {
         ..Default::default()
     }))]);
     assert_eq!(output, "  agent finished: child (0s)\n");
+    assert!(error.is_empty());
+}
+
+fn owned(mut event: wire::Event, owner: &str) -> wire::Event {
+    event.agent_session_id = owner.into();
+    event
+}
+
+fn turn_started(owner: &str) -> wire::Event {
+    owned(event(Payload::TurnStarted(wire::TurnStarted::new())), owner)
+}
+
+fn child_started(owner: &str, name: &str) -> wire::Event {
+    owned(
+        event(Payload::AgentStarted(wire::AgentStarted {
+            name: name.into(),
+            parent_agent_session_id: "root".into(),
+            ..Default::default()
+        })),
+        owner,
+    )
+}
+
+fn chunk(owner: &str, call_id: &str, name: &str, fragment: &str) -> wire::Event {
+    owned(
+        event(Payload::ToolCallChunk(wire::ToolCallChunk {
+            tool_call_id: call_id.into(),
+            tool_name: name.into(),
+            arguments_fragment: fragment.into(),
+            ..Default::default()
+        })),
+        owner,
+    )
+}
+
+fn tool_started(owner: &str, call_id: &str, name: &str) -> wire::Event {
+    owned(
+        event(Payload::ToolStarted(wire::ToolStarted {
+            tool_call_id: call_id.into(),
+            tool_name: name.into(),
+            ..Default::default()
+        })),
+        owner,
+    )
+}
+
+fn text_from(owner: &str, fragment: &str) -> wire::Event {
+    owned(
+        event(Payload::TextChunk(wire::TextChunk {
+            fragment: fragment.into(),
+            ..Default::default()
+        })),
+        owner,
+    )
+}
+
+#[test]
+fn tool_lines_carry_arguments_results_and_child_agent_tags() {
+    let (output, error, _) = render(vec![
+        turn_started("root"),
+        child_started("ag1", "explorer"),
+        chunk("ag1", "t1", "read", r#"{"path":"x.rs"}"#),
+        tool_started("ag1", "t1", "read"),
+        chunk("root", "t2", "glob", r#"{"pattern":"*.rs"}"#),
+        tool_started("root", "t2", "glob"),
+        owned(
+            event(Payload::ToolFinished(wire::ToolFinished {
+                tool_call_id: "t1".into(),
+                tool_name: "read".into(),
+                result: Some("line one\nline two\n".into()),
+                ..Default::default()
+            })),
+            "ag1",
+        ),
+        turn_started("root"),
+        tool_started("ag1", "t1", "read"),
+    ]);
+    assert_eq!(
+        output,
+        "  agent started: explorer\n  [explorer] tool started: read {\"path\":\"x.rs\"}\n  tool started: glob {\"pattern\":\"*.rs\"}\n  [explorer] tool finished: read\n    line one\n    line two\n  [explorer] tool started: read\n"
+    );
+    assert!(error.is_empty());
+}
+
+#[test]
+fn child_agent_text_is_tagged_and_breaks_lines_on_owner_change() {
+    let (output, error, _) = render(vec![
+        turn_started("root"),
+        child_started("ag1", "explorer"),
+        text_from("root", "thinking\n"),
+        text_from("ag1", "searching\n"),
+        text_from("ag1", "more\n"),
+        text_from("root", "back\n"),
+        text_from("root", "partial"),
+        text_from("ag1", "child"),
+        chunk("ag1", "t1", "read", r#"{"path":"x.rs"}"#),
+        tool_started("ag1", "t1", "read"),
+        text_from("ag1", "after"),
+    ]);
+    assert_eq!(
+        output,
+        "  agent started: explorer\nthinking\n[explorer] searching\nmore\nback\npartial\n[explorer] child\n  [explorer] tool started: read {\"path\":\"x.rs\"}\n[explorer] after"
+    );
     assert!(error.is_empty());
 }
 

@@ -1,9 +1,11 @@
 //! The basic CLI's event rendering core, independent of session/transport ownership.
 
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 use parrot_domain::protocol::messages::parrot as wire;
 
+use super::hierarchy::AgentSessionHierarchy;
 use super::task_format::{AgentTaskDeclarationFormatter, DurationFormatter, ProgressFormatter};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -18,6 +20,10 @@ pub enum RenderOutcome {
 pub struct BasicRenderer {
     started: bool,
     text_ends_line: bool,
+    text_owner: String,
+    hierarchy: AgentSessionHierarchy,
+    // (agent_session_id, tool_call_id) -> accumulated arguments JSON.
+    tool_arguments: BTreeMap<(String, String), String>,
 }
 
 impl Default for BasicRenderer {
@@ -25,6 +31,9 @@ impl Default for BasicRenderer {
         Self {
             started: false,
             text_ends_line: true,
+            text_owner: String::new(),
+            hierarchy: AgentSessionHierarchy::new(),
+            tool_arguments: BTreeMap::new(),
         }
     }
 }
@@ -42,6 +51,7 @@ impl BasicRenderer {
         error: &mut dyn Write,
     ) -> io::Result<RenderOutcome> {
         use wire::event::Payload;
+        self.hierarchy.observe(event);
         let progress = ProgressFormatter::try_read(event)
             .map_err(|failure| io::Error::new(io::ErrorKind::InvalidData, failure))?;
         let own_line = progress.is_some()
@@ -63,38 +73,96 @@ impl BasicRenderer {
                 ) => true,
                 _ => false,
             };
-        if !self.text_ends_line && own_line {
-            writeln!(output)?;
-            self.text_ends_line = true;
+        if own_line {
+            self.text_owner.clear();
+            if !self.text_ends_line {
+                writeln!(output)?;
+                self.text_ends_line = true;
+            }
         }
         match &event.payload {
-            Some(Payload::TurnStarted(_)) => self.started = true,
+            Some(Payload::TurnStarted(_)) => {
+                self.started = true;
+                self.tool_arguments.clear();
+                self.text_owner.clear();
+            }
             Some(Payload::InputAdmitted(admitted)) if self.started => {
                 writeln!(output)?;
                 writeln!(output, "  queued: {}", admitted.content)?;
             }
             Some(Payload::AgentNotice(notice)) if !notice.notice.is_empty() => {
-                writeln!(output, "↻ {}", notice.notice)?;
+                writeln!(output, "{}↻ {}", self.tag(event), notice.notice)?
             }
             Some(Payload::SkillLoaded(skill)) => {
-                writeln!(output, "↻ Skill loaded: {}", skill.path)?
+                writeln!(output, "{}↻ Skill loaded: {}", self.tag(event), skill.path)?
             }
             Some(Payload::TextChunk(chunk)) => {
+                let owner = event.agent_session_id.as_str();
+                if !chunk.fragment.is_empty() && self.text_owner != owner {
+                    if !self.text_ends_line {
+                        writeln!(output)?;
+                    }
+                    write!(output, "{}", self.tag(event))?;
+                    self.text_owner = owner.to_owned();
+                }
                 output.write_all(chunk.fragment.as_bytes())?;
                 self.text_ends_line = chunk.fragment.ends_with('\n');
             }
+            Some(Payload::ToolCallChunk(chunk)) => {
+                self.tool_arguments
+                    .entry((event.agent_session_id.clone(), chunk.tool_call_id.clone()))
+                    .or_default()
+                    .push_str(&chunk.arguments_fragment);
+            }
             Some(Payload::ToolStarted(tool)) => {
-                writeln!(output, "  tool started: {}", tool.tool_name)?
+                let arguments = self
+                    .tool_arguments
+                    .get(&(event.agent_session_id.clone(), tool.tool_call_id.clone()))
+                    .map(String::as_str)
+                    .unwrap_or("");
+                if arguments.is_empty() {
+                    writeln!(
+                        output,
+                        "  {}tool started: {}",
+                        self.tag(event),
+                        tool.tool_name
+                    )?
+                } else {
+                    writeln!(
+                        output,
+                        "  {}tool started: {} {}",
+                        self.tag(event),
+                        tool.tool_name,
+                        arguments
+                    )?
+                }
             }
             Some(Payload::ToolFinished(tool)) => {
-                writeln!(output, "  tool finished: {}", tool.tool_name)?
+                writeln!(
+                    output,
+                    "  {}tool finished: {}",
+                    self.tag(event),
+                    tool.tool_name
+                )?;
+                if let Some(result) = tool.result.as_deref() {
+                    for line in result.trim().lines() {
+                        writeln!(output, "    {line}")?;
+                    }
+                }
             }
-            Some(Payload::ToolCancelled(tool)) => {
-                writeln!(output, "  tool cancelled: {}", tool.tool_name)?
-            }
-            Some(Payload::ToolError(tool)) => {
-                writeln!(output, "  tool error: {}: {}", tool.tool_name, tool.message)?
-            }
+            Some(Payload::ToolCancelled(tool)) => writeln!(
+                output,
+                "  {}tool cancelled: {}",
+                self.tag(event),
+                tool.tool_name
+            )?,
+            Some(Payload::ToolError(tool)) => writeln!(
+                output,
+                "  {}tool error: {}: {}",
+                self.tag(event),
+                tool.tool_name,
+                tool.message
+            )?,
             Some(Payload::AgentStarted(agent)) if !agent.parent_agent_session_id.is_empty() => {
                 writeln!(output, "  agent started: {}", agent.name)?;
             }
@@ -150,6 +218,13 @@ impl BasicRenderer {
             _ => {}
         }
         Ok(RenderOutcome::Continue)
+    }
+
+    /// Owner tag for one rendered line; empty for the root agent session.
+    fn tag(&self, event: &wire::Event) -> String {
+        self.hierarchy
+            .get_label(&event.agent_session_id)
+            .map_or_else(String::new, |label| format!("[{label}] "))
     }
 }
 
