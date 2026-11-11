@@ -187,12 +187,6 @@ pub fn prepare(request: &ImageGenerationRequest) -> Result<Vec<u8>, Error> {
     Ok(body.into_bytes())
 }
 
-pub fn decode_response(bytes: &[u8]) -> Result<ImageGenerationResult, Error> {
-    let parsed = serde_json::from_slice(bytes)
-        .map_err(|_| provider("provider: invalid image response JSON"))?;
-    finish_response(parsed)
-}
-
 fn finish_response(response: Option<WireResponse>) -> Result<ImageGenerationResult, Error> {
     let mut encoded_images: Vec<Option<String>> = response
         .and_then(|response| response.data)

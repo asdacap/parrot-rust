@@ -6,7 +6,7 @@ mod startup;
 mod task_format;
 
 use parrot_cli::dispatch::{
-    CommandBackend, CommandDispatcher, DispatchError, RuntimeCommand, USAGE, cli_utility_warning,
+    CommandBackend, CommandDispatcher, DispatchError, RuntimeCommand, USAGE,
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{future::pending, io};
@@ -198,13 +198,4 @@ async fn output_failures_propagate_instead_of_success() {
     .run(&args(&["help"]), &mut RecordingBackend::default(), &Never)
     .await;
     assert!(matches!(result, Err(DispatchError::Io(_))));
-}
-
-#[test]
-fn cli_utility_warning_is_exact_for_the_inspectors_sorted_missing_list() {
-    assert_eq!(cli_utility_warning(&[]), "");
-    assert_eq!(
-        cli_utility_warning(&args(&["alpha", "zeta"])),
-        "warning: expected CLI utilities are unavailable: alpha, zeta; Bash shell commands may fail"
-    );
 }

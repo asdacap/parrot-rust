@@ -6,13 +6,6 @@ impl ToolPresenterRegistry {
     /// Every source EnhancedComposition presenter, with the real configured
     /// read-only command classifier. This registers presentations, not tools or
     /// a local production security/capability bundle.
-    pub fn standard(read_only_command_prefixes: Vec<String>) -> Self {
-        Self::standard_with_skill_read_paths(
-            read_only_command_prefixes,
-            Arc::new(read::SkillReadPathFormatter::default()),
-        )
-    }
-
     pub fn standard_with_skill_read_paths(
         read_only_command_prefixes: Vec<String>,
         skill_paths: Arc<read::SkillReadPathFormatter>,

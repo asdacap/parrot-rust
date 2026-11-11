@@ -159,25 +159,9 @@ impl Cancellation for NeverCancelled {
     }
 }
 
-/// Insert, never upsert/deduplicate. Explicit raw bytes are parsed and retained
-/// verbatim; callers cannot supply conflicting envelope/key metadata.
-pub fn record(
-    tx: &Transaction<'_>,
-    event: &Event,
-    raw: Option<&[u8]>,
-    at: &str,
-) -> Result<StoredEvent, EventError> {
-    let bytes = match raw {
-        Some(bytes) => {
-            if !statistics::events_semantically_equal(&Event::parse_from_bytes(bytes)?, event) {
-                return Err(EventError::Invalid(
-                    "raw event does not match the supplied event".into(),
-                ));
-            }
-            bytes.to_vec()
-        }
-        None => event.write_to_bytes()?,
-    };
+/// Insert, never upsert/deduplicate.
+pub fn record(tx: &Transaction<'_>, event: &Event, at: &str) -> Result<StoredEvent, EventError> {
+    let bytes = event.write_to_bytes()?;
     let (request, call) = extract_usage_keys(event);
     tx.execute("INSERT INTO event (id, agent_session, payload, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",rusqlite::params![event.id,event.agent_session_id,bytes,at,request,call])?;
     let sequence = tx.last_insert_rowid();

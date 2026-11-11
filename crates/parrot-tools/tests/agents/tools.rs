@@ -380,7 +380,7 @@ fn metadata_and_dynamic_send_description_preserve_configured_parameters() {
         (AgentToolKind::Wait, "wait"),
     ] {
         let tool = tool(kind, runtime.clone());
-        assert_eq!(tool.name(), expected_name);
+        assert_eq!(kind.name(), expected_name);
         assert_eq!(tool.definition(), &definition());
         assert_eq!(
             tool.enabled_after_interruption(),

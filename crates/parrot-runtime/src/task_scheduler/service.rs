@@ -5,9 +5,8 @@ mod receipts;
 
 use super::{
     ForkHistoryMode, SchedulerConfig, TaskDiagnostic, TaskRunner, TaskSession,
-    apply_visibility_changes,
     concurrency::{TaskAdmission, TaskConcurrencyOwner},
-    has_same_definition, has_same_visibility,
+    has_same_definition,
     notifier::{Notification, TaskNotifier},
     ports::{
         CapturedSelection, RunCancellation, TaskRunProgress, TaskWorkerLease, render, state_error,
@@ -868,51 +867,6 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 assigned_to: entry.capture_assignee(),
             }
         })
-    }
-    pub fn apply_visibility_changes(
-        self: &Arc<Self>,
-        previous: Vec<Task>,
-        incoming: Vec<Task>,
-    ) -> Operation<()> {
-        let mut admission = self.admission.lock().expect("task admission poisoned");
-        if admission.settlement.is_some() || admission.freeze.is_some() {
-            return Operation::start(async { Ok(()) });
-        }
-        let prior = admission.tail.clone();
-        let scheduler = self.clone();
-        let operation = Operation::start(async move {
-            if let Some(prior) = prior {
-                let _ = prior.join().await;
-            }
-            scheduler.owner()?;
-            let mut state = scheduler.gate.lock().await;
-            scheduler.ensure_healthy(&state)?;
-            scheduler.seal_preparing(&mut state).await?;
-            let mut changed = false;
-            for before in previous {
-                let Some(after) = incoming.iter().find(|task| task.name == before.name) else {
-                    continue;
-                };
-                if !has_same_definition(&before, after) || has_same_visibility(&before, after) {
-                    continue;
-                }
-                let Some(index) = find(&state, &after.name) else {
-                    continue;
-                };
-                if !has_same_definition(&state.entries[index].task, after) {
-                    continue;
-                }
-                state.entries[index].task =
-                    apply_visibility_changes(&state.entries[index].task, &before, after);
-                changed = true;
-            }
-            if changed {
-                scheduler.publish(&mut state).await?;
-            }
-            Ok(())
-        });
-        admission.tail = Some(operation.clone());
-        operation
     }
     /// Freezes admissions, launches and notices without closing any worker session.
     /// User-session shutdown freezes every graph before suspending shared workers.

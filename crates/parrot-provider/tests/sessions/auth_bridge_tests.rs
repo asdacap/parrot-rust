@@ -20,8 +20,7 @@
 //! WebSocketTransport          WebSocketTransport Recurses into its actual cause
 //! (OpenAICompatibleProviderSession.cs:224–245; ProviderRequestDiagnostics.cs:19)
 //! HttpError::ProviderHttp     Http(status=0,empty fields) Unexpected
-//! HttpError::RequestCancelled Cancelled         Cancelled (preserves supplied text)
-//! HttpError::Transport/Http   Network           Http (unchanged)
+//! HttpError::Transport        Network           Http (unchanged)
 //! HttpError::Provider         Configuration     Unexpected (unchanged)
 //! ProviderHttpException.cs string constructors leave status/fields empty/default;
 //! RetryingProvider.cs:191–197 does not retry status 0. No text-based promotion.
@@ -207,9 +206,6 @@ impl Provider for ScriptProvider {
     fn id(&self) -> &str {
         "auth-script"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        ScriptSession(self.0.clone()).call(request)
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
     }
@@ -295,16 +291,12 @@ fn fixture(error: Error, visible: bool) -> (Arc<Script>, RetryingProvider, Arc<S
     );
     (script, provider, sleeper)
 }
-fn call(provider: &dyn Provider, use_session: bool) -> Box<dyn EventStream> {
+fn call(provider: &dyn Provider) -> Box<dyn EventStream> {
     let request = Request {
         model: "m".into(),
         ..Default::default()
     };
-    if use_session {
-        provider.open_session().unwrap().call(request).unwrap()
-    } else {
-        provider.call(request).unwrap()
-    }
+    provider.open_session().unwrap().call(request).unwrap()
 }
 async fn drain(
     mut stream: Box<dyn EventStream>,
@@ -322,68 +314,62 @@ async fn drain(
     (events, failure)
 }
 #[tokio::test]
-async fn auth_domains_exhaust_six_calls_and_five_retries_in_direct_and_session_modes() {
+async fn auth_domains_exhaust_six_calls_and_five_retries_in_session_mode() {
     for (auth, _, _) in auth_cases() {
-        for use_session in [false, true] {
-            let error = Error::from(auth.clone());
-            let (script, provider, sleeper) = fixture(error.clone(), false);
-            let (events, failure) = drain(call(&provider, use_session), &Cancel::default()).await;
-            assert_eq!(failure, error);
-            assert_eq!(script.calls.load(Ordering::SeqCst), 6);
-            assert_eq!(events.len(), 5);
-            for (index, event) in events.iter().enumerate() {
-                assert_eq!(
-                    event,
-                    &Event::Retry {
-                        attempt: index as i32 + 1,
-                        retry_after: Duration::from_millis(200 << index),
-                        reason: "Provider connection or protocol failure. Retrying.".into()
-                    }
-                );
-            }
+        let error = Error::from(auth.clone());
+        let (script, provider, sleeper) = fixture(error.clone(), false);
+        let (events, failure) = drain(call(&provider), &Cancel::default()).await;
+        assert_eq!(failure, error);
+        assert_eq!(script.calls.load(Ordering::SeqCst), 6);
+        assert_eq!(events.len(), 5);
+        for (index, event) in events.iter().enumerate() {
             assert_eq!(
-                *sleeper.0.lock().unwrap(),
-                [200, 400, 800, 1600, 3200].map(Duration::from_millis)
+                event,
+                &Event::Retry {
+                    attempt: index as i32 + 1,
+                    retry_after: Duration::from_millis(200 << index),
+                    reason: "Provider connection or protocol failure. Retrying.".into()
+                }
             );
         }
+        assert_eq!(
+            *sleeper.0.lock().unwrap(),
+            [200, 400, 800, 1600, 3200].map(Duration::from_millis)
+        );
     }
 }
 #[tokio::test]
 async fn missing_key_remains_permanent_configuration_in_both_modes() {
     let error = Error::Provider("provider: missing API key".into());
     assert_eq!(classify_failure(&error), Failure::Configuration);
-    for use_session in [false, true] {
-        let (script, provider, sleeper) = fixture(error.clone(), false);
-        let (events, failure) = drain(call(&provider, use_session), &Cancel::default()).await;
-        assert_eq!(failure, error);
-        assert!(events.is_empty());
-        assert_eq!(script.calls.load(Ordering::SeqCst), 1);
-        assert!(sleeper.0.lock().unwrap().is_empty());
-    }
+    let (script, provider, sleeper) = fixture(error.clone(), false);
+    let (events, failure) = drain(call(&provider), &Cancel::default()).await;
+    assert_eq!(failure, error);
+    assert!(events.is_empty());
+    assert_eq!(script.calls.load(Ordering::SeqCst), 1);
+    assert!(sleeper.0.lock().unwrap().is_empty());
 }
 #[tokio::test]
 async fn caller_cancellation_and_visible_output_suppress_auth_retries() {
     for (auth, _, _) in auth_cases() {
-        for use_session in [false, true] {
-            let error = Error::from(auth.clone());
-            let (script, provider, sleeper) = fixture(error.clone(), false);
-            let cancellation = Cancel(AtomicBool::new(true));
-            let (events, failure) = drain(call(&provider, use_session), &cancellation).await;
-            assert_eq!(failure, error);
-            assert!(events.is_empty());
-            assert_eq!(script.calls.load(Ordering::SeqCst), 1);
-            assert!(sleeper.0.lock().unwrap().is_empty());
-            let (script, provider, sleeper) = fixture(error.clone(), true);
-            let (events, failure) = drain(call(&provider, use_session), &Cancel::default()).await;
-            assert_eq!(failure, error);
-            assert_eq!(events, vec![Event::TextDelta("partial".into())]);
-            assert_eq!(script.calls.load(Ordering::SeqCst), 1);
-            assert!(sleeper.0.lock().unwrap().is_empty());
-        }
+        let error = Error::from(auth.clone());
+        let (script, provider, sleeper) = fixture(error.clone(), false);
+        let cancellation = Cancel(AtomicBool::new(true));
+        let (events, failure) = drain(call(&provider), &cancellation).await;
+        assert_eq!(failure, error);
+        assert!(events.is_empty());
+        assert_eq!(script.calls.load(Ordering::SeqCst), 1);
+        assert!(sleeper.0.lock().unwrap().is_empty());
+        let (script, provider, sleeper) = fixture(error.clone(), true);
+        let (events, failure) = drain(call(&provider), &Cancel::default()).await;
+        assert_eq!(failure, error);
+        assert_eq!(events, vec![Event::TextDelta("partial".into())]);
+        assert_eq!(script.calls.load(Ordering::SeqCst), 1);
+        assert!(sleeper.0.lock().unwrap().is_empty());
     }
     let (script, provider, sleeper) =
         fixture(Error::from(OperationError::<AuthError>::Cancelled), false);
-    let (events, failure) = drain(call(&provider, false), &Cancel::default()).await;
+    let (events, failure) = drain(call(&provider), &Cancel::default()).await;
     assert_eq!(failure, Error::Cancelled);
     assert!(events.is_empty());
     assert_eq!(script.calls.load(Ordering::SeqCst), 1);
@@ -473,20 +459,18 @@ fn provider_wrapper_preserves_supplied_cause_and_full_typed_source_chain() {
 #[tokio::test]
 async fn provider_wrapper_is_permanent_regardless_of_auth_io_or_cancelled_cause() {
     for cause in provider_causes() {
-        for use_session in [false, true] {
-            for cancelled in [false, true] {
-                let error = Error::ProviderWithCause {
-                    message: "provider-private-sentinel".into(),
-                    cause: Box::new(cause.clone()),
-                };
-                let (script, provider, sleeper) = fixture(error.clone(), false);
-                let cancellation = Cancel(AtomicBool::new(cancelled));
-                let (events, failure) = drain(call(&provider, use_session), &cancellation).await;
-                assert_eq!(failure, error);
-                assert!(events.is_empty());
-                assert_eq!(script.calls.load(Ordering::SeqCst), 1);
-                assert!(sleeper.0.lock().unwrap().is_empty());
-            }
+        for cancelled in [false, true] {
+            let error = Error::ProviderWithCause {
+                message: "provider-private-sentinel".into(),
+                cause: Box::new(cause.clone()),
+            };
+            let (script, provider, sleeper) = fixture(error.clone(), false);
+            let cancellation = Cancel(AtomicBool::new(cancelled));
+            let (events, failure) = drain(call(&provider), &cancellation).await;
+            assert_eq!(failure, error);
+            assert!(events.is_empty());
+            assert_eq!(script.calls.load(Ordering::SeqCst), 1);
+            assert!(sleeper.0.lock().unwrap().is_empty());
         }
     }
 }
@@ -582,33 +566,26 @@ fn websocket_wrapper_retains_outer_display_typed_cause_clone_and_contextual_retr
 }
 #[tokio::test]
 async fn websocket_wrapped_auth_exhaustion_requests_fallback_but_bare_auth_does_not() {
-    for use_session in [false, true] {
-        let auth = Error::from(AuthError::Message("auth-private-sentinel"));
-        let (script, provider, sleeper) = fixture(websocket_wrapper(auth.clone()), false);
-        let (events, failure) = drain(call(&provider, use_session), &Cancel::default()).await;
-        assert_eq!(script.calls.load(Ordering::SeqCst), 6);
-        assert_eq!(events.len(), 5);
-        assert_eq!(
-            failure,
-            Error::InvalidOperation(
-                if use_session {
-                    "A provider call requested HTTP fallback without supporting it."
-                } else {
-                    "A stateless provider cannot select HTTP fallback."
-                }
-                .into()
-            )
-        );
-        assert_eq!(
-            *sleeper.0.lock().unwrap(),
-            [200, 400, 800, 1600, 3200].map(Duration::from_millis)
-        );
-        let (script, provider, _) = fixture(auth.clone(), false);
-        let (events, failure) = drain(call(&provider, use_session), &Cancel::default()).await;
-        assert_eq!(failure, auth);
-        assert_eq!(script.calls.load(Ordering::SeqCst), 6);
-        assert_eq!(events.len(), 5);
-    }
+    let auth = Error::from(AuthError::Message("auth-private-sentinel"));
+    let (script, provider, sleeper) = fixture(websocket_wrapper(auth.clone()), false);
+    let (events, failure) = drain(call(&provider), &Cancel::default()).await;
+    assert_eq!(script.calls.load(Ordering::SeqCst), 6);
+    assert_eq!(events.len(), 5);
+    assert_eq!(
+        failure,
+        Error::InvalidOperation(
+            "A provider call requested HTTP fallback without supporting it.".into()
+        )
+    );
+    assert_eq!(
+        *sleeper.0.lock().unwrap(),
+        [200, 400, 800, 1600, 3200].map(Duration::from_millis)
+    );
+    let (script, provider, _) = fixture(auth.clone(), false);
+    let (events, failure) = drain(call(&provider), &Cancel::default()).await;
+    assert_eq!(failure, auth);
+    assert_eq!(script.calls.load(Ordering::SeqCst), 6);
+    assert_eq!(events.len(), 5);
 }
 #[tokio::test]
 async fn websocket_diagnostics_recurse_through_actual_causes_without_crossing_provider_wrappers() {
@@ -656,14 +633,12 @@ async fn outer_provider_wrapper_stays_permanent_and_unexpected_with_websocket_or
             cause: Box::new(cause),
         };
         assert_eq!(classify_failure(&error), Failure::Configuration);
-        for use_session in [false, true] {
-            let (script, provider, sleeper) = fixture(error.clone(), false);
-            let (events, failure) = drain(call(&provider, use_session), &Cancel::default()).await;
-            assert_eq!(failure, error);
-            assert!(events.is_empty());
-            assert_eq!(script.calls.load(Ordering::SeqCst), 1);
-            assert!(sleeper.0.lock().unwrap().is_empty());
-        }
+        let (script, provider, sleeper) = fixture(error.clone(), false);
+        let (events, failure) = drain(call(&provider), &Cancel::default()).await;
+        assert_eq!(failure, error);
+        assert!(events.is_empty());
+        assert_eq!(script.calls.load(Ordering::SeqCst), 1);
+        assert!(sleeper.0.lock().unwrap().is_empty());
         let script = Arc::new(Script {
             error: error.clone(),
             visible: false,
@@ -717,21 +692,7 @@ fn typed_http_cases() -> Vec<(
             0,
         ),
         (
-            HttpError::RequestCancelled(message.clone()),
-            Failure::Cancelled,
-            "cancelled",
-            1,
-            0,
-        ),
-        (
             HttpError::Transport(message.clone()),
-            Failure::Network,
-            "http",
-            6,
-            5,
-        ),
-        (
-            HttpError::Http(message.clone()),
             Failure::Network,
             "http",
             6,
@@ -773,26 +734,24 @@ fn typed_http_variants_keep_exact_message_source_and_nontextual_classification()
 async fn typed_provider_http_and_request_cancelled_are_terminal_but_native_transport_still_retries()
 {
     for (http, _, _, calls, retries) in typed_http_cases() {
-        for use_session in [false, true] {
-            let error = Error::from(http.clone());
-            let (script, provider, sleeper) = fixture(error.clone(), false);
-            let (events, failure) = drain(call(&provider, use_session), &Cancel::default()).await;
-            assert_eq!(failure, error);
-            assert_eq!(script.calls.load(Ordering::SeqCst), calls);
-            assert_eq!(events.len(), retries);
-            assert!(
-                events
-                    .iter()
-                    .all(|event| matches!(event, Event::Retry { .. }))
+        let error = Error::from(http.clone());
+        let (script, provider, sleeper) = fixture(error.clone(), false);
+        let (events, failure) = drain(call(&provider), &Cancel::default()).await;
+        assert_eq!(failure, error);
+        assert_eq!(script.calls.load(Ordering::SeqCst), calls);
+        assert_eq!(events.len(), retries);
+        assert!(
+            events
+                .iter()
+                .all(|event| matches!(event, Event::Retry { .. }))
+        );
+        if retries == 0 {
+            assert!(sleeper.0.lock().unwrap().is_empty());
+        } else {
+            assert_eq!(
+                *sleeper.0.lock().unwrap(),
+                [200, 400, 800, 1600, 3200].map(Duration::from_millis)
             );
-            if retries == 0 {
-                assert!(sleeper.0.lock().unwrap().is_empty());
-            } else {
-                assert_eq!(
-                    *sleeper.0.lock().unwrap(),
-                    [200, 400, 800, 1600, 3200].map(Duration::from_millis)
-                );
-            }
         }
     }
 }

@@ -35,10 +35,6 @@ impl<S: AuthorizedReadService> GlobTool<S> {
             definition,
         }
     }
-    pub const fn name(&self) -> &'static str {
-        "glob"
-    }
-
     pub async fn execute(
         &self,
         invocation: &FileToolInvocation,

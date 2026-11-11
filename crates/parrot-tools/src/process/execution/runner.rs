@@ -5,7 +5,7 @@
 //! is never retried through the explicit unsandboxed branch.
 
 use super::locator::ExecutableLocator;
-use super::{LaunchSpec, ProcessResult, ShellProcessExecution};
+use super::{LaunchSpec, ShellProcessExecution};
 use crate::sandbox::linux::UnsandboxedProcessSandbox;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::paths::AgentScratchDirectory;
@@ -165,21 +165,6 @@ pub trait ProcessSandbox: Send + Sync {
             Ok(execution)
         })
     }
-
-    fn run<'a>(
-        &'a self,
-        request: &'a ProcessStartRequest,
-        policy: &'a Self::Policy,
-    ) -> BoxFuture<'a, io::Result<ProcessResult>> {
-        Box::pin(async move {
-            let mut pipe_request = request.clone();
-            pipe_request.terminal_mode = TerminalMode::Pipe;
-            let execution = self.start(&pipe_request, policy).await?;
-            let result = execution.wait().await;
-            execution.settle().await?;
-            result
-        })
-    }
 }
 
 pub struct ProcessRunner<S> {
@@ -200,18 +185,6 @@ impl<S: ProcessSandbox> ProcessRunner<S> {
         self.sandbox.sandbox_available()
     }
 
-    pub async fn start(
-        &self,
-        request: &ProcessStartRequest,
-        policy: &S::Policy,
-    ) -> io::Result<ShellProcessExecution> {
-        if self.gate.enabled() {
-            self.sandbox.start(request, policy).await
-        } else {
-            UnsandboxedProcessSandbox.start(request, &()).await
-        }
-    }
-
     /// Materialize policy only after selecting the sandbox once for this start.
     pub async fn start_with_policy(
         &self,
@@ -224,21 +197,6 @@ impl<S: ProcessSandbox> ProcessRunner<S> {
         } else {
             UnsandboxedProcessSandbox.start(request, &()).await
         }
-    }
-
-    pub async fn run(
-        &self,
-        request: &ProcessStartRequest,
-        policy: &S::Policy,
-    ) -> io::Result<ProcessResult> {
-        let mut pipe_request = request.clone();
-        pipe_request.terminal_mode = TerminalMode::Pipe;
-        let execution = self.start(&pipe_request, policy).await?;
-        let result = execution.wait().await;
-        // Source await-using disposes even a faulted Result; disposal errors are
-        // separate and can supersede the already observable work failure.
-        execution.settle().await?;
-        result
     }
 }
 

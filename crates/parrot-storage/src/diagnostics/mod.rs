@@ -148,7 +148,6 @@ pub struct FileDiagnosticLog {
     instance_id: String,
     user_session_id: Option<String>,
     warning: Box<dyn Fn(&str) + Send + Sync>,
-    clock: Box<dyn Fn() -> SystemTime + Send + Sync>,
     state: Mutex<SinkState>,
 }
 
@@ -188,14 +187,7 @@ impl FileDiagnosticLog {
         let path = log_directory
             .as_ref()
             .join(format!("parrot-{instance_id}.log"));
-        Ok(Self::open(
-            path,
-            instance_id,
-            None,
-            true,
-            warning,
-            SystemTime::now,
-        ))
+        Ok(Self::open(path, instance_id, None, true, warning))
     }
 
     /// Opens/creates the log for the caller's already selected session root.
@@ -215,27 +207,6 @@ impl FileDiagnosticLog {
             Some(user_session_id.into()),
             false,
             warning,
-            SystemTime::now,
-        ))
-    }
-
-    /// Deterministic clock constructor for exact compatibility tests.
-    pub fn open_session_with_clock(
-        selected_session_log_path: impl Into<PathBuf>,
-        instance_id: impl Into<String>,
-        user_session_id: impl Into<String>,
-        warning: impl Fn(&str) + Send + Sync + 'static,
-        clock: impl Fn() -> SystemTime + Send + Sync + 'static,
-    ) -> Result<Self, InvalidDiagnosticInstanceId> {
-        let instance_id = instance_id.into();
-        validate_instance_id(&instance_id)?;
-        Ok(Self::open(
-            selected_session_log_path.into(),
-            instance_id,
-            Some(user_session_id.into()),
-            false,
-            warning,
-            clock,
         ))
     }
 
@@ -245,7 +216,6 @@ impl FileDiagnosticLog {
         user_session_id: Option<String>,
         create_new: bool,
         warning: impl Fn(&str) + Send + Sync + 'static,
-        clock: impl Fn() -> SystemTime + Send + Sync + 'static,
     ) -> Self {
         let warning: Box<dyn Fn(&str) + Send + Sync> = Box::new(warning);
         let opened = (|| {
@@ -270,7 +240,6 @@ impl FileDiagnosticLog {
             instance_id,
             user_session_id,
             warning,
-            clock: Box::new(clock),
             state: Mutex::new(SinkState { stream, disabled }),
         }
     }
@@ -287,13 +256,6 @@ impl FileDiagnosticLog {
         }
     }
 
-    pub fn is_disabled(&self) -> bool {
-        self.state
-            .lock()
-            .map(|state| state.disabled)
-            .unwrap_or(true)
-    }
-
     pub fn write(&self, entry: &DiagnosticEvent) {
         let Ok(mut state) = self.state.lock() else {
             return;
@@ -302,7 +264,7 @@ impl FileDiagnosticLog {
             return;
         }
         let line = format_entry(
-            (self.clock)(),
+            SystemTime::now(),
             entry,
             &self.instance_id,
             self.user_session_id.as_deref(),
@@ -508,4 +470,23 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
     let month = month_prime + if month_prime < 10 { 3 } else { -9 };
     year += i64::from(month <= 2);
     (year, month as u32, day as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn timestamps_keep_utc_offsets_seven_fraction_digits_and_gregorian_dates() {
+        for (time, expected) in [
+            (UNIX_EPOCH, "1970-01-01T00:00:00.0000000+00:00"),
+            (
+                UNIX_EPOCH + Duration::new(951_782_400, 123_456_700),
+                "2000-02-29T00:00:00.1234567+00:00",
+            ),
+        ] {
+            assert_eq!(format_timestamp(time), expected);
+        }
+    }
 }

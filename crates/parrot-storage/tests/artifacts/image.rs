@@ -231,7 +231,7 @@ async fn persist_image(
 fn setup_repository(label: &str) -> (TempDir, SessionDatabase, ImageArtifactRepository) {
     let temp = TempDir::new(label);
     let root = temp.root();
-    let database = SessionDatabase::open_memory(root.clone()).unwrap();
+    let database = SessionDatabase::open(root.clone()).unwrap();
     let store = ImageArtifactStore::for_session(&root, "artifacts").unwrap();
     let repository = ImageArtifactRepository::new(database.clone(), store).unwrap();
     (temp, database, repository)

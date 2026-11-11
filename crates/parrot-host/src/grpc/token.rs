@@ -5,12 +5,6 @@ use subtle::ConstantTimeEq;
 pub struct TransportToken([u8; 32]);
 
 impl TransportToken {
-    pub fn generate() -> io::Result<Self> {
-        let mut value = [0; 32];
-        getrandom::fill(&mut value).map_err(|error| io::Error::other(error.to_string()))?;
-        Ok(Self(value))
-    }
-
     pub fn from_hex(encoded: &str) -> io::Result<Self> {
         if encoded.len() != 64 {
             return Err(invalid_token());

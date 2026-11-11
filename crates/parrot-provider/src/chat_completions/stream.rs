@@ -178,14 +178,8 @@ impl ChatStream {
             finished: false,
         }
     }
-    pub fn response_bytes(&self) -> u64 {
-        self.http.response_bytes()
-    }
     pub fn turn_state(&self) -> Option<&str> {
         self.http.turn_state()
-    }
-    pub fn finish_seen(&self) -> bool {
-        self.state.finish_seen()
     }
     pub async fn next(
         &mut self,
@@ -258,15 +252,6 @@ pub fn parse_data(
 #[derive(Default)]
 pub struct ParseState(State);
 impl ParseState {
-    pub fn finish_seen(&self) -> bool {
-        self.0.finish_seen
-    }
-    pub fn finish_reason(&self) -> &str {
-        &self.0.finish_reason
-    }
-    pub fn completion(&self, provider_id: &str) -> ChatCompletion {
-        self.0.complete(provider_id)
-    }
     pub fn terminal_events(&self, provider_id: &str) -> VecDeque<ChatEvent> {
         self.0.final_events(provider_id)
     }

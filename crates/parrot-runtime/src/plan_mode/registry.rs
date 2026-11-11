@@ -41,18 +41,8 @@ impl<S: AccessSnapshot + 'static> MaterializedModeProfile<S> {
     pub fn configuration(&self) -> &ProfileConfig {
         &self.configuration
     }
-    pub fn disabled_tools(&self) -> &[String] {
-        &self.disabled_tools
-    }
     pub fn security(&self) -> &Arc<S> {
         &self.security
-    }
-    pub fn is_tool_permitted(&self, name: &str) -> bool {
-        self.configuration
-            .allowed_tools
-            .as_ref()
-            .is_none_or(|allowed| allowed.iter().any(|tool| tool == name))
-            && !self.disabled_tools.iter().any(|tool| tool == name)
     }
 }
 
@@ -283,35 +273,8 @@ impl<S: AccessSnapshot + 'static> SessionModeProfile<'_, S> {
     pub fn id(&self) -> &str {
         self.mode.profile.id()
     }
-    pub fn usage(&self) -> &str {
-        &self.mode.profile.configuration.usage
-    }
-    pub fn recursion_limit(&self) -> i32 {
-        self.mode.profile.configuration.recursion_limit
-    }
     pub fn prompt(&self) -> ModeResult<String> {
         self.mode.prompt()
-    }
-    pub fn allowed_tools(&self) -> Option<&[String]> {
-        self.mode.profile.configuration.allowed_tools.as_deref()
-    }
-    pub fn disabled_tools(&self) -> &[String] {
-        self.mode.profile.disabled_tools()
-    }
-    pub fn max_turns(&self) -> i32 {
-        self.mode.profile.configuration.max_turns
-    }
-    pub fn is_user_selectable(&self) -> bool {
-        self.mode.profile.configuration.is_user_selectable
-    }
-    pub fn is_agent_selectable(&self) -> bool {
-        self.mode.profile.configuration.is_agent_selectable
-    }
-    pub fn security(&self) -> &Arc<S> {
-        self.mode.profile.security()
-    }
-    pub fn is_tool_permitted(&self, name: &str) -> bool {
-        self.mode.profile.is_tool_permitted(name)
     }
 }
 fn not_attached() -> ModeError {

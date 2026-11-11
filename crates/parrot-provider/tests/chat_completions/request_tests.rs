@@ -1,3 +1,4 @@
+use super::stream_tests::completion;
 use parrot_provider::chat_completions::*;
 use serde_json::Value;
 
@@ -8,7 +9,6 @@ struct Request {
     messages: Vec<Message>,
     tools: Vec<Tool>,
     effort: Option<String>,
-    summary: Option<String>,
     preferences: String,
     metadata: bool,
     max: i32,
@@ -30,9 +30,6 @@ impl RequestView for Request {
     }
     fn reasoning_effort(&self) -> Option<&str> {
         self.effort.as_deref()
-    }
-    fn reasoning_summary(&self) -> Option<&str> {
-        self.summary.as_deref()
     }
     fn provider_preferences(&self) -> &str {
         &self.preferences
@@ -174,7 +171,6 @@ fn request_has_source_top_level_fields_and_omits_unset_values() {
         messages: vec![message(MessageRole::User, "hello")],
         tools: vec![],
         effort: Some("xhigh".into()),
-        summary: Some("ignored by chat wire".into()),
         preferences: "".into(),
         metadata: true,
         max: 4096,
@@ -227,7 +223,6 @@ fn request_wraps_nonleading_system_and_preserves_message_call_order() {
         messages: vec![assistant, later],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: "".into(),
         metadata: false,
         max: 0,
@@ -270,7 +265,6 @@ fn tool_schema_preferences_and_multimodal_content_keep_order_and_raw_numbers() {
             schema: r#"{"type":"object","minimum":1e999,"x":2}"#.into(),
         }],
         effort: None,
-        summary: None,
         preferences: r#" {"order": [2,1],"route":"local"} "#.into(),
         metadata: false,
         max: 10,
@@ -300,7 +294,6 @@ fn request_instructions_and_system_updates_have_source_wire_escaping() {
         ],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: "".into(),
         metadata: false,
         max: 0,
@@ -359,7 +352,6 @@ fn quoted_request_fields_escape_html_sensitive_characters() {
             schema: "{}".into(),
         }],
         effort: Some("<>&".into()),
-        summary: None,
         preferences: "".into(),
         metadata: false,
         max: 0,
@@ -410,7 +402,6 @@ fn literal_backslash_u_sequences_remain_literal() {
         messages: vec![message(MessageRole::User, input)],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: "".into(),
         metadata: false,
         max: 0,
@@ -433,7 +424,6 @@ fn unicode_quotes_and_controls_keep_values_and_message_order() {
         ],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: "".into(),
         metadata: false,
         max: 0,
@@ -475,7 +465,6 @@ fn raw_schema_and_preferences_keep_verbatim_spelling() {
             schema: schema.into(),
         }],
         effort: None,
-        summary: None,
         preferences: preferences.into(),
         metadata: false,
         max: 0,
@@ -540,7 +529,6 @@ fn unusable_native_reasoning_payloads_fall_back_to_ordinary_history() {
             messages: vec![assistant],
             tools: vec![],
             effort: None,
-            summary: None,
             preferences: String::new(),
             metadata: false,
             max: 0,
@@ -582,7 +570,7 @@ fn reasoning_field_variants_round_trip_with_tools_outside_assistant_text() {
             )
             .unwrap();
         }
-        let completion = state.completion("test");
+        let completion = completion(&state, "test");
         let replay = completion.provider_content.clone().unwrap();
         assert_eq!(completion.assistant_text, "answer");
         assert_eq!(completion.tool_calls[0].id, "call_1");
@@ -617,7 +605,6 @@ fn reasoning_field_variants_round_trip_with_tools_outside_assistant_text() {
             ],
             tools: vec![],
             effort: None,
-            summary: None,
             preferences: String::new(),
             metadata: false,
             max: 0,
@@ -654,7 +641,6 @@ fn empty_instructions_keep_the_leading_history_system_message_unwrapped() {
         ],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: String::new(),
         metadata: false,
         max: 0,
@@ -679,7 +665,6 @@ fn empty_instructions_keep_the_leading_history_system_message_unwrapped() {
         ],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: String::new(),
         metadata: false,
         max: 0,
@@ -708,7 +693,6 @@ fn provider_reasoning_replay_is_gated_and_restored_without_ordinary_fallback_mer
         messages: vec![assistant.clone()],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: "".into(),
         metadata: false,
         max: 0,
@@ -745,7 +729,6 @@ fn malformed_schema_and_nonobject_preferences_are_errors() {
             schema: "{".into(),
         }],
         effort: None,
-        summary: None,
         preferences: String::new(),
         metadata: false,
         max: 0,
@@ -782,7 +765,6 @@ fn configured_tool_schema_descriptions_are_projected() {
             },
         ],
         effort: None,
-        summary: None,
         preferences: String::new(),
         metadata: false,
         max: 0,
@@ -830,7 +812,6 @@ fn reasoning_history_continuation_preserves_tool_result_and_user() {
         ],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: String::new(),
         metadata: false,
         max: 0,
@@ -862,7 +843,7 @@ fn both_reasoning_fields_round_trip_from_stream_completion() {
         )
         .unwrap();
     }
-    let completion = state.completion("test");
+    let completion = completion(&state, "test");
     let replay = completion.provider_content.unwrap();
     let assistant = {
         let mut assistant = message(MessageRole::Assistant, &completion.assistant_text);
@@ -882,7 +863,6 @@ fn both_reasoning_fields_round_trip_from_stream_completion() {
         messages: vec![assistant],
         tools: vec![],
         effort: None,
-        summary: None,
         preferences: String::new(),
         metadata: false,
         max: 0,

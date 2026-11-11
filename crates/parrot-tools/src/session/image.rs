@@ -59,10 +59,6 @@ where
         }
     }
 
-    pub fn name(&self) -> &'static str {
-        "imagegen"
-    }
-
     async fn execute(
         &self,
         invocation: &Invocation,
@@ -243,7 +239,6 @@ where
                             | FailureKind::InvalidOperation
                             | FailureKind::Argument
                             | FailureKind::Provider
-                            | FailureKind::Wire
                     ) =>
                 {
                     error_output(&invocation, &error.message)

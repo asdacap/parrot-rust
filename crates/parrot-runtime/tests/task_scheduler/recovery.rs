@@ -907,10 +907,7 @@ async fn task_failure_survives_ack_failure_and_newer_worker_execution() {
             first
                 .provider
                 .script("a", [Reply::text("successor output")]);
-            let sent = worker
-                .adapter
-                .session()
-                .send_text_message("unrelated successor".into(), Arc::new(NeverCancelled))
+            let sent = send_text(worker.adapter.session(), "unrelated successor")
                 .await
                 .unwrap();
             sent.execution.join().await.unwrap();
@@ -961,10 +958,7 @@ async fn canceling_waiter_does_not_cancel_or_message_unrelated_predecessor() {
     let held = Gate::new();
     h.provider.script("a", [Reply::held("answer", &held)]);
     let worker = h.factory.get("a");
-    let predecessor = worker
-        .adapter
-        .session()
-        .send_text_message("unrelated work".into(), Arc::new(NeverCancelled))
+    let predecessor = send_text(worker.adapter.session(), "unrelated work")
         .await
         .unwrap();
     held.entered().await;

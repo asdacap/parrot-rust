@@ -90,13 +90,6 @@ impl TransportAddress {
         }
     }
 
-    pub fn unix_path(&self) -> Option<&Path> {
-        match self {
-            Self::Unix(path) => Some(path),
-            Self::Tcp(_) => None,
-        }
-    }
-
     pub fn tcp_url(&self) -> Option<&Url> {
         match self {
             Self::Tcp(url) => Some(url),

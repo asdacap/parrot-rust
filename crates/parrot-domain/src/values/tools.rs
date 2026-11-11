@@ -93,25 +93,6 @@ impl ToolCycleImageBudget {
         Ok(true)
     }
 
-    pub fn restore_accepted(&self, byte_length: i64) -> Result<(), ImageBudgetError> {
-        if byte_length < 0 {
-            return Err(ImageBudgetError::NegativeByteLength);
-        }
-        let mut state = self.state.lock().expect("image budget lock poisoned");
-        state.accepted_bytes = state
-            .accepted_bytes
-            .checked_add(byte_length)
-            .ok_or(ImageBudgetError::AcceptedBytesOverflow)?;
-        Ok(())
-    }
-
-    pub fn restore_exceeded(&self) {
-        self.state
-            .lock()
-            .expect("image budget lock poisoned")
-            .is_exceeded = true;
-    }
-
     pub fn describe_failure<E>(
         &self,
         render: impl FnOnce(&str, &[(&str, String)]) -> Result<String, E>,
@@ -126,14 +107,12 @@ impl ToolCycleImageBudget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ImageBudgetError {
     NegativeByteLength,
-    AcceptedBytesOverflow,
 }
 
 impl fmt::Display for ImageBudgetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::NegativeByteLength => "byte length must not be negative",
-            Self::AcceptedBytesOverflow => "accepted image byte length overflow",
         })
     }
 }

@@ -51,9 +51,6 @@ impl HttpEventStream {
     pub fn turn_state(&self) -> Option<&str> {
         self.turn_state.as_deref()
     }
-    pub fn response_bytes(&self) -> u64 {
-        self.counter.get()
-    }
     pub async fn next(
         &mut self,
         cancellation: &dyn Cancellation,

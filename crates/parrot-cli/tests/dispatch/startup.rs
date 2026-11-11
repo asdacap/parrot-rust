@@ -18,6 +18,7 @@ use parrot_domain::{
 };
 use parrot_foundation::paths::ApplicationRoots;
 use parrot_host::{
+    composition::factory::user::ordinary_workspace_resolver,
     grpc::{
         address::TransportAddress,
         transport::{GrpcServer, GrpcTransportClient},
@@ -231,9 +232,9 @@ impl Context {
                 })
             })
         });
-        LocalChatStartup::from_working_directory(
+        LocalChatStartup::new(
             self.roots.clone(),
-            &self.root,
+            ordinary_workspace_resolver()(&self.root).unwrap(),
             self.runtime.clone(),
             self.progress.clone(),
             self.diagnostics.clone(),
@@ -241,7 +242,6 @@ impl Context {
             configure,
             take_over,
         )
-        .unwrap()
         .with_restore_progress(self.restore_progress.clone())
     }
     fn text(&self) -> String {
@@ -503,8 +503,6 @@ async fn run_case(scenario: &'static str, interactive: bool, expected_opens: usi
     };
     let take_over = scenario == "foreign-take-over";
     let startup = context.startup(local_client, take_over);
-    assert_eq!(startup.workspace().launch_directory(), context.root);
-    assert_eq!(startup.workspace().physical_identity(), context.root);
     let stop = Stop::new();
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, interactive, &stop))
         .await
@@ -1145,7 +1143,7 @@ async fn web_router_adopts_actual_native_owner_from_same_startup() {
     let router = WebSessionRouter::new(
         local,
         context.roots.clone(),
-        startup.workspace().clone(),
+        ordinary_workspace_resolver()(&context.root).unwrap(),
         startup,
         context.diagnostics.clone(),
     );

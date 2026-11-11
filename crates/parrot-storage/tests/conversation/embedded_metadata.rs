@@ -229,7 +229,7 @@ async fn empty_provider_defaults_and_derived_text_view_survive_reopen() {
         ProviderContent::default()
     );
     assert_eq!(
-        reopened.messages("agent".into()).await.unwrap(),
+        super::messages(&reopened, "agent").await,
         ["user: first\0last", "assistant: done"]
     );
     reopened.events().database().close().await.unwrap();

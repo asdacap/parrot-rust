@@ -80,21 +80,6 @@ impl ProviderRegistry {
         self.ordered.clone()
     }
 
-    pub fn all_models(&self) -> Vec<ProviderModel> {
-        self.ordered
-            .iter()
-            .flat_map(|provider| {
-                self.models(provider.id())
-                    .into_iter()
-                    .map(|model| ProviderModel {
-                        provider: provider.clone(),
-                        model,
-                        variant: None,
-                    })
-            })
-            .collect()
-    }
-
     pub fn models(&self, provider_id: &str) -> Vec<Model> {
         self.catalogues
             .read()
@@ -266,11 +251,9 @@ fn refresh<'a>(
 
 fn is_refresh_failure(error: &Error) -> bool {
     match error {
-        Error::Provider(_)
-        | Error::ProviderWithCause { .. }
-        | Error::HeaderTimeout(_)
-        | Error::Wire(_)
-        | Error::Io(_) => true,
+        Error::Provider(_) | Error::ProviderWithCause { .. } | Error::Wire(_) | Error::Io(_) => {
+            true
+        }
         Error::Authentication(error) => matches!(
             error,
             AuthError::Message(_)
@@ -284,8 +267,7 @@ fn is_refresh_failure(error: &Error) -> bool {
         ),
         Error::Http(error) => matches!(
             error,
-            HttpError::Http(_)
-                | HttpError::ProviderHttp(_)
+            HttpError::ProviderHttp(_)
                 | HttpError::Provider(_)
                 | HttpError::Response(_)
                 | HttpError::Wire(_)

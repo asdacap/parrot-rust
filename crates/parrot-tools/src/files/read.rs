@@ -40,10 +40,6 @@ impl<S: AuthorizedReadService> ReadTool<S> {
         }
     }
 
-    pub const fn name(&self) -> &'static str {
-        "read"
-    }
-
     pub async fn execute(
         &self,
         invocation: &FileToolInvocation,

@@ -647,9 +647,6 @@ impl OpenedSession {
     pub fn session(&self) -> &dyn StoredUserSession {
         self.session.as_deref().expect("session is closed")
     }
-    pub fn session_mut(&mut self) -> &mut (dyn StoredUserSession + 'static) {
-        self.session.as_deref_mut().expect("session is closed")
-    }
     /// Explicit successful-open publication; updating a session does not call it.
     pub fn record_opened(&self) -> Result<(), SessionStoreError> {
         self.resources

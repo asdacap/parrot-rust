@@ -275,10 +275,7 @@ impl<S: SessionServices> SessionTool<S> {
             Err(OperationError::Failed(error))
                 if matches!(
                     error.kind,
-                    FailureKind::Json
-                        | FailureKind::Format
-                        | FailureKind::Argument
-                        | FailureKind::InputConflict
+                    FailureKind::Json | FailureKind::Format | FailureKind::Argument
                 ) =>
             {
                 error_output(invocation, &error.message)

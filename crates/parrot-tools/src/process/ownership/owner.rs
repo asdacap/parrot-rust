@@ -112,9 +112,6 @@ impl ShellProcessOwner {
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
-    pub(crate) fn is_cancelled(&self) -> bool {
-        self.lifetime.is_cancelled()
-    }
     pub fn capture_inventory(&self) -> ShellProcessInventorySnapshot {
         self.inventory.capture()
     }
@@ -249,11 +246,6 @@ impl ShellProcessOwner {
         process.claim()
     }
 
-    pub async fn active(&self) -> Vec<ActiveProcessObservation> {
-        let _registry = self.registry.lock().await;
-        self.observe_active()
-    }
-
     pub fn observe_active(&self) -> Vec<ActiveProcessObservation> {
         let processes: Vec<_> = self.processes.lock().unwrap().values().cloned().collect();
         let mut active: Vec<_> = processes
@@ -267,11 +259,6 @@ impl ShellProcessOwner {
             .collect();
         active.sort_by(|left, right| ordinal(&left.id, &right.id));
         active
-    }
-
-    pub async fn snapshot(&self) -> Vec<ProcessStatus> {
-        let _registry = self.registry.lock().await;
-        self.observe_snapshot()
     }
 
     pub fn observe_snapshot(&self) -> Vec<ProcessStatus> {
@@ -370,24 +357,6 @@ impl Drop for ShellProcessOwner {
                 process.request_cancel();
             }
         }
-    }
-}
-
-/// Explicit scope resolution is delegated to T48; an explicit path failure
-/// never falls back to this owner. Bare names remain local to this owner.
-pub async fn claim_address<F>(
-    local: &Arc<ShellProcessOwner>,
-    address: &str,
-    resolve: F,
-) -> io::Result<ClaimedProcess>
-where
-    F: FnOnce(&str) -> BoxFuture<'static, io::Result<(Arc<ShellProcessOwner>, String)>>,
-{
-    if address.contains('/') {
-        let (owner, name) = resolve(address).await?;
-        owner.claim(&name).await
-    } else {
-        local.claim(address).await
     }
 }
 

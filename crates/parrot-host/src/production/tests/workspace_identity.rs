@@ -38,10 +38,19 @@ fn assert_claim_key(fixture: &Fixture, launch: &Path, other: &Path, id: &UserSes
             .unwrap()
             .is_empty()
     );
-    let discovered = claim.discover_latest(launch).unwrap();
+    let admissions = SessionAdmissions::new(
+        OwnershipRoots::new(
+            fixture.roots.current().state().into(),
+            fixture.roots.legacy().state().into(),
+        )
+        .unwrap(),
+        capture_runtime_identity(&host_key().unwrap()).unwrap(),
+        false,
+    );
+    let discovered = admissions.discover_latest(launch).unwrap().admission;
     assert_eq!(discovered.disposition, ClaimDisposition::Resumed);
     assert_eq!(discovered.session_id.as_ref(), Some(id));
-    let other_discovery = claim.discover_latest(other).unwrap();
+    let other_discovery = admissions.discover_latest(other).unwrap().admission;
     assert_eq!(other_discovery.disposition, ClaimDisposition::Fresh);
     assert!(other_discovery.session_id.is_none());
 }

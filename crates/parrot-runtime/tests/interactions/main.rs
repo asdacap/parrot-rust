@@ -133,7 +133,10 @@ fn question() -> QuestionDefinition {
     }
 }
 fn answer() -> QuestionReply {
-    QuestionReply::answered(vec!["first".into()])
+    QuestionReply {
+        kind: QuestionReplyKind::Answered,
+        answers: vec!["first".into()],
+    }
 }
 fn broker(timeout: Option<Duration>) -> (QuestionBroker, Arc<ManualClock>, Arc<Diagnostics>) {
     let clock = Arc::new(ManualClock::new());
@@ -180,7 +183,16 @@ fn question_validation_preserves_source_literals_and_boundaries() {
     );
     let mut q = question();
     q.multiple = true;
-    assert!(validate_reply(&[q], &QuestionReply::answered(vec!["first, second".into()])).is_ok());
+    assert!(
+        validate_reply(
+            &[q],
+            &QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: vec!["first, second".into()]
+            }
+        )
+        .is_ok()
+    );
     assert_eq!(
         validate_reply(&[question()], &QuestionReply::user_away())
             .unwrap_err()
@@ -188,15 +200,27 @@ fn question_validation_preserves_source_literals_and_boundaries() {
         "question replies require user answers"
     );
     assert_eq!(
-        validate_reply(&[question()], &QuestionReply::answered(vec![]))
-            .unwrap_err()
-            .message,
+        validate_reply(
+            &[question()],
+            &QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: vec![]
+            }
+        )
+        .unwrap_err()
+        .message,
         "question replies must contain one answer for every question in order"
     );
     assert_eq!(
-        validate_reply(&[question()], &QuestionReply::answered(vec![" \n".into()]))
-            .unwrap_err()
-            .message,
+        validate_reply(
+            &[question()],
+            &QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: vec![" \n".into()]
+            }
+        )
+        .unwrap_err()
+        .message,
         "question answers cannot be empty"
     );
 }
@@ -217,7 +241,10 @@ async fn valid_multi_reply_is_ordered_copied_and_settled_once() {
     );
     assert!(broker.reply(&id, answer()).is_err());
     assert_eq!(broker.pending().len(), 1);
-    let reply = QuestionReply::answered(vec!["second".into(), "custom".into()]);
+    let reply = QuestionReply {
+        kind: QuestionReplyKind::Answered,
+        answers: vec!["second".into(), "custom".into()],
+    };
     broker.reply(&id, reply.clone()).unwrap();
     assert_eq!(wait.await.unwrap(), reply);
     assert!(broker.pending().is_empty());
@@ -236,8 +263,14 @@ async fn invalid_replies_leave_question_pending() {
     let id = broker.pending()[0].id.clone();
     for bad in [
         QuestionReply::user_away(),
-        QuestionReply::answered(vec![]),
-        QuestionReply::answered(vec![" ".into()]),
+        QuestionReply {
+            kind: QuestionReplyKind::Answered,
+            answers: vec![],
+        },
+        QuestionReply {
+            kind: QuestionReplyKind::Answered,
+            answers: vec![" ".into()],
+        },
     ] {
         assert!(broker.reply(&id, bad).is_err());
         assert_eq!(broker.pending().len(), 1);
@@ -274,7 +307,17 @@ async fn infinite_timeout_and_pending_timing_preserve_original_deadline() {
     assert_eq!(broker.pending()[0].remaining_milliseconds, Some(10_000));
     clock.advance(Duration::from_secs(3));
     assert_eq!(broker.pending()[0].remaining_milliseconds, Some(7_000));
-    assert!(broker.reply(&id, QuestionReply::answered(vec![])).is_err());
+    assert!(
+        broker
+            .reply(
+                &id,
+                QuestionReply {
+                    kind: QuestionReplyKind::Answered,
+                    answers: vec![]
+                }
+            )
+            .is_err()
+    );
     assert_eq!(broker.pending()[0].remaining_milliseconds, Some(7_000));
     clock.advance(Duration::from_secs(7));
     assert_eq!(wait.await.unwrap().kind, QuestionReplyKind::UserAway);
@@ -643,10 +686,10 @@ async fn source_observed_option_flags_are_not_selection_constraints() {
     second.options[0].label = "First".into();
     let mut wait = Box::pin(broker.ask(vec![first, second], &token));
     assert_pending(wait.as_mut());
-    let reply = QuestionReply::answered(vec![
-        "Green, Violet".into(),
-        "arbitrary private text".into(),
-    ]);
+    let reply = QuestionReply {
+        kind: QuestionReplyKind::Answered,
+        answers: vec!["Green, Violet".into(), "arbitrary private text".into()],
+    };
     broker
         .reply(&broker.pending()[0].id, reply.clone())
         .unwrap();
@@ -816,18 +859,12 @@ async fn original_five_pending_deadline_rows_are_not_reset_by_snapshot() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn default_tokio_clock_and_domain_contract_preserve_timeout_kind() {
-    use parrot_domain::contracts::interactions::{
-        PermissionBroker as PermissionContract, QuestionBroker as QuestionContract,
-    };
+async fn default_tokio_clock_preserves_timeout_kind() {
     let diagnostics = Arc::new(Diagnostics::default());
     let token = Token::default();
     let broker = QuestionBroker::new(Some(Duration::from_millis(1)), diagnostics.clone()).unwrap();
     assert_eq!(
-        QuestionContract::ask(&broker, vec![question()], &token)
-            .await
-            .unwrap()
-            .kind,
+        broker.ask(vec![question()], &token).await.unwrap().kind,
         QuestionReplyKind::UserAway
     );
     let broker = PermissionBroker::new(
@@ -838,40 +875,12 @@ async fn default_tokio_clock_and_domain_contract_preserve_timeout_kind() {
     )
     .unwrap();
     assert_eq!(
-        PermissionContract::request(
-            &broker,
-            request(Arc::new(Approval::default()), "one"),
-            &token
-        )
-        .await
-        .unwrap()
-        .kind,
-        PermissionReplyKind::UserAway
-    );
-    let mut wait = PermissionContract::request(
-        &broker,
-        request(Arc::new(Approval::default()), "one"),
-        &token,
-    );
-    assert_pending(wait.as_mut());
-    let id = PermissionContract::pending(&broker).await.unwrap()[0]
-        .id
-        .clone();
-    assert!(
-        PermissionContract::reply(&broker, &id, PermissionReply::user_away())
+        broker
+            .request(request(Arc::new(Approval::default()), "one"), &token)
             .await
-            .is_err()
-    );
-    PermissionContract::reply(
-        &broker,
-        &id,
-        PermissionReply::decided(PermissionDecision::Reject, "  reason  "),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        wait.await.unwrap(),
-        PermissionReply::decided(PermissionDecision::Reject, "reason")
+            .unwrap()
+            .kind,
+        PermissionReplyKind::UserAway
     );
 }
 
@@ -929,5 +938,3 @@ async fn synchronous_diagnostics_and_publication_do_not_consume_request_wait_tim
     clock.advance(Duration::from_secs(1));
     assert_eq!(wait.await.unwrap().kind, PermissionReplyKind::UserAway);
 }
-
-mod children;

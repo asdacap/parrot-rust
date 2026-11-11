@@ -14,14 +14,6 @@ pub struct ImmediateScrollbackValue {
 }
 
 impl ImmediateScrollbackValue {
-    pub fn trusted(lines: Vec<String>) -> Self {
-        Self {
-            lines,
-            muted: false,
-            layout: ScrollbackLayout::Compact,
-            prefix: "",
-        }
-    }
     pub fn muted(lines: Vec<String>) -> Self {
         Self {
             lines,

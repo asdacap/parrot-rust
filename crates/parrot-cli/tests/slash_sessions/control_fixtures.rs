@@ -11,8 +11,7 @@ use std::{
 use parrot_cli::{
     dispatch::dialog::{DialogOption, SlashDialog},
     slash_sessions::{
-        CommandContext, ExistingSessionBinding, SkillRefresh, SlashActivity, SlashCommand,
-        SlashFailure, SlashSession,
+        CommandContext, SkillRefresh, SlashActivity, SlashCommand, SlashFailure, SlashSession,
     },
 };
 use parrot_domain::{
@@ -337,14 +336,6 @@ impl SlashSession for Session {
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async { panic!("unexpected new session") })
-    }
-    fn load_existing<'a>(
-        &'a mut self,
-        _: UserSession,
-        _: &'a mut dyn ExistingSessionBinding,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        Box::pin(async { panic!("unexpected existing session") })
     }
     fn set_context_limit<'a>(
         &'a mut self,

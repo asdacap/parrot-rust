@@ -218,7 +218,16 @@ fn legacy_recovery_requires_process_evidence_even_when_boot_identity_differs() {
             )
             .with_proven_comparable_process_start_tokens();
             let claim = WorkingDirectoryClaim::new(&state.0, runtime);
-            let actual = claim.open_default(Path::new(WORKSPACE)).unwrap();
+            let actual = claim
+                .resume(
+                    Path::new(WORKSPACE),
+                    &parrot_domain::values::identifiers::UserSessionId::parse(
+                        "user-session-recovery",
+                    )
+                    .unwrap(),
+                    false,
+                )
+                .unwrap();
             assert_admission(
                 &actual,
                 disposition,
@@ -226,7 +235,7 @@ fn legacy_recovery_requires_process_evidence_even_when_boot_identity_differs() {
                 generation,
                 OpenOperation::Resume,
             );
-            assert_eq!(inspected.load(Ordering::SeqCst), 2);
+            assert_eq!(inspected.load(Ordering::SeqCst), 1);
             assert_eq!(fs::read(ledger.join("v1.json")).unwrap(), bytes);
         }
     }
@@ -302,7 +311,7 @@ fn fresh_release_is_idempotent_and_inactive_resume_advances_generation() {
         WorkingDirectoryClaim::current(&activation).unwrap(),
         Some(inactive)
     );
-    let resumed = claim.open_default(Path::new(WORKSPACE)).unwrap();
+    let resumed = claim.resume(Path::new(WORKSPACE), &id, false).unwrap();
     assert_admission(
         &resumed,
         ClaimDisposition::Resumed,
@@ -329,7 +338,7 @@ fn active_owner_blocks_default_open_and_explicit_takeover() {
         parrot_domain::values::identifiers::UserSessionId::parse("user-session-active").unwrap();
     let owner = claim.create_fresh(Path::new(WORKSPACE), &id).unwrap();
     for refused in [
-        claim.open_default(Path::new(WORKSPACE)).unwrap(),
+        claim.resume(Path::new(WORKSPACE), &id, false).unwrap(),
         claim.resume(Path::new(WORKSPACE), &id, true).unwrap(),
     ] {
         assert_admission(
@@ -366,7 +375,7 @@ fn pid_reuse_recovers_ownership_and_stale_release_cannot_fence_the_successor() {
         &state.0,
         identity(ProcessIdentityStatus::Found, Some("new-start".into())),
     );
-    let successor = reused.open_default(Path::new(WORKSPACE)).unwrap();
+    let successor = reused.resume(Path::new(WORKSPACE), &id, false).unwrap();
     assert_admission(
         &successor,
         ClaimDisposition::Resumed,

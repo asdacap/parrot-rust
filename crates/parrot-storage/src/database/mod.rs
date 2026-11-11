@@ -6,13 +6,10 @@
 
 mod schema;
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::paths::SelectedSessionRoot;
-use parrot_domain::contracts::storage::{
-    AdmissionError, CommitReceipt, CommitTicket, Committed, SessionTransactions, TransactionCommand,
-};
+use parrot_domain::contracts::storage::{AdmissionError, CommitReceipt, CommitTicket, Committed};
 use std::fmt;
-use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::{Arc, Mutex, mpsc};
 use tokio::sync::{oneshot, watch};
@@ -99,12 +96,6 @@ impl SessionDatabase {
     pub fn open(root: SelectedSessionRoot) -> Result<Self, DatabaseError> {
         let path = root.path().join("session.db");
         Self::open_file(root, path)
-    }
-
-    /// Opens an in-memory synthetic database with the same schema and worker.
-    /// Production session stores should use `open`; no file fallback occurs.
-    pub fn open_memory(root: SelectedSessionRoot) -> Result<Self, DatabaseError> {
-        Self::open_file(root, Path::new(":memory:"))
     }
 
     fn open_file(root: SelectedSessionRoot, path: impl AsRef<Path>) -> Result<Self, DatabaseError> {
@@ -243,46 +234,5 @@ impl SessionDatabase {
                 .map_err(|_| DatabaseError::WorkerStopped)?;
         }
         Ok(())
-    }
-
-    /// Binds a repository command type to the shared T07 transaction contract.
-    pub fn transactions<C: DatabaseCommand>(&self) -> TransactionSession<C> {
-        TransactionSession {
-            database: self.clone(),
-            command: PhantomData,
-        }
-    }
-}
-
-/// Repository-owned typed command executed wholly inside a single transaction.
-pub trait DatabaseCommand: TransactionCommand {
-    fn execute(self, transaction: &Transaction<'_>) -> Result<Self::Output, DatabaseError>;
-}
-
-pub struct TransactionSession<C> {
-    database: SessionDatabase,
-    command: PhantomData<fn(C)>,
-}
-
-impl<C: DatabaseCommand> SessionTransactions for TransactionSession<C> {
-    type Command = C;
-    type Error = DatabaseError;
-    fn selected_root(&self) -> &SelectedSessionRoot {
-        self.database.selected_root()
-    }
-    fn admit<'a>(
-        &'a self,
-        command: C,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<
-        'a,
-        Result<CommitTicket<C::Key, C::Output, DatabaseError>, AdmissionError<DatabaseError>>,
-    > {
-        Box::pin(async move {
-            let key = command.key().clone();
-            self.database.admit(key, cancellation, move |transaction| {
-                command.execute(transaction)
-            })
-        })
     }
 }

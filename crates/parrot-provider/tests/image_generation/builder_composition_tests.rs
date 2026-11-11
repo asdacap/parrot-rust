@@ -525,7 +525,12 @@ async fn actual_builder_links_only_when_upload_and_image_urls_are_both_enabled()
             let fixture = Fixture::build(upload, image_urls, Behavior::Success, 200).await;
             let active = Token::new(false);
             let events = collect(
-                fixture.provider.call(fixture.request.clone()).unwrap(),
+                fixture
+                    .provider
+                    .open_session()
+                    .unwrap()
+                    .call(fixture.request.clone())
+                    .unwrap(),
                 &active,
             )
             .await
@@ -582,7 +587,12 @@ async fn actual_builder_links_only_when_upload_and_image_urls_are_both_enabled()
     )
     .await;
     collect(
-        fixture.provider.call(fixture.request.clone()).unwrap(),
+        fixture
+            .provider
+            .open_session()
+            .unwrap()
+            .call(fixture.request.clone())
+            .unwrap(),
         &Token::new(false),
     )
     .await
@@ -652,7 +662,12 @@ async fn actual_builder_reuploads_missing_object_once_with_real_bucket_preparati
     let fixture = Fixture::build(true, true, Behavior::MissingObject, 200).await;
     let active = Token::new(false);
     let events = collect(
-        fixture.provider.call(fixture.request.clone()).unwrap(),
+        fixture
+            .provider
+            .open_session()
+            .unwrap()
+            .call(fixture.request.clone())
+            .unwrap(),
         &active,
     )
     .await
@@ -756,7 +771,12 @@ async fn actual_builder_generation_through_linking_and_retry_is_one_paid_request
 async fn actual_builder_cancelled_observer_leaves_shared_signed_upload_alive_and_settled() {
     let fixture = Fixture::build(true, true, Behavior::GatedPrepare, 200).await;
     let cancelled = Token::new(true);
-    let mut abandoned = fixture.provider.call(fixture.request.clone()).unwrap();
+    let mut abandoned = fixture
+        .provider
+        .open_session()
+        .unwrap()
+        .call(fixture.request.clone())
+        .unwrap();
     assert!(matches!(
         abandoned.next(&cancelled).await,
         Err(Error::Cancelled)
@@ -769,7 +789,12 @@ async fn actual_builder_cancelled_observer_leaves_shared_signed_upload_alive_and
     fixture.http.release();
     let active = Token::new(false);
     collect(
-        fixture.provider.call(fixture.request.clone()).unwrap(),
+        fixture
+            .provider
+            .open_session()
+            .unwrap()
+            .call(fixture.request.clone())
+            .unwrap(),
         &active,
     )
     .await
@@ -849,17 +874,11 @@ fn source_image_token_rows_use_actual_factory_build_and_retry_composition() {
 
 #[test]
 fn unknown_provider_uses_actual_trait_default_for_source_invalid_image() {
-    use parrot_provider::{
-        catalogs::Model,
-        sessions::{EventStream, Session},
-    };
+    use parrot_provider::{catalogs::Model, sessions::Session};
     struct UnusedProvider;
     impl Provider for UnusedProvider {
         fn id(&self) -> &str {
             "unused"
-        }
-        fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-            panic!("token default must not call the provider")
         }
         fn has_credential<'a>(
             &'a self,

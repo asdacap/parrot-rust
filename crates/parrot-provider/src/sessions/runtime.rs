@@ -15,13 +15,6 @@ pub trait EventStream: Send {
 pub trait Session: Send + Sync {
     fn begin_turn(&self) -> BoxFuture<'_, Result<(), Error>>;
     fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error>;
-    fn call_with_retry_observation(
-        &self,
-        request: Request,
-        _observe: Arc<dyn Fn(i32, std::time::Duration) + Send + Sync>,
-    ) -> Result<Box<dyn EventStream>, Error> {
-        self.call(request)
-    }
     fn call_with_trace(
         &self,
         request: Request,
@@ -48,7 +41,6 @@ pub trait Provider: Send + Sync {
     fn usage_reporter(&self) -> Option<Arc<dyn super::decorators::UsageReporter>> {
         None
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error>;
     fn has_credential<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,

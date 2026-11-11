@@ -1,6 +1,5 @@
 use super::{Cancel, Fixture, active};
-use parrot_domain::contracts::storage::{SessionTransactions, TransactionCommand};
-use parrot_storage::database::{DatabaseCommand, DatabaseError, SessionDatabase, Transaction};
+use parrot_storage::database::DatabaseError;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -110,44 +109,6 @@ async fn every_admitted_command_runs_serially_on_same_non_executor_thread() {
     db.close().await.unwrap();
 }
 
-struct Command {
-    key: String,
-}
-impl TransactionCommand for Command {
-    type Key = String;
-    type Output = i64;
-    fn key(&self) -> &String {
-        &self.key
-    }
-}
-impl DatabaseCommand for Command {
-    fn execute(self, tx: &Transaction<'_>) -> Result<i64, DatabaseError> {
-        tx.execute("INSERT INTO actor_probe VALUES(?1,9)", [self.key])?;
-        Ok(9)
-    }
-}
-#[tokio::test]
-async fn typed_shared_contract_retains_key_receipt_and_selected_root() {
-    let fixture = Fixture::new();
-    let db = fixture.open_actor_database().await;
-    let transactions = db.transactions::<Command>();
-    assert_eq!(transactions.selected_root(), &fixture.root());
-    let ticket = transactions
-        .admit(
-            Command {
-                key: "typed".into(),
-            },
-            &active(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(ticket.key(), "typed");
-    let receipt = ticket.into_completion().await.unwrap().into_value();
-    assert_eq!(receipt.key(), "typed");
-    assert_eq!(*receipt.output(), 9);
-    db.close().await.unwrap();
-}
-
 #[tokio::test]
 async fn close_from_another_clone_drains_and_closes_every_clone() {
     let fixture = Fixture::new();
@@ -189,23 +150,4 @@ async fn dropping_last_database_handle_still_finishes_admitted_transaction() {
             .unwrap(),
         1
     );
-}
-
-#[tokio::test]
-async fn in_memory_database_uses_memory_journal_but_still_enforces_foreign_keys() {
-    let fixture = Fixture::new();
-    let db = SessionDatabase::open_memory(fixture.root()).unwrap();
-    let mode = db
-        .admit("memory", &active(), |tx| {
-            Ok(tx.query_row("PRAGMA journal_mode", [], |r| r.get::<_, String>(0))?)
-        })
-        .unwrap()
-        .into_completion()
-        .await
-        .unwrap()
-        .into_value()
-        .into_output();
-    assert_eq!(mode, "memory");
-    db.close().await.unwrap();
-    assert!(!fixture.0.join("session.db").exists());
 }

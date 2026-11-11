@@ -79,11 +79,6 @@ impl ModelMetadataFields {
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
-
-    #[must_use]
-    pub const fn bits(self) -> u16 {
-        self.0
-    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -126,8 +121,6 @@ pub struct Model {
 }
 
 impl Model {
-    pub const DEFAULT_REQUESTED_OUTPUT_TOKENS: i32 = 32 * 1024;
-
     #[must_use]
     pub fn new(id: impl Into<String>, provider_id: impl Into<String>) -> Self {
         let id = id.into();
@@ -144,23 +137,6 @@ impl Model {
             capabilities: ModelCapabilities::default(),
             fields: ModelMetadataFields::NONE,
         }
-    }
-
-    #[must_use]
-    pub fn requested_output_tokens(&self) -> i32 {
-        if self.max_output_tokens > 0 {
-            Self::DEFAULT_REQUESTED_OUTPUT_TOKENS.min(self.max_output_tokens)
-        } else {
-            Self::DEFAULT_REQUESTED_OUTPUT_TOKENS
-        }
-    }
-
-    #[must_use]
-    pub fn output_reserved_input_token_limit(&self) -> Option<i64> {
-        (self.context_window > 0).then(|| {
-            ((i64::from(self.context_window) - i64::from(self.requested_output_tokens())) * 20 / 21)
-                .max(0)
-        })
     }
 
     #[must_use]
@@ -189,14 +165,6 @@ pub enum StandardModelError {
     Json(CatalogError),
     InvalidOperation(CatalogError),
     Provider(CatalogError),
-}
-
-impl StandardModelError {
-    pub(crate) fn into_catalog_error(self) -> CatalogError {
-        match self {
-            Self::Json(error) | Self::InvalidOperation(error) | Self::Provider(error) => error,
-        }
-    }
 }
 
 impl fmt::Display for StandardModelError {

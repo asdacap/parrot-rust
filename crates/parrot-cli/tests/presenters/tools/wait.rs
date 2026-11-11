@@ -1,3 +1,4 @@
+use crate::support::animate;
 use parrot_cli::presenters::tools::wait::WaitToolPresenter;
 use parrot_cli::presenters::*;
 use parrot_cli::terminal_frames::{LiveBufferItem, LiveBufferRenderContext};
@@ -38,7 +39,7 @@ fn wait_counts_down_same_live_item_across_animated_frames() {
         );
         millis.store(10000, Ordering::SeqCst);
         assert_eq!(
-            LiveBufferItem::render(&live.animate(1), context)
+            LiveBufferItem::render(&animate(&live, 1), context)
                 .unwrap()
                 .lines[0]
                 .text(),
@@ -46,7 +47,7 @@ fn wait_counts_down_same_live_item_across_animated_frames() {
         );
         millis.store(400000, Ordering::SeqCst);
         assert_eq!(
-            LiveBufferItem::render(&live.animate(2), context)
+            LiveBufferItem::render(&animate(&live, 2), context)
                 .unwrap()
                 .lines[0]
                 .text(),

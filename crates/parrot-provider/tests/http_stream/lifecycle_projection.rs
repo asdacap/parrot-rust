@@ -271,6 +271,7 @@ async fn observe_provider_idle(input: &Value) -> Value {
             caller.cancel();
         });
     }
+    let counter = ResponseByteCounter::default();
     let mut stream = HttpEventStream::new(
         transport.clone(),
         endpoint(),
@@ -280,7 +281,7 @@ async fn observe_provider_idle(input: &Value) -> Value {
             idle_timeout: Duration::from_millis(timeout),
             ..options()
         },
-        ResponseByteCounter::default(),
+        counter.clone(),
     )
     .unwrap();
     let mut events = Vec::new();
@@ -295,7 +296,7 @@ async fn observe_provider_idle(input: &Value) -> Value {
             Err(error) => break error,
         }
     };
-    json!({"events":events,"error":source_error(&error),"response_bytes":stream.response_bytes(),"body_disposed":disposed.load(Ordering::SeqCst),"handler_calls":transport.calls()})
+    json!({"events":events,"error":source_error(&error),"response_bytes":counter.get(),"body_disposed":disposed.load(Ordering::SeqCst),"handler_calls":transport.calls()})
 }
 
 async fn observe_http(case_id: &str, input: &Value) -> Value {

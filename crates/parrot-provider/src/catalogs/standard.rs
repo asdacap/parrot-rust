@@ -21,10 +21,6 @@ fn invalid_operation_error(value: &Value) -> StandardModelError {
 }
 
 impl StandardModelDecoder {
-    pub fn decode(provider_id: &str, json: &str) -> Result<Vec<Model>, CatalogError> {
-        Self::decode_typed(provider_id, json).map_err(StandardModelError::into_catalog_error)
-    }
-
     pub fn decode_typed(provider_id: &str, json: &str) -> Result<Vec<Model>, StandardModelError> {
         let root = Value::parse(json)
             .map_err(|error| StandardModelError::Json(CatalogError(error.to_string())))?;

@@ -28,11 +28,6 @@ fn unix_transport_is_owner_only_and_reachable() {
         fs::symlink_metadata(&path).unwrap().permissions().mode() & 0o777,
         0o600
     );
-    assert_eq!(owned.path(), path);
-    assert_eq!(
-        UnixSocketIdentity::read(&path).unwrap(),
-        Some(owned.identity())
-    );
     let connection = UnixStream::connect(&path).unwrap();
     let _accepted = listener.accept().unwrap();
     drop(connection);
@@ -50,14 +45,12 @@ fn unix_transport_is_owner_only_and_reachable() {
 fn active_unix_transport_is_not_replaced() {
     let directory = TestDirectory::new();
     let path = directory.0.join("control/parrot.sock");
-    let (listener, owned) = unix::bind(&path).unwrap();
+    let (listener, _owned) = unix::bind(&path).unwrap();
+    let bound = UnixSocketIdentity::read(&path).unwrap();
     let error = unix::bind(&path).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
     assert!(error.to_string().contains("active"));
-    assert_eq!(
-        UnixSocketIdentity::read(&path).unwrap(),
-        Some(owned.identity())
-    );
+    assert_eq!(UnixSocketIdentity::read(&path).unwrap(), bound);
     let _first_probe = listener.accept().unwrap();
     let _client = UnixStream::connect(&path).unwrap();
     let _still_reachable = listener.accept().unwrap();
@@ -73,10 +66,7 @@ fn stale_unix_transport_is_removed_explicitly() {
     let (listener, owned) = unix::bind(&path).unwrap();
     assert!(UnixStream::connect(&path).is_ok());
     assert!(listener.accept().is_ok());
-    assert_eq!(
-        UnixSocketIdentity::read(&path).unwrap(),
-        Some(owned.identity())
-    );
+    assert!(owned.cleanup().unwrap());
 }
 
 #[test]
@@ -174,10 +164,11 @@ fn cleanup_preserves_a_bound_successor_socket_identity() {
     let directory = TestDirectory::new();
     let path = directory.0.join("socket.sock");
     let (original, owned) = unix::bind(&path).unwrap();
+    let original_identity = UnixSocketIdentity::read(&path).unwrap().unwrap();
     fs::remove_file(&path).unwrap();
     let successor = UnixListener::bind(&path).unwrap();
     let successor_identity = UnixSocketIdentity::read(&path).unwrap().unwrap();
-    assert_ne!(successor_identity, owned.identity());
+    assert_ne!(successor_identity, original_identity);
     assert!(!owned.cleanup().unwrap());
     drop(original);
     drop(owned);
@@ -194,6 +185,7 @@ fn cleanup_after_concurrent_successor_publication_preserves_successor() {
     let directory = TestDirectory::new();
     let path = directory.0.join("socket.sock");
     let (original, owned) = unix::bind(&path).unwrap();
+    let original_identity = UnixSocketIdentity::read(&path).unwrap().unwrap();
     let replacement_path = path.clone();
     let (published, ready) = std::sync::mpsc::channel();
     let replacement = std::thread::spawn(move || {
@@ -209,7 +201,7 @@ fn cleanup_after_concurrent_successor_publication_preserves_successor() {
         let _accepted = listener.accept().unwrap();
     });
     let successor = ready.recv().unwrap();
-    assert_ne!(successor, owned.identity());
+    assert_ne!(successor, original_identity);
     assert!(!owned.cleanup().unwrap());
     drop(owned);
     drop(original);

@@ -14,8 +14,7 @@ use parrot_domain::contracts::{
     security::AccessSnapshot,
 };
 use parrot_tools::task_artifacts::{
-    ArtifactReadError, BeforeToolBatch, TaskApplicationError, TaskArtifactParserAdapter,
-    TaskInputError, TaskInputInvocation, apply_task_input, parse_task_input, read_artifact,
+    ArtifactReadError, TaskArtifactParserAdapter, TaskInputError, parse_task_input, read_artifact,
 };
 
 #[derive(Debug)]
@@ -291,160 +290,39 @@ async fn task_input_requires_a_nonblank_path_and_preserves_inline_parse_errors()
     assert!(reader.request.lock().unwrap().is_none());
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct DispatchFailure(&'static str);
-impl std::fmt::Display for DispatchFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.0)
-    }
-}
-impl std::error::Error for DispatchFailure {}
-
 #[tokio::test]
-async fn application_dispatches_only_parsed_tasks_with_same_selection_and_boundary() {
-    let reader = FixtureReader::bytes(artifact_bytes());
-    let selection = String::from("immutable selection");
-    let selection_address = &selection as *const String;
-    let accepted = apply_task_input(
-        &reader,
-        TaskInputInvocation {
-            path_present: false,
-            path: None,
-            tasks_present: true,
-            tasks_json: task_set_json(),
-            snapshot: &Snapshot,
-            cancellation: &NoCancel,
-            selection: &selection,
-            assistant_sequence: 17,
-            call_id: "call-17",
-        },
-        move |tasks, actual_selection, boundary| {
-            assert_eq!(tasks.len(), 1);
-            assert!(std::ptr::eq(
-                selection_address,
-                actual_selection as *const String
-            ));
-            assert_eq!(actual_selection, "immutable selection");
-            assert_eq!(
-                boundary,
-                BeforeToolBatch {
-                    assistant_sequence: 17,
-                    call_id: "call-17".into(),
-                }
-            );
-            Ok::<_, DispatchFailure>(())
-        },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(accepted, 1);
-}
-
-#[tokio::test]
-async fn application_never_dispatches_rejected_inputs_and_does_not_accept_dispatch_errors() {
-    let not_dispatched = std::sync::atomic::AtomicBool::new(false);
-    let bad_input = apply_task_input(
-        &FixtureReader::bytes(Vec::new()),
-        TaskInputInvocation {
-            path_present: false,
-            path: None,
-            tasks_present: true,
-            tasks_json: "[]",
-            snapshot: &Snapshot,
-            cancellation: &NoCancel,
-            selection: &(),
-            assistant_sequence: 1,
-            call_id: "rejected",
-        },
-        |_, _, _| {
-            not_dispatched.store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok::<_, DispatchFailure>(())
-        },
-    )
-    .await;
-    assert!(matches!(
-        bad_input,
-        Err(OperationError::Failed(TaskApplicationError::Input(
-            TaskInputError::Inline(_)
-        )))
-    ));
-    assert!(!not_dispatched.load(std::sync::atomic::Ordering::SeqCst));
-
-    let read_rejected = apply_task_input(
+async fn task_input_read_failures_keep_artifact_errors_and_cancellation() {
+    let read_rejected = parse_task_input(
+        true,
+        Some("tasks.json"),
+        false,
+        "",
         &FixtureReader::failure(OperationError::Failed(FileReadError::new(
             FileReadErrorKind::Denied,
             "source denial",
         ))),
-        TaskInputInvocation {
-            path_present: true,
-            path: Some("tasks.json"),
-            tasks_present: false,
-            tasks_json: "",
-            snapshot: &Snapshot,
-            cancellation: &NoCancel,
-            selection: &(),
-            assistant_sequence: 1,
-            call_id: "read-rejected",
-        },
-        |_, _, _| {
-            not_dispatched.store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok::<_, DispatchFailure>(())
-        },
+        &Snapshot,
+        &NoCancel,
     )
     .await;
     assert!(matches!(
         read_rejected,
-        Err(OperationError::Failed(TaskApplicationError::Input(
-            TaskInputError::Artifact(ArtifactReadError::Read(_))
+        Err(OperationError::Failed(TaskInputError::Artifact(
+            ArtifactReadError::Read(_)
         )))
     ));
-    assert!(!not_dispatched.load(std::sync::atomic::Ordering::SeqCst));
 
-    let read_cancelled = apply_task_input(
+    let read_cancelled = parse_task_input(
+        true,
+        Some("tasks.json"),
+        false,
+        "",
         &FixtureReader::failure(OperationError::Cancelled),
-        TaskInputInvocation {
-            path_present: true,
-            path: Some("tasks.json"),
-            tasks_present: false,
-            tasks_json: "",
-            snapshot: &Snapshot,
-            cancellation: &NoCancel,
-            selection: &(),
-            assistant_sequence: 1,
-            call_id: "read-cancelled",
-        },
-        |_, _, _| {
-            not_dispatched.store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok::<_, DispatchFailure>(())
-        },
+        &Snapshot,
+        &NoCancel,
     )
     .await;
-    assert_eq!(read_cancelled, Err(OperationError::Cancelled));
-    assert!(!not_dispatched.load(std::sync::atomic::Ordering::SeqCst));
-
-    let dispatch_failure = apply_task_input(
-        &FixtureReader::bytes(Vec::new()),
-        TaskInputInvocation {
-            path_present: false,
-            path: None,
-            tasks_present: true,
-            tasks_json: task_set_json(),
-            snapshot: &Snapshot,
-            cancellation: &NoCancel,
-            selection: &(),
-            assistant_sequence: 2,
-            call_id: "failed-dispatch",
-        },
-        |_, _, _| Err::<(), _>(DispatchFailure("task graph rejected")),
-    )
-    .await;
-    assert_eq!(
-        dispatch_failure,
-        Err(OperationError::Failed(TaskApplicationError::Dispatch(
-            DispatchFailure("task graph rejected")
-        )))
-    );
+    assert!(matches!(read_cancelled, Err(OperationError::Cancelled)));
 }
 
 #[test]

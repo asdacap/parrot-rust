@@ -390,9 +390,7 @@ async fn http_only_auth_error_is_never_given_a_websocket_wrapper() {
     for kind in KINDS {
         for original in ordinary()
             .into_iter()
-            .chain([Error::Http(HttpError::RequestCancelled(
-                "actual-cancel-message".into(),
-            ))])
+            .chain([Error::Http(HttpError::Cancelled)])
         {
             let rig = rig(kind, original.clone(), 1, true);
             let actual = observe(rig.provider.open_session().unwrap().as_ref()).await;
@@ -406,8 +404,7 @@ async fn http_only_auth_error_is_never_given_a_websocket_wrapper() {
 fn preserved() -> Vec<Error> {
     vec![
         Error::Cancelled,
-        Error::Cancellation("secret-cancel".into()),
-        Error::Http(HttpError::RequestCancelled("actual-cancel-message".into())),
+        Error::Http(HttpError::Cancelled),
         Error::Provider("secret-config".into()),
         Error::ProviderWithCause {
             message: "secret-provider".into(),
@@ -448,8 +445,8 @@ async fn source_cancellation_and_provider_whitelist_remain_unwrapped() {
 async fn cancellation_and_permanent_provider_errors_do_not_use_the_websocket_retry_budget() {
     for kind in KINDS {
         for original in [
-            Error::Cancellation("secret-cancel".into()),
-            Error::Http(HttpError::RequestCancelled("actual-cancel-message".into())),
+            Error::Cancelled,
+            Error::Http(HttpError::Cancelled),
             Error::Http(HttpError::ProviderHttp("secret-provider-http".into())),
             Error::Provider("secret-config".into()),
             Error::ProviderWithCause {
@@ -460,14 +457,6 @@ async fn cancellation_and_permanent_provider_errors_do_not_use_the_websocket_ret
             let http_only = matches!(&original, Error::Http(HttpError::ProviderHttp(_)));
             let rig = rig(kind, original.clone(), usize::MAX, http_only);
             let actual = observe(retry_session(&rig).as_ref()).await;
-            if matches!(&original, Error::Http(HttpError::RequestCancelled(_))) {
-                let error = actual.failure.as_ref().unwrap();
-                assert_eq!(error.to_string(), "actual-cancel-message");
-                assert_eq!(
-                    std::error::Error::source(error).unwrap().to_string(),
-                    "actual-cancel-message"
-                );
-            }
             assert_eq!(actual.failure, Some(original));
             assert_eq!(actual.retries(), 0);
             assert_eq!(rig.credentials.calls.load(Ordering::SeqCst), 1);
@@ -584,12 +573,7 @@ async fn visible_websocket_output_still_blocks_retry_and_http_fallback() {
 async fn signalled_caller_keeps_credential_cancellation(http_only: bool) {
     for kind in KINDS {
         for retry in [false, true] {
-            for original in [
-                Error::Cancellation("synthetic auth cancelled".into()),
-                Error::Http(HttpError::RequestCancelled(
-                    "synthetic HTTP auth cancelled".into(),
-                )),
-            ] {
+            for original in [Error::Cancelled, Error::Http(HttpError::Cancelled)] {
                 let caller = Arc::new(Caller::default());
                 let rig = rig(kind, original.clone(), usize::MAX, http_only);
                 *rig.credentials.cancel_caller.lock().unwrap() = Some(caller.clone());

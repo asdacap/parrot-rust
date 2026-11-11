@@ -1,5 +1,5 @@
 //! Fixed bundled-template migration evidence, not general Scriban compatibility.
-use parrot_foundation::template_minijinja::MiniJinjaPromptTemplateEngine;
+use parrot_core::{CancellationToken, template::MiniJinjaPromptTemplateEngine};
 use serde_json::{Map, Value};
 use std::{fs, path::PathBuf};
 
@@ -29,7 +29,7 @@ fn fields(value: &Value) -> &Map<String, Value> {
 fn render(id: &str, text: &str, arguments: &Value) -> String {
     let engine =
         MiniJinjaPromptTemplateEngine::compile(&format!("prompt_templates.{id}"), text).unwrap();
-    match engine.render(fields(arguments), &NoCancellation) {
+    match engine.render(fields(arguments), CancellationToken::new(&NoCancellation)) {
         Ok(value) => value,
         Err(error) => panic!("{id}: {error}"),
     }
@@ -62,10 +62,16 @@ fn m3_content_is_opaque_and_repeated_template_calls_are_isolated() {
         )
         .unwrap();
         let first = engine
-            .render(fields(&input["arguments"]), &NoCancellation)
+            .render(
+                fields(&input["arguments"]),
+                CancellationToken::new(&NoCancellation),
+            )
             .unwrap();
         let second = engine
-            .render(fields(&input["arguments"]), &NoCancellation)
+            .render(
+                fields(&input["arguments"]),
+                CancellationToken::new(&NoCancellation),
+            )
             .unwrap();
         assert_eq!(first, second, "{id} repeated render");
     }

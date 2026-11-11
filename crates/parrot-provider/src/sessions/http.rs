@@ -153,13 +153,6 @@ impl HttpDriver {
     pub fn take_turn_state(&mut self) -> Option<String> {
         self.turn_state.take()
     }
-    pub fn response_bytes(&self) -> u64 {
-        self.counter.get()
-    }
-    /// The scope owner can cancel this trace even while no read is outstanding.
-    pub fn request_trace(&self) -> Option<RequestTrace> {
-        self.attempt.clone()
-    }
 
     fn initialize(&mut self) -> Result<(), Error> {
         let Some(initial) = self.initial.take() else {
@@ -376,8 +369,7 @@ fn chat_error(error: ChatStreamError) -> Error {
 fn failure_kind(error: &Error) -> FailureKind {
     match error {
         Error::Cancelled
-        | Error::Cancellation(_)
-        | Error::Http(HttpError::Cancelled | HttpError::RequestCancelled(_))
+        | Error::Http(HttpError::Cancelled)
         | Error::Socket(WebSocketError::Cancelled) => FailureKind::Cancelled,
         Error::Http(HttpError::RequestTooLarge(_)) => FailureKind::RequestTooLarge,
         Error::Http(HttpError::Wire(_))
@@ -403,20 +395,6 @@ impl HttpEventsBridge {
     }
 }
 impl HttpEvents for HttpEventsBridge {
-    fn next<'a>(
-        &'a mut self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, Error>> {
-        Box::pin(async move {
-            loop {
-                match self.driver.next_response(cancellation).await? {
-                    Some(HttpResponseEvent::Event(event)) => return Ok(Some(event)),
-                    Some(_) => {}
-                    None => return Ok(None),
-                }
-            }
-        })
-    }
     fn next_event<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,

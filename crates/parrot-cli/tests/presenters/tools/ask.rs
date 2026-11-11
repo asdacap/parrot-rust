@@ -7,9 +7,12 @@ use parrot_cli::terminal_frames::{
 
 fn live(call: &ToolCallPresentation, columns: usize) -> Vec<String> {
     LiveBufferItem::render(
-        &ToolPresenterRegistry::standard(vec![])
-            .present_live(call, 0)
-            .unwrap(),
+        &ToolPresenterRegistry::standard_with_skill_read_paths(
+            vec![],
+            Arc::new(tools::read::SkillReadPathFormatter::default()),
+        )
+        .present_live(call, 0)
+        .unwrap(),
         LiveBufferRenderContext {
             columns,
             color: false,
@@ -28,10 +31,13 @@ fn terminal(
     columns: usize,
 ) -> Vec<String> {
     ScrollbackItem::render(
-        &ToolPresenterRegistry::standard(vec![])
-            .present_terminal(call, terminal)
-            .unwrap()
-            .unwrap(),
+        &ToolPresenterRegistry::standard_with_skill_read_paths(
+            vec![],
+            Arc::new(tools::read::SkillReadPathFormatter::default()),
+        )
+        .present_terminal(call, terminal)
+        .unwrap()
+        .unwrap(),
         ScrollbackRenderContext {
             columns,
             color: false,

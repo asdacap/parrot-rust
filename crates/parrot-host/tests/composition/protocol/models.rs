@@ -14,7 +14,7 @@ use parrot_provider::{
         registry::ProviderRegistry,
     },
     sessions::{
-        Content, Error, EventStream, Provider, Request, Session,
+        Content, Error, Provider, Session,
         decorators::{
             SubscriptionUsage, UsageCredits, UsageReporter, UsageReportingProvider, UsageWindow,
         },
@@ -54,9 +54,6 @@ struct FixtureProvider {
 impl Provider for FixtureProvider {
     fn id(&self) -> &str {
         self.id
-    }
-    fn call(&self, _: Request) -> std::result::Result<Box<dyn EventStream>, Error> {
-        panic!("no live calls")
     }
     fn has_credential<'a>(
         &'a self,

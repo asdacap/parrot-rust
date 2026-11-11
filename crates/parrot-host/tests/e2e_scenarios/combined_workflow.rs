@@ -1,6 +1,6 @@
 use super::*;
 use parrot_domain::values::context::ContextSize;
-use parrot_runtime::interactions::{PermissionDecision, QuestionReply};
+use parrot_runtime::interactions::{PermissionDecision, QuestionReply, QuestionReplyKind};
 use parrot_storage::{conversation::ConversationRepository, events::MessageRole};
 use tokio::sync::Semaphore;
 
@@ -168,7 +168,10 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     hosted
         .reply_question(
             &question.id,
-            QuestionReply::answered(vec!["t76-combined-answer".into()]),
+            QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: vec!["t76-combined-answer".into()],
+            },
         )
         .unwrap();
     // The plain reject choice accepts no reason and can never call NeverGrant::approve.

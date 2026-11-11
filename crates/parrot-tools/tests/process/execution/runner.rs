@@ -63,7 +63,7 @@ async fn enabled_unavailable_runner_does_not_start_or_provision_queue() {
     let runner = ProcessRunner::new(UnavailableProcessSandbox, Arc::new(SandboxGate::new(true)));
     assert!(!runner.sandbox_available());
     let error = runner
-        .start(&request, &())
+        .start_with_policy(&request, || Ok(()))
         .await
         .err()
         .expect("unavailable sandbox");
@@ -72,17 +72,17 @@ async fn enabled_unavailable_runner_does_not_start_or_provision_queue() {
 }
 
 #[tokio::test]
-async fn explicit_gate_off_run_forces_pipe_and_forwards_environment_and_cwd() {
+async fn explicit_gate_off_start_forwards_environment_and_cwd() {
     let directory = Directory::new();
     let mut request = directory.request("printf '%s|%s' \"$T40_RUNNER_VALUE\" \"$PWD\"");
     request
         .environment
         .push(("T40_RUNNER_VALUE".into(), "π-value".into()));
-    request.terminal_mode = TerminalMode::PseudoTerminal;
-    request.pty_helper = Some(directory.0.join("missing-helper"));
     let gate = Arc::new(SandboxGate::new(false));
     let runner = ProcessRunner::new(UnavailableProcessSandbox, gate.clone());
-    let result = runner.run(&request, &()).await.unwrap();
+    let execution = runner.start_with_policy(&request, || Ok(())).await.unwrap();
+    let result = execution.wait().await.unwrap();
+    execution.settle().await.unwrap();
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.stdout, format!("π-value|{}", directory.0.display()));
     assert!(result.stderr.is_empty());
@@ -92,7 +92,12 @@ async fn explicit_gate_off_run_forces_pipe_and_forwards_environment_and_cwd() {
     assert!(!runner.sandbox_available());
     gate.set_enabled(true);
     assert_eq!(
-        runner.start(&request, &()).await.err().unwrap().kind(),
+        runner
+            .start_with_policy(&request, || Ok(()))
+            .await
+            .err()
+            .unwrap()
+            .kind(),
         io::ErrorKind::Unsupported
     );
 }
@@ -169,7 +174,7 @@ async fn request_cancellation_remains_linked_after_start_returns() {
     let cancellation = Arc::new(Cancel::default());
     request.cancellation = Some(cancellation.clone());
     let runner = ProcessRunner::new(UnavailableProcessSandbox, Arc::new(SandboxGate::new(false)));
-    let execution = runner.start(&request, &()).await.unwrap();
+    let execution = runner.start_with_policy(&request, || Ok(())).await.unwrap();
     let pid = execution.id();
     cancellation.0.store(true, Ordering::Release);
     let _ = tokio::time::timeout(Duration::from_secs(5), execution.wait())

@@ -76,16 +76,10 @@ impl StatePaths {
     pub fn credentials_file(&self) -> PathBuf {
         self.config.join("credentials.json")
     }
-    pub fn credential_preset_directory(&self) -> PathBuf {
-        self.config.join("credential_presets")
-    }
     pub fn skills_directory(&self) -> PathBuf {
         self.data.join("skills")
     }
     pub fn control(&self) -> PathBuf {
         self.state.join("control")
-    }
-    pub fn log_directory(&self) -> PathBuf {
-        self.state.join("logs")
     }
 }

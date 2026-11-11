@@ -435,10 +435,7 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
     ));
     let mut harness = Harness::new(&fixture, vec![tool.clone().handle()]).await;
     let (sequence, calls) = fixture.fresh_batches.lock().unwrap().pop_front().unwrap();
-    harness
-        .state
-        .begin_execution(sequence, calls.clone())
-        .unwrap();
+    harness.begin_execution(sequence, calls.clone()).unwrap();
     let mut request = ToolExecutionChunk {
         assistant_sequence: sequence,
         starts_batch: true,
@@ -486,11 +483,7 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
             .iter()
             .any(|event| event.has_tool_finished())
     );
-    harness
-        .state
-        .record_results(&mut harness.runtime_state.get_mut().conversation, &results)
-        .await
-        .unwrap();
+    harness.record_results(&results).await.unwrap();
     assert_eq!(
         fixture
             .history
@@ -528,23 +521,9 @@ async fn executor_uses_only_supplied_calls_and_state_records_results_before_the_
         .execute(next, harness.capture.clone().as_ref(), &NeverCancelled)
         .await
         .unwrap();
-    harness
-        .state
-        .record_results(
-            &mut harness.runtime_state.get_mut().conversation,
-            &remaining,
-        )
-        .await
-        .unwrap();
+    harness.record_results(&remaining).await.unwrap();
     let completed: Vec<_> = results.into_iter().chain(remaining).collect();
-    harness
-        .state
-        .complete_execution(
-            &mut harness.runtime_state.get_mut().conversation,
-            &completed,
-        )
-        .await
-        .unwrap();
+    harness.complete_execution(&completed).await.unwrap();
     assert_eq!(
         tool.calls
             .lock()

@@ -2,7 +2,9 @@ use super::TempRoot;
 use parrot_domain::contracts::paths::RootOrigin;
 use parrot_domain::values::identifiers::UserSessionId;
 use parrot_foundation::paths::{ApplicationRoots, UserSessionResources};
+use parrot_storage::conversation::{ConversationRepository, HistoryProjection};
 use parrot_storage::database::SessionDatabase;
+use parrot_storage::events::EventRepository;
 use parrot_storage::history_files::{SessionIndex, SessionMeta};
 use parrot_storage::ownership::{
     ClaimDisposition, OwnerRecord, OwnershipRoots, ProcessIdentity, ProcessIdentityStatus,
@@ -253,7 +255,6 @@ async fn selected_legacy_resources_and_writes_remain_in_place_after_duplicate_an
         .join(target.value());
     fixture.metadata(RootOrigin::Current, &target, "2026-01-01");
     let current_before = directory_files(&before_current);
-    admissions.set_legacy_path_read_fallback(false);
     let resources = UserSessionResources::new(selected.clone(), target.clone(), ()).unwrap();
     let db = SessionDatabase::open(selected.clone()).unwrap();
     let index = SessionIndex::new(selected.clone(), target.clone(), &fixture.workspace).unwrap();
@@ -274,21 +275,16 @@ async fn selected_legacy_resources_and_writes_remain_in_place_after_duplicate_an
         vec!["agent-session-main".into()],
     )
     .unwrap();
+    let repository = ConversationRepository::new(
+        EventRepository::new(db.clone()),
+        SessionIndex::new(selected.clone(), target.clone(), &fixture.workspace).unwrap(),
+    )
+    .unwrap();
     history
-        .replace_entries(vec![
-            parrot_storage::conversation::AgentHistoryEntry::Compaction {
-                sequence: 1,
-                summary: "legacy-history".into(),
-                watermark: 0,
-            },
-        ])
+        .rebuild(&repository, "agent-session-main")
         .await
         .unwrap();
-    assert!(
-        fs::read_to_string(history.path())
-            .unwrap()
-            .contains("legacy-history")
-    );
+    assert!(history.path().is_file());
     let blobs = parrot_storage::artifacts::output_blobs::ToolOutputBlobStore::for_session(
         &selected,
         "artifacts/output",
@@ -314,7 +310,10 @@ async fn selected_legacy_resources_and_writes_remain_in_place_after_duplicate_an
         b"legacy-only"
     );
     db.close().await.unwrap();
-    let discovered = admissions.discover_latest(&fixture.workspace).unwrap();
+    let discovered = fixture
+        .admissions(ProcessIdentityStatus::Found, false)
+        .discover_latest(&fixture.workspace)
+        .unwrap();
     // With fallback disabled, the legacy-only association is not discovered.
     assert_eq!(discovered.admission.disposition, ClaimDisposition::Fresh);
 }

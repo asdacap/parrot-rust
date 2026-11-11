@@ -57,7 +57,7 @@ async fn finish(
     text: &str,
 ) -> TurnCommit {
     repository
-        .admit_close_turn(turn, proposed, None, message(text), &NeverCancelled)
+        .admit_close_turn(turn, proposed, message(text), &NeverCancelled)
         .unwrap()
         .into_completion()
         .await
@@ -104,7 +104,6 @@ async fn cancellation_before_admission_keeps_turn_open_without_projection() {
     let ticket = repository.admit_close_turn(
         key("agent", "start"),
         end("agent", "canceled", "interrupted", 17, 9),
-        None,
         message("losing"),
         &cancelled,
     );
@@ -134,7 +133,6 @@ async fn projection_failure_after_terminal_insert_rolls_back_whole_close() {
         .admit_close_turn(
             key("agent", "start"),
             end("agent", "failed", "stop", 17, 9),
-            None,
             message("must rollback"),
             &NeverCancelled,
         )
@@ -186,7 +184,6 @@ async fn admitted_close_survives_dropped_ticket_late_cancel_and_reopen() {
         .admit_close_turn(
             key("agent", "start"),
             event.clone(),
-            Some(raw.clone()),
             message("winning answer"),
             &cancellation,
         )
@@ -356,7 +353,6 @@ async fn competing_closes_have_one_exact_winner_and_other_agent_events_do_not_bo
                 .admit_close_turn(
                     key("agent", "start"),
                     end("agent", id, "stop", 17, 9),
-                    None,
                     message(id),
                     &NeverCancelled,
                 )
@@ -433,7 +429,7 @@ async fn exact_invalid_turn_keys_and_stale_start_are_rejected_without_writes() {
         ),
     ] {
         let result = repository
-            .admit_close_turn(turn, proposed, None, message("never"), &NeverCancelled)
+            .admit_close_turn(turn, proposed, message("never"), &NeverCancelled)
             .unwrap()
             .into_completion()
             .await;
@@ -451,7 +447,6 @@ async fn exact_invalid_turn_keys_and_stale_start_are_rejected_without_writes() {
         .admit_close_turn(
             key("stale-agent", "old"),
             end("stale-agent", "stale", "stop", 0, 0),
-            None,
             message("never"),
             &NeverCancelled,
         )

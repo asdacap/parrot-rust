@@ -2,16 +2,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parrot_cli::presenters::{
-    EnhancedSessionPresenter, ImmediateScrollbackValue, SessionReplayContext, ToolPresenterRegistry,
+    EnhancedSessionPresenter, Presentation, SessionReplayContext, ToolPresenterRegistry,
 };
+use parrot_cli::terminal_frames::ScrollbackLayout;
 use parrot_domain::protocol::messages::{parrot as wire, queue};
 use protobuf::Message;
 use wire::event::Payload;
 
+use super::support::SessionHarness;
 use super::turn::{child, commits, completed, ended, event, live, start, text};
 
-fn configured(columns: usize) -> EnhancedSessionPresenter {
-    let mut presenter = EnhancedSessionPresenter::new(columns, false, false);
+fn configured(columns: usize) -> SessionHarness {
+    let mut presenter = SessionHarness::new(columns, false, false);
     presenter
         .set_session("build", "provider/model", false)
         .unwrap();
@@ -32,7 +34,7 @@ fn summary(owner: &str, fragment: &str, completed: bool) -> wire::Event {
 #[test]
 fn tool_path_aliases_flow_from_events_to_live_and_replayed_labels_per_agent() {
     for replaying in [false, true] {
-        let mut presenter = EnhancedSessionPresenter::new(200, false, replaying);
+        let mut presenter = SessionHarness::new(200, false, replaying);
         presenter
             .set_session("build", "provider/model", false)
             .unwrap();
@@ -165,9 +167,10 @@ fn reasoning_rows_flush_before_explicit_and_promoted_user_commits() {
         .observe(&summary("root", "Planning", false))
         .unwrap();
     let update = presenter
-        .commit(Arc::new(ImmediateScrollbackValue::trusted(vec![
-            "dialog output".into(),
-        ])))
+        .commit(Arc::new(Presentation::Lines {
+            lines: vec!["dialog output".into()],
+            layout: ScrollbackLayout::Compact,
+        }))
         .unwrap();
     assert_eq!(
         commits(&update.commits, 80),
@@ -366,7 +369,7 @@ fn reasoning_rows_resize_without_losing_entries_or_rewriting_committed_history()
 fn reasoning_replay_and_deferred_publication_share_the_same_rows() {
     let mut traces = Vec::new();
     for deferred in [false, true] {
-        let mut presenter = EnhancedSessionPresenter::new(80, false, true);
+        let mut presenter = SessionHarness::new(80, false, true);
         let mut trace = Vec::new();
         for published in [
             start("root"),
@@ -409,8 +412,7 @@ fn reasoning_replay_and_deferred_publication_share_the_same_rows() {
 #[test]
 fn reasoning_rows_precede_replayed_and_live_plan_output() {
     for replaying in [false, true] {
-        let replay = Arc::new(Mutex::new(SessionReplayContext::new(replaying)));
-        let mut presenter = EnhancedSessionPresenter::with_replay_context(80, false, replay);
+        let mut presenter = SessionHarness::new(80, false, replaying);
         presenter.observe(&start("root")).unwrap();
         presenter
             .observe(&summary("root", "Planning", false))
@@ -471,12 +473,12 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
     ];
     let registry =
         Arc::new(ToolPresenterRegistry::new(presenters, Arc::new(GenericToolPresenter)).unwrap());
-    let mut presenter = EnhancedSessionPresenter::with_registry(
+    let mut presenter = SessionHarness::external(EnhancedSessionPresenter::with_registry(
         200,
         true,
         Arc::new(Mutex::new(SessionReplayContext::new(false))),
         registry,
-    );
+    ));
     presenter
         .set_session("build", "provider/model", false)
         .unwrap();
@@ -563,7 +565,7 @@ fn task_update_notice_shows_execution_assignments_only_in_the_ui() {
         AGENT_TASK_PROGRESS_STATUS_SUCCEEDED as Succeeded,
     };
     for replaying in [false, true] {
-        let mut presenter = EnhancedSessionPresenter::new(160, false, replaying);
+        let mut presenter = SessionHarness::new(160, false, replaying);
         presenter.observe(&start("root")).unwrap();
         presenter.observe(&child("root")).unwrap();
         let snapshot = wire::AgentTaskProgressSnapshot {
@@ -788,7 +790,7 @@ fn steer_remains_pending_across_turn_boundaries_until_its_own_promotion() {
 
 #[test]
 fn replay_restores_pending_steers_and_commits_only_promoted_ones() {
-    let mut presenter = EnhancedSessionPresenter::new(120, false, true);
+    let mut presenter = SessionHarness::new(120, false, true);
     for (id, content) in [("taken", "taken steer"), ("pending", "pending steer")] {
         let update = presenter
             .observe(&event(
@@ -829,7 +831,7 @@ fn process_completions_use_distinct_icons_in_live_output_and_replay() {
             (wire::InputSource::INPUT_SOURCE_PROCESS, "⚙", "⚙"),
             (wire::InputSource::INPUT_SOURCE_UNSPECIFIED, "◇", "◆"),
         ] {
-            let mut presenter = EnhancedSessionPresenter::new(120, false, replaying);
+            let mut presenter = SessionHarness::new(120, false, replaying);
             presenter.observe(&start("root")).unwrap();
             let admitted = presenter
                 .observe(&event(
@@ -883,7 +885,7 @@ fn pending_notifications_show_only_the_headline_and_promote_the_full_content() {
                 "Shell process 'work' completed.",
             ),
         ] {
-            let mut presenter = EnhancedSessionPresenter::new(120, false, replaying);
+            let mut presenter = SessionHarness::new(120, false, replaying);
             let content =
                 format!("\n\n{headline}\nDetails that should not fill the pending buffer.");
             let admitted = presenter
@@ -1213,9 +1215,10 @@ fn live_usage_is_modeline_only_aggregates_all_agents_expires_and_resets() {
         assert!(!frame.contains(hidden));
     }
     let committed = presenter
-        .commit(Arc::new(ImmediateScrollbackValue::trusted(vec![
-            "committed sentinel".into(),
-        ])))
+        .commit(Arc::new(Presentation::Lines {
+            lines: vec!["committed sentinel".into()],
+            layout: ScrollbackLayout::Compact,
+        }))
         .unwrap();
     assert_eq!(committed.commits.len(), 1);
     let output = commits(&committed.commits, 120);
@@ -1392,12 +1395,15 @@ pub(crate) fn queue_event(owner: &str, queues: Vec<queue::QueueState>) -> wire::
 fn boundary_case(kind: &str, owner: &str, replaying: bool) {
     // This is the source's constant RunWithReplay predicate, not prepared-stream state.
     let context = Arc::new(Mutex::new(SessionReplayContext::new(replaying)));
-    let mut presenter = EnhancedSessionPresenter::with_registry(
+    let mut presenter = SessionHarness::external(EnhancedSessionPresenter::with_registry(
         120,
         false,
         context,
-        Arc::new(ToolPresenterRegistry::standard(Vec::new())),
-    );
+        Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
+            Vec::new(),
+            Arc::new(parrot_cli::presenters::tools::read::SkillReadPathFormatter::default()),
+        )),
+    ));
     presenter
         .set_session("build", "provider/model", false)
         .unwrap();

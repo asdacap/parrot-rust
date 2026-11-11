@@ -104,14 +104,13 @@ fn full_load_requires_and_propagates_every_template_validator_call() {
     })
     .unwrap();
     let mut visited = BTreeMap::new();
-    let configuration = Configuration::from_content("", &fixtures::environment(), |spec| {
+    Configuration::from_content("", &fixtures::environment(), |spec| {
         assert_eq!(expected.get(&spec.path), Some(spec));
         visited.insert(spec.path.clone(), spec.clone());
         Ok(())
     })
     .unwrap();
     assert_eq!(visited, expected);
-    assert_eq!(configuration.prompt_templates.len(), visited.len());
 }
 
 #[test]
@@ -123,7 +122,10 @@ fn approved_legacy_flag_is_default_true_and_does_not_change_resource_values() {
     assert_eq!(default.models, disabled.models);
     assert_eq!(default.runtime.snapshot(), disabled.runtime.snapshot());
     assert_eq!(default.system_prompts, disabled.system_prompts);
-    assert_eq!(default.prompt_templates, disabled.prompt_templates);
+    assert_eq!(
+        fixtures::fixture_templates("").unwrap(),
+        fixtures::fixture_templates("legacy_path_read_fallback: false\n").unwrap()
+    );
     for invalid in ["null", "TRUE", "[]", "0"] {
         assert_eq!(
             fixtures::fixture_configuration(&format!("legacy_path_read_fallback: {invalid}\n"))
@@ -194,9 +196,10 @@ fn configuration_instances_share_the_source_style_read_modify_write_lock() {
         .map(|(index, mut configuration)| {
             std::thread::spawn(move || {
                 let alias = ["low_llm", "medium_llm", "high_llm", "xhigh_llm"][index % 4];
-                configuration
-                    .set_model_alias(alias, &format!("provider/model-{index}"))
-                    .unwrap();
+                crate::support::transact(&mut configuration, |transaction| {
+                    transaction.set_model_alias(alias, &format!("provider/model-{index}"))
+                })
+                .unwrap();
             })
         })
         .collect();

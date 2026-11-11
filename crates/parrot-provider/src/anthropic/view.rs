@@ -11,9 +11,6 @@ pub trait RequestView {
     fn messages(&self) -> &[Self::Message];
     fn tools(&self) -> &[Self::Tool];
     fn reasoning_effort(&self) -> Option<&str>;
-    fn reasoning_summary(&self) -> Option<&str>;
-    fn provider_preferences(&self) -> &str;
-    fn include_router_metadata(&self) -> bool;
 }
 
 pub trait MessageView {
@@ -39,11 +36,8 @@ pub enum Role {
 pub trait ContentView {
     fn kind(&self) -> ContentKind;
     fn text(&self) -> &str;
-    fn image_path(&self) -> &str;
     fn image_url(&self) -> &str;
     fn media_type(&self) -> &str;
-    fn image_width(&self) -> i32;
-    fn image_height(&self) -> i32;
     fn read_image(&self) -> std::io::Result<Vec<u8>>;
 }
 

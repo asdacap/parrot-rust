@@ -98,7 +98,7 @@ impl ConversationRepository {
         let context = self.events.context().clone();
         self.events
             .transaction(move |tx| {
-                record(tx, &published, None, &(context.timestamp)())?;
+                record(tx, &published, &(context.timestamp)())?;
                 assistant.origin = ConversationOrigin::Model;
                 projection::project(
                     tx,

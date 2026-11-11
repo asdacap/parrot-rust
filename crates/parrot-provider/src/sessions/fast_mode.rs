@@ -42,14 +42,6 @@ impl Session for FastModeSession {
     fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
         self.inner.call(self.prepare(request))
     }
-    fn call_with_retry_observation(
-        &self,
-        request: Request,
-        observe: Arc<dyn Fn(i32, std::time::Duration) + Send + Sync>,
-    ) -> Result<Box<dyn EventStream>, Error> {
-        self.inner
-            .call_with_retry_observation(self.prepare(request), observe)
-    }
     fn call_with_trace(
         &self,
         request: Request,

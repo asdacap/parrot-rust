@@ -13,7 +13,7 @@ pub fn registry(raw: Arc<Policy>) -> Arc<ModeRegistry<Policy>> {
                         .unwrap()
                 })
                 .collect(),
-            COORDINATOR,
+            "coordinator",
         )
         .unwrap(),
     )
@@ -47,26 +47,24 @@ impl RetainedModePolicyMaterializer<Policy> for Materializer {
 fn registry_defaults_flags_case_sensitivity_and_ordinal_order_are_effective_configuration() {
     let profiles = profiles();
     let registry = registry(policy("raw"));
-    assert_eq!(registry.default(), COORDINATOR);
+    assert_eq!(registry.default(), "coordinator");
     assert_eq!(
         registry.list(),
-        [BUILD, COORDINATOR, "general", PLAN, QUERY]
+        [BUILD, "coordinator", "general", PLAN, "query"]
     );
-    assert_eq!(registry.resolve("").unwrap().id(), COORDINATOR);
+    assert_eq!(registry.resolve("").unwrap().id(), "coordinator");
     for unknown in ["missing", "Plan", "worker", " "] {
         assert!(registry.resolve(unknown).is_err());
     }
     for id in registry.list() {
         let mode = registry.resolve(id).unwrap();
         assert_eq!(mode.configuration(), &profiles[id]);
-        assert_eq!(mode.disabled_tools(), ["disabled"]);
-        assert!(!mode.is_tool_permitted("disabled"));
     }
     for (id, read_only, maximum) in [
-        (COORDINATOR, false, 1024),
+        ("coordinator", false, 1024),
         (BUILD, false, 1024),
         (PLAN, true, 1024),
-        (QUERY, true, 8),
+        ("query", true, 8),
     ] {
         let selected = registry.resolve(id).unwrap();
         assert_eq!(selected.configuration().read_only, read_only);
@@ -85,14 +83,12 @@ fn registry_defaults_flags_case_sensitivity_and_ordinal_order_are_effective_conf
     )
     .unwrap();
     assert_eq!(special.list(), ["A", "a", "\u{10000}", "\u{e000}"]);
-    config.allowed_tools = Some(vec!["allowed".into(), "disabled".into()]);
-    let profile = MaterializedModeProfile::new(
-        "custom".into(),
-        &config,
-        &["disabled".into()],
-        policy("tools"),
-    )
-    .unwrap();
+    let profile = parrot_runtime::agent_turn::services::TurnProfile {
+        id: "custom".into(),
+        maximum_requests: config.max_turns,
+        allowed_tools: Some(vec!["allowed".into(), "disabled".into()]),
+        disabled_tools: vec!["disabled".into()],
+    };
     assert!(profile.is_tool_permitted("allowed"));
     for tool in ["Allowed", "disabled", "other"] {
         assert!(!profile.is_tool_permitted(tool));
@@ -100,10 +96,9 @@ fn registry_defaults_flags_case_sensitivity_and_ordinal_order_are_effective_conf
 }
 
 #[test]
-fn lazy_mode_profile_retains_raw_policy_and_all_metadata_across_prepare_complete_and_reattach() {
+fn lazy_mode_profile_prompt_follows_prepare_complete_and_reattach() {
     let fixture = Fixture::new();
     let raw = policy("raw");
-    let config = profiles()[PLAN].clone();
     let parser = Arc::new(Parser::new());
     let factory = Arc::new(PlanModeWorkflowFactory::new(templates(), parser));
     let modes = UserSessionModes::new(registry(raw.clone()), vec![(PLAN.into(), factory)]).unwrap();
@@ -114,14 +109,6 @@ fn lazy_mode_profile_retains_raw_policy_and_all_metadata_across_prepare_complete
     modes.attach(fixture.scratch("main"));
     let profile = mode.profile();
     assert_eq!(profile.id(), PLAN);
-    assert_eq!(profile.usage(), config.usage);
-    assert_eq!(profile.recursion_limit(), config.recursion_limit);
-    assert_eq!(profile.allowed_tools(), config.allowed_tools.as_deref());
-    assert_eq!(profile.disabled_tools(), ["disabled"]);
-    assert_eq!(profile.max_turns(), config.max_turns);
-    assert_eq!(profile.is_user_selectable(), config.is_user_selectable);
-    assert_eq!(profile.is_agent_selectable(), config.is_agent_selectable);
-    assert!(Arc::ptr_eq(profile.security(), &raw));
     let before = profile.prompt().unwrap();
     // Consume T44's actual composite/epoch contract with the selected mode's
     // lazy text; this local adapter is not the production host composition.
@@ -159,7 +146,6 @@ fn lazy_mode_profile_retains_raw_policy_and_all_metadata_across_prepare_complete
         mode.complete().unwrap(),
         ModeCompletionOutcome::Repair(_)
     ));
-    assert!(Arc::ptr_eq(profile.security(), &raw));
     mode.prepare().unwrap();
     assert_eq!(profile.prompt().unwrap(), after);
     modes.attach(fixture.scratch("main"));
@@ -170,7 +156,6 @@ fn lazy_mode_profile_retains_raw_policy_and_all_metadata_across_prepare_complete
     assert_eq!(build.profile().prompt().unwrap(), profiles()[BUILD].prompt);
     build.prepare().unwrap();
     assert_eq!(build.complete().unwrap(), ModeCompletionOutcome::None);
-    assert!(Arc::ptr_eq(build.profile().security(), &raw));
 }
 
 #[test]
@@ -220,7 +205,6 @@ fn workflow_port_preserves_exact_lazy_prompt_reads_prepare_and_repair_lifecycle(
     let profile = mode.profile();
     assert_eq!(workflow.reads.load(Ordering::SeqCst), 0);
     assert_eq!(profile.id(), BUILD);
-    assert!(Arc::ptr_eq(profile.security(), &raw));
     assert_eq!(profile.prompt().unwrap(), "initial");
     mode.prepare().unwrap();
     assert!(workflow.prepared.load(Ordering::SeqCst));
@@ -257,7 +241,7 @@ fn independent_user_flags_and_copied_configuration_do_not_change_the_other_parti
     configs.get_mut(BUILD).unwrap().prompt = "later mutation".into();
     assert_eq!(
         registry.list(),
-        [BUILD, COORDINATOR, "general", PLAN, QUERY, "worker"]
+        [BUILD, "coordinator", "general", PLAN, "query", "worker"]
     );
     assert!(registry.resolve("review").is_err());
     assert_eq!(registry.resolve("worker").unwrap().id(), "worker");
@@ -269,7 +253,6 @@ fn independent_user_flags_and_copied_configuration_do_not_change_the_other_parti
         build.configuration().allowed_tools,
         configs[BUILD].allowed_tools
     );
-    assert_eq!(build.disabled_tools(), ["disabled"]);
     assert!(Arc::ptr_eq(build.security(), &raw));
     // ResolveChild/explore alias remain the child-profile owner, not ModeRegistry.
 }
@@ -312,10 +295,6 @@ fn capture_validates_before_single_materialization_propagates_error_and_forwards
     assert_eq!(*materializer.calls.lock().unwrap(), 2);
     assert!(Arc::ptr_eq(&selection.security, &output));
     assert!(!Arc::ptr_eq(&selection.security, &raw));
-    assert!(Arc::ptr_eq(
-        modes.resolve(PLAN).unwrap().profile().security(),
-        &raw
-    ));
     assert_eq!(selection.profile.id, PLAN);
     assert_eq!(
         selection.profile.maximum_requests,

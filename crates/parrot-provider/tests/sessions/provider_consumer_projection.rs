@@ -4,14 +4,13 @@ use parrot_provider::{
     http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     sessions::{
-        Error, Event, EventStream, Message, Provider, Request,
-        diagnostics::{
-            CallContext, CallTrace, DiagnosticEvent, DiagnosticSink, MonotonicDiagnosticClock,
-        },
+        Error, Event, EventStream, Message, Provider, Request, Session,
+        diagnostic_session::DiagnosticSession,
+        diagnostics::{DiagnosticEvent, DiagnosticSink, MonotonicDiagnosticClock},
         http::Protocol,
         provider::{
-            ApiKeySource, CallTraceFactory, ChatGptOptions, ChatGptProvider, CompatibleOptions,
-            OAuthAccess, OAuthTokenSource, OpenAICompatibleProvider,
+            ApiKeySource, ChatGptOptions, ChatGptProvider, CompatibleOptions, OAuthAccess,
+            OAuthTokenSource, OpenAICompatibleProvider,
         },
     },
 };
@@ -226,37 +225,17 @@ impl DiagnosticSink for Log {
         self.0.lock().unwrap().push(event);
     }
 }
-struct TraceFactory {
-    log: Arc<Log>,
-}
-impl CallTraceFactory for TraceFactory {
-    fn start(&self, request: &Request) -> Arc<CallTrace> {
-        Arc::new(CallTrace::start(
-            self.log.clone(),
-            Arc::new(MonotonicDiagnosticClock::default()),
-            CallContext {
-                agent_session_id: "consumer-probe".into(),
-                correlation_id: "consumer-call".into(),
-                provider_id: "configured".into(),
-                model_id: request.model.clone(),
-            },
-            None,
-        ))
-    }
-}
 fn provider(
     transport: &str,
     fallback: bool,
     idle: i64,
     http: Arc<Transport>,
     connector: Arc<UnsupportedConnector>,
-    trace: Option<Arc<dyn CallTraceFactory>>,
 ) -> Result<Arc<dyn Provider>, Error> {
     if transport == "chatgpt" {
         let mut options = ChatGptOptions::new(Arc::new(Credentials("key")));
         options.disable_websocket = !fallback;
         options.stream_idle_timeout_ms = idle;
-        options.trace_factory = trace;
         Ok(Arc::new(ChatGptProvider::new(options, http, connector)?))
     } else {
         let mut options = CompatibleOptions::new(
@@ -283,7 +262,6 @@ fn provider(
         };
         options.disable_websocket = !fallback;
         options.stream_idle_timeout_ms = idle;
-        options.trace_factory = trace;
         Ok(Arc::new(OpenAICompatibleProvider::new(
             options, http, connector,
         )?))
@@ -325,9 +303,15 @@ async fn idle(case: &Case) -> Result<(Value, Value), Box<dyn std::error::Error>>
         case.timeout_ms,
         http.clone(),
         connector.clone(),
-        Some(Arc::new(TraceFactory { log: log.clone() })),
     )?;
-    let session = provider.open_session()?;
+    let session = DiagnosticSession::new(
+        provider.open_session()?,
+        log.clone(),
+        Arc::new(MonotonicDiagnosticClock::default()),
+        "consumer-probe".into(),
+        "configured".into(),
+        None,
+    );
     let request = Request {
         model: "model".into(),
         messages: vec![Message::user("hello")],
@@ -389,7 +373,6 @@ async fn native(case: &Case) -> Result<(Value, Value), Box<dyn std::error::Error
         300_000,
         http.clone(),
         Arc::new(UnsupportedConnector::default()),
-        None,
     )?;
     let session = provider.open_session()?;
     let initial = Request {

@@ -216,7 +216,6 @@ async fn fetch_swallows_uncancelled_transport_cancellation_without_suppressing_n
  {
     for failure in [
         HttpError::Cancelled,
-        HttpError::RequestCancelled("The operation was canceled.".into()),
         HttpError::ProviderHttp("provider: response limit".into()),
     ] {
         let mut transport = Transport::body(Vec::new());

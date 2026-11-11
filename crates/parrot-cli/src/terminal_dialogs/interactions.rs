@@ -288,31 +288,6 @@ fn enhanced_question_collector() -> QuestionCollector {
     })
 }
 
-/// Return frontend-owned error detail while sharing Enhanced's answer collector.
-/// The caller owns InvalidArgument formatting and any retry of this request.
-pub async fn complete_question_with_outcome(
-    client: WebClient,
-    user_session_id: &str,
-    pending: &wire::PendingQuestion,
-    dialog: &mut dyn SlashDialog,
-    update_countdown: CountdownCallback,
-    cancellation: &dyn Cancellation,
-) -> Result<QuestionCompletionOutcome, SlashFailure> {
-    complete_question_core(
-        client,
-        user_session_id,
-        pending,
-        dialog,
-        update_countdown,
-        (
-            QuestionInteractionOptions::default(),
-            enhanced_question_collector(),
-        ),
-        cancellation,
-    )
-    .await
-}
-
 /// Share the same server-authoritative lifetime and reply/reject RPCs with a
 /// frontend-owned answer collector. `None` rejects; the caller owns retry/output.
 pub async fn complete_question_using(
@@ -729,17 +704,6 @@ async fn collect_question_answers(
 }
 
 /// Complete a plan's source dialog. `true` means that a prompt was queued.
-pub async fn complete_plan(
-    client: WebClient,
-    completed: &wire::PlanCompleted,
-    session: &mut dyn SlashSession,
-    dialog: &mut dyn SlashDialog,
-    cancellation: &dyn Cancellation,
-) -> Result<bool, SlashFailure> {
-    complete_plan_with_before_send(client, completed, session, dialog, |_| Ok(()), cancellation)
-        .await
-}
-
 /// Notify the owner after any selected mode change and immediately before the
 /// actual send, never for a cancelled, empty, or mode-only action.
 pub async fn complete_plan_with_before_send(

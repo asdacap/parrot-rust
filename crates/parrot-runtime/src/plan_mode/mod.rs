@@ -19,10 +19,8 @@ pub use workflow::{
 
 use std::{fmt, io};
 
-pub const COORDINATOR: &str = "coordinator";
 pub const BUILD: &str = "build";
 pub const PLAN: &str = "plan";
-pub const QUERY: &str = "query";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ModeError {

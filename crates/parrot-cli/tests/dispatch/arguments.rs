@@ -1,5 +1,5 @@
 use parrot_cli::dispatch::arguments::*;
-use std::io::{self, Cursor, Read};
+use std::io::Cursor;
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).into()).collect()
@@ -257,39 +257,4 @@ fn stdin_auth_requires_nonempty_key_or_exactly_two_nonempty_s3_lines() {
             "parrot: expected an access key and secret key on two stdin lines"
         );
     }
-}
-
-#[test]
-fn prompt_argument_pipe_and_interactive_modes_remain_distinct() {
-    struct Unreadable;
-    impl Read for Unreadable {
-        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
-            Err(io::Error::other("must not read input"))
-        }
-    }
-    assert_eq!(
-        read_chat_input("argument", true, &mut Unreadable).unwrap(),
-        ChatInput::Once("argument".into())
-    );
-    assert_eq!(
-        read_chat_input("", false, &mut Unreadable).unwrap(),
-        ChatInput::Interactive
-    );
-    assert_eq!(
-        read_chat_input("", true, &mut Cursor::new("  line1\nline2 \n")).unwrap(),
-        ChatInput::Once("line1\nline2".into())
-    );
-    assert_eq!(
-        read_chat_input("", true, &mut Cursor::new(" \n\t")).unwrap(),
-        ChatInput::EmptyPipe
-    );
-    assert!(read_chat_input("", true, &mut Unreadable).is_err());
-}
-
-#[test]
-fn renderer_selection_does_not_confuse_no_color_with_basic_mode() {
-    assert_eq!(renderer_for(false, false), RendererKind::Enhanced);
-    assert_eq!(renderer_for(true, false), RendererKind::Basic);
-    assert_eq!(renderer_for(false, true), RendererKind::Basic);
-    assert_eq!(renderer_for(true, true), RendererKind::Basic);
 }

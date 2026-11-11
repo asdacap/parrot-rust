@@ -1,7 +1,7 @@
 use super::support::{Activity, Dialog, NEVER, RpcFixture, RpcState, Session, Temp};
 use parrot_cli::{
-    slash_sessions::{CommandContext, SkillRefresh, SlashCommandRegistry},
-    slash_settings::{AuthServices, SettingsServices, commands},
+    slash_sessions::{CommandContext, SkillRefresh, SlashCommands},
+    slash_settings::{AuthServices, SettingsServices},
 };
 use parrot_domain::contracts::async_ops::{
     BoxFuture, Cancellation, OperationError, OperationResult,
@@ -83,10 +83,14 @@ async fn real_settings_handlers_register_exact_source_spellings_and_dispatch_thr
             FileDiagnosticLog::open_global(temp.path.join("logs"), "registration", |_| {}).unwrap(),
         ),
     });
-    let registry = SlashCommandRegistry::new(commands(SettingsServices {
-        client: fixture.client.clone(),
-        auth,
-    }));
+    let registry = SlashCommands::create(
+        SettingsServices {
+            client: fixture.client.clone(),
+            auth,
+        },
+        None,
+        "fixture-version",
+    );
     let expected = [
         ("/auth", "Manage credentials"),
         (
@@ -119,14 +123,13 @@ async fn real_settings_handlers_register_exact_source_spellings_and_dispatch_thr
         ),
     ];
     let descriptions = registry.descriptions();
-    assert_eq!(
-        descriptions
-            .iter()
-            .map(|row| (row.name.as_str(), row.summary.as_str()))
-            .collect::<Vec<_>>(),
-        expected
-    );
-    for (name, _) in expected {
+    for (name, summary) in expected {
+        assert!(
+            descriptions
+                .iter()
+                .any(|row| row.name == name && row.summary == summary),
+            "{name}"
+        );
         assert!(registry.find(name).is_some());
     }
     assert!(registry.find("/MODEL").is_none());

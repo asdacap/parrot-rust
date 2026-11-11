@@ -98,11 +98,6 @@ impl PtyTranscript {
         Self::read_locked(&mut state, offset)
     }
 
-    pub fn read_text(&self, offset: u64) -> io::Result<(u64, String)> {
-        let (cursor, units) = self.read(offset)?;
-        Ok((cursor, String::from_utf16_lossy(&units)))
-    }
-
     fn validate_offset(state: &State, offset: u64) -> io::Result<()> {
         if offset > state.length {
             return Err(invalid("The PTY transcript offset is out of range."));
@@ -196,8 +191,13 @@ impl Drop for PtyTranscript {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process::execution::output::tests::Directory;
+    use crate::process::execution::output::tests::{Directory, copy_output};
     use std::sync::{Arc, Barrier};
+
+    fn read_text(transcript: &PtyTranscript, offset: u64) -> (u64, String) {
+        let (cursor, units) = transcript.read(offset).unwrap();
+        (cursor, String::from_utf16_lossy(&units))
+    }
 
     // PtyTranscriptTests.Transcript_uses_utf16_offsets_while_decoding_split_utf8
     #[test]
@@ -222,9 +222,9 @@ mod tests {
         let dir = Directory::new();
         let transcript = PtyTranscript::new(&dir.0);
         transcript.append("A😀".as_bytes()).unwrap();
-        let (cursor, first) = transcript.read_text(0).unwrap();
+        let (cursor, first) = read_text(&transcript, 0);
         transcript.append("€B".as_bytes()).unwrap();
-        let (end, second) = transcript.read_text(cursor).unwrap();
+        let (end, second) = read_text(&transcript, cursor);
         assert_eq!(cursor, 3);
         assert_eq!(end, 5);
         assert_eq!(first + &second, "A😀€B");
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(transcript.len(), 0);
         transcript.complete().unwrap();
         transcript.complete().unwrap();
-        assert_eq!(transcript.read_text(0).unwrap().1, "�");
+        assert_eq!(read_text(&transcript, 0).1, "�");
         assert_eq!(transcript.len(), 1);
         assert!(transcript.append(b"x").is_err());
     }
@@ -272,7 +272,7 @@ mod tests {
         transcript.append(expected.as_bytes()).unwrap();
         transcript.complete().unwrap();
         let (first_cursor, first) = transcript.read(0).unwrap();
-        let (second_cursor, second) = transcript.read_text(first_cursor).unwrap();
+        let (second_cursor, second) = read_text(&transcript, first_cursor);
         assert_eq!(first.len(), MAX_OUTPUT_CHARACTERS + 1);
         assert_eq!(String::from_utf16(&first).unwrap(), format!("{prefix}😀"));
         assert_eq!(second, "tail");
@@ -328,9 +328,7 @@ mod tests {
         );
         assert_eq!(output.len(), remaining.encode_utf16().count() as u64);
         assert!(output.spilled());
-        let mut copied = Vec::new();
-        output.copy_to(&mut copied).unwrap();
-        assert_eq!(copied, remaining.as_bytes());
+        assert_eq!(copy_output(&output), remaining.as_bytes());
         let path = output.temporary_path().unwrap().to_owned();
         output.delete_temporary_file().unwrap();
         assert!(path.exists());
@@ -348,8 +346,6 @@ mod tests {
         transcript.append(expected.as_bytes()).unwrap();
         transcript.complete().unwrap();
         let (_, output) = transcript.read_output(0).unwrap();
-        let mut copied = Vec::new();
-        output.copy_to(&mut copied).unwrap();
-        assert_eq!(copied, expected.as_bytes());
+        assert_eq!(copy_output(&output), expected.as_bytes());
     }
 }

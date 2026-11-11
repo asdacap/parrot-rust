@@ -22,39 +22,16 @@ pub trait HeaderSource: Send + Sync {
 pub trait HttpFallback: Send + Sync {
     fn open_unprepared<'a>(
         &'a self,
-        _turn_state: String,
-        _cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>> {
-        Box::pin(async {
-            Err(Error::InvalidOperation(
-                "HTTP fallback does not support unprepared requests.".into(),
-            ))
-        })
-    }
-
-    fn open<'a>(
-        &'a self,
-        body: Vec<u8>,
         turn_state: String,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>>;
 }
 pub trait HttpEvents: Send {
-    fn next<'a>(
-        &'a mut self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, Error>>;
-    /// Override to preserve HTTP lifecycle markers, advancing only one event per pull.
+    /// Preserves HTTP lifecycle markers, advancing only one event per pull.
     fn next_event<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<SessionEvent>, Error>> {
-        Box::pin(async move {
-            self.next(cancellation)
-                .await
-                .map(|event| event.map(SessionEvent::Response))
-        })
-    }
+    ) -> BoxFuture<'a, Result<Option<SessionEvent>, Error>>;
     fn take_turn_state(&mut self) -> Option<String>;
 }
 
@@ -114,13 +91,6 @@ impl Session {
             disposed: false,
         }
     }
-    pub fn http_default(
-        provider_id: impl Into<String>,
-        headers: Arc<dyn HeaderSource>,
-        client: WebSocketClient,
-    ) -> Self {
-        Self::new(provider_id, headers, client, true)
-    }
     pub fn begin_turn(&mut self) {
         self.turn_state = None;
         self.reset_connection = true;
@@ -135,17 +105,6 @@ impl Session {
         self.completed = None;
         self.poison();
     }
-    pub fn call<'a>(
-        &'a mut self,
-        request: WebSocketRequest,
-        http: &'a dyn HttpFallback,
-    ) -> Result<SessionCall<'a>, WebSocketError> {
-        self.check_disposed()?;
-        self.reset_stale_connection();
-        let mut call = SessionCall::new(self, http);
-        call.prepare(request);
-        Ok(call)
-    }
     /// Prepares only on the first WebSocket pull; HTTP uses `open_unprepared` instead.
     pub fn call_lazy<'a>(
         &'a mut self,
@@ -154,7 +113,6 @@ impl Session {
     ) -> Result<SessionCall<'a>, WebSocketError> {
         self.check_disposed()?;
         let mut call = SessionCall::new(self, http);
-        call.use_original_http = true;
         call.prepare_request = Some(Box::new(prepare));
         Ok(call)
     }
@@ -198,7 +156,6 @@ pub struct SessionCall<'a> {
     session: &'a mut Session,
     http: &'a dyn HttpFallback,
     request: Option<WebSocketRequest>,
-    use_original_http: bool,
     prepare_request:
         Option<Box<dyn FnOnce() -> Result<WebSocketRequest, WebSocketError> + Send + 'a>>,
     observer: Option<Arc<dyn WebSocketObserver>>,
@@ -221,7 +178,6 @@ impl<'a> SessionCall<'a> {
             session,
             http,
             request: None,
-            use_original_http: false,
             prepare_request: None,
             observer: None,
             attempt_observer: None,
@@ -327,16 +283,7 @@ impl<'a> SessionCall<'a> {
     ) -> Result<Option<SessionEvent>, Error> {
         if self.http_events.is_none() {
             let turn_state = self.session.turn_state.clone().unwrap_or_default();
-            let opened = if self.use_original_http {
-                self.http.open_unprepared(turn_state, cancellation).await
-            } else if let Some(request) = &self.request {
-                self.http
-                    .open(request.http_body().to_vec(), turn_state, cancellation)
-                    .await
-            } else {
-                self.http.open_unprepared(turn_state, cancellation).await
-            };
-            match opened {
+            match self.http.open_unprepared(turn_state, cancellation).await {
                 Ok(events) => self.http_events = Some(events),
                 Err(error) => {
                     self.done = true;
@@ -489,7 +436,6 @@ impl<'a> SessionCall<'a> {
         Err(match error {
             error @ (WebSocketError::Socket { .. }
             | WebSocketError::Wire(_)
-            | WebSocketError::InvalidOperation(_)
             | WebSocketError::Response(
                 ResponsesError::WireProtocol(_)
                 | ResponsesError::Json(_)

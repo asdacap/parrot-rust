@@ -61,25 +61,6 @@ fn schema_null_absence_order_and_spelling_are_not_normalized() {
 }
 
 #[test]
-fn restored_usage_and_exceeded_state_are_independent_and_sticky() {
-    for restore_exceeded in [false, true] {
-        let budget = ToolCycleImageBudget::new(10);
-        budget.restore_accepted(6).unwrap();
-        if restore_exceeded {
-            budget.restore_exceeded();
-        }
-        assert_eq!(budget.try_accept(4), Ok(!restore_exceeded));
-        assert_eq!(budget.try_accept(5), Ok(false));
-        assert_eq!(budget.try_accept(1), Ok(false));
-        assert_eq!(budget.try_accept(0), Ok(false));
-        assert!(budget.is_exceeded());
-        let independent = ToolCycleImageBudget::new(10);
-        assert_eq!(independent.try_accept(10), Ok(true));
-        assert!(!independent.is_exceeded());
-    }
-}
-
-#[test]
 fn zero_exact_limit_over_limit_and_negative_input() {
     let zero = ToolCycleImageBudget::new(0);
     assert_eq!(zero.try_accept(0), Ok(true));
@@ -88,10 +69,6 @@ fn zero_exact_limit_over_limit_and_negative_input() {
     let budget = ToolCycleImageBudget::new(10);
     assert_eq!(
         budget.try_accept(-1),
-        Err(ImageBudgetError::NegativeByteLength)
-    );
-    assert_eq!(
-        budget.restore_accepted(-1),
         Err(ImageBudgetError::NegativeByteLength)
     );
     assert!(!budget.is_exceeded());
@@ -104,22 +81,10 @@ fn zero_exact_limit_over_limit_and_negative_input() {
     );
     assert!(budget.is_exceeded());
     assert_eq!(ToolCycleImageBudget::new(-1).try_accept(0), Ok(false));
-}
-
-#[test]
-fn restore_can_exceed_limit_but_checked_overflow_does_not_change_state() {
-    let budget = ToolCycleImageBudget::new(10);
-    budget.restore_accepted(i64::MAX).unwrap();
-    assert!(!budget.is_exceeded());
     assert_eq!(
-        budget.restore_accepted(1),
-        Err(ImageBudgetError::AcceptedBytesOverflow)
+        ToolCycleImageBudget::new(10).try_accept(i64::MAX),
+        Ok(false)
     );
-    assert_eq!(budget.restore_accepted(0), Ok(()));
-    assert_eq!(budget.try_accept(0), Ok(false));
-    assert!(budget.is_exceeded());
-    let budget = ToolCycleImageBudget::new(10);
-    assert_eq!(budget.try_accept(i64::MAX), Ok(false));
 }
 
 #[test]

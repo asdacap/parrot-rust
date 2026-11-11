@@ -196,7 +196,7 @@ async fn actual_anthropic_factory_bridge_is_lazy_and_passes_lifecycle_headers_ra
     native.provider_content =
         r#"[{"type":"thinking","thinking":"native","signature":"opaque"}]"#.into();
     req.messages.push(native);
-    let mut stream = provider.call(req).unwrap();
+    let mut stream = provider.open_session().unwrap().call(req).unwrap();
     assert_eq!(key.calls.load(Ordering::SeqCst), 0);
     assert!(transport.requests.lock().unwrap().is_empty());
     assert_eq!(
@@ -266,7 +266,7 @@ async fn actual_anthropic_stateless_sessions_delegate_calls_and_report_unsupport
 #[tokio::test]
 async fn actual_anthropic_request_limit_fails_before_start_or_transport() {
     let (provider, transport) = fixture(Arc::new(Key::ready()), 1, vec![]);
-    let mut stream = provider.call(request()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(request()).unwrap();
     assert!(matches!(
         stream.next(&ACTIVE).await,
         Err(Error::Http(HttpError::RequestTooLarge(1)))
@@ -280,7 +280,7 @@ async fn anthropic_pending_initialization_survives_dropped_observer_and_resolves
     key.released = AtomicBool::new(false);
     let key = Arc::new(key);
     let (provider, transport) = fixture(key.clone(), 1 << 20, vec![(200, COMPLETED)]);
-    let mut stream = provider.call(request()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(request()).unwrap();
     let mut next = stream.next(&ACTIVE);
     assert!(
         tokio::time::timeout(Duration::from_millis(10), next.as_mut())
@@ -303,7 +303,7 @@ async fn anthropic_close_cancels_and_joins_pending_initialization_without_sendin
     key.released = AtomicBool::new(false);
     let key = Arc::new(key);
     let (provider, transport) = fixture(key, 1 << 20, vec![]);
-    let mut stream = provider.call(request()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(request()).unwrap();
     let mut next = stream.next(&ACTIVE);
     assert!(
         tokio::time::timeout(Duration::from_millis(10), next.as_mut())
@@ -351,7 +351,7 @@ async fn anthropic_close_keeps_polling_cancelled_credential_cleanup_until_it_fin
         finished: AtomicBool::new(false),
     });
     let (provider, transport) = fixture(key.clone(), 1 << 20, vec![]);
-    let mut stream = provider.call(request()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(request()).unwrap();
     let mut next = stream.next(&ACTIVE);
     tokio::select! { biased; result=&mut next=>panic!("unexpected start {result:?}"), _=key.started.notified()=>{} }
     drop(next);
@@ -379,7 +379,7 @@ async fn anthropic_authentication_retains_actual_auth_enum_and_http_errors_retai
         let key = Arc::new(Key::ready());
         *key.result.lock().unwrap() = Err(Error::Authentication(error.clone()));
         let (provider, transport) = fixture(key, 1 << 20, vec![]);
-        let mut stream = provider.call(request()).unwrap();
+        let mut stream = provider.open_session().unwrap().call(request()).unwrap();
         assert_eq!(
             stream.next(&ACTIVE).await.unwrap_err(),
             Error::Authentication(error)
@@ -394,7 +394,7 @@ async fn anthropic_authentication_retains_actual_auth_enum_and_http_errors_retai
             r#"{"error":{"message":"denied","type":"authentication_error"}}"#,
         )],
     );
-    let mut stream = provider.call(request()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(request()).unwrap();
     assert!(matches!(
         stream.next(&ACTIVE).await.unwrap(),
         Some(Event::HttpRequestStarted)
@@ -415,7 +415,7 @@ async fn anthropic_authentication_retains_actual_auth_enum_and_http_errors_retai
 async fn anthropic_structured_stream_error_keeps_all_response_fields_and_body() {
     let body = "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"code\":\"overloaded\",\"message\":\"retry later\"}}\n\n";
     let (provider, _) = fixture(Arc::new(Key::ready()), 1 << 20, vec![(200, body)]);
-    let mut stream = provider.call(request()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(request()).unwrap();
     stream.next(&ACTIVE).await.unwrap();
     stream.next(&ACTIVE).await.unwrap();
     match stream.next(&ACTIVE).await.unwrap_err() {
@@ -435,7 +435,7 @@ async fn anthropic_initial_cancellation_preserves_aware_and_ignoring_ready_crede
         key.honor_cancel = aware;
         let key = Arc::new(key);
         let (provider, transport) = fixture(key.clone(), 1 << 20, vec![]);
-        let mut stream = provider.call(request()).unwrap();
+        let mut stream = provider.open_session().unwrap().call(request()).unwrap();
         let first = stream.next(&CANCELLED).await;
         if aware {
             assert!(matches!(first, Err(Error::Http(HttpError::Cancelled))))

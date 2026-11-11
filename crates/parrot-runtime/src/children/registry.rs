@@ -110,23 +110,6 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRegistry<S> {
         }
         Ok(())
     }
-    pub fn unregister_root(&self, scope: &Arc<Scope<S>>) -> ChildResult<()> {
-        let mut state = self.state.lock().expect("registry poisoned");
-        let index = state
-            .roots
-            .iter()
-            .position(|registered| {
-                Arc::ptr_eq(registered, scope) && scope.identity().session.depth == 0
-            })
-            .ok_or_else(|| {
-                ChildError::registry(format!(
-                    "agent scope not found: {}",
-                    scope.identity().session.session_id
-                ))
-            })?;
-        state.roots.remove(index);
-        Ok(())
-    }
     pub fn snapshot_roots(&self) -> Vec<Arc<Scope<S>>> {
         let state = self.state.lock().expect("registry poisoned");
         if state.shutdown.is_some() {
@@ -402,19 +385,6 @@ impl<S: RestrictableAccessSnapshot + 'static> ChildRegistry<S> {
                 scope.identity().session.session_id
             )))
         }
-    }
-    /// Borrows the current children while holding the same gate used by admission.
-    ///
-    /// The callback must not reenter this registry (including its other methods):
-    /// the gate is non-reentrant. Callers nesting different registries must retain
-    /// their ordinary parent-before-own ordering and acquire a root's own gate once.
-    pub fn with_children<R>(&self, callback: impl FnOnce(&[Arc<Scope<S>>]) -> R) -> R {
-        let state = self.state.lock().expect("children poisoned");
-        callback(if state.shutdown.is_some() {
-            &[]
-        } else {
-            &state.children
-        })
     }
     pub fn snapshot_children(&self) -> Vec<Arc<Scope<S>>> {
         let state = self.state.lock().expect("children poisoned");

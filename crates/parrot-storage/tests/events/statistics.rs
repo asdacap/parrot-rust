@@ -142,7 +142,12 @@ async fn usage_fact_semantic_retry_preserves_original_wire_unknowns_and_optional
             // originally committed wire bytes must not be canonicalized on retry.
             raw.extend_from_slice(&[0x0a, 0x03, b'r', b'a', b'w']);
             let parsed = Event::parse_from_bytes(&raw)?;
-            record(tx, &parsed, Some(&raw), AT)?;
+            let (request_id, tool_call_id) =
+                parrot_storage::database::extract_usage_keys(&parsed);
+            tx.execute(
+                "INSERT INTO event (id, agent_session, payload, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![parsed.id, parsed.agent_session_id, raw, AT, request_id, tool_call_id],
+            )?;
             assert_eq!(append_usage_fact(tx, &fact, &clock)?, 1);
             let stored: Vec<u8> =
                 tx.query_row("SELECT payload FROM event WHERE id = 'raw';", [], |row| {
@@ -252,7 +257,7 @@ async fn replay_progress_observes_each_decoded_row_without_changing_statistics()
                 request("duplicate", "agent", "", "repeat", 100),
                 envelope("nonusage", "observer"),
             ] {
-                record(tx, &event, None, AT)?;
+                record(tx, &event, AT)?;
             }
             Ok(())
         })
@@ -306,7 +311,7 @@ async fn replay_progress_stops_before_malformed_row_without_reporting_empty_succ
         repository
             .transaction(move |tx| {
                 for index in 0..4 {
-                    record(tx, &envelope(&format!("event-{index}"), "agent"), None, AT)?;
+                    record(tx, &envelope(&format!("event-{index}"), "agent"), AT)?;
                 }
                 tx.execute(
                     "UPDATE event SET payload = ?1 WHERE id = ?2;",
@@ -338,8 +343,8 @@ async fn replay_progress_counts_are_not_a_replay_success_marker() {
     let repository = fixture.repository();
     repository
         .transaction(|tx| {
-            record(tx, &start("first", "agent", "parent"), None, AT)?;
-            record(tx, &start("conflict", "agent", "other-parent"), None, AT)?;
+            record(tx, &start("first", "agent", "parent"), AT)?;
+            record(tx, &start("conflict", "agent", "other-parent"), AT)?;
             Ok(())
         })
         .await
@@ -376,7 +381,7 @@ async fn replay_ignores_aggregate_publications_and_preserves_fact_dedup_tools_an
                 envelope("trailing", "observer"),
             ];
             for event in events {
-                record(tx, &event, None, AT)?;
+                record(tx, &event, AT)?;
             }
             let replay = replay_statistics(tx)?;
             let agent = &replay.agents["agent"];
@@ -411,7 +416,7 @@ async fn replay_accumulates_each_descendant_own_models_once_in_source_agent_orde
                 request("middle-use", "middle", "root", "middle", 3),
                 request("leaf-use", "leaf", "middle", "leaf", 5),
             ] {
-                record(tx, &event, None, AT)?;
+                record(tx, &event, AT)?;
             }
             let replay = replay_statistics(tx)?;
             assert_eq!(replay.agents["root"].own.totals.input_tokens, 2);
@@ -435,12 +440,12 @@ async fn replay_cumulative_cost_addition_keeps_source_first_seen_agent_order() {
     let repository = fixture.repository();
     repository
         .transaction(|tx| {
-            record(tx, &start("root", "root", ""), None, AT)?;
+            record(tx, &start("root", "root", ""), AT)?;
             for (index, cost) in [1e16, -1e16, 1.0].into_iter().enumerate() {
                 let agent = format!("child-{index}");
                 let mut event = request(&format!("r-{index}"), &agent, "root", &agent, 0);
                 event.mut_request_usage_recorded().input_cost = cost;
-                record(tx, &event, None, AT)?;
+                record(tx, &event, AT)?;
             }
             assert_eq!(
                 replay_statistics(tx)?.agents["root"]
@@ -463,14 +468,14 @@ async fn replay_legacy_finished_tools_count_once_unfinished_mark_only_original_a
     repository
         .transaction(|tx| {
             for event in [start("root", "root", ""), start("child", "child", "root")] {
-                record(tx, &event, None, AT)?;
+                record(tx, &event, AT)?;
             }
             let mut finished = envelope("finished-before-start", "child");
             finished.set_tool_finished(ToolFinished {
                 tool_call_id: "legacy".into(),
                 ..Default::default()
             });
-            record(tx, &finished, None, AT)?;
+            record(tx, &finished, AT)?;
             for (id, call) in [
                 ("start-legacy", "legacy"),
                 ("start-unfinished", "unfinished"),
@@ -481,20 +486,15 @@ async fn replay_legacy_finished_tools_count_once_unfinished_mark_only_original_a
                     tool_call_id: call.into(),
                     ..Default::default()
                 });
-                record(tx, &event, None, AT)?;
+                record(tx, &event, AT)?;
             }
             finished.id = "duplicate-finish".into();
-            record(tx, &finished, None, AT)?;
+            record(tx, &finished, AT)?;
             let mut explicit_finish = finished.clone();
             explicit_finish.id = "explicit-finish".into();
             explicit_finish.mut_tool_finished().tool_call_id = "explicit".into();
-            record(tx, &explicit_finish, None, AT)?;
-            record(
-                tx,
-                &tool("explicit-fact", "child", "root", "explicit"),
-                None,
-                AT,
-            )?;
+            record(tx, &explicit_finish, AT)?;
+            record(tx, &tool("explicit-fact", "child", "root", "explicit"), AT)?;
             let replay = replay_statistics(tx)?;
             assert_eq!(replay.agents["child"].own.totals.tool_calls, 2);
             assert_eq!(replay.agents["root"].cumulative.totals.tool_calls, 2);
@@ -530,7 +530,7 @@ async fn replay_rejects_conflicting_missing_ancestor_and_cyclic_lineage_exactly(
         let fixture = Fixture::new();
         let repository = fixture.repository();
         repository.transaction(move |tx| {
-            for event in events { record(tx, &event, None, AT)?; }
+            for event in events { record(tx, &event, AT)?; }
             assert!(matches!(replay_statistics(tx), Err(EventError::Invalid(message)) if message == expected));
             Ok(())
         }).await.unwrap();
@@ -544,25 +544,20 @@ async fn replay_uses_current_fact_and_finished_failed_lineage_and_checks_fact_ov
     let repository = fixture.repository();
     repository
         .transaction(|tx| {
-            record(tx, &request("root-fact", "root", "", "root", 2), None, AT)?;
+            record(tx, &request("root-fact", "root", "", "root", 2), AT)?;
             let mut finished = envelope("finished", "child");
             finished.set_agent_finished(AgentFinished {
                 parent_agent_session_id: "root".into(),
                 ..Default::default()
             });
-            record(tx, &finished, None, AT)?;
+            record(tx, &finished, AT)?;
             let mut failed = envelope("failed", "leaf");
             failed.set_agent_failed(AgentFailed {
                 parent_agent_session_id: "child".into(),
                 ..Default::default()
             });
-            record(tx, &failed, None, AT)?;
-            record(
-                tx,
-                &request("leaf-fact", "leaf", "child", "leaf", 3),
-                None,
-                AT,
-            )?;
+            record(tx, &failed, AT)?;
+            record(tx, &request("leaf-fact", "leaf", "child", "leaf", 3), AT)?;
             let replay = replay_statistics(tx)?;
             assert_eq!(replay.parents["root"], "");
             assert_eq!(replay.parents["leaf"], "child");
@@ -571,7 +566,6 @@ async fn replay_uses_current_fact_and_finished_failed_lineage_and_checks_fact_ov
             record(
                 tx,
                 &request("overflow", "root", "", "overflow", i64::MAX),
-                None,
                 AT,
             )?;
             assert!(matches!(replay_statistics(tx), Err(EventError::Overflow)));
@@ -685,7 +679,7 @@ async fn aggregate_publications_are_raw_events_not_accounting_baselines() {
         .unwrap();
     let publication = baseline("publication", "agent", 900);
     let bytes = publication.write_to_bytes().unwrap();
-    let appended = repository.append_raw(bytes.clone(), None).await.unwrap();
+    let appended = repository.append(publication, None).await.unwrap();
     assert_eq!(appended.stored.raw, bytes);
     repository
         .append_usage_fact(request("after", "agent", "", "after", 3))

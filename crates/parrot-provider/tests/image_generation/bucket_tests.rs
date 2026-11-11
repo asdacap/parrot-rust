@@ -83,7 +83,7 @@ impl CredentialSource for Credentials {
                 })),
                 4 => Err(store_failure()),
                 5 => Err(Error::Provider("unrelated provider failure".into())),
-                6 => Err(Error::Cancellation("stored operation canceled".into())),
+                6 => Err(Error::Cancelled),
                 _ => Ok(None),
             }
         })
@@ -167,9 +167,7 @@ impl ImageTransport for Transport {
             }
             let status = self.statuses.lock().unwrap().pop_front().unwrap_or(200);
             if status == -2 {
-                return Err(Error::Cancellation(
-                    "synthetic dispatch cancellation".into(),
-                ));
+                return Err(Error::Http(HttpError::Cancelled));
             }
             if status < 0 {
                 std::future::pending::<()>().await;
@@ -591,7 +589,7 @@ async fn ready_credential_load_dispatches_even_with_precancelled_caller() {
 async fn non_authentication_store_failures_propagate_without_wrapping_or_fallback() {
     for (mode, expected) in [
         (5, Error::Provider("unrelated provider failure".into())),
-        (6, Error::Cancellation("stored operation canceled".into())),
+        (6, Error::Cancelled),
     ] {
         let transport = Transport::new(&[]);
         let b = bucket(transport.clone(), config(), credentials(mode));
@@ -669,7 +667,7 @@ async fn scripted_dispatch_cancellation_keeps_exact_original_cause_only_without_
         assert_cause(
             &error,
             &format!("image_upload: {path} timed out"),
-            &Error::Cancellation("synthetic dispatch cancellation".into()),
+            &Error::Http(HttpError::Cancelled),
         );
         assert_eq!(transport.requests.lock().unwrap().len(), 1);
     }

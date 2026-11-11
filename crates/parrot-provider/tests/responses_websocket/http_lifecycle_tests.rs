@@ -58,45 +58,25 @@ impl Connector for Unsupported {
 }
 struct Http {
     trace: Arc<Trace>,
-    legacy: bool,
     fail_body: bool,
 }
 impl HttpFallback for Http {
-    fn open<'a>(
+    fn open_unprepared<'a>(
         &'a self,
-        _: Vec<u8>,
         state: String,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
         self.trace.opens.lock().unwrap().push(state);
         let trace = self.trace.clone();
-        let legacy = self.legacy;
         let fail_body = self.fail_body;
         Box::pin(async move {
-            if legacy {
-                Ok(Box::new(Legacy(trace)) as Box<dyn HttpEvents>)
-            } else {
-                Ok(Box::new(PullHttp {
-                    trace,
-                    step: 0,
-                    state: None,
-                    fail_body,
-                }) as Box<dyn HttpEvents>)
-            }
+            Ok(Box::new(PullHttp {
+                trace,
+                step: 0,
+                state: None,
+                fail_body,
+            }) as Box<dyn HttpEvents>)
         })
-    }
-}
-struct Legacy(Arc<Trace>);
-impl HttpEvents for Legacy {
-    fn next<'a>(
-        &'a mut self,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
-        self.0.pulls.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Ok(Some(ResponsesEvent::TextDelta("legacy".into()))) })
-    }
-    fn take_turn_state(&mut self) -> Option<String> {
-        None
     }
 }
 struct PullHttp {
@@ -111,12 +91,6 @@ impl Drop for PullHttp {
     }
 }
 impl HttpEvents for PullHttp {
-    fn next<'a>(
-        &'a mut self,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
-        panic!("lifecycle override must be used, not legacy next")
-    }
     fn next_event<'a>(
         &'a mut self,
         token: &'a dyn Cancellation,
@@ -168,11 +142,7 @@ fn request() -> WebSocketRequest {
     )
 }
 
-fn setup(
-    disabled: bool,
-    legacy: bool,
-    fail_body: bool,
-) -> (Session, Http, Arc<Trace>, Arc<AtomicUsize>) {
+fn setup(disabled: bool, fail_body: bool) -> (Session, Http, Arc<Trace>, Arc<AtomicUsize>) {
     let trace = Arc::new(Trace::default());
     let connects = Arc::new(AtomicUsize::new(0));
     let client = WebSocketClient::new(
@@ -188,7 +158,6 @@ fn setup(
         session,
         Http {
             trace: trace.clone(),
-            legacy,
             fail_body,
         },
         trace,
@@ -204,28 +173,12 @@ fn counters(trace: &Trace) -> (usize, usize, usize) {
 }
 
 #[tokio::test]
-async fn old_http_next_implementation_uses_compatible_single_pull_default() {
-    let (mut session, http, trace, connects) = setup(true, true, false);
-    let token = Token::default();
-    let mut call = session.call(request(), &http).unwrap();
-    assert_eq!(counters(&trace), (0, 0, 0));
-    assert_eq!(
-        call.next(&token).await.unwrap(),
-        Some(SessionEvent::Response(ResponsesEvent::TextDelta(
-            "legacy".into()
-        )))
-    );
-    assert_eq!(counters(&trace), (1, 0, 0));
-    assert_eq!(connects.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
 async fn lifecycle_override_preserves_each_http_pull_and_fallback_boundary() {
     for disabled in [true, false] {
-        let (mut session, http, trace, connects) = setup(disabled, false, false);
+        let (mut session, http, trace, connects) = setup(disabled, false);
         let token = Token::default();
         {
-            let mut call = session.call(request(), &http).unwrap();
+            let mut call = session.call_lazy(|| Ok(request()), &http).unwrap();
             if !disabled {
                 assert!(matches!(
                     call.next(&token).await.unwrap(),
@@ -261,7 +214,7 @@ async fn lifecycle_override_preserves_each_http_pull_and_fallback_boundary() {
         }
         assert_eq!(trace.drops.load(Ordering::SeqCst), 1);
         assert_eq!(connects.load(Ordering::SeqCst), usize::from(!disabled));
-        let mut next = session.call(request(), &http).unwrap();
+        let mut next = session.call_lazy(|| Ok(request()), &http).unwrap();
         assert_eq!(
             next.next(&token).await.unwrap(),
             Some(SessionEvent::HttpRequestStarted)
@@ -296,9 +249,9 @@ async fn lifecycle_pull_projection_matches_actual_source_oracle() {
                 )
             })
             .collect();
-        let (mut session, http, trace, _) = setup(disabled, false, false);
+        let (mut session, http, trace, _) = setup(disabled, false);
         let token = Token::default();
-        let mut call = session.call(request(), &http).unwrap();
+        let mut call = session.call_lazy(|| Ok(request()), &http).unwrap();
         let mut actual = Vec::new();
         loop {
             let event = call.next(&token).await.unwrap();
@@ -327,9 +280,9 @@ async fn lifecycle_pull_projection_matches_actual_source_oracle() {
 #[tokio::test]
 async fn abandoning_lifecycle_marker_drops_http_without_prefetch() {
     for marker_count in [1, 2] {
-        let (mut session, http, trace, _) = setup(true, false, false);
+        let (mut session, http, trace, _) = setup(true, false);
         let token = Token::default();
-        let mut call = session.call(request(), &http).unwrap();
+        let mut call = session.call_lazy(|| Ok(request()), &http).unwrap();
         for _ in 0..marker_count {
             call.next(&token).await.unwrap().unwrap();
         }
@@ -345,9 +298,9 @@ async fn abandoning_lifecycle_marker_drops_http_without_prefetch() {
 #[tokio::test]
 async fn lifecycle_cancellation_and_body_error_do_not_replay_or_advance_again() {
     for cancel in [true, false] {
-        let (mut session, http, trace, connects) = setup(true, false, !cancel);
+        let (mut session, http, trace, connects) = setup(true, !cancel);
         let token = Token::default();
-        let mut call = session.call(request(), &http).unwrap();
+        let mut call = session.call_lazy(|| Ok(request()), &http).unwrap();
         assert_eq!(
             call.next(&token).await.unwrap(),
             Some(SessionEvent::HttpRequestStarted)

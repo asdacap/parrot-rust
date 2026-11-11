@@ -71,7 +71,6 @@ pub struct Configuration {
     pub models: ModelSettings,
     pub runtime: RuntimeSettings,
     pub system_prompts: BTreeMap<String, String>,
-    pub prompt_templates: BTreeMap<String, TemplateSpec>,
     pub legacy_path_read_fallback: bool,
     pub skills_generation: i64,
     path: Option<PathBuf>,
@@ -94,7 +93,7 @@ impl Configuration {
         yaml::merge(&mut root, &user_root)?;
         // Source validates profiles before constructing the template catalog and settings.
         runtime::validate_profiles(&root, environment)?;
-        let prompt_templates = templates::read_templates(&root, &mut validator)?;
+        templates::read_templates(&root, &mut validator)?;
         let _ = models::read_context_limit(&root, "context_limit", "context_limit")?;
         let system_prompts = templates::read_system_prompts(&root)?;
         if let Some(value) = root.get("inline_diff") {
@@ -114,7 +113,6 @@ impl Configuration {
             models,
             runtime,
             system_prompts,
-            prompt_templates,
             legacy_path_read_fallback,
             skills_generation: 0,
             path: None,
@@ -184,12 +182,6 @@ impl Configuration {
         Ok(())
     }
 
-    pub fn set_model_alias(&mut self, name: &str, target: &str) -> Result<()> {
-        self.model_configuration_transaction(|transaction| {
-            transaction.set_model_alias(name, target)
-        })?
-    }
-
     fn set_model_alias_unlocked(&mut self, name: &str, target: &str) -> Result<()> {
         if !self.models.model_aliases.contains_key(name) {
             return Err(ConfigError::invalid_data(format!(
@@ -214,32 +206,10 @@ impl Configuration {
         Ok(())
     }
 
-    pub fn set_model_aliases(&mut self, defaults: &ProviderModelAliasDefaults) -> Result<()> {
-        self.model_configuration_transaction(|transaction| transaction.set_model_aliases(defaults))?
-    }
-
     fn set_model_aliases_unlocked(&mut self, defaults: &ProviderModelAliasDefaults) -> Result<()> {
         let targets = defaults.targets();
         models::validate_provider_model_alias_defaults(&defaults.provider_id, &targets)?;
         self.set_routing_unlocked(None, &targets, None)
-    }
-
-    pub fn set_model_routing(
-        &mut self,
-        model: &str,
-        targets: &BTreeMap<String, String>,
-    ) -> Result<()> {
-        self.set_model_routing_with_limits(model, targets, None)
-    }
-    pub fn set_model_routing_with_limits(
-        &mut self,
-        model: &str,
-        targets: &BTreeMap<String, String>,
-        limits: Option<&ModelPresetContextLimits>,
-    ) -> Result<()> {
-        self.model_configuration_transaction(|transaction| {
-            transaction.set_model_routing_with_limits(model, targets, limits)
-        })?
     }
 
     fn set_model_routing_with_limits_unlocked(
@@ -289,12 +259,6 @@ impl Configuration {
         Ok(())
     }
 
-    pub fn set_model_preset(&mut self, name: &str, preset: &ModelPresetConfig) -> Result<()> {
-        self.model_configuration_transaction(|transaction| {
-            transaction.set_model_preset(name, preset)
-        })?
-    }
-
     fn set_model_preset_unlocked(&mut self, name: &str, preset: &ModelPresetConfig) -> Result<()> {
         models::validate_preset_name(name)?;
         models::validate_requested_selector(&format!("model_presets.{name}.model"), &preset.model)?;
@@ -323,26 +287,6 @@ impl Configuration {
             .insert(name.to_owned(), preset.clone());
         Ok(())
     }
-    pub fn capture_context_limits(&self) -> ModelPresetContextLimits {
-        ModelPresetContextLimits {
-            default: self.models.context_limit.clone(),
-            model_aliases: self
-                .models
-                .model_aliases
-                .iter()
-                .filter_map(|(name, alias)| {
-                    alias
-                        .context_limit
-                        .clone()
-                        .map(|limit| (name.clone(), limit))
-                })
-                .collect(),
-        }
-    }
-    pub fn set_context_limit(&mut self, limit: ContextSize) -> Result<()> {
-        self.model_configuration_transaction(|transaction| transaction.set_context_limit(limit))?
-    }
-
     fn set_context_limit_unlocked(&mut self, limit: ContextSize) -> Result<()> {
         let mut root = self.user_root()?;
         root.set("context_limit", Node::scalar(limit.to_string()));

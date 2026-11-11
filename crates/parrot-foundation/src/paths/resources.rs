@@ -62,24 +62,11 @@ impl<W> UserSessionResources<W> {
     pub fn metadata_path(&self) -> PathBuf {
         self.root().join("meta.json")
     }
-    pub fn database_path(&self) -> PathBuf {
-        self.root().join("session.db")
-    }
-    pub fn log_path(&self) -> PathBuf {
-        self.root().join("session.log")
-    }
-    pub fn artifact_directory(&self) -> PathBuf {
-        self.root().join("artifacts")
-    }
     pub fn scratch_directory(&self) -> PathBuf {
         self.root().join("scratch")
     }
     pub fn agents_directory(&self) -> PathBuf {
         self.root().join("root-agents")
-    }
-
-    pub fn owns(&self, path: &Path, current_directory: &Path) -> io::Result<bool> {
-        Ok(normalize(path, current_directory, native_platform())?.starts_with(self.root()))
     }
 
     pub fn agent_scratch(&self, name_path: &[&str]) -> io::Result<AgentScratchDirectory> {
@@ -158,10 +145,6 @@ impl AgentScratchDirectory {
     }
     pub fn plan_directory(&self) -> PathBuf {
         self.root.join("plan")
-    }
-
-    pub fn contains(&self, path: &Path, current_directory: &Path) -> io::Result<bool> {
-        Ok(normalize(path, current_directory, native_platform())?.starts_with(&self.root))
     }
 
     pub fn provision(&self) -> io::Result<()> {

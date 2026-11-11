@@ -583,64 +583,6 @@
       "headers": {},
       "failure": "cancelled",
       "connect_timeout_ms": 10
-    },
-    {
-      "case_id": "supplemental-client-failure-invalid-operation",
-      "canonical_source_case": null,
-      "kind": "client",
-      "endpoint": "https://api.example.test/v1/responses",
-      "headers": {},
-      "failure": "invalid-operation",
-      "connect_timeout_ms": 10
-    },
-    {
-      "case_id": "authority-49",
-      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Client_derives_plaintext_endpoint_and_certificate_exception_is_authority_scoped",
-      "kind": "authority",
-      "endpoint": "wss://api.example.test/v1/responses",
-      "authority": "https://api.example.test"
-    },
-    {
-      "case_id": "authority-50",
-      "canonical_source_case": "Parrot.Core.Tests.ResponsesWebSocketTests.Client_derives_plaintext_endpoint_and_certificate_exception_is_authority_scoped",
-      "kind": "authority",
-      "endpoint": "wss://other.example.test/v1/responses",
-      "authority": "https://api.example.test"
-    },
-    {
-      "case_id": "authority-51",
-      "canonical_source_case": null,
-      "kind": "authority",
-      "endpoint": "ws://api.example.test:80/path",
-      "authority": "http://api.example.test"
-    },
-    {
-      "case_id": "authority-52",
-      "canonical_source_case": null,
-      "kind": "authority",
-      "endpoint": "wss://api.example.test:8443/path",
-      "authority": "https://api.example.test"
-    },
-    {
-      "case_id": "authority-53",
-      "canonical_source_case": null,
-      "kind": "authority",
-      "endpoint": "https://API.EXAMPLE.TEST/path",
-      "authority": "HTTPS://api.example.test"
-    },
-    {
-      "case_id": "authority-54",
-      "canonical_source_case": null,
-      "kind": "authority",
-      "endpoint": "wss://api.example.test/path",
-      "authority": "http://api.example.test"
-    },
-    {
-      "case_id": "supplemental-authority-non-request",
-      "canonical_source_case": null,
-      "kind": "authority",
-      "endpoint": null,
-      "authority": "https://api.example.test"
     }
   ]
 }

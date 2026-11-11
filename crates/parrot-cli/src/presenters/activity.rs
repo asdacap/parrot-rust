@@ -956,12 +956,6 @@ impl RawActivityView {
         self.flush_response_into(owner, &mut commits);
         self.update(commits, None)
     }
-    pub fn reset_requests(&mut self) -> PresenterResult<ActivityUpdate> {
-        for state in self.agents.values_mut() {
-            state.observe_request_phase(&wire::ProviderRequestPhaseChangedEvent::default());
-        }
-        self.update(Vec::new(), None)
-    }
     pub fn observe(&mut self, published: &wire::Event) -> PresenterResult<ActivityUpdate> {
         use wire::event::Payload;
         let owner = &published.agent_session_id;

@@ -1,6 +1,7 @@
 //! Test-only hosted-session boundary. This is not a production composition proof.
 //! Storage acquisition, activation leases, input/event persistence, images and
 //! question/permission brokers are real; agent execution and skill discovery are not.
+use crate::protocol::stream::*;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -10,7 +11,7 @@ use parrot_domain::{
     values::{context::ContextSize, project_workspace::ProjectWorkspace},
 };
 use parrot_foundation::config::Configuration;
-use parrot_host::composition::protocol::{models::ModelOperations, stream::*, *};
+use parrot_host::composition::protocol::{models::ModelOperations, *};
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -19,7 +20,7 @@ use parrot_provider::{
         registry::ProviderRegistry,
     },
     sessions::{
-        Content, Error as ProviderError, EventStream, Provider, Request, Session,
+        Content, Error as ProviderError, Provider, Session,
         decorators::{UsageReporter, UsageReportingProvider},
     },
 };
@@ -106,9 +107,6 @@ struct SyntheticProvider;
 impl Provider for SyntheticProvider {
     fn id(&self) -> &str {
         "scripted"
-    }
-    fn call(&self, _: Request) -> std::result::Result<Box<dyn EventStream>, ProviderError> {
-        panic!("offline routing fixture must not execute a provider")
     }
     fn seed_models(&self) -> Vec<Model> {
         vec![Model::new("model", "scripted")]
@@ -803,15 +801,21 @@ pub struct Fixture {
 }
 impl Fixture {
     pub fn new() -> Self {
-        Self::with_provider(Arc::new(SyntheticProvider))
+        Self::with_provider(Arc::new(SyntheticProvider), false)
+    }
+    pub fn with_legacy_path_read_fallback() -> Self {
+        Self::with_provider(Arc::new(SyntheticProvider), true)
     }
     pub fn with_usage_reporter(reporter: Arc<dyn UsageReporter>) -> Self {
-        Self::with_provider(Arc::new(UsageReportingProvider::new(
-            Arc::new(SyntheticProvider),
-            reporter,
-        )))
+        Self::with_provider(
+            Arc::new(UsageReportingProvider::new(
+                Arc::new(SyntheticProvider),
+                reporter,
+            )),
+            false,
+        )
     }
-    fn with_provider(provider: Arc<dyn Provider>) -> Self {
+    fn with_provider(provider: Arc<dyn Provider>, legacy_path_read_fallback: bool) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "t62-service-{}-{}",
@@ -859,7 +863,7 @@ impl Fixture {
         let admissions = Arc::new(SessionAdmissions::new(
             OwnershipRoots::new(state.clone(), root.join("legacy")).unwrap(),
             runtime,
-            false,
+            legacy_path_read_fallback,
         ));
         let diagnostics = Arc::new(
             FileDiagnosticLog::open_global(

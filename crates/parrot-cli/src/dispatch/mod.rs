@@ -9,7 +9,6 @@ pub mod hierarchy;
 pub mod interrupts;
 pub mod jsonl_log;
 pub mod prepared_stream;
-pub mod prompt;
 pub mod provider_catalog;
 pub mod session_list;
 pub mod startup;
@@ -93,16 +92,5 @@ impl CommandDispatcher<'_> {
                 Ok(EXIT_USAGE)
             }
         }
-    }
-}
-
-pub fn cli_utility_warning(missing_expected: &[String]) -> String {
-    if missing_expected.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "warning: expected CLI utilities are unavailable: {}; Bash shell commands may fail",
-            missing_expected.join(", ")
-        )
     }
 }

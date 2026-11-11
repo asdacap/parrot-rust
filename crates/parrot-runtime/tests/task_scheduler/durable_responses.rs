@@ -102,7 +102,7 @@ async fn accepted_response_contains_full_work_and_replays_after_completion_and_t
 }
 
 #[tokio::test]
-async fn render_failure_blocks_later_batches_and_visibility_without_stranding_settlement() {
+async fn render_failure_blocks_later_batches_without_stranding_settlement() {
     let first = Harness::new();
     *first.factory.configuration.lock().unwrap() = Some(broken_response());
     let root = first.root("owner").await;
@@ -139,16 +139,6 @@ async fn render_failure_blocks_later_batches_and_visibility_without_stranding_se
                 call(12, "later")
             )
             .unwrap()
-            .join()
-            .await
-            .is_err()
-    );
-    let before = scheduler.snapshot().await;
-    let mut hidden = before.clone();
-    hidden[0].hidden = true;
-    assert!(
-        scheduler
-            .apply_visibility_changes(before, hidden)
             .join()
             .await
             .is_err()

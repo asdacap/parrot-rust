@@ -37,9 +37,7 @@ use parrot_provider::{
         configuration::ModelConfigurationCoordinator,
         registry::ProviderRegistry,
     },
-    sessions::{
-        Content, Error as ProviderError, EventStream, Provider, Request as ProviderRequest, Session,
-    },
+    sessions::{Content, Error as ProviderError, Provider, Session},
 };
 use parrot_runtime::{
     interactions::{InteractionError, PendingQuestion, QuestionReply},
@@ -236,9 +234,6 @@ struct OfflineProvider;
 impl Provider for OfflineProvider {
     fn id(&self) -> &str {
         "t68"
-    }
-    fn call(&self, _: ProviderRequest) -> Result<Box<dyn EventStream>, ProviderError> {
-        panic!("no provider execution in T68")
     }
     fn seed_models(&self) -> Vec<Model> {
         vec![Model::new("fixture", "t68")]
@@ -644,7 +639,10 @@ impl Native {
             diagnostics.clone(),
             tokio::runtime::Handle::current(),
         ));
-        let token = TransportToken::generate().unwrap();
+        let token = TransportToken::from_hex(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
         let server = bounded(GrpcServer::start(
             GrpcService::new(service.clone()),
             TransportAddress::parse("http://127.0.0.1:0").unwrap(),
@@ -808,7 +806,10 @@ pub struct Capture {
 impl Capture {
     async fn new(diagnostics: Arc<FileDiagnosticLog>) -> Self {
         let state = Arc::new(CaptureState::default());
-        let token = TransportToken::generate().unwrap();
+        let token = TransportToken::from_hex(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
         let server = bounded(GrpcServer::start(
             RecordingService(state.clone()),
             TransportAddress::parse("http://127.0.0.1:0").unwrap(),

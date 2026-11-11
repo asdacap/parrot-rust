@@ -328,11 +328,9 @@ async fn actual_legacy_waiter_preserves_an_unrelated_manual_predecessor_and_its_
         Some(Arc::new(Semaphore::new(0))),
     );
     let manual_session = manual.get_service::<RuntimeSession<Security>>().unwrap();
-    let predecessor = bounded(
-        manual_session.send_text_message("manual predecessor".into(), Arc::new(NeverCancelled)),
-    )
-    .await
-    .unwrap();
+    let predecessor = bounded(send_text(&manual_session, "manual predecessor"))
+        .await
+        .unwrap();
     bounded(async {
         while fixture.requests.lock().unwrap().is_empty() {
             tokio::task::yield_now().await;
