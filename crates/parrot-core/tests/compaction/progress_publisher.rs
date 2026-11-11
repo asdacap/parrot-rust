@@ -1,6 +1,4 @@
-use parrot_core::{
-    BoxFuture, CancellationToken, Error, EventPublisher, compaction::CompactionProgress,
-};
+use parrot_core::{BoxFuture, CancellationToken, CompactionProgress, Error, EventPublisher};
 use std::sync::{Arc, Mutex};
 
 pub struct ProgressPublisher {

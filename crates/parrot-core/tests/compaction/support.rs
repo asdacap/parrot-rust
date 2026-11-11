@@ -1,6 +1,6 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, Content, Error, Message, ProviderRequest, Reasoning, Role,
-    compaction::{CompactionGroup, CompactionPlan, CompactionProgress, SummaryResponse},
+    BoxFuture, CancellationToken, CompactionGroup, CompactionPlan, CompactionProgress, Content,
+    Error, Message, ProviderRequest, Reasoning, Role, SummaryResponse,
 };
 use std::{
     collections::VecDeque,

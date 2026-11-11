@@ -1,6 +1,6 @@
 use parrot_core::{
-    CancellationToken, Content, Error, ProviderRequest, Role, ToolCall,
-    compaction::{CompactionFailure, CompactionProgress, SummaryResponse, compact},
+    CancellationToken, CompactionFailure, CompactionProgress, Content, Error, ProviderRequest,
+    Role, SummaryResponse, ToolCall, compaction::compact,
 };
 use std::{
     future::Future,
@@ -40,10 +40,10 @@ fn finish<F: Future>(future: F) -> F::Output {
 }
 
 fn run(
-    plan: Option<parrot_core::compaction::CompactionPlan>,
+    plan: Option<parrot_core::CompactionPlan>,
     effects: &mut Effects,
     provider: &Provider,
-) -> Result<Option<parrot_core::compaction::CompactionResult>, Error> {
+) -> Result<Option<parrot_core::CompactionResult>, Error> {
     let provider = provider.with_estimates(effects);
     let publisher = progress_publisher::ProgressPublisher {
         progress: effects.progress.clone(),

@@ -1,10 +1,8 @@
 use super::*;
-use parrot_core::compaction::{
-    CompactionConfiguration, CompactionInput, CompactionResult, fit_compaction, fit_status,
-};
 use parrot_core::{
-    ConfigKey, ConfigValue, ContextConfiguration, ContextModel, ContextSnapshot, ErrorCode,
-    Message, States,
+    CompactionConfiguration, CompactionInput, CompactionResult, ConfigKey, ConfigValue,
+    ContextConfiguration, ContextModel, ContextSnapshot, ErrorCode, Message, States,
+    compaction::{fit_compaction, fit_status},
 };
 use std::sync::{
     Mutex,

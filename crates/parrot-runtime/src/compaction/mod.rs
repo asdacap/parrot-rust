@@ -15,7 +15,7 @@ pub use parrot_core::{StatusKey, StatusOffer, StatusOffering, StatusStanding};
 mod planning;
 
 pub use budget::ProviderTokenBudget;
-pub use parrot_core::compaction::PlanningError;
+pub use parrot_core::PlanningError;
 pub use parrot_domain::values::{
     accounting::RetainedAgentBudget,
     context::{ContextCompactionPolicy, ContextSize, ContextSnapshot, TokenEstimator},

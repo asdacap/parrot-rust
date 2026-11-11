@@ -216,7 +216,7 @@ impl Harness {
                 receipt: parrot_core::ToolCallReceipt {
                     assistant_sequence: request.assistant_sequence,
                 },
-                flags: parrot_core::budget::TurnFlags { final_phase: false },
+                flags: parrot_core::TurnFlags { final_phase: false },
                 starts_batch: request.starts_batch,
                 cancel_remaining: request.cancel_remaining,
             },

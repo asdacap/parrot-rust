@@ -1,5 +1,5 @@
 use super::*;
-use parrot_core::compaction::{CompactionConfiguration, CompactionPlan};
+use parrot_core::{CompactionConfiguration, CompactionPlan};
 
 #[test]
 fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() {
@@ -130,10 +130,9 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
         Reply::final_response("answer"),
     ]);
     state.compaction_plan = Some(compaction_support::plan(&["saved group", "retained tail"]));
-    let provider =
-        compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
-            "injected summary".into(),
-        )]);
+    let provider = compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
+        "injected summary".into(),
+    )]);
     let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
     assert_eq!(
         state.run_with_compaction(&mut compaction),
@@ -215,10 +214,9 @@ fn planning_and_fitting_failures_are_recorded_before_propagation() {
     for (step, message) in [("plan", "planning failed"), ("fit", "fitting failed")] {
         let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
         state.compaction_plan = Some(compaction_support::plan(&["saved group", "tail"]));
-        let provider =
-            compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
-                "not committed".into(),
-            )]);
+        let provider = compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
+            "not committed".into(),
+        )]);
         let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
         let error = Error::failed(message);
         if step == "plan" {

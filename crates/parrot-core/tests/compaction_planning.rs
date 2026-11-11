@@ -1,10 +1,8 @@
 use parrot_core::{
-    Content, ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail,
-    ErrorKind, Message, Provider, Role, ToolCall, ToolDefinition,
-    compaction::{
-        CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan,
-        CompactionPolicy, PlanningError, group_messages, is_complete,
-    },
+    CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan, Content,
+    ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail, ErrorKind,
+    Message, PlanningError, Provider, Role, ToolCall, ToolDefinition,
+    compaction::{CompactionPolicy, group_messages, is_complete},
 };
 
 fn message(tokens: i64) -> Message {

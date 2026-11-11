@@ -611,7 +611,7 @@ where
         &'a mut self,
         instructions: &'a str,
         definitions: &'a [ToolDefinition],
-        result: Result<Option<parrot_core::compaction::FittedCompaction>, CoreError>,
+        result: Result<Option<parrot_core::FittedCompaction>, CoreError>,
     ) -> BoxFuture<'a, Result<CoreContextCompaction, CoreError>> {
         Box::pin(async move {
             let definitions: Vec<sessions::Tool> = definitions.to_vec();

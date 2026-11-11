@@ -1,10 +1,8 @@
-use super::{
-    CompactionConfiguration, CompactionFailure, CompactionInput, CompactionPlan, CompactionResult,
-    FittedCompaction, compact,
-};
+use super::{CompactionFailure, CompactionPlan, CompactionResult, compact};
 use crate::{
-    CancellationToken, Content, ContextConfiguration, ContextSnapshot, Error, EventPublisher,
-    Message, Provider, ProviderRequest, Role, States, ToolDefinition, join_status_offering,
+    CancellationToken, CompactionConfiguration, CompactionInput, Content, ContextConfiguration,
+    ContextSnapshot, Error, EventPublisher, FittedCompaction, Message, Provider, ProviderRequest,
+    Role, States, ToolDefinition, join_status_offering,
 };
 use std::future::Future;
 

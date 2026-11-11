@@ -1,11 +1,8 @@
 use super::*;
-use parrot_core::compaction::{
-    CompactionConfiguration, ConversationHistoryItem, ConversationState, ConversationSummary,
-    prepare_compaction,
-};
 use parrot_core::{
-    BoxFuture, ConfigKey, ConfigValue, ContextConfiguration, ContextModel, ContextSnapshot,
-    ErrorCode, ErrorDetail, EventPublisher, Message, States,
+    BoxFuture, CompactionConfiguration, ConfigKey, ConfigValue, ContextConfiguration, ContextModel,
+    ContextSnapshot, ConversationHistoryItem, ConversationState, ConversationSummary, ErrorCode,
+    ErrorDetail, EventPublisher, Message, States, compaction::prepare_compaction,
 };
 use std::sync::Mutex;
 
