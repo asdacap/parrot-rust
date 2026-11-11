@@ -94,7 +94,7 @@ impl ConversationRepository {
         let agent = published.agent_session_id.clone();
         self.events
             .transaction(move |tx| {
-                record(tx, &published, None, &timestamp())?;
+                record(tx, &published, &timestamp())?;
                 assistant.origin = ConversationOrigin::Model;
                 projection::project(tx, &published.agent_session_id, &assistant, &timestamp())?;
                 project_system(tx, &published.agent_session_id, reminder)?;

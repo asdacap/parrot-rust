@@ -1051,23 +1051,6 @@ impl<B: DrainBackend> AgentSession<B> {
             )
         }
     }
-    pub async fn send_text_message(
-        &self,
-        message: String,
-        caller: Arc<dyn Cancellation>,
-    ) -> Result<SendResult, LifecycleError> {
-        let id = parrot_domain::values::identifiers::Identifier::message_id()
-            .map_err(|error| LifecycleError::Failed(error.to_string()))?;
-        self.send_and_select_execution(
-            vec![ConversationPart::text(message)],
-            id,
-            InputSource::INPUT_SOURCE_UNSPECIFIED,
-            caller.clone(),
-        )?
-        .wait(caller.as_ref())
-        .await
-    }
-
     pub fn enqueue_execution(
         &self,
         parts: Vec<ConversationPart>,

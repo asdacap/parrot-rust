@@ -23,7 +23,7 @@ use parrot_tools::process::ownership::domain::CapturedProcessLauncher;
 use parrot_tools::process::ownership::execution::{Execution, NeverCancelled, ProcessLifetime};
 use parrot_tools::process::ownership::inventory::ActivityKind;
 use parrot_tools::process::ownership::managed::{
-    CompletionMessage, CompletionSink, NoProcessDiagnostics,
+    CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
 };
 use parrot_tools::process::ownership::monitor::{
     MonitorDelivery, MonitorEvent, MonitorIdentity, MonitorInputSource, MonitorReport, MonitorSink,
@@ -38,6 +38,11 @@ use serde_json::{Value, json};
 const LIMIT: Duration = Duration::from_secs(20);
 const METADATA_REMINDER: &str = "\n\nReminder: include 'name' and 'description' for multiline commands or commands longer than 300 characters.";
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+struct NoProcessDiagnostics;
+impl ProcessDiagnostics for NoProcessDiagnostics {
+    fn write(&self, _: ProcessDiagnostic) {}
+}
 
 struct Directory(PathBuf);
 impl Directory {
@@ -536,9 +541,9 @@ async fn factory_uses_actual_configured_definitions_names_aliases_and_schemas() 
         let tool = factory.create();
         assert_eq!(factory.definition(), &definition);
         assert_eq!(tool.definition(), &definition);
-        assert_eq!(tool.name(), name);
+        assert_eq!(kind.name(), name);
         assert_eq!(
-            tool.aliases(),
+            kind.aliases(),
             if kind == ProcessToolKind::ExecCommand {
                 &["bash"][..]
             } else {
@@ -615,7 +620,7 @@ async fn real_completion_environment_and_owned_security_capture_reach_the_launch
         .await;
     completed(&result.text, 7, "s\n[stdout]\nout\n[stderr]\nerr");
     assert!(result.yielded_process.is_none());
-    assert!(fixture.owner.active().await.is_empty());
+    assert!(fixture.owner.observe_active().is_empty());
     assert!(fixture.sink.rows.lock().unwrap().is_empty());
 
     for (environment, expected) in [
@@ -1026,7 +1031,7 @@ async fn invalid_wrapper_arguments_have_source_exact_errors_and_never_launch() {
         assert!(result.yielded_process.is_none());
     }
     assert!(fixture.launcher.records.lock().unwrap().is_empty());
-    assert!(fixture.owner.snapshot().await.is_empty());
+    assert!(fixture.owner.observe_snapshot().is_empty());
     fixture.finish().await;
 }
 
@@ -1223,7 +1228,7 @@ async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner
     assert_eq!(state.parent_agent_session_id, "parent-session");
     assert_eq!(state.parent_agent_name, "parent");
     assert_eq!(state.depth, 1);
-    assert_eq!(fixture.owner.active().await[0].name, "live-pipe");
+    assert_eq!(fixture.owner.observe_active()[0].name, "live-pipe");
     let duplicate = fixture
         .exec(json!({"command":"printf duplicate","name":"live-pipe"}))
         .await;
@@ -1262,7 +1267,7 @@ async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner
         .exec(json!({"command":"printf reused","name":"live-pipe"}))
         .await;
     completed(&reused.text, 0, "s\n[stdout]\nreused");
-    assert!(fixture.owner.active().await.is_empty());
+    assert!(fixture.owner.observe_active().is_empty());
     fixture.finish().await;
 }
 
@@ -1277,7 +1282,7 @@ async fn yielded_exec_delivers_real_completion_and_generates_an_omitted_name() {
     .expect("run_async waited for the configured automatic yield time");
     let yielded = result.yielded_process.unwrap();
     assert!(yielded.name.starts_with("shell-"));
-    assert_eq!(fixture.owner.active().await.len(), 1);
+    assert_eq!(fixture.owner.observe_active().len(), 1);
     fs::write(fixture.directory.0.join("release"), "").unwrap();
     let rows = fixture.sink.rows(1).await;
     let Row::Completion(message) = &rows[0] else {
@@ -1297,7 +1302,7 @@ async fn yielded_exec_delivers_real_completion_and_generates_an_omitted_name() {
         yielded.name
     )));
     assert!(message.text.ends_with("s\n[stdout]\ndone"));
-    assert!(fixture.owner.active().await.is_empty());
+    assert!(fixture.owner.observe_active().is_empty());
     fixture.finish().await;
 }
 
@@ -1487,7 +1492,7 @@ async fn cancellation_releases_observation_but_keeps_the_real_process_owned() {
         )
         .await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
-    assert_eq!(fixture.owner.active().await.len(), 1);
+    assert_eq!(fixture.owner.observe_active().len(), 1);
     assert!(fixture.sink.rows.lock().unwrap().is_empty());
     let signal = fixture
         .invoke(
@@ -1704,7 +1709,7 @@ async fn monitor_case(arguments: Value, interrupt: bool, expected: &[&str]) {
         )
     );
     assert_eq!(
-        fixture.owner.active().await.len(),
+        fixture.owner.observe_active().len(),
         1,
         "monitor must keep the turn open while running"
     );
@@ -1743,7 +1748,7 @@ async fn monitor_case(arguments: Value, interrupt: bool, expected: &[&str]) {
     assert_eq!(completion.input_source, InputSource::INPUT_SOURCE_PROCESS);
     assert_eq!(completion.process_name, "watch");
     assert!(fixture.sink.failures.lock().unwrap().is_empty());
-    assert!(fixture.owner.active().await.is_empty());
+    assert!(fixture.owner.observe_active().is_empty());
     fixture.finish().await;
     assert_eq!(fixture.sink.rows.lock().unwrap().len(), expected.len());
 }
@@ -1850,7 +1855,7 @@ async fn cancelling_an_active_exec_wait_releases_claim_without_detaching_ownersh
     };
     let (result, ()) = tokio::join!(wait, cancel);
     assert!(matches!(result, Err(OperationError::Cancelled)));
-    assert_eq!(fixture.owner.active().await.len(), 1);
+    assert_eq!(fixture.owner.observe_active().len(), 1);
     let claim = fixture.owner.claim("active-wait").await.unwrap();
     fs::write(fixture.directory.0.join("release-active"), "").unwrap();
     let outcome = tokio::time::timeout(LIMIT, claim.wait(None, &NeverCancelled))
@@ -1871,7 +1876,7 @@ async fn precancelled_exec_keeps_the_started_process_owned_until_observed() {
         InvocationContext::new(fixture.security.clone(), (), &cancellation),
     ).await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
-    assert_eq!(fixture.owner.active().await.len(), 1);
+    assert_eq!(fixture.owner.observe_active().len(), 1);
     let claim = fixture.owner.claim("precancelled").await.unwrap();
     fs::write(fixture.directory.0.join("release-pre"), "").unwrap();
     let outcome = tokio::time::timeout(LIMIT, claim.wait(None, &NeverCancelled))
@@ -1901,7 +1906,7 @@ async fn precancelled_interrupt_does_not_signal_or_consume_the_owner() {
         .await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
     let claim = fixture.owner.claim("no-signal").await.unwrap();
-    assert!(!claim.process().snapshot().unwrap().completed);
+    assert!(!claim.process().completed());
     claim.send_signal(9, &NeverCancelled).unwrap();
     fixture.sink.rows(1).await;
     fixture.finish().await;

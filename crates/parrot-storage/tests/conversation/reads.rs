@@ -338,7 +338,7 @@ async fn agent_history_orders_structured_messages_and_retains_compactions() {
 }
 
 #[tokio::test]
-async fn structured_parts_calls_provider_and_legacy_model_rendering_are_exact() {
+async fn structured_parts_calls_and_provider_content_are_exact() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let mut projected = message(MessageRole::Assistant, "unused");
@@ -365,21 +365,8 @@ async fn structured_parts_calls_provider_and_legacy_model_rendering_are_exact() 
     };
     let expected = append(&repo, "structured", "agent", projected).await;
     append(&repo, "other", "other", message(MessageRole::User, "other")).await;
-    let model = repo.model_history("agent".into()).await.unwrap();
-    assert_eq!(model.len(), 1);
-    assert_eq!(model[0].role, MessageRole::Assistant);
     assert_eq!(
-        model[0].contents,
-        vec![
-            ModelContent::Text("first".into()),
-            ModelContent::Text("".into()),
-            ModelContent::Text("last".into())
-        ]
-    );
-    assert_eq!(model[0].tool_calls, expected.message.tool_calls);
-    assert_eq!(model[0].provider_content, expected.message.provider_content);
-    assert_eq!(
-        repo.messages("agent".into()).await.unwrap(),
+        super::messages(&repo, "agent").await,
         ["assistant: firstlast"]
     );
     repo.events().database().close().await.unwrap();
@@ -401,21 +388,13 @@ async fn structured_parts_calls_provider_and_legacy_model_rendering_are_exact() 
 }
 
 #[tokio::test]
-async fn legacy_model_rejects_images_while_materialize_preserves_text_and_errors() {
+async fn materialize_preserves_text_and_rejects_images_without_session_resources() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let image = super::Fixture::image("a".repeat(64), "image/png", "display");
     let mut projected = message(MessageRole::User, "");
     projected.parts = vec![ConversationPart::text("before"), image.clone()];
     append(&repo, "image", "agent", projected).await;
-    for result in [
-        repo.model_history("agent".into()).await.map(|_| ()),
-        repo.messages("agent".into()).await.map(|_| ()),
-    ] {
-        assert!(
-            matches!(result, Err(EventError::Invalid(message)) if message == "artifact references must be materialized before model history is read")
-        );
-    }
     assert_eq!(
         repo.materialize(vec![
             ConversationPart::text("a"),
@@ -435,7 +414,7 @@ async fn legacy_model_rejects_images_while_materialize_preserves_text_and_errors
 }
 
 #[tokio::test]
-async fn legacy_model_history_excludes_tool_images_without_removing_raw_result_parts() {
+async fn tool_result_images_remain_raw_result_parts() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     let mut tool = message(MessageRole::Tool, "before");
@@ -448,17 +427,6 @@ async fn legacy_model_history_excludes_tool_images_without_removing_raw_result_p
     tool.parts.push(ConversationPart::text("after"));
     let item = append(&repo, "tool-image", "agent", tool.clone()).await;
     assert_eq!(item.message, tool);
-    let model = repo.model_history("agent".into()).await.unwrap();
-    assert_eq!(model.len(), 1);
-    assert_eq!(model[0].role, MessageRole::Tool);
-    assert_eq!(model[0].tool_call_id, "call");
-    assert_eq!(
-        model[0].contents,
-        [
-            ModelContent::Text("before".into()),
-            ModelContent::Text("after".into())
-        ]
-    );
     assert_eq!(repo.conversation("agent".into()).await.unwrap(), [item]);
     repo.events().database().close().await.unwrap();
 }
@@ -848,7 +816,7 @@ async fn delegated_event_projection_has_exactly_one_readable_prompt() {
         .append(event("e2", "agent"), None)
         .await
         .unwrap();
-    let messages = repo.messages("agent".into()).await.unwrap();
+    let messages = super::messages(&repo, "agent").await;
     assert_eq!(messages.len(), 1);
     assert!(messages[0].contains("the prompt"));
     repo.events().database().close().await.unwrap();

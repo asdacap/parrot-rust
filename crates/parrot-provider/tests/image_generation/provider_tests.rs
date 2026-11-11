@@ -15,7 +15,7 @@ use parrot_provider::{
     },
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     sessions::{
-        Content, Error, EventStream, Provider, Request, Session,
+        Content, Error, Provider, Session,
         decorators::{RetryingProvider, SubscriptionUsage, UsageReporter, UsageReportingProvider},
         provider::{
             ApiKeySource, ChatGptOptions, ChatGptProvider, CompatibleOptions, OAuthAccess,
@@ -654,10 +654,6 @@ struct Unsupported(AtomicUsize);
 impl Provider for Unsupported {
     fn id(&self) -> &str {
         "unsupported"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Err(Error::Provider("unexpected call".into()))
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(false) })

@@ -1118,7 +1118,7 @@ async fn actual_compatible_transport_errors_keep_typed_classification_and_privat
                 message: "private-sentinel".into(),
             },
             "websocket" => ws::WebSocketError::Socket {
-                code: ws::SocketErrorCode::Other,
+                code: ws::SocketErrorCode::Faulted,
                 message: "private-sentinel".into(),
             },
             "wire_protocol" => ws::WebSocketError::Wire("private-sentinel".into()),

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
-use parrot_domain::contracts::events::{EventPublisher, EventSubscription, SubscriptionLimits};
+use parrot_domain::contracts::events::{EventPublisher, EventSubscription};
 use parrot_domain::contracts::storage::Committed;
 use parrot_domain::protocol::messages::parrot::{AgentStarted, Event, ToolSnapshot, TurnEnded};
 use parrot_runtime::event_broker::{BrokerError, EventBroker, Subscription};
@@ -170,16 +170,14 @@ async fn default_transient_budget_only_evicts_its_oldest_class() {
 async fn retained_runtime_publication_preserves_class_budget_and_raw_event_payload() {
     use protobuf::Message;
 
-    let broker = EventBroker::with_limits(SubscriptionLimits {
-        retained: 2,
-        transient: 2,
-    })
-    .unwrap();
+    let broker = EventBroker::new();
     let listener = broker.subscribe();
     let first = event("retained-first");
     let mut transient = event("transient");
     transient.set_turn_ended(TurnEnded::new());
-    let last = event("retained-last");
+    let survivors: Vec<_> = (0..1023)
+        .map(|index| event(format!("retained-{index}")))
+        .collect();
     let mut newest = event("retained-new");
     newest.set_agent_started(AgentStarted::new());
     newest
@@ -192,53 +190,46 @@ async fn retained_runtime_publication_preserves_class_budget_and_raw_event_paylo
         .publish_transient(transient.clone(), &Token::default())
         .await
         .unwrap();
-    broker.publish_retained(&last);
+    for survivor in &survivors {
+        broker.publish_retained(survivor);
+    }
     broker.publish_retained(&newest);
     let actual = drain(&listener);
-    assert_eq!(actual, vec![transient, last, newest]);
-    assert_eq!(actual[2].write_to_bytes().unwrap(), newest_bytes);
+    let expected: Vec<_> = std::iter::once(transient)
+        .chain(survivors)
+        .chain([newest])
+        .collect();
+    assert_eq!(actual, expected);
+    assert_eq!(actual[1024].write_to_bytes().unwrap(), newest_bytes);
 }
 
 #[tokio::test]
 async fn retained_eviction_preserves_transient_and_survivor_order() {
-    let broker = EventBroker::with_limits(SubscriptionLimits {
-        retained: 2,
-        transient: 1,
-    })
-    .unwrap();
+    let broker = EventBroker::new();
     let listener = broker.subscribe();
+    let range = |indices: std::ops::Range<usize>| {
+        indices
+            .map(|index| event(format!("r{index}")))
+            .collect::<Vec<_>>()
+    };
     retained(&broker, event("r0")).await;
     broker
         .publish_transient(event("t0"), &Token::default())
         .await
         .unwrap();
-    retained(&broker, event("r1")).await;
-    retained(&broker, event("r2")).await;
+    for survivor in range(1..1025) {
+        retained(&broker, survivor).await;
+    }
     assert_eq!(
         drain(&listener),
-        vec![event("t0"), event("r1"), event("r2")]
+        std::iter::once(event("t0"))
+            .chain(range(1..1025))
+            .collect::<Vec<_>>()
     );
-    retained(&broker, event("r3")).await;
-    retained(&broker, event("r4")).await;
-    assert_eq!(drain(&listener), vec![event("r3"), event("r4")]);
-}
-
-#[test]
-fn invalid_configured_capacity_is_explicit_not_an_unbounded_queue() {
-    assert!(matches!(
-        EventBroker::with_limits(SubscriptionLimits {
-            retained: 0,
-            transient: 1
-        }),
-        Err(BrokerError::InvalidCapacity)
-    ));
-    assert!(matches!(
-        EventBroker::with_limits(SubscriptionLimits {
-            retained: 1,
-            transient: 0
-        }),
-        Err(BrokerError::InvalidCapacity)
-    ));
+    for refill in range(1025..2049) {
+        retained(&broker, refill).await;
+    }
+    assert_eq!(drain(&listener), range(1025..2049));
 }
 
 #[tokio::test]

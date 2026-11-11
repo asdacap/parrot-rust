@@ -203,32 +203,6 @@ impl ConversationRepository {
             .await
     }
 
-    /// Captures a summary and its flat durable tail with stored ownership and checkpoint facts.
-    pub async fn read_conversation_state(
-        &self,
-        agent: String,
-    ) -> Result<ConversationHistorySnapshot, EventError> {
-        self.events
-            .transaction(move |tx| {
-                let snapshot = super::compaction::read_snapshot(tx, &agent)?;
-                let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
-                let items = read_durable_tail(tx, &agent, watermark)?;
-                let checkpoint_sequences = super::forks::read_checkpoints(tx, &agent)?
-                    .into_iter()
-                    .filter(|checkpoint| checkpoint.assistant_sequence > watermark)
-                    .map(|checkpoint| checkpoint.assistant_sequence)
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .into_iter()
-                    .collect();
-                Ok(ConversationHistorySnapshot {
-                    snapshot,
-                    items,
-                    checkpoint_sequences,
-                })
-            })
-            .await
-    }
-
     /// Captures the current conversation boundary for a new public execution.
     pub async fn execution_watermark(&self, agent: String) -> Result<i64, EventError> {
         self.events.transaction(move |tx| {
@@ -297,49 +271,6 @@ impl ConversationRepository {
         self.events
             .transaction(move |tx| read_conversation(tx, &agent, watermark))
             .await
-    }
-    /// Source legacy model reads reject artifact references; only materialize resolves them.
-    pub async fn model_history(&self, agent: String) -> Result<Vec<ModelMessage>, EventError> {
-        self.conversation(agent)
-            .await?
-            .into_iter()
-            .map(|item| {
-                let mut message = item.message;
-                message.retain_model_parts();
-                if message
-                    .parts
-                    .iter()
-                    .any(|part| matches!(part, ConversationPart::ImageArtifact { .. }))
-                {
-                    return Err(EventError::Invalid(
-                        "artifact references must be materialized before model history is read"
-                            .into(),
-                    ));
-                }
-                Ok(ModelMessage {
-                    role: message.role,
-                    contents: message
-                        .parts
-                        .into_iter()
-                        .map(|part| match part {
-                            ConversationPart::Text(text) => ModelContent::Text(text),
-                            _ => unreachable!("checked artifact references"),
-                        })
-                        .collect(),
-                    tool_calls: message.tool_calls,
-                    tool_call_id: message.tool_call_id,
-                    provider_content: message.provider_content,
-                })
-            })
-            .collect()
-    }
-    pub async fn messages(&self, agent: String) -> Result<Vec<String>, EventError> {
-        Ok(self
-            .model_history(agent)
-            .await?
-            .into_iter()
-            .map(|message| format!("{}: {}", message.role.as_str(), message.content()))
-            .collect())
     }
     pub async fn materialize(
         &self,

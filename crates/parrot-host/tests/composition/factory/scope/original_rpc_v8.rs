@@ -4,7 +4,7 @@
 //! OS workspace adapter, T36 implementation, grant, or security-scope witness.
 use super::*;
 use parrot_domain::{
-    contracts::{filesystem::EntryKind, interactions::QuestionOption, paths::ReadOrigin},
+    contracts::{filesystem::EntryKind, interactions::QuestionOption},
     protocol::messages::parrot as wire,
 };
 use parrot_host::composition::protocol::{
@@ -84,11 +84,7 @@ impl SkillReads {
             }
             fs::canonicalize(path).map_err(file_error)?
         };
-        security.check_read(&ResolvedRead::new(
-            path.into(),
-            physical.clone(),
-            ReadOrigin::Explicit,
-        ))?;
+        security.check_read(&ResolvedRead::new(path.into(), physical.clone()))?;
         let meta = if links == LinkPolicy::Follow {
             fs::metadata(path).map_err(file_error)?
         } else {
@@ -269,9 +265,6 @@ impl CredentialProvider {
 impl Provider for CredentialProvider {
     fn id(&self) -> &str {
         "local"
-    }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.0.call(request)
     }
     fn has_credential<'a>(
         &'a self,
@@ -1357,8 +1350,12 @@ async fn caller_scoped_physical_filters_match_launch_identity_not_repository_chi
     .unwrap();
     let alias = f.root.join("workspace-link");
     std::os::unix::fs::symlink(&f.workspace, &alias).unwrap();
-    let child_id = Identifier::user_session().unwrap().to_string();
-    let unrelated_id = Identifier::user_session().unwrap().to_string();
+    let child_id = parrot_domain::values::identifiers::UserSessionId::generate()
+        .unwrap()
+        .to_string();
+    let unrelated_id = parrot_domain::values::identifiers::UserSessionId::generate()
+        .unwrap()
+        .to_string();
     f.seed(&child_id, &child);
     f.seed(&unrelated_id, &f.root);
     let by_alias = listed(&f, alias.to_str().unwrap());
@@ -1408,7 +1405,9 @@ async fn actual_catalog_existing_then_deleted_workspace_preserves_unfiltered_row
     let session = f.create().await;
     let removed_workspace = f.root.join("inactive-work");
     fs::create_dir_all(&removed_workspace).unwrap();
-    let saved_id = Identifier::user_session().unwrap().to_string();
+    let saved_id = parrot_domain::values::identifiers::UserSessionId::generate()
+        .unwrap()
+        .to_string();
     f.seed(&saved_id, &removed_workspace);
     assert!(removed_workspace.is_dir());
     let before = listed(&f, removed_workspace.to_str().unwrap());
@@ -1435,11 +1434,17 @@ async fn actual_catalog_preserves_active_inactive_corrupt_rows_and_excludes_inva
     let session = f.create().await;
     let inactive_workspace = f.root.join("inactive-workspace");
     fs::create_dir_all(&inactive_workspace).unwrap();
-    let inactive_id = Identifier::user_session().unwrap().to_string();
+    let inactive_id = parrot_domain::values::identifiers::UserSessionId::generate()
+        .unwrap()
+        .to_string();
     f.seed(&inactive_id, &inactive_workspace);
-    let missing_id = Identifier::user_session().unwrap().to_string();
+    let missing_id = parrot_domain::values::identifiers::UserSessionId::generate()
+        .unwrap()
+        .to_string();
     f.seed(&missing_id, &f.root.join("never-existing-workspace"));
-    let corrupt_id = Identifier::user_session().unwrap().to_string();
+    let corrupt_id = parrot_domain::values::identifiers::UserSessionId::generate()
+        .unwrap()
+        .to_string();
     let corrupt = f.state.join("sessions").join(&corrupt_id);
     fs::create_dir_all(&corrupt).unwrap();
     fs::write(corrupt.join("meta.json"), "{bad json").unwrap();

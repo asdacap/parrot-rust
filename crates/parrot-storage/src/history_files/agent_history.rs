@@ -65,34 +65,6 @@ impl AgentHistoryFile {
         &self.path
     }
 
-    /// Explicitly replace the JSONL projection without best-effort suppression.
-    pub async fn replace_entries(&self, entries: Vec<AgentHistoryEntry>) -> super::Result<()> {
-        let state = self.state.clone().lock_owned().await;
-        let path = self.path.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut state = state;
-            state.written_length = None;
-            replace_entries(&path, &entries)
-        })
-        .await
-        .map_err(|error| {
-            super::Error::new(
-                super::ErrorKind::Io,
-                format!("history replacement worker failed: {error}"),
-            )
-        })?
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::InvalidData {
-                super::Error::invalid_data(format!("replace agent history file: {error}"))
-            } else if error.kind() == std::io::ErrorKind::InvalidInput {
-                super::Error::new(super::ErrorKind::InvalidOperation, error.to_string())
-            } else {
-                super::Error::io("replace agent history file", error)
-            }
-        })?;
-        Ok(())
-    }
-
     fn validate(&self, agent: &str) -> Result<(), EventError> {
         if agent != self.agent_session_id {
             return Err(EventError::Invalid(
@@ -384,10 +356,30 @@ mod tests {
         }];
 
         replace_entries(&path, &entries).unwrap();
+        let original = fs::read(&path).unwrap();
         assert_eq!(
-            fs::read_to_string(&path).unwrap(),
-            "{\"type\":\"compaction\",\"summary\":\"saved summary\",\"watermark\":3,\"sequence\":4}\n"
+            original,
+            b"{\"type\":\"compaction\",\"summary\":\"saved summary\",\"watermark\":3,\"sequence\":4}\n"
         );
+        let invalid = AgentHistoryEntry::Request {
+            sequence: 8,
+            event_sequence: 9,
+            request_id: "invalid-cost".into(),
+            provider: "provider".into(),
+            model: "model".into(),
+            effort: None,
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            input_cost: f64::NAN,
+            output_cost: 0.0,
+            tool_calls: 0,
+        };
+        assert_eq!(
+            replace_entries(&path, &[invalid]).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(fs::read(&path).unwrap(), original);
         assert!(fs::read_dir(&directory).unwrap().all(|entry| {
             !entry
                 .unwrap()
@@ -395,70 +387,6 @@ mod tests {
                 .to_string_lossy()
                 .ends_with(".tmp")
         }));
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn dropped_replace_future_keeps_worker_serialization_until_disk_work_finishes() {
-        use parrot_domain::contracts::paths::RootOrigin;
-        use std::future::Future;
-        use std::task::Poll;
-
-        let directory = std::env::temp_dir().join(format!(
-            "parrot-history-drop-{}-{}",
-            std::process::id(),
-            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        let root = SelectedSessionRoot::new(directory.clone(), RootOrigin::Current).unwrap();
-        let projection = AgentHistoryFile::new(
-            root.clone(),
-            root.path().join("agent/history.jsonl"),
-            vec!["current".into()],
-        )
-        .unwrap();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .max_blocking_threads(1)
-            .build()
-            .unwrap();
-        runtime.block_on(async {
-            let (release_tx, release_rx) = std::sync::mpsc::channel();
-            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-            let blocker = tokio::task::spawn_blocking(move || {
-                started_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-            });
-            started_rx.await.unwrap();
-            let entry = |summary: &str| {
-                vec![AgentHistoryEntry::Compaction {
-                    sequence: 1,
-                    summary: summary.into(),
-                    watermark: 0,
-                }]
-            };
-            let mut first = Box::pin(projection.replace_entries(entry("older")));
-            std::future::poll_fn(|context| {
-                assert!(first.as_mut().poll(context).is_pending());
-                Poll::Ready(())
-            })
-            .await;
-            drop(first);
-            // Its queued blocking worker, not the dropped future, owns the gate.
-            assert!(projection.state.try_lock().is_err());
-            let mut second = Box::pin(projection.replace_entries(entry("newer")));
-            std::future::poll_fn(|context| {
-                assert!(second.as_mut().poll(context).is_pending());
-                Poll::Ready(())
-            })
-            .await;
-            release_tx.send(()).unwrap();
-            blocker.await.unwrap();
-            second.await.unwrap();
-            assert_eq!(
-                fs::read_to_string(projection.path()).unwrap(),
-                "{\"type\":\"compaction\",\"summary\":\"newer\",\"watermark\":0,\"sequence\":1}\n"
-            );
-        });
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -487,7 +415,7 @@ mod tests {
             vec!["current".into()],
         )
         .unwrap();
-        assert!(projection.replace_entries(Vec::new()).await.is_err());
+        assert!(replace_entries(projection.path(), &[]).is_err());
         assert!(!is_written(projection.path(), Some(9)));
         assert!(append_entries(projection.path(), &[]).is_err());
         let repository = ConversationRepository::new(
@@ -533,14 +461,15 @@ mod tests {
             vec!["current".into()],
         )
         .unwrap();
-        projection
-            .replace_entries(vec![AgentHistoryEntry::Compaction {
+        replace_entries(
+            projection.path(),
+            &[AgentHistoryEntry::Compaction {
                 sequence: 1,
                 summary: "unchanged".into(),
                 watermark: 0,
-            }])
-            .await
-            .unwrap();
+            }],
+        )
+        .unwrap();
         let expected = fs::read(projection.path()).unwrap();
         repository.events().database().close().await.unwrap();
 

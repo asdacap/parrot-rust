@@ -29,11 +29,8 @@ impl fmt::Display for HttpFailure {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HttpError {
     Cancelled,
-    Http(String),
     /// Provider policy/bounded-HTTP failure without a response status.
     ProviderHttp(String),
-    /// Request-transport cancellation with its actual transport-provided message.
-    RequestCancelled(String),
     Provider(String),
     Response(HttpFailure),
     Wire(String),
@@ -48,9 +45,7 @@ impl fmt::Display for HttpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Cancelled => f.write_str("operation cancelled"),
-            Self::Http(message)
-            | Self::ProviderHttp(message)
-            | Self::RequestCancelled(message)
+            Self::ProviderHttp(message)
             | Self::Provider(message)
             | Self::InvalidJsonString(message)
             | Self::Wire(message)

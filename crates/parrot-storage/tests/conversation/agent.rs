@@ -120,47 +120,6 @@ async fn live_and_restored_tool_messages_exclude_images_but_preserve_raw_results
 }
 
 #[tokio::test]
-async fn bound_raw_conversation_state_reads_only_its_agent_and_does_not_refresh_projection() {
-    let fixture = Fixture::new();
-    let repo = fixture.repository();
-    let projection = Arc::new(Projection::new(
-        "agent",
-        repo.events().database().selected_root().clone(),
-    ));
-    let history = repo
-        .bind_agent_history("agent".into(), projection.clone())
-        .unwrap();
-    let empty = history.read_conversation_state().await.unwrap();
-    assert_eq!(empty.snapshot, None);
-    assert!(empty.items.is_empty());
-    assert!(empty.checkpoint_sequences.is_empty());
-    repo.events()
-        .append(
-            event("owned", "agent"),
-            Some(ConversationMessage::text(MessageRole::User, "owned")),
-        )
-        .await
-        .unwrap();
-    repo.events()
-        .append(
-            event("other", "other"),
-            Some(ConversationMessage::text(MessageRole::User, "other")),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        history.read_conversation_state().await.unwrap(),
-        repo.read_conversation_state("agent".into()).await.unwrap()
-    );
-    assert_eq!(
-        history.read_conversation_state().await.unwrap().items.len(),
-        1
-    );
-    assert!(projection.entries_seen.lock().unwrap().is_empty());
-    repo.events().database().close().await.unwrap();
-}
-
-#[tokio::test]
 async fn last_visible_turn_is_absent_for_empty_or_system_only_conversations() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
@@ -179,7 +138,6 @@ async fn last_visible_turn_is_absent_for_empty_or_system_only_conversations() {
     conversation.add(model(MessageRole::System, "status"));
     repo.events().database().close().await.unwrap();
     assert_eq!(conversation.read_last_turn_messages(), None);
-    assert!(!conversation.is_answerable());
 }
 
 #[tokio::test]
@@ -222,11 +180,9 @@ async fn last_visible_turn_retains_tools_candidates_and_trailing_notices_after_l
     repo.events().database().close().await.unwrap();
     assert_eq!(conversation.read_last_turn_messages(), Some(expected));
     assert_eq!(conversation.len(), 10);
-    assert!(!conversation.is_answerable());
     let latest = model(MessageRole::User, "newer question");
     conversation.add(latest.clone());
     assert_eq!(conversation.read_last_turn_messages(), Some(vec![latest]));
-    assert!(conversation.is_answerable());
 }
 
 #[tokio::test]
@@ -293,7 +249,6 @@ async fn last_visible_turn_keeps_compacted_context_when_no_user_remains_visible(
     expected.push(notice);
     repo.events().database().close().await.unwrap();
     assert_eq!(conversation.read_last_turn_messages(), Some(expected));
-    assert!(conversation.is_answerable());
 }
 
 #[tokio::test]
@@ -425,7 +380,7 @@ async fn derived_file_failure_propagates_after_commit_without_undoing_authoritat
     repo.events().database().close().await.unwrap();
     let reopened = fixture.repository();
     assert_eq!(
-        reopened.messages("agent".into()).await.unwrap(),
+        super::messages(&reopened, "agent").await,
         vec!["user: saved"]
     );
     projection.fail_refresh.store(false, Ordering::SeqCst);
@@ -458,14 +413,10 @@ async fn agent_conversation_reload_discards_memory_and_restores_sqlite_compactio
         .await
         .unwrap();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-    assert!(conversation.is_answerable());
     conversation.add(model(MessageRole::System, "ignored for answerability"));
-    assert!(conversation.is_answerable());
     conversation.add(model(MessageRole::Assistant, "memory only"));
-    assert!(!conversation.is_answerable());
     conversation.reload().await.unwrap();
     assert_eq!(conversation.len(), 1);
-    assert!(conversation.is_answerable());
     let watermark = history.conversation().await.unwrap()[0].sequence;
     history
         .append_compaction_status(
@@ -505,7 +456,6 @@ async fn agent_conversation_reload_discards_memory_and_restores_sqlite_compactio
         conversation.messages()[2].provider_content.content,
         "opaque"
     );
-    assert!(!conversation.is_answerable());
     repo.events().database().close().await.unwrap();
     let reopened = fixture.repository();
     let restored = AgentConversation::new(

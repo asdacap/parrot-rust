@@ -55,9 +55,16 @@ async fn saved_canceled_checkpoint_closes_unfinished_tools_without_activating_pr
         )
         .await
         .unwrap();
-    let outcome = bounded(runtime.session.recover_owned().unwrap().join())
-        .await
-        .unwrap();
+    let outcome = bounded(
+        runtime
+            .session
+            .recover_owned_reserved()
+            .unwrap()
+            .execution
+            .join(),
+    )
+    .await
+    .unwrap();
     assert_eq!(outcome.status, ExecutionStatus::Canceled);
     let saved = store.load().await.unwrap().unwrap().execution.unwrap();
     assert_eq!(saved.phase, ExecutionPhase::Canceled);
@@ -107,9 +114,16 @@ async fn saved_canceled_checkpoint_closes_unfinished_tools_without_activating_pr
     assert_eq!(tools.materializations.load(Ordering::SeqCst), 0);
     assert_eq!(parent.messages.lock().unwrap().len(), 1);
     assert_eq!(
-        bounded(runtime.session.recover_owned().unwrap().join())
-            .await
-            .unwrap(),
+        bounded(
+            runtime
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join()
+        )
+        .await
+        .unwrap(),
         outcome
     );
     assert_eq!(

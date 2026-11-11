@@ -107,15 +107,6 @@ impl<'a> RequestView for Request<'a> {
     fn reasoning_effort(&self) -> Option<&str> {
         self.value["reasoning"]["effort"].as_str()
     }
-    fn reasoning_summary(&self) -> Option<&str> {
-        self.value["reasoning"]["summary"].as_str()
-    }
-    fn provider_preferences(&self) -> &str {
-        s(self.value, "provider_preferences")
-    }
-    fn include_router_metadata(&self) -> bool {
-        b(self.value, "include_router_metadata")
-    }
 }
 impl<'a> MessageView for Message<'a> {
     type Content = Json<'a>;
@@ -156,20 +147,11 @@ impl ContentView for Json<'_> {
     fn text(&self) -> &str {
         s(self, "text")
     }
-    fn image_path(&self) -> &str {
-        "anthropic-image.bin"
-    }
     fn image_url(&self) -> &str {
         s(self, "image_url")
     }
     fn media_type(&self) -> &str {
         s(self, "media_type")
-    }
-    fn image_width(&self) -> i32 {
-        n(self, "width") as i32
-    }
-    fn image_height(&self) -> i32 {
-        n(self, "height") as i32
     }
     fn read_image(&self) -> std::io::Result<Vec<u8>> {
         Ok(unhex(s(self, "image_hex")))
@@ -395,24 +377,24 @@ fn price(value: f64) -> Value {
     }
 }
 fn model(value: Model) -> Value {
+    use parrot_provider::catalogs::ModelMetadataFields as F;
     let labels = [
-        "Name",
-        "ContextWindow",
-        "MaxOutputTokens",
-        "InputPrice",
-        "CachedInputPrice",
-        "OutputPrice",
-        "Tools",
-        "Reasoning",
-        "Output",
-        "Variants",
-        "MaxInputTokens",
+        ("Name", F::NAME),
+        ("ContextWindow", F::CONTEXT_WINDOW),
+        ("MaxOutputTokens", F::MAX_OUTPUT_TOKENS),
+        ("InputPrice", F::INPUT_PRICE),
+        ("CachedInputPrice", F::CACHED_INPUT_PRICE),
+        ("OutputPrice", F::OUTPUT_PRICE),
+        ("Tools", F::TOOLS),
+        ("Reasoning", F::REASONING),
+        ("Output", F::OUTPUT),
+        ("Variants", F::VARIANTS),
+        ("MaxInputTokens", F::MAX_INPUT_TOKENS),
     ];
     let fields = labels
         .iter()
-        .enumerate()
-        .filter(|(i, _)| value.fields.bits() & (1 << i) != 0)
-        .map(|(_, v)| *v)
+        .filter(|(_, field)| value.fields.contains(*field))
+        .map(|(label, _)| *label)
         .collect::<Vec<_>>();
     json!({"Id":value.id,"ProviderId":value.provider_id,"Name":value.name,"ContextWindow":value.context_window,"MaxOutputTokens":value.max_output_tokens,"MaxInputTokens":value.max_input_tokens,"InputTokenLimit":value.input_token_limit(),"InputPrice":price(value.input_price),"CachedInputPrice":price(value.cached_input_price),"OutputPrice":price(value.output_price),"Capabilities":{"Tools":value.capabilities.tools,"Reasoning":value.capabilities.reasoning,"Output":value.capabilities.output,"Variants":value.capabilities.variants.into_iter().map(|v|json!({"Name":v.name,"ReasoningEffort":v.reasoning_effort})).collect::<Vec<_>>()},"Fields":if fields.is_empty(){"None".into()}else{fields.join(", ")}})
 }

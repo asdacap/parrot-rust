@@ -12,10 +12,7 @@ use parrot_host::web::router::WebClient;
 
 use crate::dispatch::arguments::ChatOptions;
 
-use super::{
-    ExistingSessionBinding, SlashActivity, SlashFailure, SlashSession, SlashSessionBinding,
-    native_call,
-};
+use super::{SlashActivity, SlashFailure, SlashSession, SlashSessionBinding, native_call};
 
 pub type ReplaceSession = Arc<
     dyn for<'a> Fn(
@@ -309,22 +306,6 @@ impl SlashSession for RpcSlashSession {
             let rollback = Rollback::new(&mut self.current);
             *rollback.current = replacement.clone();
             self.binding.replace(replacement, c).await?;
-            rollback.keep();
-            Ok(())
-        })
-    }
-    fn load_existing<'a>(
-        &'a mut self,
-        replacement: wire::UserSession,
-        binding: &'a mut dyn ExistingSessionBinding,
-        c: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        Box::pin(async move {
-            let rollback = Rollback::new(&mut self.current);
-            {
-                let mut commit = || *rollback.current = replacement.clone();
-                binding.bind(&mut commit, c).await?;
-            }
             rollback.keep();
             Ok(())
         })

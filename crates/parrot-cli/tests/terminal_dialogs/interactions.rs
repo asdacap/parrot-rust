@@ -20,9 +20,9 @@ use parrot_cli::{
     slash_sessions::{CallbackSessionBinding, RpcSlashSession},
     terminal_dialogs::interactions::{
         CountdownCallback, PendingQuestionLifetime, QuestionCollector, QuestionCompletionOutcome,
-        QuestionCountdown, QuestionInteractionOptions, complete_permission, complete_plan,
-        complete_question, complete_question_using, complete_question_with_options,
-        complete_question_with_outcome,
+        QuestionCountdown, QuestionInteractionOptions, complete_permission,
+        complete_plan_with_before_send, complete_question, complete_question_using,
+        complete_question_with_options,
     },
 };
 use parrot_domain::{
@@ -105,11 +105,12 @@ async fn plan_picker_changes_mode_before_queued_prompt_on_same_session() {
     let mut dialog = RecordingDialog::default();
     dialog.selections.push_back(Some("yes".into()));
     assert!(
-        complete_plan(
+        complete_plan_with_before_send(
             fixture.client(),
             &plan(),
             &mut session,
             &mut dialog,
+            |_| Ok(()),
             &Stop::new()
         )
         .await
@@ -152,11 +153,12 @@ async fn plan_custom_feedback_is_trimmed_and_blank_or_cancellation_sends_nothing
         dialog.selections.push_back(Some("feedback".into()));
         dialog.texts.push_back(feedback.map(str::to_owned));
         assert_eq!(
-            complete_plan(
+            complete_plan_with_before_send(
                 fixture.client(),
                 &plan(),
                 &mut session,
                 &mut dialog,
+                |_| Ok(()),
                 &Stop::new()
             )
             .await
@@ -183,11 +185,12 @@ async fn plan_missing_dialog_empty_choices_cancel_and_rpc_status_remain_distinct
     let mut session = session(&mut fixture);
     let mut dialog = RecordingDialog::default();
     assert!(
-        !complete_plan(
+        !complete_plan_with_before_send(
             fixture.client(),
             &wire::PlanCompleted::new(),
             &mut session,
             &mut dialog,
+            |_| Ok(()),
             &Stop::new()
         )
         .await
@@ -198,22 +201,24 @@ async fn plan_missing_dialog_empty_choices_cancel_and_rpc_status_remain_distinct
         ..Default::default()
     };
     assert!(
-        !complete_plan(
+        !complete_plan_with_before_send(
             fixture.client(),
             &empty,
             &mut session,
             &mut dialog,
+            |_| Ok(()),
             &Stop::new()
         )
         .await
         .unwrap()
     );
     assert!(
-        !complete_plan(
+        !complete_plan_with_before_send(
             fixture.client(),
             &plan(),
             &mut session,
             &mut dialog,
+            |_| Ok(()),
             &Stop::new()
         )
         .await
@@ -221,11 +226,12 @@ async fn plan_missing_dialog_empty_choices_cancel_and_rpc_status_remain_distinct
     );
     assert!(fixture.calls.lock().unwrap().is_empty());
     dialog.selections.push_back(Some("yes".into()));
-    let error = complete_plan(
+    let error = complete_plan_with_before_send(
         fixture.client(),
         &plan(),
         &mut session,
         &mut dialog,
+        |_| Ok(()),
         &Stop::new(),
     )
     .await
@@ -1089,70 +1095,14 @@ async fn question_rpc_not_found_is_benign_invalid_argument_shown_and_other_statu
 }
 
 #[tokio::test]
-async fn outcome_allows_caller_retry_of_same_question_while_legacy_helper_stays_enhanced() {
+async fn enhanced_question_displays_invalid_argument_and_returns_without_retry() {
     let mut question = pending("question-request");
     question.questions[0].options.push(wire::QuestionOption {
         label: "Green".into(),
         ..Default::default()
     });
     question.remaining_timeout_ms = Some(4000);
-    let (mut fixture, state) = question_fixture(vec![question.clone()]).await;
-    state
-        .lock()
-        .unwrap()
-        .reply_failures
-        .push_back(Status::invalid_argument("choose another answer"));
-    let mut dialog = RecordingDialog::default();
-    dialog
-        .selections
-        .extend([Some("__option_0__".into()), Some("__option_1__".into())]);
-    let (callback, updates) = countdown();
     let stop = Stop::new();
-    let first = bounded(complete_question_with_outcome(
-        fixture.client(),
-        "captured-session",
-        &question,
-        &mut dialog,
-        callback.clone(),
-        &stop,
-    ))
-    .await
-    .unwrap();
-    assert_eq!(
-        first,
-        QuestionCompletionOutcome::RetryInvalidArgument("choose another answer".into())
-    );
-    assert!(dialog.errors.is_empty());
-    assert_eq!(
-        replies(&fixture).len(),
-        1,
-        "the helper must not own the caller's retry loop"
-    );
-    let second = bounded(complete_question_with_outcome(
-        fixture.client(),
-        "captured-session",
-        &question,
-        &mut dialog,
-        callback,
-        &stop,
-    ))
-    .await
-    .unwrap();
-    assert_eq!(second, QuestionCompletionOutcome::Finished);
-    assert!(dialog.errors.is_empty());
-    let sent = replies(&fixture);
-    assert_eq!(sent.len(), 2);
-    for reply in &sent {
-        assert_eq!(reply.user_session_id, "captured-session");
-        assert_eq!(reply.question_request_id, "question-request");
-        assert_eq!(reply.answers.len(), 1);
-    }
-    assert_eq!(sent[0].answers[0].text, "Blue");
-    assert_eq!(sent[1].answers[0].text, "Green");
-    assert_eq!(*updates.lock().unwrap(), [Some(4), None, Some(4), None]);
-    assert!(rejections(&fixture).is_empty());
-    fixture.close().await;
-
     let (mut legacy_fixture, state) = question_fixture(vec![question.clone()]).await;
     state
         .lock()

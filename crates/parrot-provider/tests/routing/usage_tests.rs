@@ -464,11 +464,10 @@ async fn reporters_resolve_each_call_and_forward_original_credential_error() {
         let transport = Transport::new(if open_code { "{}" } else { r#"{"data":{}}"# });
         let reporter = reporter(open_code, key.clone(), transport.clone());
         reporter.usage(&Token(false)).await.unwrap();
-        *key.value.lock().unwrap() =
-            Err(Error::Cancellation("credential cancelled exactly".into()));
+        *key.value.lock().unwrap() = Err(Error::Cancelled);
         assert_eq!(
             reporter.usage(&Token(false)).await.unwrap_err(),
-            Error::Cancellation("credential cancelled exactly".into())
+            Error::Cancelled
         );
         assert_eq!(key.calls.load(Ordering::SeqCst), 2);
         assert_eq!(transport.requests.lock().unwrap().len(), 1);

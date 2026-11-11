@@ -1,8 +1,7 @@
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
-use parrot_foundation::config::{
-    ConfigError, configuration::source_predefined_content, node::Node, yaml,
-};
-use parrot_foundation::template_scalar::{ScalarPromptTemplateEngine, validate_arguments};
+use parrot_core::template::{ScalarPromptTemplateEngine, validate_arguments};
+use parrot_core::{CancellationToken, Error};
+use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_foundation::config::{configuration::source_predefined_content, node::Node, yaml};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -21,7 +20,7 @@ fn as_set(values: &[String]) -> BTreeSet<String> {
     values.iter().cloned().collect()
 }
 
-fn run_render(input: &Value) -> Result<String, ConfigError> {
+fn run_render(input: &Value) -> Result<String, Error> {
     let path = input["path"].as_str().unwrap();
     let text = input["template"].as_str().unwrap();
     let allowed = as_set(
@@ -69,12 +68,7 @@ fn run_render(input: &Value) -> Result<String, ConfigError> {
         };
     validate_arguments("prompt_templates.case", &allowed, &required, &names)?;
     let engine = ScalarPromptTemplateEngine::compile(path, text, &allowed)?;
-    engine
-        .render(&values, &CancellationState(false))
-        .map_err(|failure| match failure {
-            OperationError::Cancelled => ConfigError::invalid_data("operation cancelled".into()),
-            OperationError::Failed(error) => error,
-        })
+    engine.render(&values, CancellationToken::new(&CancellationState(false)))
 }
 
 #[test]
@@ -132,7 +126,9 @@ fn user_override_of_bundled_template_renders_multiline_values_with_literal_brace
         ),
     ]);
     assert_eq!(
-        engine.render(&values, &CancellationState(false)).unwrap(),
+        engine
+            .render(&values, CancellationToken::new(&CancellationState(false)))
+            .unwrap(),
         "Agent worker says:\nvalue {not_a_placeholder}\nnext"
     );
 }
@@ -156,7 +152,10 @@ fn literal_braces_stay_opaque_in_template_text_and_argument_values() {
     let arguments = BTreeMap::from([("value".to_owned(), value.to_owned())]);
     assert_eq!(
         engine
-            .render(&arguments, &CancellationState(false))
+            .render(
+                &arguments,
+                CancellationToken::new(&CancellationState(false))
+            )
             .unwrap(),
         "{prefix} {{ hostile }} {unresolved}\nnext"
     );
@@ -174,7 +173,7 @@ fn scalar_checker_prioritizes_duplicate_disallowed_and_required_checks_in_source
             &["other".into(), "other".into()]
         )
         .unwrap_err()
-        .0,
+        .message,
         "prompt_templates.example received duplicate argument 'other'"
     );
     assert_eq!(
@@ -185,13 +184,13 @@ fn scalar_checker_prioritizes_duplicate_disallowed_and_required_checks_in_source
             &["other".into()]
         )
         .unwrap_err()
-        .0,
+        .message,
         "prompt_templates.example does not allow argument 'other'"
     );
     assert_eq!(
         validate_arguments("prompt_templates.example", &allowed, &required, &[])
             .unwrap_err()
-            .0,
+            .message,
         "prompt_templates.example requires argument 'known'"
     );
 }
@@ -202,16 +201,22 @@ fn scalar_render_checks_cancellation_before_observing_missing_values() {
     let engine =
         ScalarPromptTemplateEngine::compile("prompt_templates.example", "{name}", &allowed)
             .unwrap();
-    assert!(matches!(
-        engine.render(&BTreeMap::new(), &CancellationState(true)),
-        Err(OperationError::Cancelled)
-    ));
     assert_eq!(
         engine
-            .render(&BTreeMap::new(), &CancellationState(false))
+            .render(
+                &BTreeMap::new(),
+                CancellationToken::new(&CancellationState(true))
+            )
             .unwrap_err(),
-        OperationError::Failed(ConfigError::invalid_data(
-            "prompt_templates.example requires scalar argument 'name'".into()
-        ))
+        Error::cancelled()
+    );
+    assert_eq!(
+        engine
+            .render(
+                &BTreeMap::new(),
+                CancellationToken::new(&CancellationState(false))
+            )
+            .unwrap_err(),
+        Error::template("prompt_templates.example requires scalar argument 'name'")
     );
 }

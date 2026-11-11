@@ -429,7 +429,7 @@ impl ScopeFactory<Security> for Factory {
                     (id, statistics)
                 })
                 .collect();
-            let backend = RuntimeBackend::new(RuntimeConfig {
+            let runtime_config = RuntimeConfig {
                 tool_execution: crate::tool_execution_support::tool_execution_config(
                     &history,
                     templates(),
@@ -457,7 +457,11 @@ impl ScopeFactory<Security> for Factory {
                 parent_completion: prepared.parent_completion,
                 ancestors,
                 event_id: Arc::new(id),
-            })
+            };
+            let backend = RuntimeBackend::with_sessions(
+                runtime_config,
+                parrot_provider::sessions::ProviderSessions::new(),
+            )
             .await
             .map_err(|error| ChildError::failure("runtime", error.to_string()))?;
             let store = crate::agent_state_support::test_agent_state_store(

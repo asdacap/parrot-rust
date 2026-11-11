@@ -160,9 +160,6 @@ impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.call_impl(request)
-    }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(self.clone()))
     }
@@ -671,7 +668,7 @@ impl Harness {
             tool: wait_tool(bridge.clone()),
         })));
         let provider = Scripted::default();
-        let backend = RuntimeBackend::new(RuntimeConfig {
+        let runtime_config = RuntimeConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
                 ..Default::default()
@@ -709,7 +706,11 @@ impl Harness {
             parent_completion: Arc::new(NoParent),
             ancestors: vec![],
             event_id: Arc::new(id),
-        })
+        };
+        let backend = RuntimeBackend::with_sessions(
+            runtime_config,
+            parrot_provider::sessions::ProviderSessions::new(),
+        )
         .await
         .unwrap();
         let store = crate::agent_state_support::test_agent_state_store(

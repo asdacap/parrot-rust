@@ -177,9 +177,6 @@ mod fixture {
         fn id(&self) -> &str {
             "scripted"
         }
-        fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-            self.call_impl(request)
-        }
         fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
             Ok(Arc::new(self.clone()))
         }
@@ -660,7 +657,7 @@ mod fixture {
                 })
                 .into_iter()
                 .collect();
-            let backend = RuntimeBackend::new(RuntimeConfig {
+            let runtime_config = RuntimeConfig {
                 agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                     disable_max_turns: false,
                     ..Default::default()
@@ -691,7 +688,11 @@ mod fixture {
                 parent_completion: prepared.parent_completion,
                 ancestors,
                 event_id: Arc::new(id),
-            })
+            };
+            let backend = RuntimeBackend::with_sessions(
+                runtime_config,
+                parrot_provider::sessions::ProviderSessions::new(),
+            )
             .await
             .unwrap();
             let store = crate::agent_state_support::test_agent_state_store(
@@ -1564,14 +1565,20 @@ async fn host_root_question_is_user_only_and_cancellation_withdraws_agent_ask() 
         h.user_questions()
             .reply(
                 &pending[0].id,
-                parrot_domain::contracts::interactions::QuestionReply::answered(vec!["Yes".into()]),
+                parrot_domain::contracts::interactions::QuestionReply {
+                    kind: parrot_domain::contracts::interactions::QuestionReplyKind::Answered,
+                    answers: vec!["Yes".into()],
+                },
             )
             .unwrap();
     };
     let (reply, ()) = tokio::join!(asking_user, reply_user);
     assert_eq!(
         reply.unwrap(),
-        parrot_domain::contracts::interactions::QuestionReply::answered(vec!["Yes".into()])
+        parrot_domain::contracts::interactions::QuestionReply {
+            kind: parrot_domain::contracts::interactions::QuestionReplyKind::Answered,
+            answers: vec!["Yes".into()]
+        }
     );
     assert!(h.user_questions().pending().is_empty());
     h.child("first").await;

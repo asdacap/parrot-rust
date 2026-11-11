@@ -303,21 +303,6 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
             );
         }
     }
-    pub fn build_prompt(
-        &self,
-        task: &Task,
-        siblings: &[Task],
-        dependencies: &[Task],
-        feedback: &[String],
-        carried_result: Option<&str>,
-    ) -> ChildResult<String> {
-        self.build_assignment(
-            task,
-            self.header(task, siblings, dependencies)?,
-            feedback,
-            carried_result,
-        )
-    }
     fn build_assignment(
         &self,
         task: &Task,

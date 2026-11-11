@@ -1,14 +1,16 @@
-use crate::support::Context;
+use crate::support::{Context, transact};
 #[test]
 fn source_assertions() {
     let context = Context::new();
     let mut config=context.configured("theme: dark\nmodel_aliases:\n  high_llm:\n    model_string: provider/old\n    usage: Customized usage\n    augment_system_prompt: Keep metadata.\n").unwrap();
-    config
-        .set_model_routing(
+    transact(&mut config, |transaction| {
+        transaction.set_model_routing_with_limits(
             "high_llm",
             &[("high_llm".into(), "provider/new/high".into())].into(),
+            None,
         )
-        .unwrap();
+    })
+    .unwrap();
     let reloaded = context.load().unwrap();
     assert_eq!(reloaded.model, "high_llm");
     assert_eq!(

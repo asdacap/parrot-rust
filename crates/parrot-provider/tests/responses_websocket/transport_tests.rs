@@ -12,9 +12,9 @@ fn source_transport_cases_match_owned_observations() {
     let oracle: Value = serde_json::from_str(ORACLE).unwrap();
     let cases = inputs["cases"].as_array().unwrap();
     let expected = oracle["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 56);
+    assert_eq!(cases.len(), 48);
     assert_eq!(expected.len(), cases.len());
-    for (kind, count) in [("send", 37), ("client", 12), ("authority", 7)] {
+    for (kind, count) in [("send", 37), ("client", 11)] {
         assert_eq!(
             cases.iter().filter(|case| case["kind"] == kind).count(),
             count

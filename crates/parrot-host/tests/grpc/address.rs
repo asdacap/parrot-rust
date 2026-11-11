@@ -1,5 +1,5 @@
 use parrot_host::grpc::address::TransportAddress;
-use std::{net::SocketAddr, path::Path};
+use std::net::SocketAddr;
 
 #[test]
 fn transport_addresses_are_explicit_and_authority_only() {
@@ -22,7 +22,7 @@ fn transport_addresses_are_explicit_and_authority_only() {
         assert!(TransportAddress::parse(input).is_err(), "accepted {input}");
     }
     let unix = TransportAddress::parse("unix:/tmp/control/../parrot.sock").unwrap();
-    assert_eq!(unix.unix_path(), Some(Path::new("/tmp/parrot.sock")));
+    assert_eq!(unix, TransportAddress::Unix("/tmp/parrot.sock".into()));
     assert!(!unix.is_tcp());
     assert!(!unix.is_external());
     assert!(unix.tcp_url().is_none());
@@ -30,7 +30,6 @@ fn transport_addresses_are_explicit_and_authority_only() {
     assert_eq!(unix.to_string(), "unix:/tmp/parrot.sock");
     let tcp = TransportAddress::parse("http://localhost:8710/").unwrap();
     assert!(tcp.is_tcp());
-    assert!(tcp.unix_path().is_none());
     assert_eq!(tcp.to_string(), "http://localhost:8710");
     assert_eq!(
         tcp.socket_addr().unwrap(),
@@ -120,9 +119,7 @@ fn only_external_plaintext_listening_requires_the_unsafe_flag() {
 #[test]
 fn unix_path_normalization_does_not_walk_above_root() {
     assert_eq!(
-        TransportAddress::parse("unix:/../../tmp//./parrot.sock")
-            .unwrap()
-            .unix_path(),
-        Some(Path::new("/tmp/parrot.sock"))
+        TransportAddress::parse("unix:/../../tmp//./parrot.sock").unwrap(),
+        TransportAddress::Unix("/tmp/parrot.sock".into())
     );
 }

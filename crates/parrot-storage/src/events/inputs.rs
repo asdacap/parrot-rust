@@ -108,17 +108,6 @@ pub fn peek_pending_input(
     }
     Ok(pending(tx, agent, Delivery::DELIVERY_QUEUE, 1)?.pop())
 }
-pub fn inputs_for_next_promotion(
-    tx: &Transaction<'_>,
-    agent: &str,
-) -> Result<Vec<AdmittedInput>, EventError> {
-    let steers = pending(tx, agent, Delivery::DELIVERY_STEER, -1)?;
-    if steers.is_empty() {
-        pending(tx, agent, Delivery::DELIVERY_QUEUE, 1)
-    } else {
-        Ok(steers)
-    }
-}
 pub fn admit_parts<F>(
     tx: &Transaction<'_>,
     agent: &str,
@@ -151,51 +140,11 @@ where
     let event = compose(&admitted)?;
     tx.execute("INSERT INTO input (id, agent_session, message_id, content, delivery, status, created_at) VALUES (?1,?2,?3,?4,?5,'pending',?6)",params![admitted.id,agent,message,admitted.content(),delivery_text(delivery)?,timestamp()])?;
     projection::insert_input_parts(tx, &admitted.id, &admitted.parts)?;
-    record(tx, &event, None, &timestamp())?;
+    record(tx, &event, &timestamp())?;
     Ok(Admission {
         input: admitted,
         published: Some(event),
     })
-}
-pub fn admit_steer_if_idle<F>(
-    tx: &Transaction<'_>,
-    agent: &str,
-    message: &str,
-    content: String,
-    compose: F,
-) -> Result<Option<Admission>, EventError>
-where
-    F: FnOnce(&AdmittedInput) -> Result<Event, EventError>,
-{
-    if let Some(already) = existing(tx, agent, message)? {
-        return if already.content() == content && already.delivery == Delivery::DELIVERY_STEER {
-            Ok(Some(Admission {
-                input: already,
-                published: None,
-            }))
-        } else {
-            Err(EventError::Conflict(format!(
-                "message {message} was already admitted with different content"
-            )))
-        };
-    }
-    if has_pending(tx, agent)? {
-        return Ok(None);
-    }
-    let admitted = AdmittedInput {
-        id: Identifier::input_id()?,
-        message_id: message.into(),
-        parts: vec![ConversationPart::text(content)],
-        delivery: Delivery::DELIVERY_STEER,
-    };
-    let event = compose(&admitted)?;
-    tx.execute("INSERT INTO input (id, agent_session, message_id, content, delivery, status, created_at) VALUES (?1,?2,?3,?4,'steer','pending',?5)",params![admitted.id,agent,message,admitted.content(),timestamp()])?;
-    // Source idle-steer path intentionally has no input_part insertion.
-    record(tx, &event, None, &timestamp())?;
-    Ok(Some(Admission {
-        input: admitted,
-        published: Some(event),
-    }))
 }
 pub fn cancel_pending<F>(
     tx: &Transaction<'_>,
@@ -208,7 +157,7 @@ where
 {
     if tx.execute("UPDATE input SET status = 'canceled' WHERE agent_session = ?1 AND id = ?2 AND status = 'pending'",params![agent,input])?==0{return Ok(None);}
     let event = compose()?;
-    record(tx, &event, None, &timestamp())?;
+    record(tx, &event, &timestamp())?;
     Ok(Some(event))
 }
 pub fn promote<F>(
@@ -239,7 +188,7 @@ where
             provider_content: ProviderContent::default(),
         };
         projection::project(tx, agent, &message, &timestamp())?;
-        record(tx, &event, None, &timestamp())?;
+        record(tx, &event, &timestamp())?;
         promoted.push(Promotion {
             input,
             published: event,

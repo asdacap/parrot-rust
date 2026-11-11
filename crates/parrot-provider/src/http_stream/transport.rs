@@ -325,7 +325,6 @@ async fn parse_error(
     let bytes = match read_at_most(&mut *response.body, MAX_ERROR_BYTES + 4, cancellation).await {
         Ok(bytes) => bytes,
         Err(error) if cancellation.is_cancelled() => return Err(error),
-        Err(HttpError::Http(message)) => return Err(HttpError::Http(message)),
         Err(_) => {
             return Ok(HttpError::Response(HttpFailure {
                 status: response.status,

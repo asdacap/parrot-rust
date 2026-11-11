@@ -571,12 +571,6 @@ impl ShellProcessExecution {
             }
         }
     }
-    pub fn resize(&self, rows: u16, columns: u16) -> io::Result<()> {
-        recover(&self.shared.native)
-            .as_ref()
-            .ok_or_else(cancelled)?
-            .resize(rows, columns)
-    }
     pub fn send_signal(&self, signal: i32) -> io::Result<()> {
         recover(&self.shared.native)
             .as_ref()

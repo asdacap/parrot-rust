@@ -101,10 +101,6 @@ impl RetryPolicy {
         self.output_emitted = true;
     }
 
-    pub fn max_output_tokens(&self) -> i32 {
-        self.maximum_tokens
-    }
-
     /// Called only after the underlying session successfully selects HTTP.
     /// Header, overload, context-adjustment and visibility state are retained.
     pub fn reset_stream(&mut self) {

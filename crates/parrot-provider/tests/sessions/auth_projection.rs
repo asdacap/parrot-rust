@@ -338,20 +338,9 @@ struct Script {
     error: Error,
     visible: Option<String>,
 }
-impl Script {
-    fn stream(&self) -> Box<dyn EventStream> {
-        Box::new(ThrowStream {
-            error: Some(self.error.clone()),
-            visible: self.visible.clone(),
-        })
-    }
-}
 impl Provider for Script {
     fn id(&self) -> &str {
         &self.id
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(self.stream())
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(ScriptSession {
@@ -428,13 +417,6 @@ struct CountingProvider {
 impl Provider for CountingProvider {
     fn id(&self) -> &str {
         self.inner.id()
-    }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.counts.physical_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(CountingStream::new(
-            self.inner.call(request)?,
-            self.counts.clone(),
-        )))
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         self.counts.session_opens.fetch_add(1, Ordering::SeqCst);
@@ -755,22 +737,14 @@ async fn run_case(case: &Case, collaborators: &Collaborators) -> Result<(Value, 
         sleeper.clone(),
     );
     let caller = Caller(case.caller_cancelled);
-    let session = if case.mode == "session" {
-        let session = retry.open_session()?;
-        session.begin_turn().await?;
-        Some(session)
-    } else if case.mode == "direct" {
-        None
-    } else {
+    if !matches!(case.mode.as_str(), "direct" | "session") {
         return Err(Error::InvalidOperation(
             "unsupported public call mode".into(),
         ));
-    };
-    let mut stream = if let Some(session) = &session {
-        session.call(request)?
-    } else {
-        retry.call(request)?
-    };
+    }
+    let session = retry.open_session()?;
+    session.begin_turn().await?;
+    let mut stream = session.call(request)?;
     let mut events = Vec::new();
     let mut terminal = None;
     loop {
@@ -786,9 +760,7 @@ async fn run_case(case: &Case, collaborators: &Collaborators) -> Result<(Value, 
     if let Err(error) = stream.close().await {
         terminal = Some(error)
     }
-    if let Some(session) = session {
-        session.close().await?
-    }
+    session.close().await?;
     let selected = terminal.as_ref().map(selected_error).transpose()?;
     let observation = json!({"events":events,"physical_calls":counts.physical_calls.load(Ordering::SeqCst),"enumerator_disposals":counts.enumerator_disposals.load(Ordering::SeqCst),"session_opens":counts.session_opens.load(Ordering::SeqCst),"session_disposals":counts.session_disposals.load(Ordering::SeqCst),"delays_ms":*sleeper.0.lock().unwrap(),"error":selected,"diagnostic_classification":classification,"caller_cancelled":caller.is_cancelled(),"credential_gets":counts.credential_gets.load(Ordering::SeqCst),"http_sends":counts.http_sends.load(Ordering::SeqCst)});
     Ok((

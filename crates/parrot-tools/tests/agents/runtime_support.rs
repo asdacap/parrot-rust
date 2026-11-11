@@ -95,9 +95,6 @@ impl Provider for OfflineProvider {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.stream(request)
-    }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(self.clone()))
     }
@@ -338,7 +335,7 @@ impl ScopeFactory<Security> for Factory {
                 prepared.identity.session.session_id.clone(),
                 prepared.identity.session.parent_session_id.clone(),
             );
-            let backend = RuntimeBackend::new(RuntimeConfig {
+            let runtime_config = RuntimeConfig {
                 tool_execution: crate::tool_execution_support::tool_execution_config(
                     &prepared.history,
                     templates.clone(),
@@ -366,7 +363,11 @@ impl ScopeFactory<Security> for Factory {
                 parent_completion: prepared.parent_completion,
                 ancestors,
                 event_id: Arc::new(support::id),
-            })
+            };
+            let backend = RuntimeBackend::with_sessions(
+                runtime_config,
+                parrot_provider::sessions::ProviderSessions::new(),
+            )
             .await
             .unwrap();
             let adapter = Arc::new(SessionAdapter::new(

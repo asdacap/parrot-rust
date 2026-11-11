@@ -40,10 +40,6 @@ impl<S: AuthorizedReadService> ReadImageTool<S> {
         }
     }
 
-    pub const fn name(&self) -> &'static str {
-        "read_image"
-    }
-
     pub async fn execute(
         &self,
         invocation: &FileToolInvocation,

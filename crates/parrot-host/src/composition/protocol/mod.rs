@@ -4,7 +4,6 @@ mod boundary;
 pub mod models;
 mod registry;
 mod service;
-pub mod stream;
 
 pub use boundary::*;
 pub use registry::UserSessionRegistry;

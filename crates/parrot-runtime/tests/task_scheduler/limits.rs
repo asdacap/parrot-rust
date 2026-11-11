@@ -126,7 +126,7 @@ fn oversized_leaf_and_composite_suffixes_remain_whole_even_when_larger_than_prom
     let instruction = format!("{}TAIL-MARKER", "😀".repeat(140 * 1024));
     let mut leaf = task("a");
     leaf.payload = TaskPayload::Instruction(instruction.clone());
-    let prompt = runner.build_prompt(&leaf, &[], &[], &[], None).unwrap();
+    let prompt = runner.begin(leaf, vec![], vec![]).unwrap().prompt;
     assert!(prompt.starts_with("AgentTask role: payload executor"));
     assert!(prompt.contains(&instruction));
     assert!(!prompt.contains("Task: a\n"));
@@ -135,9 +135,7 @@ fn oversized_leaf_and_composite_suffixes_remain_whole_even_when_larger_than_prom
     let mut nested = task("inner");
     nested.payload = TaskPayload::Instruction(instruction);
     let composite = composite("owner", vec![nested]);
-    let prompt = runner
-        .build_prompt(&composite, &[], &[], &[], None)
-        .unwrap();
+    let prompt = runner.begin(composite, vec![], vec![]).unwrap().prompt;
     assert!(prompt.starts_with("AgentTask role: composite owner"));
     assert!(prompt.contains("TAIL-MARKER"));
     assert!(!prompt.contains("[truncated]"));

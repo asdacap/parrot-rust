@@ -9,45 +9,33 @@ fn model(id: &str) -> Model {
     Model::new(id, "p")
 }
 
+fn field_bits(fields: F) -> u16 {
+    [
+        F::NAME,
+        F::CONTEXT_WINDOW,
+        F::MAX_OUTPUT_TOKENS,
+        F::INPUT_PRICE,
+        F::CACHED_INPUT_PRICE,
+        F::OUTPUT_PRICE,
+        F::TOOLS,
+        F::REASONING,
+        F::OUTPUT,
+        F::VARIANTS,
+        F::MAX_INPUT_TOKENS,
+    ]
+    .into_iter()
+    .enumerate()
+    .filter(|(_, field)| fields.contains(*field))
+    .map(|(bit, _)| 1 << bit)
+    .sum()
+}
+
 fn boundary_inputs() -> serde_json::Map<String, serde_json::Value> {
     serde_json::from_str(include_str!("fixtures/catalog-boundary-inputs.json")).unwrap()
 }
 
 fn boundary_input(name: &str) -> String {
     boundary_inputs()[name].as_str().unwrap().to_owned()
-}
-
-fn assert_legacy_standard_error(json: &str, error: StandardModelError) {
-    let legacy = StandardModelDecoder::decode("p", json).unwrap_err();
-    let expected = match error {
-        StandardModelError::Json(error)
-        | StandardModelError::InvalidOperation(error)
-        | StandardModelError::Provider(error) => error,
-    };
-    assert_eq!(legacy, expected, "legacy error changed for {json}");
-}
-
-#[test]
-fn model_reserves_requested_output_and_five_percent_input_headroom() {
-    for (context, output, requested, safe_input) in [
-        (180_000, 0, 32_768, Some(140_220)),
-        (180_000, -1, 32_768, Some(140_220)),
-        (180_000, 65_536, 32_768, Some(140_220)),
-        (180_000, 8_192, 8_192, Some(163_626)),
-        (1_000, 0, 32_768, Some(0)),
-        (1_000, 100, 100, Some(857)),
-        (22, 2, 2, Some(19)),
-        (23, 3, 3, Some(19)),
-        (i32::MAX, 0, 32_768, Some(2_045_191_313)),
-        (0, 0, 32_768, None),
-        (-1, 8_192, 8_192, None),
-    ] {
-        let mut model = model("model");
-        model.context_window = context;
-        model.max_output_tokens = output;
-        assert_eq!(model.requested_output_tokens(), requested);
-        assert_eq!(model.output_reserved_input_token_limit(), safe_input);
-    }
 }
 
 #[test]
@@ -183,7 +171,7 @@ fn catalog_boundary_projection_matches_pinned_dotnet_raw_v2_bytes() {
                 input_price_micros,
                 model.capabilities.reasoning,
                 variants,
-                model.fields.bits(),
+                field_bits(model.fields),
             ));
         }
         output.push_str("]}");
@@ -216,7 +204,7 @@ fn project_provider_model(model: &Model) -> serde_json::Value {
                 "reasoning_effort": variant.reasoning_effort,
             })).collect::<Vec<_>>(),
         },
-        "fields": model.fields.bits(),
+        "fields": field_bits(model.fields),
     })
 }
 
@@ -335,7 +323,7 @@ fn models_dev_rejects_non_object_roots() {
 
 #[test]
 fn standard_decoder_dedupes_and_defaults_name() {
-    let models = StandardModelDecoder::decode(
+    let models = StandardModelDecoder::decode_typed(
         "p",
         r#"{"data":[{"id":"m1","context_window":100},{"id":"m1"},{"id":""}]}"#,
     )
@@ -373,7 +361,6 @@ fn standard_decoder_typed_errors_match_archived_t32_source_contrasts() {
                     source_error["message"].as_str().unwrap().to_owned(),
                 ));
                 assert_eq!(error, expected, "{case_id}");
-                assert_legacy_standard_error(body, error);
             }
             Some("Parrot.Llm.LLMProviderException") => {
                 let error = StandardModelDecoder::decode_typed("p", body).unwrap_err();
@@ -381,7 +368,6 @@ fn standard_decoder_typed_errors_match_archived_t32_source_contrasts() {
                     source_error["message"].as_str().unwrap().to_owned(),
                 ));
                 assert_eq!(error, expected, "{case_id}");
-                assert_legacy_standard_error(body, error);
             }
             Some("System.Text.Json.JsonReaderException") => {
                 let error = StandardModelDecoder::decode_typed("p", body).unwrap_err();
@@ -389,7 +375,6 @@ fn standard_decoder_typed_errors_match_archived_t32_source_contrasts() {
                     matches!(error, StandardModelError::Json(_)),
                     "{case_id}: {error}"
                 );
-                assert_legacy_standard_error(body, error);
             }
             None => {
                 assert!(source_error.is_null(), "{case_id}");
@@ -403,7 +388,7 @@ fn standard_decoder_typed_errors_match_archived_t32_source_contrasts() {
 
 #[test]
 fn standard_decoder_reads_rich_metadata_without_claiming_invalid_fields() {
-    let models=StandardModelDecoder::decode("p",r#"{"data":[{"id":"rich","name":"Rich","max_input_tokens":0,"max_output_tokens":42,"input_cost_per_token":0,"cache_read_input_token_cost":0.00025,"output_cost_per_token":0.002,"supports_function_calling":false,"supports_reasoning":true,"supported_output_modalities":[],"reasoning_effort_levels":["low","high"],"default_reasoning_effort":"high"},{"id":"invalid","max_input_tokens":-1,"input_cost_per_token":-1,"supports_reasoning":"yes","supported_output_modalities":"text","supported_reasoning_efforts":"high"}]}"#).unwrap();
+    let models=StandardModelDecoder::decode_typed("p",r#"{"data":[{"id":"rich","name":"Rich","max_input_tokens":0,"max_output_tokens":42,"input_cost_per_token":0,"cache_read_input_token_cost":0.00025,"output_cost_per_token":0.002,"supports_function_calling":false,"supports_reasoning":true,"supported_output_modalities":[],"reasoning_effort_levels":["low","high"],"default_reasoning_effort":"high"},{"id":"invalid","max_input_tokens":-1,"input_cost_per_token":-1,"supports_reasoning":"yes","supported_output_modalities":"text","supported_reasoning_efforts":"high"}]}"#).unwrap();
     let rich = &models[0];
     let invalid = &models[1];
     assert_eq!(rich.name, "Rich");
@@ -549,7 +534,7 @@ fn litellm_needs_supplement_when_any_supplemental_field_is_missing() {
 
 #[test]
 fn supplement_preserves_primary_membership_and_field_precedence() {
-    let primary=StandardModelDecoder::decode("p",r#"{"data":[{"id":"served","max_output_tokens":0,"supports_function_calling":false},{"id":"primary-only","supports_reasoning":false}]}"#).unwrap();
+    let primary=StandardModelDecoder::decode_typed("p",r#"{"data":[{"id":"served","max_output_tokens":0,"supports_function_calling":false},{"id":"primary-only","supports_reasoning":false}]}"#).unwrap();
     let supplemental=LiteLlmModelInfoDecoder::decode("p",r#"{"data":[{"model_name":"served","model_info":{"max_input_tokens":512,"max_output_tokens":64,"supports_function_calling":true,"supports_reasoning":true,"reasoning_effort_levels":["low","high"]}},{"model_name":"info-only","model_info":{"max_input_tokens":999}},{"model_name":"served","model_info":{"max_input_tokens":1024}}]}"#).unwrap();
     let configured = Model {
         id: "served".into(),
@@ -671,9 +656,11 @@ fn explicit_endpoint_non_reasoning_suppresses_configured_variants() {
         variants: vec![ModelVariant::new("high", "high")],
     };
     configured.fields = F::REASONING.union(F::VARIANTS);
-    let fetched =
-        StandardModelDecoder::decode("p", r#"{"data":[{"id":"m","supports_reasoning":false}]}"#)
-            .unwrap();
+    let fetched = StandardModelDecoder::decode_typed(
+        "p",
+        r#"{"data":[{"id":"m","supports_reasoning":false}]}"#,
+    )
+    .unwrap();
     let merged = merge_models(Some(&fetched), &[configured], &[], &[]);
     assert!(!merged[0].capabilities.reasoning);
     assert!(merged[0].capabilities.variants.is_empty());
@@ -953,7 +940,7 @@ fn synthetic_standard_capabilities_do_not_override_configuration() {
         .union(F::REASONING)
         .union(F::OUTPUT)
         .union(F::VARIANTS);
-    let fetched = StandardModelDecoder::decode("p", r#"{"data":[{"id":"m"}]}"#).unwrap();
+    let fetched = StandardModelDecoder::decode_typed("p", r#"{"data":[{"id":"m"}]}"#).unwrap();
     let merged = merge_models(Some(&fetched), &[configured], &[], &[]);
     assert!(!merged[0].capabilities.tools);
     assert!(merged[0].capabilities.reasoning);
@@ -1018,7 +1005,7 @@ fn kimi_maps_display_name_and_supported_efforts() {
                     "reasoning_effort": &variant.reasoning_effort,
                 })).collect::<Vec<_>>(),
             },
-            "fields": model.fields.bits(),
+            "fields": field_bits(model.fields),
         });
         assert_eq!(observed, expected[index]);
     }
@@ -1195,7 +1182,9 @@ fn models_dev_openai_catalogue_projects_only_allowed_models_to_chatgpt() {
 #[test]
 fn decoders_reject_missing_catalogue_envelopes_and_preserve_no_usable_error() {
     assert_eq!(
-        StandardModelDecoder::decode("p", "{}").unwrap_err().0,
+        StandardModelDecoder::decode_typed("p", "{}")
+            .unwrap_err()
+            .to_string(),
         "provider: models response contains no usable models"
     );
     assert_eq!(

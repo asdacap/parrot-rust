@@ -1,5 +1,5 @@
 use crate::{
-    agent_turn::lifecycle::{AgentSession, DrainBackend, Execution, IncomingActivity},
+    agent_turn::lifecycle::{Execution, IncomingActivity},
     children::{AgentIdentity, AgentRegistry, ChildError, ChildResult, Operation},
     event_broker::BrokerError,
 };
@@ -11,7 +11,7 @@ use parrot_domain::{
         events::EventPublisher,
         security::RestrictableAccessSnapshot,
     },
-    protocol::messages::parrot::{Delivery, Event, InputSource},
+    protocol::messages::parrot::{Delivery, Event},
     values::agent_state::{
         ExecutionCheckpoint, TaskResponseReference, TaskResultClaim, TaskRunnerCheckpoint,
     },
@@ -80,14 +80,6 @@ pub trait TaskSession: Send + Sync {
         message_id: String,
         cancellation: Arc<dyn Cancellation>,
     ) -> ChildResult<Operation<Execution>>;
-    fn send_and_wait(
-        &self,
-        parts: Vec<ConversationPart>,
-        message_id: String,
-        cancellation: Arc<dyn Cancellation>,
-    ) -> BoxFuture<'_, ChildResult<Execution>> {
-        Box::pin(async move { self.enqueue(parts, message_id, cancellation)?.join().await })
-    }
     fn record(
         &self,
         parts: Vec<ConversationPart>,
@@ -101,195 +93,6 @@ pub trait TaskSession: Send + Sync {
         delivery: Delivery,
         activity: IncomingActivity,
     ) -> BoxFuture<'_, ChildResult<()>>;
-}
-
-/// Construct with a clone of the actual `AgentSession` supplied to T48.
-pub struct TaskSessionAdapter<B: DrainBackend> {
-    identity: Arc<AgentIdentity>,
-    session: AgentSession<B>,
-    state: Arc<dyn AgentStateStore>,
-}
-impl<B: DrainBackend> TaskSessionAdapter<B> {
-    pub fn new(
-        identity: Arc<AgentIdentity>,
-        session: AgentSession<B>,
-        state: Arc<dyn AgentStateStore>,
-    ) -> Self {
-        Self {
-            identity,
-            session,
-            state,
-        }
-    }
-    pub fn session(&self) -> &AgentSession<B> {
-        &self.session
-    }
-}
-impl<B: DrainBackend> TaskSession for TaskSessionAdapter<B> {
-    fn identity(&self) -> &Arc<AgentIdentity> {
-        &self.identity
-    }
-    fn capture_execution(&self) -> BoxFuture<'_, ChildResult<Option<ExecutionCheckpoint>>> {
-        Box::pin(async move {
-            Ok(self
-                .state
-                .load()
-                .await
-                .map_err(state_error)?
-                .ok_or_else(|| ChildError::registry("worker state is missing"))?
-                .execution)
-        })
-    }
-    fn recover(&self) -> ChildResult<TaskExecution> {
-        let handles = self.session.recover_owned_reserved()?;
-        Ok(TaskExecution {
-            execution: Operation::start(async move {
-                handles.execution.join().await.map_err(Into::into)
-            }),
-            reservation: Operation::start(async move {
-                handles.reservation.join().await.map_err(Into::into)
-            }),
-        })
-    }
-    fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>> {
-        let operation = self.session.cancel_recovered_execution(prompt_id)?;
-        Ok(Operation::start(async move {
-            operation.join().await.map_err(Into::into)
-        }))
-    }
-    fn suspend(&self) -> BoxFuture<'_, ChildResult<()>> {
-        Box::pin(async move { self.session.suspend().await.map_err(Into::into) })
-    }
-    fn enqueue_claimed(
-        &self,
-        parts: Vec<ConversationPart>,
-        message_id: String,
-        claim: TaskResultClaim,
-        cancellation: Arc<dyn Cancellation>,
-    ) -> ChildResult<TaskExecution> {
-        let handles =
-            self.session
-                .enqueue_claimed_execution(parts, message_id, claim, cancellation)?;
-        Ok(TaskExecution {
-            execution: Operation::start(async move {
-                handles.execution.join().await.map_err(Into::into)
-            }),
-            reservation: Operation::start(async move {
-                handles.reservation.join().await.map_err(Into::into)
-            }),
-        })
-    }
-    fn capture_result<'a>(
-        &'a self,
-        prompt_id: &'a str,
-        claim: &'a TaskResultClaim,
-    ) -> BoxFuture<'a, ChildResult<TaskResponseReference>> {
-        Box::pin(async move {
-            self.session
-                .capture_claimed_result(prompt_id, claim)
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn acknowledge_result<'a>(
-        &'a self,
-        reference: &'a TaskResponseReference,
-        claim: &'a TaskResultClaim,
-    ) -> BoxFuture<'a, ChildResult<()>> {
-        Box::pin(async move {
-            self.session
-                .acknowledge_claimed_result(reference, claim)
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn acknowledge_retired_result<'a>(
-        &'a self,
-        reference: &'a TaskResponseReference,
-        claim: &'a TaskResultClaim,
-    ) -> BoxFuture<'a, ChildResult<()>> {
-        Box::pin(async move {
-            self.session
-                .acknowledge_retired_result(reference, claim)
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn cancel_notification<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ChildResult<()>> {
-        Box::pin(async move {
-            self.session
-                .cancel_recorded_notification(message_id)
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn restore_response<'a>(
-        &'a self,
-        reference: &'a TaskResponseReference,
-    ) -> BoxFuture<'a, ChildResult<Execution>> {
-        Box::pin(async move {
-            self.session
-                .restore_saved_response(reference)
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn enqueue(
-        &self,
-        parts: Vec<ConversationPart>,
-        message_id: String,
-        cancellation: Arc<dyn Cancellation>,
-    ) -> ChildResult<Operation<Execution>> {
-        let execution =
-            self.session
-                .enqueue_execution(parts, message_id, None, None, cancellation)?;
-        // Join, rather than cancellation-sensitive observation: stop recording and
-        // a restarted run must follow the actual execution's terminal callbacks.
-        Ok(Operation::start(async move {
-            execution.join().await.map_err(Into::into)
-        }))
-    }
-    fn record(
-        &self,
-        parts: Vec<ConversationPart>,
-        message_id: String,
-        delivery: Delivery,
-    ) -> BoxFuture<'_, ChildResult<()>> {
-        Box::pin(async move {
-            self.session
-                .record_handle(
-                    parts,
-                    message_id,
-                    delivery,
-                    InputSource::INPUT_SOURCE_NOTIFICATION,
-                    Arc::new(parrot_storage::events::NeverCancelled),
-                )?
-                .join()
-                .await?;
-            Ok(())
-        })
-    }
-    fn send(
-        &self,
-        parts: Vec<ConversationPart>,
-        message_id: String,
-        delivery: Delivery,
-        activity: IncomingActivity,
-    ) -> BoxFuture<'_, ChildResult<()>> {
-        Box::pin(async move {
-            self.session
-                .send_handle(
-                    parts,
-                    message_id,
-                    delivery,
-                    activity,
-                    Arc::new(parrot_storage::events::NeverCancelled),
-                )?
-                .join()
-                .await?;
-            Ok(())
-        })
-    }
 }
 
 pub trait TaskModelRouter: Send + Sync {

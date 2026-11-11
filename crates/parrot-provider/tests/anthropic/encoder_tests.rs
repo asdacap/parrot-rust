@@ -40,20 +40,11 @@ impl ContentView for Part {
     fn text(&self) -> &str {
         &self.text
     }
-    fn image_path(&self) -> &str {
-        "never-opened"
-    }
     fn image_url(&self) -> &str {
         &self.url
     }
     fn media_type(&self) -> &str {
         "image/png"
-    }
-    fn image_width(&self) -> i32 {
-        123
-    }
-    fn image_height(&self) -> i32 {
-        456
     }
     fn read_image(&self) -> io::Result<Vec<u8>> {
         self.reads.set(self.reads.get() + 1);
@@ -170,15 +161,6 @@ impl RequestView for Request {
     }
     fn reasoning_effort(&self) -> Option<&str> {
         self.effort.as_deref()
-    }
-    fn reasoning_summary(&self) -> Option<&str> {
-        Some("ignored-summary")
-    }
-    fn provider_preferences(&self) -> &str {
-        "invalid-but-unused"
-    }
-    fn include_router_metadata(&self) -> bool {
-        true
     }
 }
 fn raw(request: &Request) -> String {

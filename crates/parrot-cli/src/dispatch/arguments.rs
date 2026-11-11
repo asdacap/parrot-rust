@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead};
 
 pub const DEFAULT_MODEL: &str = "opencode-go/glm-5.3";
 pub const DEFAULT_WEB_PORT: u16 = 7420;
@@ -318,46 +318,5 @@ fn take_line(text: &str) -> (&str, &str) {
             (&text[..index], &text[next..])
         }
         None => (text, ""),
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ChatInput {
-    EmptyPipe,
-    Once(String),
-    Interactive,
-}
-
-pub fn read_chat_input(
-    prompt: &str,
-    input_redirected: bool,
-    input: &mut dyn Read,
-) -> io::Result<ChatInput> {
-    if !prompt.is_empty() {
-        return Ok(ChatInput::Once(prompt.into()));
-    }
-    if !input_redirected {
-        return Ok(ChatInput::Interactive);
-    }
-    let mut text = String::new();
-    input.read_to_string(&mut text)?;
-    if text.trim().is_empty() {
-        Ok(ChatInput::EmptyPipe)
-    } else {
-        Ok(ChatInput::Once(text.trim().into()))
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RendererKind {
-    Basic,
-    Enhanced,
-}
-
-pub fn renderer_for(basic: bool, output_redirected: bool) -> RendererKind {
-    if basic || output_redirected {
-        RendererKind::Basic
-    } else {
-        RendererKind::Enhanced
     }
 }

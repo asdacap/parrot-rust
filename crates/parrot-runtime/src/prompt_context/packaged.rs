@@ -644,11 +644,9 @@ pub static PACKAGED_SKILL_ASSETS: &[PackagedSkillAsset] = &[
     },
 ];
 
-use parrot_domain::contracts::packaged_files::{
-    InstallMissingError, InstallMissingOutcome, InstallMissingRequest, PackagedFileInstaller,
-};
+use parrot_domain::contracts::packaged_files::InstallMissingError;
 use sha2::{Digest, Sha256};
-use std::{fmt, path::Path};
+use std::fmt;
 
 /// Hashes embedded paths, contents and executable intent in fixed manifest order.
 pub fn hash_packaged_skills() -> String {
@@ -672,75 +670,21 @@ fn hash_assets(assets: &[PackagedSkillAsset]) -> String {
 pub enum PackagedSkillsError {
     EmptyDestination,
     Write(InstallMissingError),
-    InvalidOperation(InstallMissingError),
 }
 impl fmt::Display for PackagedSkillsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyDestination => formatter.write_str("destination must not be empty"),
             Self::Write(_) => formatter.write_str("unable to write packaged skills"),
-            Self::InvalidOperation(error) => error.fmt(formatter),
         }
     }
 }
 impl std::error::Error for PackagedSkillsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Write(error) | Self::InvalidOperation(error) => Some(error),
+            Self::Write(error) => Some(error),
             Self::EmptyDestination => None,
         }
-    }
-}
-
-/// Await and join this entire operation before releasing the installer scope.
-/// It supplies resources to the injected publisher; it never opens files itself.
-pub async fn extract_packaged_skills<I: PackagedFileInstaller + ?Sized>(
-    destination: &Path,
-    installer: &I,
-    security: &I::Security,
-) -> Result<(), PackagedSkillsError> {
-    for request in requests(destination)? {
-        installer
-            .install_missing(&request, security)
-            .await
-            .map_err(install_error)?;
-    }
-    Ok(())
-}
-
-/// Installs the same embedded resources during synchronous host construction.
-pub fn extract_packaged_skills_sync(
-    destination: &Path,
-    mut install: impl FnMut(
-        &InstallMissingRequest,
-    ) -> Result<InstallMissingOutcome, InstallMissingError>,
-) -> Result<(), PackagedSkillsError> {
-    for request in requests(destination)? {
-        install(&request).map_err(install_error)?;
-    }
-    Ok(())
-}
-
-fn requests(
-    destination: &Path,
-) -> Result<impl Iterator<Item = InstallMissingRequest> + '_, PackagedSkillsError> {
-    if destination.as_os_str().is_empty() {
-        return Err(PackagedSkillsError::EmptyDestination);
-    }
-    Ok(PACKAGED_SKILL_ASSETS
-        .iter()
-        .map(move |asset| InstallMissingRequest {
-            target: destination.join(asset.relative_path),
-            contents: asset.bytes.to_vec(),
-            executable: asset.executable,
-        }))
-}
-
-fn install_error(error: InstallMissingError) -> PackagedSkillsError {
-    if error.kind.is_io_or_denied() {
-        PackagedSkillsError::Write(error)
-    } else {
-        PackagedSkillsError::InvalidOperation(error)
     }
 }
 

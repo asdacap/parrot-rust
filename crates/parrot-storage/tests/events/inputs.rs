@@ -135,13 +135,6 @@ async fn pending_peek_is_read_only_prioritizes_steers_and_retains_queue_sequence
     }
     assert_eq!(repository.replay().await.unwrap(), before);
     assert_eq!(
-        repository
-            .inputs_for_next_promotion("agent".into())
-            .await
-            .unwrap(),
-        vec![first_steer.input.clone(), second_steer.input.clone()]
-    );
-    assert_eq!(
         repository.peek_pending_input("other".into()).await.unwrap(),
         Some(other.input)
     );
@@ -266,9 +259,10 @@ async fn actual_input_admission_survives_dropped_completion_and_retry_keeps_comp
     let reopened = fixture.repository();
     assert_eq!(
         reopened
-            .inputs_for_next_promotion("agent".into())
+            .peek_pending_input("agent".into())
             .await
-            .unwrap()[0]
+            .unwrap()
+            .unwrap()
             .id,
         original
     );
@@ -348,13 +342,12 @@ async fn promotion_second_compose_failure_rolls_back_all_inputs_events_and_proje
             .await
             .is_err()
     );
-    let pending = repository
-        .inputs_for_next_promotion("agent".into())
-        .await
-        .unwrap();
     assert_eq!(
-        pending.iter().map(|input| &input.id).collect::<Vec<_>>(),
-        vec![&first.input.id, &second.input.id]
+        repository
+            .capture_pending_input_ids("agent".into())
+            .await
+            .unwrap(),
+        vec![first.input.message_id, second.input.message_id]
     );
     assert_eq!(repository.replay().await.unwrap().len(), 2);
     repository

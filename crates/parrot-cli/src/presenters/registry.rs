@@ -38,10 +38,6 @@ impl ToolPresenterRegistry {
         })
     }
 
-    pub fn registered_names(&self) -> impl Iterator<Item = &str> {
-        self.presenters.keys().map(String::as_str)
-    }
-
     pub fn describe(&self, tool_name: &str) -> ToolPresentationMetadata {
         self.find(tool_name).metadata()
     }

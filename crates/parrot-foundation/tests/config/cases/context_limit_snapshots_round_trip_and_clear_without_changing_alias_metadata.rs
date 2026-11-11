@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::{Context, transact};
 use parrot_domain::values::context::ContextSize;
 use parrot_foundation::config::models::{ModelPresetConfig, ModelPresetContextLimits};
 use std::collections::BTreeMap;
@@ -24,10 +24,10 @@ fn source_assertions() {
                 model_aliases: BTreeMap::new(),
             }
         } else {
-            configuration.capture_context_limits()
+            configuration.models.capture_context_limits()
         };
-        configuration
-            .set_model_preset(
+        transact(&mut configuration, |transaction| {
+            transaction.set_model_preset(
                 "saved",
                 &ModelPresetConfig {
                     model: "provider/old".into(),
@@ -35,18 +35,21 @@ fn source_assertions() {
                     context_limits: Some(limits),
                 },
             )
-            .unwrap();
-        configuration
-            .set_context_limit(ContextSize::parse("50k").unwrap())
-            .unwrap();
+        })
+        .unwrap();
+        transact(&mut configuration, |transaction| {
+            transaction.set_context_limit(ContextSize::parse("50k").unwrap())
+        })
+        .unwrap();
         let legacy = configuration.models.model_presets["legacy"].clone();
-        configuration
-            .set_model_routing_with_limits(
+        transact(&mut configuration, |transaction| {
+            transaction.set_model_routing_with_limits(
                 &legacy.model,
                 &legacy.model_aliases,
                 legacy.context_limits.as_ref(),
             )
-            .unwrap();
+        })
+        .unwrap();
         assert_eq!(
             context.load().unwrap().models.context_limit,
             Some(ContextSize::parse("50k").unwrap())
@@ -56,13 +59,14 @@ fn source_assertions() {
             Some(ContextSize::parse("20%").unwrap())
         );
         let saved = context.load().unwrap().models.model_presets["saved"].clone();
-        configuration
-            .set_model_routing_with_limits(
+        transact(&mut configuration, |transaction| {
+            transaction.set_model_routing_with_limits(
                 &saved.model,
                 &saved.model_aliases,
                 saved.context_limits.as_ref(),
             )
-            .unwrap();
+        })
+        .unwrap();
         let restored = context.load().unwrap();
         assert_eq!(
             restored.models.context_limit,

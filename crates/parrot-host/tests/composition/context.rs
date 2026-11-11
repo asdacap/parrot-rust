@@ -17,10 +17,7 @@ use resources::BorrowedContextResources;
 #[path = "../../../parrot-runtime/tests/tool_settlement/runtime.rs"]
 mod runtime;
 use parrot_core::ContextReminderCheckpoint;
-use parrot_domain::contracts::runtime::SessionControl;
-use parrot_host::composition::context::{
-    CompactRequest, ContextControl, ContextSelection, ContextServices, RetainedCompactTool,
-};
+use parrot_host::composition::context::{ContextSelection, ContextServices, RetainedCompactTool};
 use parrot_runtime::{agent_turn::lifecycle::ExecutionStatus, prompt_context::SessionPrompt};
 use parrot_tools::session::{self, Failure, SessionServices};
 
@@ -73,7 +70,7 @@ impl SessionServices for Ancillary {
         _: Option<ContextSize>,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<session::Compaction, OperationError<Failure>>> {
-        panic!("must route through frozen SessionControl")
+        panic!("must route through the retained compact invocation")
     }
     fn estimate_after_tool_result(
         &self,
@@ -84,42 +81,12 @@ impl SessionServices for Ancillary {
         panic!("must estimate actual postcompact history")
     }
 }
-impl SessionControl for Ancillary {
-    type ReminderRequest = String;
-    type ReminderResult = String;
-    type ClearReminderRequest = String;
-    type ClearReminderResult = String;
-    type CompactRequest = ();
-    type CompactResult = ();
-    type Status = &'static str;
-    type Error = Failure;
-    fn compact<'a>(
-        &'a self,
-        _: (),
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), OperationError<Failure>>> {
-        panic!("must use actual context route")
-    }
-    fn set_reminder(&self, value: String) -> Result<String, Failure> {
-        Ok(value)
-    }
-    fn clear_reminder(&self, value: String) -> Result<String, Failure> {
-        Ok(value)
-    }
-    fn status(&self) -> Result<&'static str, Failure> {
-        Ok("ancillary status")
-    }
-}
-
 type Bridge = (
     Arc<RetainedCompactTool<Security>>,
-    Arc<ContextControl<Ancillary>>,
-    Arc<session::SessionTool<ContextServices<Security, Ancillary, Ancillary>>>,
+    Arc<session::SessionTool<ContextServices<Security, Ancillary>>>,
 );
 fn bridge() -> Bridge {
-    let ancillary = Arc::new(Ancillary);
-    let control = Arc::new(ContextControl::new(ancillary.clone()));
-    let services = Arc::new(ContextServices::new(ancillary, control.clone()));
+    let services = Arc::new(ContextServices::new(Arc::new(Ancillary)));
     let tool = Arc::new(session::SessionTool::new(
         session::Kind::CompactContext,
         ConfiguredToolDefinition::new("Compact current context", r#"{"type":"object"}"#),
@@ -139,7 +106,7 @@ fn bridge() -> Bridge {
     ));
     let adapter =
         Arc::new(RetainedCompactTool::from_session(tool.clone(), planner, templates()).unwrap());
-    (adapter, control, tool)
+    (adapter, tool)
 }
 fn compact_step() -> Step {
     let mut step = Step::complete("request retained compact");
@@ -152,7 +119,7 @@ fn compact_step() -> Step {
 async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity() {
     let fixture = Fixture::new();
     fixture.seed().await;
-    let (adapter, control, retained) = bridge();
+    let (adapter, retained) = bridge();
     let retained_tool = Arc::downgrade(&retained);
     drop(retained);
     assert!(retained_tool.upgrade().is_some());
@@ -169,7 +136,6 @@ async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity()
     )
     .await;
     let session = Arc::new(session);
-    control.bind_session(Arc::downgrade(&session)).unwrap();
     for _ in 0..2 {
         let sent = runtime::send(&session).await;
         assert_eq!(
@@ -233,76 +199,10 @@ async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity()
 }
 
 #[tokio::test]
-async fn frozen_control_external_compaction_waits_behind_active_drain_and_joins() {
-    let fixture = Fixture::new();
-    fixture.seed().await;
-    let (adapter, control, _) = bridge();
-    let gate = Gate::new();
-    let mut first = Step::complete("first answer");
-    first.gate = Some(gate.clone());
-    let provider = Scripted::new(vec![first, Step::complete("external durable summary")]);
-    let (session, _) =
-        runtime::runtime(&fixture, &provider, vec![ToolHandle::Borrowed(adapter)]).await;
-    let session = Arc::new(session);
-    control.bind_session(Arc::downgrade(&session)).unwrap();
-    assert!(control.bind_session(Arc::downgrade(&session)).is_err());
-    let sent = runtime::send(&session).await;
-    gate.entered().await;
-    let request = CompactRequest::external(None, Arc::new(NeverCancelled));
-    let compact = SessionControl::compact(control.as_ref(), request, &NeverCancelled);
-    tokio::pin!(compact);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(25), &mut compact)
-            .await
-            .is_err()
-    );
-    assert_eq!(
-        provider.requests.lock().unwrap().len(),
-        1,
-        "external compaction must not overlap active provider/drain"
-    );
-    gate.open();
-    let compacted = bounded(compact).await.unwrap();
-    assert!(compacted.reduced);
-    bounded(sent.execution.join()).await.unwrap();
-    bounded(session.close()).await.unwrap();
-    let summary_instructions = templates()
-        .render("compaction.summary-instructions", &[], &NeverCancelled)
-        .unwrap();
-    assert!(
-        provider.requests.lock().unwrap()[1]
-            .messages
-            .iter()
-            .any(|message| message.role == sessions::Role::System
-                && message.content() == summary_instructions)
-    );
-    assert!(
-        fixture
-            .history
-            .compaction_history()
-            .await
-            .unwrap()
-            .unwrap()
-            .snapshot
-            .summary
-            .contains("external durable summary")
-    );
-    assert!(
-        SessionControl::compact(
-            control.as_ref(),
-            CompactRequest::external(None, Arc::new(NeverCancelled)),
-            &NeverCancelled
-        )
-        .await
-        .is_err()
-    );
-}
-
-#[tokio::test]
 async fn retained_inline_cancellation_shutdown_joins_real_provider_work() {
     let fixture = Fixture::new();
     fixture.seed().await;
-    let (adapter, control, _) = bridge();
+    let (adapter, _) = bridge();
     let gate = Gate::new();
     let mut summary = Step::complete("must cancel");
     summary.gate = Some(gate.clone());
@@ -310,7 +210,6 @@ async fn retained_inline_cancellation_shutdown_joins_real_provider_work() {
     let (session, _) =
         runtime::runtime(&fixture, &provider, vec![ToolHandle::Borrowed(adapter)]).await;
     let session = Arc::new(session);
-    control.bind_session(Arc::downgrade(&session)).unwrap();
     let sent = runtime::send(&session).await;
     gate.entered().await;
     bounded(session.close()).await.unwrap();
@@ -334,50 +233,13 @@ async fn retained_inline_cancellation_shutdown_joins_real_provider_work() {
 }
 
 #[tokio::test]
-async fn frozen_control_precancel_is_nonmutating_and_ancillary_methods_delegate() {
-    let fixture = Fixture::new();
-    fixture.seed().await;
-    let (adapter, control, _) = bridge();
-    let provider = Scripted::default();
-    let (session, _) =
-        runtime::runtime(&fixture, &provider, vec![ToolHandle::Borrowed(adapter)]).await;
-    let session = Arc::new(session);
-    control.bind_session(Arc::downgrade(&session)).unwrap();
-    let cancelled = Arc::new(Signal::new());
-    cancelled.cancel();
-    assert!(matches!(
-        SessionControl::compact(
-            control.as_ref(),
-            CompactRequest::external(None, cancelled.clone()),
-            cancelled.as_ref()
-        )
-        .await,
-        Err(OperationError::Cancelled)
-    ));
-    assert!(provider.requests.lock().unwrap().is_empty());
-    assert_eq!(
-        SessionControl::set_reminder(control.as_ref(), "set".into()).unwrap(),
-        "set"
-    );
-    assert_eq!(
-        SessionControl::clear_reminder(control.as_ref(), "clear".into()).unwrap(),
-        "clear"
-    );
-    assert_eq!(
-        SessionControl::status(control.as_ref()).unwrap(),
-        "ancillary status"
-    );
-    bounded(session.close()).await.unwrap();
-}
-
-#[tokio::test]
 async fn retained_result_fixedpoint_matches_actual_controller_history_estimate() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let sequence = fixture
         .batch(vec![call("fixedpoint", "compact_context")])
         .await;
-    let (adapter, _, _) = bridge();
+    let (adapter, _) = bridge();
     let mut harness =
         BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
     let provider = Scripted::new(vec![Step::complete("fixedpoint summary")]);
@@ -403,22 +265,35 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
     ))
     .await
     .unwrap();
+    let reloaded = parrot_storage::conversation::AgentConversation::new(fixture.history.clone())
+        .await
+        .unwrap();
+    let mut messages: Vec<_> = reloaded.messages().iter().map(provider_message).collect();
+    messages.push(sessions::Message::tool_result(
+        "fixedpoint",
+        templates()
+            .render(
+                "tool-result.text",
+                &[("value".into(), output.text.clone().into())],
+                &NeverCancelled,
+            )
+            .unwrap(),
+    ));
+    let instructions = harness
+        .prompt
+        .build(&harness.selection.model, &NeverCancelled)
+        .await
+        .unwrap();
     let estimated = harness
         .context
-        .estimate_context_after_tool_result(
-            EpochInput {
-                selection: &harness.selection.model,
-                tools: &definitions,
-                conversation: &mut harness.conversation,
-                prompt: &harness.prompt,
-                sessions: &harness.sessions,
-                status: &Status,
-                events: &harness.events,
-            },
-            "fixedpoint",
-            &output.text,
+        .compactor()
+        .planner()
+        .estimate_selected_context(
+            &harness.selection.model,
+            &instructions,
+            &definitions,
+            &messages,
         )
-        .await
         .unwrap();
     assert!(estimated.is_available());
     let arguments = [
@@ -583,7 +458,7 @@ impl SessionServices for StatusAncillary {
 type StatusBridge = (
     Arc<RetainedCompactTool<Security>>,
     Arc<StatusAncillary>,
-    Arc<session::SessionTool<ContextServices<Security, StatusAncillary, Ancillary>>>,
+    Arc<session::SessionTool<ContextServices<Security, StatusAncillary>>>,
 );
 fn status_bridge() -> StatusBridge {
     status_bridge_with_prompt(None)
@@ -604,8 +479,7 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
         observed: Mutex::new(vec![]),
         prompt_probe,
     });
-    let control = Arc::new(ContextControl::new(Arc::new(Ancillary)));
-    let services = Arc::new(ContextServices::new(ancillary.clone(), control));
+    let services = Arc::new(ContextServices::new(ancillary.clone()));
     let tool = Arc::new(session::SessionTool::new(
         session::Kind::Status,
         ConfiguredToolDefinition::new("Observe runtime status", r#"{"type":"object"}"#),
@@ -892,7 +766,7 @@ async fn retained_compact_preserves_live_prompt_cancellation_after_successful_co
     let sequence = fixture
         .batch(vec![call("cancel-build", "compact_context")])
         .await;
-    let (adapter, _, _) = bridge();
+    let (adapter, _) = bridge();
     let mut harness =
         BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
     let provider = Scripted::new(vec![Step::complete("actual completed summary")]);

@@ -69,7 +69,6 @@ impl Session for TestSession {
 
 struct TestProvider {
     opened: AtomicUsize,
-    direct_calls: AtomicUsize,
     sessions: Mutex<Vec<Arc<TestSession>>>,
     failure: Option<Error>,
     blocking: bool,
@@ -78,7 +77,6 @@ impl TestProvider {
     fn new(failure: Option<Error>, blocking: bool) -> Arc<Self> {
         Arc::new(Self {
             opened: AtomicUsize::new(0),
-            direct_calls: AtomicUsize::new(0),
             sessions: Mutex::new(Vec::new()),
             failure,
             blocking,
@@ -91,12 +89,6 @@ impl TestProvider {
 impl Provider for TestProvider {
     fn id(&self) -> &str {
         "session-provider"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.direct_calls.fetch_add(1, Ordering::SeqCst);
-        Err(Error::InvalidOperation(
-            "Scoped calls must not use the shared provider directly.".into(),
-        ))
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
@@ -204,7 +196,6 @@ async fn sessions_are_lazy_shared_within_an_owner_and_isolated_across_owners() {
         drain_session(session.as_ref()).await;
     }
     assert_eq!(provider.opened.load(Ordering::SeqCst), 2);
-    assert_eq!(provider.direct_calls.load(Ordering::SeqCst), 0);
     assert_eq!(provider.session(0).calls.load(Ordering::SeqCst), 2);
     assert_eq!(provider.session(1).calls.load(Ordering::SeqCst), 1);
     first_owner.close().await.unwrap();
@@ -373,7 +364,6 @@ async fn retrying_provider_opens_and_disposes_one_inner_session() {
     drain_session(session.as_ref()).await;
     owner.close().await.unwrap();
     assert_eq!(provider.opened.load(Ordering::SeqCst), 1);
-    assert_eq!(provider.direct_calls.load(Ordering::SeqCst), 0);
     assert_eq!(provider.session(0).calls.load(Ordering::SeqCst), 2);
     assert_eq!(provider.session(0).closes.load(Ordering::SeqCst), 1);
 }

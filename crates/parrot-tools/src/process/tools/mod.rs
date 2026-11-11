@@ -30,7 +30,6 @@ use crate::sandbox::linux::ReadOnlyExecCommandClassifier;
 use input::{ExecInput, InterruptInput, MonitorInput, WriteStdinInput};
 
 pub const NAMED_COMMAND_LENGTH: usize = 300;
-pub const LONG_COMMAND_LENGTH: usize = 200;
 
 /// Overrides only; the platform launcher owns the inherited environment and
 /// selected resources. Values are passed literally, never shell-expanded here.
@@ -178,14 +177,6 @@ impl<L: CapturedProcessLauncher<Request = CommandRequest>> ProcessTool<L>
 where
     L::Security: Clone,
 {
-    pub fn name(&self) -> &'static str {
-        self.kind.name()
-    }
-
-    pub fn aliases(&self) -> &'static [&'static str] {
-        self.kind.aliases()
-    }
-
     fn error(
         &self,
         invocation: &ProcessInvocation,

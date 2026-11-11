@@ -29,7 +29,6 @@ pub fn close_turn_if_open(
     tx: &Transaction<'_>,
     key: &TurnKey,
     proposed: &Event,
-    raw: Option<&[u8]>,
     message: Option<&ConversationMessage>,
 ) -> Result<TurnCommit, EventError> {
     if proposed.agent_session_id != key.agent_session_id || !proposed.has_turn_ended() {
@@ -81,7 +80,7 @@ pub fn close_turn_if_open(
         }
     }
     drop(read);
-    let outcome = repository::append(tx, proposed, raw, message)?;
+    let outcome = repository::append(tx, proposed, message)?;
     Ok(TurnCommit {
         key: key.clone(),
         closure: TurnClosure::NewlyClosed,
@@ -104,19 +103,12 @@ impl EventRepository {
         &self,
         key: TurnKey,
         proposed: Event,
-        raw: Option<Vec<u8>>,
         message: Option<ConversationMessage>,
         cancellation: &dyn Cancellation,
     ) -> Result<CommitTicket<TurnKey, TurnCommit, EventError>, AdmissionError<EventError>> {
         let command_key = key.clone();
         self.admit(key, cancellation, move |tx| {
-            close_turn_if_open(
-                tx,
-                &command_key,
-                &proposed,
-                raw.as_deref(),
-                message.as_ref(),
-            )
+            close_turn_if_open(tx, &command_key, &proposed, message.as_ref())
         })
     }
     /// Reconcile only the receipt's key, before cancellable publication. A
@@ -137,7 +129,7 @@ impl EventRepository {
         R: FnOnce(&TurnCommit),
     {
         let ticket = self
-            .admit_close_turn(key, proposed, None, message, cancellation)
+            .admit_close_turn(key, proposed, message, cancellation)
             .map_err(|error| match error {
                 AdmissionError::Cancelled => CloseTurnError::AdmissionCancelled,
                 AdmissionError::Rejected(error) => CloseTurnError::Repository(error),

@@ -312,12 +312,6 @@ impl<B: DrainBackend> AgentSession<B> {
         Ok(true)
     }
 
-    /// Reconstructs the retained public execution without submitting a new turn
-    /// prompt. All scopes must be registered before composition activates it.
-    pub fn recover_owned(&self) -> Result<ExecutionHandle, LifecycleError> {
-        Ok(self.recover_owned_reserved()?.execution)
-    }
-
     /// Reserves recovery and exposes readiness independently of provider completion.
     /// For saved terminals readiness follows exact result restoration; execution still
     /// joins parent delivery. Composition joins terminal/absent executions before activation.

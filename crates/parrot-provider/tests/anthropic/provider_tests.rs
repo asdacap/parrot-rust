@@ -139,7 +139,6 @@ async fn body_remains_owned_through_completed_then_drops_on_exhaustion() {
         Some(AnthropicStreamEvent::Message(AnthropicEvent::Completed(_)))
     ));
     assert!(!dropped.load(Ordering::SeqCst));
-    assert!(stream.response_bytes() > 0);
     assert_eq!(stream.next(&Never).await.unwrap(), None);
     assert!(dropped.load(Ordering::SeqCst));
 }

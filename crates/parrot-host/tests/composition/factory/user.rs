@@ -16,7 +16,7 @@ use parrot_provider::{
         aliases::{ModelAliasCatalog, ModelRouting},
         registry::ProviderRegistry,
     },
-    sessions::{Content, Error, EventStream, Provider, Request, Session},
+    sessions::{Content, Error, Provider, Session},
 };
 use parrot_runtime::prompt_context::{AgentIdentityDescription, SkillDiscoveryContext};
 use parrot_storage::conversation::{ConversationMessage, ConversationOrigin, MessageRole};
@@ -226,11 +226,6 @@ struct LocalProvider;
 impl Provider for LocalProvider {
     fn id(&self) -> &str {
         "local"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        Err(Error::InvalidOperation(
-            "no provider call in this test".into(),
-        ))
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(false) })

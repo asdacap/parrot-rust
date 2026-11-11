@@ -10,4 +10,4 @@ pub use concurrency::TaskConcurrencyBudget;
 pub use ports::*;
 pub use runner::TaskRunner;
 pub use service::{PROGRESS_KIND, TaskDetail, TaskScheduler};
-pub use values::{apply_visibility_changes, has_same_definition, has_same_visibility, status_name};
+pub use values::{has_same_definition, status_name};

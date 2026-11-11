@@ -58,7 +58,7 @@ async fn set_context_limit_persistence_fault_requires_server_exception_projectio
     };
     bounded(async {
         let fixture = Fixture::new().await;
-        let token = TransportToken::generate().unwrap();
+        let token = TransportToken::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap();
         let mut server = GrpcServer::start(
             GrpcService::new(fixture.service.clone()),
             TransportAddress::parse("http://127.0.0.1:0").unwrap(),

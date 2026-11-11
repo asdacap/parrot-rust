@@ -19,7 +19,8 @@ use parrot_domain::{
             MutationTarget, ReadRequest,
         },
         interactions::{
-            AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
+            AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply,
+            QuestionReplyKind, QuestionRequester,
         },
         paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
         runtime::{AgentRuntime, TaskController},
@@ -47,7 +48,7 @@ use parrot_tools::{
         ownership::{
             domain::CapturedProcessLauncher,
             execution::{Execution, ProcessLifetime},
-            managed::{CompletionMessage, CompletionSink, NoProcessDiagnostics},
+            managed::{CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics},
             monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
             owner::{ProcessAgent, ShellProcessOwner},
         },
@@ -94,6 +95,11 @@ impl AccessSnapshot for Snapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Selection {
     pub id: i32,
+}
+
+struct NoProcessDiagnostics;
+impl ProcessDiagnostics for NoProcessDiagnostics {
+    fn write(&self, _: ProcessDiagnostic) {}
 }
 
 pub struct NoCancel;
@@ -445,9 +451,10 @@ impl QuestionRequester for Services {
         Box::pin(async move {
             cancelled(cancellation)?;
             self.record("question", format!("{questions:?}"), None, None);
-            Ok(QuestionReply::answered(
-                questions.iter().map(|_| "catalog answer".into()).collect(),
-            ))
+            Ok(QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: questions.iter().map(|_| "catalog answer".into()).collect(),
+            })
         })
     }
 }

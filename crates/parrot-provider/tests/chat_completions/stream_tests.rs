@@ -19,6 +19,13 @@ fn feed(state: &mut ParseState, data: &str) -> Vec<ChatEvent> {
     )
     .unwrap()
 }
+pub(super) fn completion(state: &ParseState, provider_id: &str) -> ChatCompletion {
+    let Some(ChatEvent::Completed(completion)) = state.terminal_events(provider_id).pop_back()
+    else {
+        unreachable!("terminal events end with the completion")
+    };
+    completion
+}
 
 #[test]
 fn text_reasoning_finish_and_usage_are_separate_and_complete() {
@@ -44,7 +51,7 @@ fn text_reasoning_finish_and_usage_are_separate_and_complete() {
             kind: ReasoningKind::Raw
         }
     );
-    let final_state = state.completion("p");
+    let final_state = completion(&state, "p");
     assert_eq!(final_state.assistant_text, "hello world");
     assert_eq!(final_state.finish_reason, "stop");
     assert_eq!(
@@ -88,7 +95,7 @@ fn null_and_empty_native_reasoning_do_not_emit_events_or_replay() {
         r#"{"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}"#,
     );
     assert_eq!(events, vec![ChatEvent::TextDelta("answer".into())]);
-    let completion = state.completion("test");
+    let completion = completion(&state, "test");
     assert!(completion.provider_content.is_none());
 }
 
@@ -110,7 +117,7 @@ fn reasoning_display_prefers_reasoning_content_but_retains_both_replay_fields() 
         &mut state,
         r#"{"choices":[{"delta":{"reasoning_content":" second","reasoning":" field","content":"answer"},"finish_reason":"stop"}]}"#,
     );
-    let replay = state.completion("provider").provider_content.unwrap();
+    let replay = completion(&state, "provider").provider_content.unwrap();
     assert_eq!(replay.reasoning_content.as_deref(), Some("first second"));
     assert_eq!(replay.reasoning.as_deref(), Some("other field"));
 }
@@ -124,7 +131,7 @@ fn fragmented_interleaved_calls_keep_index_order_and_raw_partial_arguments() {
     );
     events.extend(feed(&mut state,r#"{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"2}"}},{"index":0,"function":{"arguments":"\"echo hi\"}"}}]},"finish_reason":"tool_calls"}]}"#));
     assert!(events.is_empty());
-    let toolcalls = state.completion("p").tool_calls;
+    let toolcalls = completion(&state, "p").tool_calls;
     assert_eq!(
         toolcalls
             .iter()
@@ -164,7 +171,7 @@ fn call_delta_emitted_only_for_observed_call_and_is_never_json_repaired() {
         r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
     );
     assert_eq!(empty.terminal_events("p").len(), 1);
-    assert!(empty.completion("p").tool_calls.is_empty());
+    assert!(completion(&empty, "p").tool_calls.is_empty());
 }
 
 #[test]
@@ -186,7 +193,7 @@ fn finish_reason_mapping_and_usage_only_defaults_are_source_shaped() {
                 r#"{{"choices":[{{"finish_reason":"{input}","delta":{{}}}}],"usage":{{"prompt_tokens":7,"completion_tokens":2}}}}"#
             ),
         );
-        let result = state.completion("p");
+        let result = completion(&state, "p");
         assert_eq!(result.finish_reason, expected);
         assert_eq!(
             (
@@ -212,9 +219,9 @@ fn usage_values_replace_previous_values_and_bad_integer_fails() {
     );
     assert_eq!(
         (
-            state.completion("p").input_tokens,
-            state.completion("p").cached_input_tokens,
-            state.completion("p").output_tokens
+            completion(&state, "p").input_tokens,
+            completion(&state, "p").cached_input_tokens,
+            completion(&state, "p").output_tokens
         ),
         (2, 1, 3)
     );
@@ -302,7 +309,7 @@ fn each_choice_is_processed_in_order_and_missing_index_uses_zero() {
             ChatEvent::TextDelta("b".into())
         ]
     );
-    let calls = state.completion("p").tool_calls;
+    let calls = completion(&state, "p").tool_calls;
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].id, "");
 }
@@ -366,7 +373,7 @@ impl HttpTransport for Fake {
         })
     }
 }
-fn http(bytes: &str) -> (HttpEventStream, Arc<Fake>) {
+fn http(bytes: &str) -> (HttpEventStream, Arc<Fake>, ResponseByteCounter) {
     let fake = Arc::new(Fake {
         bytes: bytes.as_bytes().to_vec(),
         calls: std::sync::atomic::AtomicUsize::new(0),
@@ -382,16 +389,16 @@ fn http(bytes: &str) -> (HttpEventStream, Arc<Fake>) {
             idle_timeout: Duration::ZERO,
             maximum_request_bytes: 10,
         },
-        count,
+        count.clone(),
     )
     .unwrap();
-    (stream, fake)
+    (stream, fake, count)
 }
 
 #[tokio::test]
 async fn owning_http_stream_preserves_lifecycle_order_fragmentation_bytes_and_terminal_events() {
     let body = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
-    let (http, fake) = http(body);
+    let (http, fake, count) = http(body);
     let mut stream = ChatStream::new(http, "chat");
     let never = Never;
     assert_eq!(
@@ -413,12 +420,12 @@ async fn owning_http_stream_preserves_lifecycle_order_fragmentation_bytes_and_te
     ));
     assert_eq!(stream.next(&never).await.unwrap(), None);
     assert_eq!(fake.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert_eq!(stream.response_bytes(), body.len() as u64);
+    assert_eq!(count.get(), body.len() as u64);
 }
 
 #[tokio::test]
 async fn missing_finish_is_not_promoted_to_successful_completion() {
-    let (http, _) = http(
+    let (http, _, _) = http(
         "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"partial\",\"function\":{\"name\":\"run\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}\n\n",
     );
     let mut stream = ChatStream::new(http, "chat");

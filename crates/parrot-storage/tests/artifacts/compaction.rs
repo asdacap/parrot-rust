@@ -7,14 +7,10 @@
 #[path = "../../src/artifacts/compaction.rs"]
 mod implementation;
 
-use implementation::{
-    CompactionContent, CompactionErrorKind, CompactionGroup, CompactionGroupBlobStore,
-    CompactionMessage, CompactionToolCall,
-};
+use implementation::{CompactionErrorKind, CompactionGroupBlobStore};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::filenames::FilenameGenerator;
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
-use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -116,21 +112,6 @@ fn entries(directory: &Path) -> Vec<String> {
     names.sort();
     names
 }
-fn group(text: &str) -> CompactionGroup {
-    CompactionGroup {
-        messages: vec![CompactionMessage {
-            role: "User".into(),
-            contents: vec![CompactionContent {
-                kind: "Text".into(),
-                text: text.into(),
-                image_path: None,
-                media_type: String::new(),
-            }],
-            tool_calls: Vec::new(),
-            tool_call_id: String::new(),
-        }],
-    }
-}
 fn assert_private(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(
@@ -140,110 +121,17 @@ fn assert_private(path: &Path) {
 }
 
 #[test]
-fn ordered_message_fields_raw_tool_arguments_and_base64_images_survive_collision() {
-    for named in [false, true] {
-        let directory = Directory::new();
-        fs::write(directory.blobs.join("existing.json"), "existing").unwrap();
-        let mut store = directory.store(&["existing.json", "group.json"], named);
-        let image_path = directory.container.join("fixture.png");
-        fs::write(&image_path, include_bytes!("fixtures/compaction-image.bin")).unwrap();
-        let artifact = CompactionGroup {
-            messages: vec![
-                CompactionMessage {
-                    role: "Assistant".into(),
-                    contents: vec![CompactionContent {
-                        kind: "Text".into(),
-                        text: "ask".into(),
-                        image_path: None,
-                        media_type: String::new(),
-                    }],
-                    tool_calls: vec![
-                        CompactionToolCall {
-                            id: "call-1".into(),
-                            name: "first".into(),
-                            arguments_json: r#"{"a":1}"#.into(),
-                        },
-                        CompactionToolCall {
-                            id: "call-2".into(),
-                            name: "second".into(),
-                            arguments_json: "raw".into(),
-                        },
-                    ],
-                    tool_call_id: String::new(),
-                },
-                CompactionMessage {
-                    role: "Tool".into(),
-                    contents: vec![CompactionContent {
-                        kind: "Text".into(),
-                        text: "one".into(),
-                        image_path: None,
-                        media_type: String::new(),
-                    }],
-                    tool_calls: Vec::new(),
-                    tool_call_id: "call-1".into(),
-                },
-                CompactionMessage {
-                    role: "User".into(),
-                    contents: vec![
-                        CompactionContent {
-                            kind: "Image".into(),
-                            text: String::new(),
-                            image_path: Some(image_path),
-                            media_type: "image/png".into(),
-                        },
-                        CompactionContent {
-                            kind: "Text".into(),
-                            text: "tail".into(),
-                            image_path: None,
-                            media_type: String::new(),
-                        },
-                    ],
-                    tool_calls: Vec::new(),
-                    tool_call_id: String::new(),
-                },
-            ],
-        };
-        let path = store.persist(&artifact, &Token::default()).unwrap();
-        assert_eq!(path, directory.blobs.join("group.json"));
-        let serialized = fs::read_to_string(&path).unwrap();
-        let actual: Value = serde_json::from_str(&serialized).unwrap();
-        let messages = actual["messages"].as_array().unwrap();
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0]["role"], "Assistant");
-        assert_eq!(messages[0]["tool_calls"][1]["arguments_json"], "raw");
-        assert_eq!(messages[2]["contents"][0]["image"], "AAH/");
-        assert_eq!(
-            actual["messages"][0]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            ["role", "contents", "tool_calls", "tool_call_id"]
-        );
-        assert!(serialized.starts_with("{\n  \"messages\": [\n"));
-        assert!(serialized.contains(r#""arguments_json": "{\u0022a\u0022:1}""#));
-        assert_eq!(
-            fs::read_to_string(directory.blobs.join("existing.json")).unwrap(),
-            "existing"
-        );
-        assert_eq!(entries(&directory.blobs), ["existing.json", "group.json"]);
-        assert_private(&path);
-    }
-}
-
-#[test]
 fn construction_is_lazy_on_unsupported_platform_and_cancellation_precedes_platform_failure() {
     let directory = Directory::new();
     fs::remove_dir(&directory.blobs).unwrap();
     let mut store = directory.store(&["unsupported.json"], false);
     store.unsupported_platform = true;
     let token = Token::default();
-    let error = store.persist(&group("text"), &token).unwrap_err();
+    let error = store.write_to_scratch(b"text", &token).unwrap_err();
     assert_eq!(error.kind, CompactionErrorKind::UnsupportedPlatform);
     assert!(!directory.blobs.exists());
     token.cancel();
-    let error = store.persist(&group("text"), &token).unwrap_err();
+    let error = store.write_to_scratch(b"text", &token).unwrap_err();
     assert_eq!(error.kind, CompactionErrorKind::Cancelled);
     assert_eq!(error.message, "The operation was canceled.");
 }
@@ -260,90 +148,18 @@ fn one_staging_file_preserves_eight_mib_and_retries_publish_collisions() {
             count.fetch_add(1, Ordering::SeqCst);
         }));
         let text = "x".repeat(8 * 1024 * 1024);
-        let artifact = group(&text);
-        let path = store.persist(&artifact, &Token::default()).unwrap();
+        let path = store
+            .write_to_scratch(text.as_bytes(), &Token::default())
+            .unwrap();
         assert_eq!(path, directory.blobs.join("fallback.json"));
         assert_eq!(creations.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap()["messages"][0]["contents"]
-                [0]["text"],
-            text
-        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
         assert_eq!(
             entries(&directory.blobs),
             ["existing.json", "fallback.json"]
         );
         assert_private(&path);
     }
-}
-
-#[test]
-fn raw_tool_arguments_and_base64_images_are_not_truncated_or_reparsed() {
-    for named in [false, true] {
-        let directory = Directory::new();
-        let mut store = directory.store(&["large-fields-arse.dat"], named);
-        let arguments = format!("not-json <&> λ {}", "x".repeat(100_000));
-        let image = "AAH/".repeat(30_000);
-        let image_path = directory.container.join("large-image.bin");
-        let image_fixture = include_bytes!("fixtures/compaction-image.bin");
-        let mut image_bytes = Vec::with_capacity(image_fixture.len() * 30_000);
-        for _ in 0..30_000 {
-            image_bytes.extend_from_slice(image_fixture);
-        }
-        fs::write(&image_path, image_bytes).unwrap();
-        let artifact = CompactionGroup {
-            messages: vec![CompactionMessage {
-                role: "Assistant".into(),
-                contents: vec![CompactionContent {
-                    kind: "Image".into(),
-                    text: String::new(),
-                    image_path: Some(image_path),
-                    media_type: "image/png".into(),
-                }],
-                tool_calls: vec![CompactionToolCall {
-                    id: "call-1".into(),
-                    name: "tool".into(),
-                    arguments_json: arguments.clone(),
-                }],
-                tool_call_id: String::new(),
-            }],
-        };
-        let path = store.persist(&artifact, &Token::default()).unwrap();
-        let actual: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-        assert_eq!(
-            actual["messages"][0]["tool_calls"][0]["arguments_json"],
-            arguments
-        );
-        assert_eq!(actual["messages"][0]["contents"][0]["image"], image);
-        assert_eq!(entries(&directory.blobs), ["large-fields.json"]);
-    }
-}
-
-#[test]
-fn missing_source_image_fails_before_publication_without_leaving_a_blob() {
-    let directory = Directory::new();
-    let mut store = directory.store(&["missing-image-arse.dat"], true);
-    let artifact = CompactionGroup {
-        messages: vec![CompactionMessage {
-            role: "User".into(),
-            contents: vec![CompactionContent {
-                kind: "Image".into(),
-                text: String::new(),
-                image_path: Some(directory.container.join("missing.png")),
-                media_type: "image/png".into(),
-            }],
-            tool_calls: Vec::new(),
-            tool_call_id: String::new(),
-        }],
-    };
-    assert_eq!(
-        store
-            .persist(&artifact, &Token::default())
-            .unwrap_err()
-            .kind,
-        CompactionErrorKind::Io
-    );
-    assert!(entries(&directory.blobs).is_empty());
 }
 
 #[test]
@@ -374,6 +190,7 @@ fn cancelled_scratch_write_removes_staging_and_final_files() {
             .write_to_scratch(&[0, 255, 1], token.as_ref())
             .unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::Cancelled);
+        assert_eq!(error.message, "A task was canceled.");
         assert!(error.cleanup_failures.is_empty());
         assert!(entries(&directory.blobs).is_empty());
     }
@@ -386,54 +203,9 @@ fn pre_cancelled_persist_creates_no_artifact() {
         let mut store = directory.store(&["canceled.json"], named);
         let token = Token::default();
         token.cancel();
-        let error = store.persist(&group("text"), &token).unwrap_err();
+        let error = store.write_to_scratch(b"text", &token).unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::Cancelled);
         assert_eq!(error.message, "The operation was canceled.");
-        assert!(entries(&directory.blobs).is_empty());
-    }
-}
-
-#[test]
-fn cancellation_after_file_creation_removes_staging_and_final_files() {
-    for named in [false, true] {
-        let directory = Directory::new();
-        let token = Arc::new(Token::default());
-        let cancel = token.clone();
-        let mut store = directory.store(&["canceled-fallback.json"], named);
-        store.hooks.after_file_created = Some(Box::new(move || cancel.cancel()));
-        let error = store
-            .persist(&group(&"x".repeat(1_000_000)), token.as_ref())
-            .unwrap_err();
-        assert_eq!(error.kind, CompactionErrorKind::Cancelled);
-        assert_eq!(error.message, "A task was canceled.");
-        assert!(error.cleanup_failures.is_empty());
-        assert!(entries(&directory.blobs).is_empty());
-    }
-}
-
-#[test]
-fn cancellation_during_streaming_leaves_no_partial_file() {
-    struct DuringWrite(AtomicUsize);
-    impl Cancellation for DuringWrite {
-        fn is_cancelled(&self) -> bool {
-            self.0.fetch_add(1, Ordering::SeqCst) > 20
-        }
-        fn cancelled(&self) -> BoxFuture<'_, ()> {
-            Box::pin(std::future::pending())
-        }
-    }
-    for named in [false, true] {
-        let directory = Directory::new();
-        let mut store = directory.store(&["canceled-stream.json"], named);
-        let error = store
-            .persist(
-                &group(&"x".repeat(100_000)),
-                &DuringWrite(AtomicUsize::new(0)),
-            )
-            .unwrap_err();
-        assert_eq!(error.kind, CompactionErrorKind::Cancelled);
-        assert_eq!(error.message, "A task was canceled.");
-        assert!(error.cleanup_failures.is_empty());
         assert!(entries(&directory.blobs).is_empty());
     }
 }
@@ -457,7 +229,7 @@ fn rejects_blob_and_ancestor_symlink_replacement_before_creation() {
                 std::os::unix::fs::symlink(&outside, &original).unwrap();
             }));
             let error = store
-                .persist(&group("secret"), &Token::default())
+                .write_to_scratch(b"secret", &Token::default())
                 .unwrap_err();
             assert_eq!(error.kind, CompactionErrorKind::InvalidOperation);
             assert!(entries(&directory.displaced_blobs(ancestor)).is_empty());
@@ -481,7 +253,7 @@ fn removes_handle_relative_candidate_after_directory_replacement_during_creation
             std::os::unix::fs::symlink(&outside, &original).unwrap();
         }));
         let error = store
-            .persist(&group(&"x".repeat(100_000)), &Token::default())
+            .write_to_scratch("x".repeat(100_000).as_bytes(), &Token::default())
             .unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::InvalidOperation);
         assert!(error.cleanup_failures.is_empty());
@@ -512,7 +284,7 @@ fn rolls_back_final_link_after_directory_or_ancestor_replacement() {
                 fs::write(blobs.join("post-link.json"), "replacement").unwrap();
             }));
             let error = store
-                .persist(&group("secret payload"), &Token::default())
+                .write_to_scratch(b"secret payload", &Token::default())
                 .unwrap_err();
             assert_eq!(error.kind, CompactionErrorKind::InvalidOperation);
             assert!(error.cleanup_failures.is_empty());
@@ -540,7 +312,7 @@ fn rollback_preserves_unrelated_final_link_replacement() {
             fs::create_dir_all(&blobs).unwrap();
         }));
         let error = store
-            .persist(&group("secret payload"), &Token::default())
+            .write_to_scratch(b"secret payload", &Token::default())
             .unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::InvalidOperation);
         assert!(error.cleanup_failures.is_empty());
@@ -578,7 +350,7 @@ fn rollback_quarantines_before_inspection_and_blocks_destination_recreation() {
             }
         }));
         let error = store
-            .persist(&group("secret payload"), &Token::default())
+            .write_to_scratch(b"secret payload", &Token::default())
             .unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::InvalidOperation);
         assert!(error.cleanup_failures.is_empty());
@@ -599,7 +371,7 @@ fn statx_fails_closed_if_either_required_identity_field_is_missing() {
         let mut store = directory.store(&["missing-inode.json"], true);
         store.hooks.returned_status_mask = Some(Box::new(move |mask| mask & !missing));
         let error = store
-            .persist(&group("secret payload"), &Token::default())
+            .write_to_scratch(b"secret payload", &Token::default())
             .unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::Io);
         assert!(
@@ -616,7 +388,7 @@ fn artifacts_are_exactly_owner_read_write() {
     for named in [false, true] {
         let directory = Directory::new();
         let mut store = directory.store(&["private.json"], named);
-        let path = store.persist(&group("text"), &Token::default()).unwrap();
+        let path = store.write_to_scratch(b"text", &Token::default()).unwrap();
         assert_private(&path);
     }
 }
@@ -639,7 +411,7 @@ fn final_collisions_have_exactly_sixteen_exclusive_attempts_and_no_staging_leak(
         store.force_named_file = named;
         fs::write(directory.blobs.join("existing.json"), "existing").unwrap();
         let error = store
-            .persist(&group("secret"), &Token::default())
+            .write_to_scratch(b"secret", &Token::default())
             .unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::Io);
         assert_eq!(calls.load(Ordering::SeqCst), 16);
@@ -672,7 +444,9 @@ fn cancellation_between_publish_collisions_stops_before_next_name_and_cleans_sta
         )
         .unwrap();
         store.force_named_file = named;
-        let error = store.persist(&group("secret"), token.as_ref()).unwrap_err();
+        let error = store
+            .write_to_scratch(b"secret", token.as_ref())
+            .unwrap_err();
         assert_eq!(error.kind, CompactionErrorKind::Cancelled);
         assert!(error.cleanup_failures.is_empty());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -693,7 +467,9 @@ fn final_publish_does_not_overwrite_symlinks_or_directories() {
         std::os::unix::fs::symlink(&target, directory.blobs.join("symlink.json")).unwrap();
         fs::create_dir(directory.blobs.join("directory.json")).unwrap();
         let mut store = directory.store(&["symlink.json", "directory.json", "final.json"], named);
-        let path = store.persist(&group("secret"), &Token::default()).unwrap();
+        let path = store
+            .write_to_scratch(b"secret", &Token::default())
+            .unwrap();
         assert_eq!(path, directory.blobs.join("final.json"));
         assert!(
             fs::symlink_metadata(directory.blobs.join("symlink.json"))
@@ -727,7 +503,7 @@ fn rejects_unsafe_basenames_and_replaces_only_terminal_generator_suffix() {
             let directory = Directory::new();
             let mut store = directory.store(&[bad], named);
             let error = store
-                .persist(&group("secret"), &Token::default())
+                .write_to_scratch(b"secret", &Token::default())
                 .unwrap_err();
             assert_eq!(error.kind, CompactionErrorKind::InvalidOperation, "{bad:?}");
             assert!(error.cleanup_failures.is_empty());
@@ -736,7 +512,7 @@ fn rejects_unsafe_basenames_and_replaces_only_terminal_generator_suffix() {
     }
     let directory = Directory::new();
     let mut store = directory.store(&["a-arse.dat-b-arse.dat"], true);
-    let path = store.persist(&group("text"), &Token::default()).unwrap();
+    let path = store.write_to_scratch(b"text", &Token::default()).unwrap();
     assert_eq!(path, directory.blobs.join("a-arse.dat-b.json"));
 }
 
@@ -761,7 +537,7 @@ fn selected_root_rejects_escaping_agent_resources_and_never_falls_back() {
     fs::remove_dir(&directory.blobs).unwrap();
     let mut store = directory.store(&["missing.json"], true);
     let error = store
-        .persist(&group("secret"), &Token::default())
+        .write_to_scratch(b"secret", &Token::default())
         .unwrap_err();
     assert_eq!(error.kind, CompactionErrorKind::InvalidOperation);
     assert!(entries(&directory.outside).is_empty());
@@ -771,11 +547,11 @@ fn selected_root_rejects_escaping_agent_resources_and_never_falls_back() {
 fn directory_identity_is_pinned_across_separate_persist_calls() {
     let directory = Directory::new();
     let mut store = directory.store(&["first.json", "second.json"], true);
-    store.persist(&group("first"), &Token::default()).unwrap();
+    store.write_to_scratch(b"first", &Token::default()).unwrap();
     fs::rename(&directory.blobs, &directory.moved).unwrap();
     fs::create_dir(&directory.blobs).unwrap();
     let error = store
-        .persist(&group("second"), &Token::default())
+        .write_to_scratch(b"second", &Token::default())
         .unwrap_err();
     assert_eq!(error.kind, CompactionErrorKind::InvalidOperation);
     assert_eq!(entries(&directory.moved), ["first.json"]);
@@ -800,7 +576,7 @@ fn cleanup_failures_are_attached_without_replacing_primary_failure() {
         }
     }));
     let error = store
-        .persist(&group("secret"), &Token::default())
+        .write_to_scratch(b"secret", &Token::default())
         .unwrap_err();
     assert_eq!(error.kind, CompactionErrorKind::Io);
     assert!(

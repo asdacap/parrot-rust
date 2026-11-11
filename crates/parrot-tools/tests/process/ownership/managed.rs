@@ -1,16 +1,12 @@
 //! Original ShellProcessOwner/ManagedShellProcess predicates, using controlled
 //! execution futures to expose the precise claim and shutdown interleavings.
 
-#[path = "domain.rs"]
-mod domain_bridge;
-
 use super::*;
 use crate::process::ownership::execution::{
     Execution, NeverCancelled, ProcessLifetime, ProcessResult,
 };
 use crate::process::ownership::managed::{
-    CompletionMessage, CompletionReport, CompletionSink, NoProcessDiagnostics, ProcessDiagnostic,
-    ProcessDiagnostics,
+    CompletionMessage, CompletionReport, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::path::PathBuf;
@@ -202,7 +198,7 @@ fn input(owner: &str, name: Option<&str>) -> ProcessStart {
     }
 }
 fn owner(id: &str, sink: Arc<Sink>) -> Arc<ShellProcessOwner> {
-    Arc::new(ShellProcessOwner::new(id, None, sink, Arc::new(NoProcessDiagnostics)).unwrap())
+    Arc::new(ShellProcessOwner::new(id, None, sink, Arc::new(Diagnostics::default())).unwrap())
 }
 async fn start(
     owner: &ShellProcessOwner,
@@ -319,8 +315,6 @@ async fn synchronous_observation_reads_live_report_flags_not_activity_kind() {
         }]
     );
     assert_eq!(owner.observe_snapshot(), snapshot);
-    assert_eq!(owner.active().await, owner.observe_active());
-    assert_eq!(owner.snapshot().await, snapshot);
     owner.dispose().await.unwrap();
     for execution in executions {
         assert!(execution.cancel_count.load(Ordering::Acquire) > 0);
@@ -434,7 +428,7 @@ async fn synchronous_observation_preserves_ordinal_identity_and_scope_isolation(
 }
 
 #[tokio::test]
-async fn synchronous_observation_does_not_wait_for_startup_but_async_readers_do() {
+async fn synchronous_observation_does_not_wait_for_startup() {
     let owner = owner("agent", Arc::new(Sink::default()));
     let existing = Arc::new(FakeExecution::default());
     start(&owner, Some("existing"), existing.clone())
@@ -464,26 +458,14 @@ async fn synchronous_observation_does_not_wait_for_startup_but_async_readers_do(
         result = &mut startup => panic!("startup must be pending: {:?}", result.err()),
         () = entered.notified() => {}
     }
-    let active = owner.active();
-    let snapshot = owner.snapshot();
-    tokio::pin!(active, snapshot);
-    tokio::select! {
-        biased;
-        _ = &mut active => panic!("async active must await startup"),
-        _ = &mut snapshot => panic!("async snapshot must await startup"),
-        () = std::future::ready(()) => {}
-    }
     assert_eq!(owner.observe_active(), before_active);
     assert_eq!(owner.observe_snapshot(), before_snapshot);
     release.cancel();
-    let (claimed, active, snapshot) = tokio::time::timeout(Duration::from_secs(5), async {
-        tokio::join!(&mut startup, &mut active, &mut snapshot)
-    })
-    .await
-    .unwrap();
-    let claimed = claimed.unwrap();
-    assert_eq!(active, owner.observe_active());
-    assert_eq!(snapshot, owner.observe_snapshot());
+    let claimed = tokio::time::timeout(Duration::from_secs(5), &mut startup)
+        .await
+        .unwrap()
+        .unwrap();
+    let snapshot = owner.observe_snapshot();
     assert_eq!(snapshot.len(), 2);
     assert!(
         snapshot
@@ -735,8 +717,7 @@ async fn owners_isolate_names_inventory_and_settlement() {
     assert!(second.claim("first-only").await.is_err());
     assert_eq!(
         first
-            .active()
-            .await
+            .observe_active()
             .iter()
             .map(|item| item.id.as_str())
             .collect::<Vec<_>>(),
@@ -895,7 +876,7 @@ async fn cursor_segments_are_committed_once_and_terminal_wait_retires() {
     execution.complete(7);
     let completed = claim.wait(None, &NeverCancelled).await.unwrap();
     assert_eq!(completed.result.unwrap().stdout, "final");
-    assert!(owner.active().await.is_empty());
+    assert!(owner.observe_active().is_empty());
     assert!(owner.claim("work").await.is_err());
     owner.dispose().await.unwrap();
 }
@@ -943,7 +924,7 @@ async fn failed_terminal_delivery_retries_same_message_once_then_retires_and_set
     claim.yield_now();
     execution.complete(0);
     until(|| process.retired()).await;
-    assert!(owner.active().await.is_empty());
+    assert!(owner.observe_active().is_empty());
     let calls = sink.calls.lock().unwrap().clone();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].message_id, calls[1].message_id);
@@ -1016,63 +997,20 @@ async fn publication_failure_cleans_started_execution_without_registering_name()
 }
 
 #[tokio::test]
-async fn explicit_scope_failure_has_no_local_fallback_and_bare_names_do_not_resolve() {
-    let local = owner("local", Arc::new(Sink::default()));
-    let remote = owner("remote", Arc::new(Sink::default()));
-    start(&local, Some("shared"), Arc::new(FakeExecution::default()))
-        .await
-        .yield_now();
-    start(
-        &local,
-        Some("child/shared"),
-        Arc::new(FakeExecution::default()),
-    )
-    .await
-    .yield_now();
-    start(&remote, Some("shared"), Arc::new(FakeExecution::default()))
-        .await
-        .yield_now();
-    drop(
-        claim_address(&local, "shared", |_| {
-            panic!("bare lookup must not resolve scope")
-        })
-        .await
-        .unwrap(),
-    );
-    assert!(
-        claim_address(&local, "child/shared", |_| Box::pin(async {
-            Err(io::Error::other("explicit scope denied"))
-        }))
-        .await
-        .is_err()
-    );
-    let target = remote.clone();
-    let claimed = claim_address(&local, "child/shared", move |_| {
-        Box::pin(async move { Ok((target, "shared".into())) })
-    })
-    .await
-    .unwrap();
-    assert_eq!(claimed.process().state.owner_agent_session_id, "remote");
-    drop(claimed);
-    local.dispose().await.unwrap();
-    remote.dispose().await.unwrap();
-}
-
-#[tokio::test]
 async fn owner_shutdown_does_not_cancel_parent_or_sibling_lifetime() {
     let parent = Arc::new(ProcessLifetime::default());
     let first = ShellProcessOwner::new(
         "first",
         Some(parent.clone()),
         Arc::new(Sink::default()),
-        Arc::new(NoProcessDiagnostics),
+        Arc::new(Diagnostics::default()),
     )
     .unwrap();
     let second = ShellProcessOwner::new(
         "second",
         Some(parent.clone()),
         Arc::new(Sink::default()),
-        Arc::new(NoProcessDiagnostics),
+        Arc::new(Diagnostics::default()),
     )
     .unwrap();
     let a = Arc::new(FakeExecution::default());
@@ -1380,7 +1318,7 @@ async fn retired_near_limit_pipes_release_execution_despite_retained_name_histor
             .iter()
             .all(|process| process.completed() && process.retired())
     );
-    assert!(owner.active().await.is_empty());
+    assert!(owner.observe_active().is_empty());
     owner.dispose().await.unwrap();
 }
 

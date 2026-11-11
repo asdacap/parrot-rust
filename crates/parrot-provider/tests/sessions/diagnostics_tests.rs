@@ -305,7 +305,7 @@ fn cancellation_records_immediately_without_another_read_or_dispose_and_only_onc
     request.record_request_bytes(7);
     clock.advance(5);
     request.observe_cancellation(true);
-    call.observe_cancellation(true);
+    call.cancel();
     let entries = sink.entries();
     assert_eq!(
         entries

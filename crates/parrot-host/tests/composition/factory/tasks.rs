@@ -37,7 +37,7 @@ use parrot_host::composition::factory::tasks::ScopedTaskController;
 use parrot_runtime::{
     agent_turn::{lifecycle::Signal, services::TurnSelection},
     children::ScopedSession,
-    task_scheduler::{ForkHistoryMode, SchedulerConfig, TaskConfiguration, TaskSessionAdapter},
+    task_scheduler::{ForkHistoryMode, SchedulerConfig, TaskConfiguration},
 };
 use parrot_storage::{
     artifacts::output_blobs::{MAXIMUM_INLINE_BYTES, ToolOutputBlobStore},
@@ -52,7 +52,7 @@ use parrot_tools::{
 };
 
 use harness::Harness;
-use support::{Security, bounded};
+use support::{Security, TaskSessionAdapter, bounded};
 
 type Controller = ScopedTaskController<Security, TurnSelection<Security>>;
 
@@ -388,8 +388,8 @@ async fn actual_tool_parser_scheduler_and_runner_preserve_captured_model_and_det
     let child = h.factory.get("build");
     let captured = child.selection.capture().unwrap();
     assert_eq!(
-        captured.model.canonical_base(),
-        selected.model.canonical_base()
+        captured.model.canonical_model.selector(),
+        selected.model.canonical_model.selector()
     );
     assert_eq!(
         captured.security.permissions,

@@ -1,7 +1,7 @@
 use parrot_domain::protocol::messages::parrot as wire;
 use parrot_runtime::interactions::{
     PERMISSION_CHOICES, PendingPermission, PermissionTargetDescription,
-    PermissionTargetDescriptionKind, map_pending_permission, permission_pending_event,
+    PermissionTargetDescriptionKind, map_pending_permission,
 };
 
 fn pending() -> PendingPermission<PermissionTargetDescription> {
@@ -82,23 +82,4 @@ fn pending_permission_protocol_preserves_source_fields_order_and_duplicates() {
         mapped.choices[2].action.enum_value().unwrap(),
         wire::PermissionAction::PERMISSION_ACTION_DENY
     );
-}
-
-#[test]
-fn permission_event_has_a_new_event_identity_and_the_requesting_session_payload() {
-    let input = pending();
-    let first = permission_pending_event(&input, Clone::clone).unwrap();
-    let second = permission_pending_event(&input, Clone::clone).unwrap();
-
-    assert!(!first.id.is_empty());
-    assert_ne!(first.id, input.id);
-    assert_ne!(first.id, second.id);
-    assert_eq!(first.agent_session_id, input.agent_session_id);
-    assert!(first.has_permission_pending());
-    assert_eq!(
-        first.permission_pending(),
-        &map_pending_permission(&input, Clone::clone)
-    );
-    assert_eq!(input.targets[0].path, "/synthetic/missing/../literal-界");
-    assert_eq!(input.reason, "  supplied reason is not normalized  ");
 }

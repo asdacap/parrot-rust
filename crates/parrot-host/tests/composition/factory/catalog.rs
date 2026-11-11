@@ -31,7 +31,7 @@ mod fixture_support {
             },
             interactions::{
                 AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply,
-                QuestionRequester,
+                QuestionReplyKind, QuestionRequester,
             },
             paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
             runtime::{AgentRuntime, TaskController},
@@ -58,7 +58,9 @@ mod fixture_support {
             ownership::{
                 domain::CapturedProcessLauncher,
                 execution::{Execution, ProcessLifetime},
-                managed::{CompletionMessage, CompletionSink, NoProcessDiagnostics},
+                managed::{
+                    CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
+                },
                 monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
                 owner::{ProcessAgent, ShellProcessOwner},
             },
@@ -105,6 +107,11 @@ mod fixture_support {
     }
     pub type Snapshot = SharedSecurity<Security>;
     pub type Selection = ContextSelection<Security>;
+
+    struct NoProcessDiagnostics;
+    impl ProcessDiagnostics for NoProcessDiagnostics {
+        fn write(&self, _: ProcessDiagnostic) {}
+    }
 
     pub struct NoCancel;
     impl Cancellation for NoCancel {
@@ -457,9 +464,10 @@ mod fixture_support {
             Box::pin(async move {
                 cancelled(cancellation)?;
                 self.record("question", format!("{questions:?}"), None, None);
-                Ok(QuestionReply::answered(
-                    questions.iter().map(|_| "catalog answer".into()).collect(),
-                ))
+                Ok(QuestionReply {
+                    kind: QuestionReplyKind::Answered,
+                    answers: questions.iter().map(|_| "catalog answer".into()).collect(),
+                })
             })
         }
     }
@@ -1179,12 +1187,6 @@ impl Provider for PlanningProvider {
     fn id(&self) -> &str {
         "fixture"
     }
-    fn call(
-        &self,
-        _: sessions::Request,
-    ) -> Result<Box<dyn sessions::EventStream>, sessions::Error> {
-        panic!("no provider calls in catalog conversion tests")
-    }
     fn has_credential<'a>(
         &'a self,
         _: &'a dyn Cancellation,
@@ -1269,7 +1271,36 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
             .iter()
             .map(|tool| tool.definition().name.as_str())
             .collect::<Vec<_>>(),
-        parrot_tools::catalog::BUILTIN_NAMES
+        [
+            "exec_command",
+            "write_stdin",
+            "interrupt_process",
+            "monitor",
+            "question",
+            "ask",
+            "reply",
+            "read",
+            "read_image",
+            "imagegen",
+            "glob",
+            "write",
+            "edit",
+            "web_fetch",
+            "agent_spawn",
+            "set_agent_tasks",
+            "get_agent_tasks",
+            "set_checkpoint",
+            "set_exit_reminder",
+            "clear_exit_reminder",
+            "agent_send",
+            "agent_interrupt",
+            "agent_status",
+            "wait",
+            "status",
+            "compact_context",
+            "request_write_permission",
+            "progress",
+        ]
     );
     assert_eq!(first.tools.len(), 28);
     assert_eq!(first.supported.iter().filter(|value| **value).count(), 27);
@@ -1286,11 +1317,11 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
         }
         assert!(Arc::ptr_eq(
             &originals[index],
-            &adapter.catalog().factories()[index].create()
+            &adapter.catalog.factories()[index].create()
         ));
         assert_eq!(
             first.definitions[index],
-            *adapter.catalog().factories()[index].definition()
+            *adapter.catalog.factories()[index].definition()
         );
     }
     assert!(matches!(first.tools[24], ToolHandle::Borrowed(_)));

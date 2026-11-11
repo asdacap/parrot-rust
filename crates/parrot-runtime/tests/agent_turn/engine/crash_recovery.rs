@@ -101,8 +101,22 @@ async fn observe(fixture: &Fixture) -> Value {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
+    let repository_history: Vec<String> = fixture
+        .history
+        .conversation()
+        .await
+        .unwrap()
+        .iter()
+        .map(|item| {
+            format!(
+                "{}: {}",
+                item.message.role.as_str(),
+                parrot_storage::events::content(&item.message.parts)
+            )
+        })
+        .collect();
     json!({
-        "sql": sql, "repository_history": fixture.history.messages().await.unwrap(),
+        "sql": sql, "repository_history": repository_history,
         "pending": fixture.history.has_pending_inputs().await.unwrap(),
         "turn_starts": starts, "turn_endings": endings, "usage_facts": facts,
         "promotions": promotions,
@@ -202,7 +216,7 @@ async fn runtime(
             .await
             .unwrap(),
     );
-    let backend = RuntimeBackend::new(RuntimeConfig {
+    let runtime_config = RuntimeConfig {
         tool_execution: tool_execution_config(&fixture.history, templates.clone(), erased.clone()),
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
@@ -244,7 +258,11 @@ async fn runtime(
         parent_completion: Arc::new(Parent(trace)),
         ancestors: vec![],
         event_id: Arc::new(event_id),
-    })
+    };
+    let backend = RuntimeBackend::with_sessions(
+        runtime_config,
+        parrot_provider::sessions::ProviderSessions::new(),
+    )
     .await
     .unwrap();
     (

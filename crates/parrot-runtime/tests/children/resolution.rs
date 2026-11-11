@@ -21,7 +21,13 @@ async fn security_refresh_is_conditional_and_preserves_new_model_and_profile() {
     let after_failure = cell.current().unwrap();
     assert!(Arc::ptr_eq(&after_failure.security, &expected));
     assert_eq!(after_failure.profile.id, "new-mode");
-    assert!(after_failure.model.canonical_base().ends_with("/second"));
+    assert!(
+        after_failure
+            .model
+            .canonical_model
+            .selector()
+            .ends_with("/second")
+    );
 
     let replacement = Security::new(0x07);
     cell.try_update_security::<()>(|current| {
@@ -32,7 +38,13 @@ async fn security_refresh_is_conditional_and_preserves_new_model_and_profile() {
     let refreshed = cell.current().unwrap();
     assert!(Arc::ptr_eq(&refreshed.security, &replacement));
     assert_eq!(refreshed.profile.id, "new-mode");
-    assert!(refreshed.model.canonical_base().ends_with("/second"));
+    assert!(
+        refreshed
+            .model
+            .canonical_model
+            .selector()
+            .ends_with("/second")
+    );
     assert_eq!(original.security.permissions, 0xff);
     assert_eq!(expected.permissions, 0x03);
     harness.close().await;
@@ -150,14 +162,11 @@ async fn registry_and_resolver_require_exact_registered_scope_not_matching_ident
         .unwrap();
         assert!(!h.registry.contains(&duplicate));
         assert!(h.registry.register_root(duplicate.clone()).is_err());
-        assert!(h.registry.unregister_root(&duplicate).is_err());
         assert!(
             AgentResolver::new(&duplicate, &h.registry)
                 .resolve_recipient("/root")
                 .is_err()
         );
-        root.parent_scope().validate_owner(&root).unwrap();
-        assert_eq!(root.parent_scope().validate_owner(&duplicate).err().unwrap().to_string(), format!("agent scope does not match child registry owner: {}", root.identity().session.session_id));
         let resolver = AgentResolver::new(&root, &h.registry);
         assert_eq!(resolver.resolve_recipient("  ").err().unwrap().code(), "argument");
         assert_eq!(resolver.resolve_status_scope("  ").err().unwrap().code(), "argument");
@@ -181,12 +190,6 @@ async fn registry_and_resolver_require_exact_registered_scope_not_matching_ident
             .unwrap()
             .to_string()
             .contains("launch parent does not match")
-        );
-        h.registry.unregister_root(&root).unwrap();
-        assert!(
-            AgentResolver::new(&root, &h.registry)
-                .resolve_recipient("/root")
-                .is_err()
         );
         bounded(root.close().join()).await.unwrap();
         h.close().await;

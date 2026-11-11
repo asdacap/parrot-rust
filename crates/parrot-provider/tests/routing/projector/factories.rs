@@ -164,9 +164,7 @@ impl HttpTransport for Transport {
                 matches!(request.method, HttpMethod::Post).then_some(request.body.as_slice()),
             )?;
             if cancellation.is_cancelled() {
-                return Err(HttpError::RequestCancelled(
-                    "The operation was canceled.".into(),
-                ));
+                return Err(HttpError::Cancelled);
             }
             let reply = (self.handler)(&request);
             if let Some(error) = reply.failure {
@@ -693,7 +691,7 @@ mod typed_origin_tests {
         assert_eq!(observation["requests"].as_array().unwrap().len(), 1);
         assert_eq!(
             observation["error"]["type"],
-            "System.Threading.Tasks.TaskCanceledException"
+            "System.OperationCanceledException"
         );
         assert_eq!(
             observation["error"]["message"],

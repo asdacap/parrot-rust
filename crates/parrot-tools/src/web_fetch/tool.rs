@@ -24,8 +24,6 @@ pub struct WebFetchTool<Security, Selection> {
 }
 
 impl<Security, Selection> WebFetchTool<Security, Selection> {
-    pub const NAME: &'static str = "web_fetch";
-
     pub fn new(fetcher: Arc<WebFetcher>, definition: ConfiguredToolDefinition) -> Self {
         Self {
             fetcher,

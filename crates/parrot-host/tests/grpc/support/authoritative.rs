@@ -57,7 +57,7 @@ use parrot_provider::{
         configuration::ModelConfigurationCoordinator,
         registry::ProviderRegistry,
     },
-    sessions::{Content, Error, EventStream, Provider, Request, Session},
+    sessions::{Content, Error, Provider, Session},
 };
 use parrot_runtime::{
     agent_turn::services::SelectionSource,
@@ -255,9 +255,6 @@ impl DenyProvider {
 impl Provider for DenyProvider {
     fn id(&self) -> &str {
         "local"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        Err(Error::Cancelled)
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(false) })

@@ -323,13 +323,13 @@ async fn owned_recovery_preserves_settled_result_and_closes_unfinished_without_i
     let session =
         AgentSession::with_state(legacy.backend().clone(), Arc::new(Signal::new()), store);
     assert_eq!(
-        bounded(session.recover_owned().unwrap().join())
+        bounded(session.recover_owned_reserved().unwrap().execution.join())
             .await
             .unwrap(),
         Execution::succeeded("answer after tool crash")
     );
     assert_eq!(
-        bounded(session.recover_owned().unwrap().join())
+        bounded(session.recover_owned_reserved().unwrap().execution.join())
             .await
             .unwrap(),
         Execution::succeeded("answer after tool crash")

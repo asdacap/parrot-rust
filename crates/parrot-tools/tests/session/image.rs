@@ -1029,7 +1029,6 @@ async fn provider_failure_preserves_output_without_retry_and_sanitizes_authentic
 {
     for kind in [
         FailureKind::Provider,
-        FailureKind::Wire,
         FailureKind::Authentication,
         FailureKind::Network,
     ] {
@@ -1237,7 +1236,6 @@ async fn post_provider_target_change_is_rejected_by_write_boundary_with_original
 #[test]
 fn image_tool_retains_configured_definition_and_sequential_interruption_contract() {
     let fixture = Fixture::new();
-    assert_eq!(fixture.tool.name(), "imagegen");
     assert_eq!(
         fixture.tool.definition(),
         &ConfiguredToolDefinition::new("imagegen", "{}")

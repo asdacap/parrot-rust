@@ -1,13 +1,10 @@
-use std::collections::VecDeque;
 use std::future::Future;
 use std::io::{self, BufRead, Cursor, Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
 
-use parrot_cli::dispatch::dialog::{
-    BasicSlashDialog, DialogOption, SecretKey, SecretKeyInput, SlashDialog, load,
-};
+use parrot_cli::dispatch::dialog::{BasicSlashDialog, DialogOption, SlashDialog, load};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use tonic::Code;
 
@@ -454,60 +451,5 @@ fn input_output_error_and_flush_failures_are_not_swallowed() {
             .unwrap_err()
             .message(),
         "write failed"
-    );
-}
-
-struct Keys(VecDeque<SecretKey>);
-impl SecretKeyInput for Keys {
-    fn read_key(&mut self) -> io::Result<SecretKey> {
-        self.0
-            .pop_front()
-            .ok_or_else(|| io::Error::other("keys exhausted"))
-    }
-}
-
-#[test]
-fn secret_key_input_edits_filters_controls_and_never_echoes_contents() {
-    let keys = Keys(VecDeque::from([
-        SecretKey::Backspace,
-        SecretKey::Character('a'),
-        SecretKey::Character('b'),
-        SecretKey::Backspace,
-        SecretKey::Character('\t'),
-        SecretKey::Character('c'),
-        SecretKey::Enter,
-    ]));
-    let mut dialog =
-        BasicSlashDialog::new(FailingReader, Vec::new(), Vec::new()).with_secret_input(keys);
-    assert_eq!(
-        complete(dialog.read_secret("Key", &Token::default()))
-            .unwrap()
-            .as_deref(),
-        Some("ac")
-    );
-    let nl = newline();
-    assert_eq!(text(dialog.into_parts().1), format!("Key{nl}> {nl}"));
-}
-
-#[test]
-fn secret_key_escape_and_control_c_dismiss_and_key_errors_propagate() {
-    for end in [SecretKey::Escape, SecretKey::ControlC] {
-        let keys = Keys(VecDeque::from([SecretKey::Character('s'), end]));
-        let mut dialog =
-            BasicSlashDialog::new(FailingReader, Vec::new(), Vec::new()).with_secret_input(keys);
-        assert_eq!(
-            complete(dialog.read_secret("Key", &Token::default())).unwrap(),
-            None
-        );
-        let nl = newline();
-        assert_eq!(text(dialog.into_parts().1), format!("Key{nl}> {nl}"));
-    }
-    let mut dialog = BasicSlashDialog::new(FailingReader, Vec::new(), Vec::new())
-        .with_secret_input(Keys(VecDeque::new()));
-    assert_eq!(
-        complete(dialog.read_secret("Key", &Token::default()))
-            .unwrap_err()
-            .message(),
-        "keys exhausted"
     );
 }

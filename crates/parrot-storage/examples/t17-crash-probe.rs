@@ -121,13 +121,8 @@ async fn main() {
         "during-transaction" => {
             repository
                 .transaction(move |transaction| -> Result<(), EventError> {
-                    let outcome = close_turn_if_open(
-                        transaction,
-                        &key,
-                        &proposed,
-                        Some(&raw),
-                        Some(&message),
-                    )?;
+                    let outcome =
+                        close_turn_if_open(transaction, &key, &proposed, Some(&message))?;
                     assert_eq!(outcome.closure, TurnClosure::NewlyClosed);
                     assert_eq!(count_rows(transaction, "event"), 2);
                     for table in ["conversation_part", "conversation_item"] {
@@ -143,7 +138,7 @@ async fn main() {
         }
         "after-commit-before-observation" => {
             let _unobserved_ticket = repository
-                .admit_close_turn(key, proposed, Some(raw), Some(message), &NeverCancelled)
+                .admit_close_turn(key, proposed, Some(message), &NeverCancelled)
                 .unwrap();
             repository
                 .transaction(|transaction| {

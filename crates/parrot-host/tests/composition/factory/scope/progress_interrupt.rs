@@ -40,11 +40,9 @@ async fn actual_user_interrupt_preserves_progress_and_next_turn_can_close_it() {
             Some(Arc::new(Semaphore::new(0))),
         );
         let session = root.get_service::<RuntimeSession<Security>>().unwrap();
-        let sent = bounded(
-            session.send_text_message("progress-interrupt-marker".into(), Arc::new(NeverCancelled)),
-        )
-        .await
-        .unwrap();
+        let sent = bounded(send_text(&session, "progress-interrupt-marker"))
+            .await
+            .unwrap();
         bounded(async {
             loop {
                 if fixture.requests.lock().unwrap().iter().any(|request| {
@@ -79,11 +77,9 @@ async fn actual_user_interrupt_preserves_progress_and_next_turn_can_close_it() {
             reply("closed after interruption"),
             None,
         );
-        let sent = bounded(
-            session.send_text_message("close-progress-next-turn".into(), Arc::new(NeverCancelled)),
-        )
-        .await
-        .unwrap();
+        let sent = bounded(send_text(&session, "close-progress-next-turn"))
+            .await
+            .unwrap();
         bounded(sent.execution.join()).await.unwrap();
         assert_eq!(progress.capture_snapshot().unwrap().progress, None);
         bounded(hosted.close()).await.unwrap();

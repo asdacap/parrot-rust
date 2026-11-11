@@ -291,7 +291,7 @@ async fn usage_runtime(
         .await
         .unwrap(),
     );
-    let backend = RuntimeBackend::new(RuntimeConfig {
+    let runtime_config = RuntimeConfig {
         tool_execution: tool_execution_config(
             &fixture.history,
             templates.clone(),
@@ -337,7 +337,11 @@ async fn usage_runtime(
         parent_completion: Arc::new(Parent(trace)),
         ancestors: vec![],
         event_id: Arc::new(id),
-    })
+    };
+    let backend = RuntimeBackend::with_sessions(
+        runtime_config,
+        parrot_provider::sessions::ProviderSessions::new(),
+    )
     .await
     .unwrap();
     let store = crate::agent_state_support::test_agent_state_store(

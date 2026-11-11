@@ -3,7 +3,7 @@ use parrot_provider::{
     catalogs::Model,
     image_generation::{ImageGenerationReference, ImageGenerationRequest, ImageGenerationResult},
     sessions::{
-        Content, Error, EventStream, Provider, Request, Session,
+        Content, Error, Provider, Session,
         decorators::{
             RetrySleeper, RetryingProvider, SubscriptionUsage, UsageReporter,
             UsageReportingProvider,
@@ -40,9 +40,6 @@ struct ImageSpy {
 impl Provider for ImageSpy {
     fn id(&self) -> &str {
         "image-spy"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        panic!("image call must not open streaming")
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         panic!("image wrapper must not pre-resolve credentials")
@@ -82,9 +79,6 @@ struct DefaultImageProvider;
 impl Provider for DefaultImageProvider {
     fn id(&self) -> &str {
         "default-image"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        panic!("unsupported image must not open streaming")
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         panic!("unsupported image must not resolve credentials")

@@ -4,16 +4,11 @@ use parrot_domain::values::progress::Progress;
 #[tokio::test]
 async fn retained_progress_catalog_handle_replaces_closes_and_reopens_one_report() {
     let fixture = Fixture::new("", true, 0);
-    let snapshot = fixture.catalog.snapshot().unwrap();
-    let progress = snapshot.find("progress").unwrap();
+    let progress = fixture.find("progress").unwrap();
     assert_eq!(
         fixture.catalog.factories().last().unwrap().name(),
         "progress"
     );
-    assert!(Arc::ptr_eq(
-        &progress.create(),
-        &snapshot.find("progress").unwrap().create()
-    ));
     assert_eq!(
         progress.create().parallel_safety(&Invocation::new(
             "progress-call",
@@ -70,12 +65,6 @@ async fn retained_progress_catalog_handle_replaces_closes_and_reopens_one_report
         .unwrap();
     assert!(invalid.text.starts_with("error:"));
     assert_eq!(fixture.services.calls(), calls);
-    assert!(
-        snapshot
-            .permitted_by(|name| name != "progress")
-            .find("progress")
-            .is_none()
-    );
     fixture
         .invoke("progress", json!({"close":true}))
         .await
@@ -90,11 +79,9 @@ async fn progress_schema_reaches_real_provider_and_result_overrides_are_used() {
         true,
         0,
     );
-    let snapshot = fixture.catalog.snapshot().unwrap();
-    let selected = snapshot.permitted_by(|name| name == "progress");
     let request = Request {
         model: "vendor/model".into(),
-        tools: selected.definitions(),
+        tools: fixture.definitions(|name| name == "progress"),
         ..Request::default()
     };
     let prepared = chat_completions::prepare(&request, "test").unwrap();

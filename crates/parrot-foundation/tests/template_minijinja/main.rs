@@ -1,6 +1,6 @@
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
-use parrot_foundation::config::ConfigError;
-use parrot_foundation::template_minijinja::MiniJinjaPromptTemplateEngine;
+use parrot_core::template::MiniJinjaPromptTemplateEngine;
+use parrot_core::{CancellationToken, Error, ErrorKind};
+use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use serde_json::{Map, Value, json};
 
 const PATH: &str = "prompt_templates.custom.adapter";
@@ -35,11 +35,14 @@ fn engine(text: &str) -> MiniJinjaPromptTemplateEngine {
     MiniJinjaPromptTemplateEngine::compile(PATH, text).unwrap()
 }
 
-fn native_error(result: Result<String, OperationError<ConfigError>>) -> String {
+fn native_error(result: Result<String, Error>) -> String {
     match result {
-        Err(OperationError::Failed(error)) => {
-            assert!(error.0.starts_with(&format!("{PATH}.template:")), "{error}");
-            error.0
+        Err(error) if error.kind != ErrorKind::Cancelled => {
+            assert!(
+                error.message.starts_with(&format!("{PATH}.template:")),
+                "{error}"
+            );
+            error.message
         }
         other => panic!("expected path-prefixed native error, got {other:?}"),
     }
@@ -52,7 +55,9 @@ fn m3_m8_native_content_cases_preserve_independent_expected_bytes() {
         let compiled = engine(case["template"].as_str().unwrap());
         let values = case["arguments"].as_object().unwrap();
         assert_eq!(
-            compiled.render(values, &CancellationState::Active).unwrap(),
+            compiled
+                .render(values, CancellationToken::new(&CancellationState::Active))
+                .unwrap(),
             case["expected"].as_str().unwrap(),
             "{}",
             case["id"]
@@ -68,30 +73,38 @@ fn m3_calls_and_templates_do_not_leak_scope_or_mutate_inputs() {
     let saved = first.clone();
     for _ in 0..3 {
         assert_eq!(
-            compiled.render(&first, &CancellationState::Active).unwrap(),
+            compiled
+                .render(&first, CancellationToken::new(&CancellationState::Active))
+                .unwrap(),
             "first"
         );
         assert_eq!(
             compiled
-                .render(&second, &CancellationState::Active)
+                .render(&second, CancellationToken::new(&CancellationState::Active))
                 .unwrap(),
             "second"
         );
     }
     assert_eq!(first, saved);
     let other = engine("{{ value }}");
-    native_error(other.render(&Map::new(), &CancellationState::Active));
+    native_error(other.render(
+        &Map::new(),
+        CancellationToken::new(&CancellationState::Active),
+    ));
     assert_eq!(
-        other.render(&first, &CancellationState::Active).unwrap(),
+        other
+            .render(&first, CancellationToken::new(&CancellationState::Active))
+            .unwrap(),
         "first"
     );
 }
 
 #[test]
 fn m4_missing_variable_is_strict_and_discards_prior_output() {
-    let error = native_error(
-        engine("PRIVATE-PARTIAL{{ missing }}").render(&Map::new(), &CancellationState::Active),
-    );
+    let error = native_error(engine("PRIVATE-PARTIAL{{ missing }}").render(
+        &Map::new(),
+        CancellationToken::new(&CancellationState::Active),
+    ));
     assert!(error.contains("undefined"), "{error}");
     assert!(
         !error.contains("PRIVATE-PARTIAL"),
@@ -101,10 +114,10 @@ fn m4_missing_variable_is_strict_and_discards_prior_output() {
 
 #[test]
 fn m4_missing_member_is_strict() {
-    let error = native_error(
-        engine("{{ item.missing }}")
-            .render(&arguments(json!({"item":{}})), &CancellationState::Active),
-    );
+    let error = native_error(engine("{{ item.missing }}").render(
+        &arguments(json!({"item":{}})),
+        CancellationToken::new(&CancellationState::Active),
+    ));
     assert!(error.contains("undefined"), "{error}");
 }
 
@@ -112,7 +125,7 @@ fn m4_missing_member_is_strict() {
 fn m4_missing_index_is_strict() {
     let error = native_error(engine("{{ items[1] }}").render(
         &arguments(json!({"items":[{}]})),
-        &CancellationState::Active,
+        CancellationToken::new(&CancellationState::Active),
     ));
     assert!(error.contains("undefined"), "{error}");
 }
@@ -122,8 +135,8 @@ fn compile_reports_native_syntax_error_with_configuration_path() {
     let error = MiniJinjaPromptTemplateEngine::compile(PATH, "{% for item in items %}")
         .err()
         .unwrap();
-    assert!(error.0.starts_with(&format!("{PATH}.template:")));
-    assert!(error.0.contains("syntax error"), "{error}");
+    assert!(error.message.starts_with(&format!("{PATH}.template:")));
+    assert!(error.message.contains("syntax error"), "{error}");
 }
 
 #[test]
@@ -132,8 +145,8 @@ fn m9_adapter_is_native_only_not_a_scriban_alias() {
     let error = MiniJinjaPromptTemplateEngine::compile(PATH, "{{ if visible }}yes{{ end }}")
         .err()
         .unwrap();
-    assert!(error.0.starts_with(&format!("{PATH}.template:")));
-    assert!(error.0.contains("syntax error"), "{error}");
+    assert!(error.message.starts_with(&format!("{PATH}.template:")));
+    assert!(error.message.contains("syntax error"), "{error}");
 }
 
 #[test]
@@ -155,7 +168,9 @@ fn m6_source_mapped_1001_items_fit_fuel_and_repeat_cleanly() {
     let values = case["new_input"]["arguments"].as_object().unwrap();
     for _ in 0..2 {
         assert_eq!(
-            compiled.render(values, &CancellationState::Active).unwrap(),
+            compiled
+                .render(values, CancellationToken::new(&CancellationState::Active))
+                .unwrap(),
             case["old_expected"]["value"].as_str().unwrap()
         );
     }
@@ -166,8 +181,11 @@ fn m7_precancelled_render_rejects_success_and_native_errors() {
     let values = arguments(json!({"value":"data"}));
     for text in ["prefix{{ value }}suffix", "{{ missing }}", NO_OUTPUT_FUEL] {
         assert_eq!(
-            engine(text).render(&values, &CancellationState::Cancelled),
-            Err(OperationError::Cancelled)
+            engine(text).render(
+                &values,
+                CancellationToken::new(&CancellationState::Cancelled)
+            ),
+            Err(Error::cancelled())
         );
     }
 }
@@ -178,14 +196,17 @@ fn m7_active_render_returns_complete_output_and_empty_output() {
         engine("prefix{{ value }}suffix")
             .render(
                 &arguments(json!({"value":"data"})),
-                &CancellationState::Active
+                CancellationToken::new(&CancellationState::Active)
             )
             .unwrap(),
         "prefixdatasuffix"
     );
     assert_eq!(
         engine("{% for i in range(1001) %}{% set x = i %}{% endfor %}")
-            .render(&Map::new(), &CancellationState::Active)
+            .render(
+                &Map::new(),
+                CancellationToken::new(&CancellationState::Active)
+            )
             .unwrap(),
         ""
     );
@@ -195,7 +216,10 @@ fn m7_active_render_returns_complete_output_and_empty_output() {
 fn m7_no_output_fuel_failure_is_path_prefixed_and_resets_per_call() {
     let compiled = engine(NO_OUTPUT_FUEL);
     for _ in 0..2 {
-        let error = native_error(compiled.render(&Map::new(), &CancellationState::Active));
+        let error = native_error(compiled.render(
+            &Map::new(),
+            CancellationToken::new(&CancellationState::Active),
+        ));
         assert!(error.contains("engine ran out of fuel"), "{error}");
     }
 }
@@ -205,14 +229,20 @@ fn m7_fuel_failure_after_output_exposes_no_partial_result() {
     let compiled = engine(
         "prefix{% for i in range(1001) %}{% for j in range(1001) %}x{% endfor %}{% endfor %}",
     );
-    let error = native_error(compiled.render(&Map::new(), &CancellationState::Active));
+    let error = native_error(compiled.render(
+        &Map::new(),
+        CancellationToken::new(&CancellationState::Active),
+    ));
     assert!(error.contains("engine ran out of fuel"), "{error}");
 }
 
 #[test]
 fn m7_native_recursion_failure_is_bounded_and_no_partial_escapes() {
     let compiled = engine("prefix{% macro recur() %}{{ recur() }}{% endmacro %}{{ recur() }}");
-    let error = native_error(compiled.render(&Map::new(), &CancellationState::Active));
+    let error = native_error(compiled.render(
+        &Map::new(),
+        CancellationToken::new(&CancellationState::Active),
+    ));
     assert!(error.contains("recursion limit exceeded"), "{error}");
 }
 
@@ -226,7 +256,10 @@ fn m8_no_filesystem_loader_even_for_existing_file() {
         "{{% include {} %}}",
         serde_json::to_string(&file.to_string_lossy()).unwrap()
     ));
-    let error = native_error(compiled.render(&Map::new(), &CancellationState::Active));
+    let error = native_error(compiled.render(
+        &Map::new(),
+        CancellationToken::new(&CancellationState::Active),
+    ));
     std::fs::remove_file(file).unwrap();
     std::fs::remove_dir(directory).unwrap();
     assert!(error.contains("template not found"), "{error}");
@@ -246,7 +279,10 @@ fn m8_no_ambient_environment_process_network_or_scriban_builtins() {
         ("{{ date.now }}", "undefined value"),
         ("{{ string.upcase('x') }}", "unknown method"),
     ] {
-        let error = native_error(engine(text).render(&Map::new(), &CancellationState::Active));
+        let error = native_error(engine(text).render(
+            &Map::new(),
+            CancellationToken::new(&CancellationState::Active),
+        ));
         assert!(error.contains(category), "{text}: {error}");
     }
 }
@@ -254,12 +290,14 @@ fn m8_no_ambient_environment_process_network_or_scriban_builtins() {
 #[test]
 fn m8_owned_json_types_are_data_not_host_callables() {
     let values = arguments(json!({"callable":{"name":"exec"},"items":[null,true,42,"safe",{}]}));
-    let error =
-        native_error(engine("{{ callable() }}").render(&values, &CancellationState::Active));
+    let error = native_error(
+        engine("{{ callable() }}")
+            .render(&values, CancellationToken::new(&CancellationState::Active)),
+    );
     assert!(error.contains("not callable"), "{error}");
     assert_eq!(
         engine("{{ items | length }}")
-            .render(&values, &CancellationState::Active)
+            .render(&values, CancellationToken::new(&CancellationState::Active))
             .unwrap(),
         "5"
     );

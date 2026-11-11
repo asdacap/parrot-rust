@@ -2,6 +2,18 @@ use super::*;
 use parrot_runtime::agent_turn::lifecycle::DrainBackend;
 use parrot_storage::conversation::{HistoryForkBoundary, HistoryForkSelection};
 
+fn is_answerable(conversation: &AgentConversation) -> bool {
+    matches!(
+        conversation
+            .messages()
+            .iter()
+            .rev()
+            .find(|message| message.role != MessageRole::System)
+            .map(|message| message.role),
+        Some(MessageRole::User | MessageRole::Tool)
+    )
+}
+
 impl Fixture {
     async fn admit_consumed_input(&self, message_id: &str, text: &str) {
         self.history
@@ -83,15 +95,17 @@ async fn inherited_unfinished_fork_context_is_not_owned_recovery_work() {
         .unwrap();
     fixture
         .history
-        .initialize_fork(
+        .repository()
+        .initialize_forked_agent_history(
             "parent".into(),
+            fixture.history.agent_session_id().into(),
             HistoryForkBoundary::AfterCompletedHistory,
             HistoryForkSelection::parse("full"),
             None,
         )
         .await
         .unwrap();
-    assert!(fixture.conversation().await.is_answerable());
+    assert!(is_answerable(&fixture.conversation().await));
     let provider = Scripted::default();
     let runtime = fixture
         .recovered_runtime(
@@ -141,7 +155,7 @@ async fn canceled_consumed_input_is_sealed_without_suppressing_later_real_input(
         .status,
         ExecutionStatus::Canceled
     );
-    assert!(fixture.conversation().await.is_answerable());
+    assert!(is_answerable(&fixture.conversation().await));
     let terminal = store
         .load()
         .await
@@ -165,9 +179,16 @@ async fn canceled_consumed_input_is_sealed_without_suppressing_later_real_input(
             Arc::new(RecoveryParent::default()),
         )
         .await;
-    bounded(reopened.session.recover_owned().unwrap().join())
-        .await
-        .unwrap();
+    bounded(
+        reopened
+            .session
+            .recover_owned_reserved()
+            .unwrap()
+            .execution
+            .join(),
+    )
+    .await
+    .unwrap();
     assert!(!reopened.session.has_recovery_work().await.unwrap());
     fixture
         .admit_consumed_input("later-input", "later real question")
@@ -376,9 +397,16 @@ async fn later_promoted_input_after_pass_capture_is_not_swallowed_by_terminal_pe
                 Arc::new(RecoveryParent::default()),
             )
             .await;
-        let restored = bounded(resumed.session.recover_owned().unwrap().join())
-            .await
-            .unwrap();
+        let restored = bounded(
+            resumed
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             restored.status,
             if failed {

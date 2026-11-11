@@ -10,7 +10,6 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Both paths must come from one current HOME/XDG resolution. The application
 /// component alone differs; discovery never searches earlier homes.
@@ -49,12 +48,12 @@ pub struct SessionAdmission {
 }
 
 /// Ownership safety always checks both supplied roots. The fallback flag only
-/// changes future discovery/resume; returned roots and leases are immutable.
+/// changes discovery/resume; returned roots and leases are immutable.
 pub struct SessionAdmissions {
     roots: OwnershipRoots,
     current: WorkingDirectoryClaim,
     legacy: WorkingDirectoryClaim,
-    legacy_enabled: AtomicBool,
+    legacy_enabled: bool,
 }
 impl SessionAdmissions {
     pub fn new(roots: OwnershipRoots, runtime: RuntimeIdentity, legacy_enabled: bool) -> Self {
@@ -62,17 +61,14 @@ impl SessionAdmissions {
             current: WorkingDirectoryClaim::new(roots.current.clone(), runtime.clone()),
             legacy: WorkingDirectoryClaim::new(roots.legacy.clone(), runtime),
             roots,
-            legacy_enabled: AtomicBool::new(legacy_enabled),
+            legacy_enabled,
         }
     }
     pub fn roots(&self) -> &OwnershipRoots {
         &self.roots
     }
-    pub fn set_legacy_path_read_fallback(&self, enabled: bool) {
-        self.legacy_enabled.store(enabled, Ordering::Release);
-    }
     pub fn legacy_path_read_fallback(&self) -> bool {
-        self.legacy_enabled.load(Ordering::Acquire)
+        self.legacy_enabled
     }
 
     pub fn discover_latest(&self, workspace: &Path) -> io::Result<SessionAdmission> {

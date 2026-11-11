@@ -7,7 +7,7 @@ use super::{
 };
 use crate::composition::{
     agents::{AgentSessionServices, ScopedAgentRuntime},
-    context::{ContextControl, ContextSelection, ContextServices},
+    context::{ContextSelection, ContextServices},
     processes::{ScopedProcessStatus, production_filename_generator},
     protocol,
 };
@@ -18,7 +18,6 @@ use parrot_domain::{
             ScopeLifetime,
         },
         filesystem::{AuthorizedMutationService, AuthorizedReadService},
-        runtime::SessionControl,
         security::RestrictableAccessSnapshot,
         status::ProcessStatusSource,
     },
@@ -66,7 +65,7 @@ use parrot_runtime::{
     agent_turn::{
         activity::{LiveActivity, TurnDiagnostics},
         engine::{Publisher, RuntimeBackend, RuntimeConfig},
-        lifecycle::{AgentSession, IncomingActivity, OperationHandle},
+        lifecycle::{AgentSession, IncomingActivity},
         provider_call::OutputWriter,
         services::{SelectionSource, SessionOutput, TurnError, TurnSelection, TurnStatus},
     },
@@ -851,17 +850,11 @@ impl<S: RestrictableAccessSnapshot + 'static> ImageProvider for ScopedImages<S> 
                 .await
                 .map_err(|error| {
                     let kind = match &error {
-                        ProviderError::Cancelled
-                        | ProviderError::Cancellation(_)
-                        | ProviderError::Http(
-                            HttpError::Cancelled | HttpError::RequestCancelled(_),
-                        ) => {
+                        ProviderError::Cancelled | ProviderError::Http(HttpError::Cancelled) => {
                             return OperationError::Cancelled;
                         }
                         ProviderError::Authentication(_) => FailureKind::Authentication,
-                        ProviderError::Http(HttpError::Transport(_) | HttpError::Http(_)) => {
-                            FailureKind::Network
-                        }
+                        ProviderError::Http(HttpError::Transport(_)) => FailureKind::Network,
                         _ => FailureKind::Provider,
                     };
                     OperationError::Failed(Failure::new(kind, error.to_string()))
@@ -870,15 +863,6 @@ impl<S: RestrictableAccessSnapshot + 'static> ImageProvider for ScopedImages<S> 
     }
 }
 
-pub struct ReminderRequest {
-    pub title: String,
-    pub description: String,
-    pub cancellation: Arc<dyn Cancellation>,
-}
-pub struct ClearReminderRequest {
-    pub title: String,
-    pub cancellation: Arc<dyn Cancellation>,
-}
 struct ScopedSessionServices<S: RestrictableAccessSnapshot + 'static> {
     link: Arc<ScopeLink<S>>,
     reminders: Arc<ExitReminders<Publisher>>,
@@ -996,69 +980,6 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
         ))
     }
 }
-impl<S: RestrictableAccessSnapshot + 'static> SessionControl for ScopedSessionServices<S> {
-    type ReminderRequest = ReminderRequest;
-    type ReminderResult = OperationHandle<()>;
-    type ClearReminderRequest = ClearReminderRequest;
-    type ClearReminderResult = OperationHandle<bool>;
-    type CompactRequest = (Option<ContextSize>, Arc<dyn Cancellation>);
-    type CompactResult = Compaction;
-    type Status = parrot_domain::values::activity::AgentSessionActivitySnapshot;
-    type Error = Failure;
-    fn compact<'a>(
-        &'a self,
-        request: Self::CompactRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Compaction, Failure>> {
-        Box::pin(async move {
-            cancellation
-                .check()
-                .map_err(|_| OperationError::Cancelled)?;
-            self.link
-                .session()
-                .map_err(operation_failure)?
-                .compact_context(request.0, request.1)
-                .await
-                .map(|result| Compaction {
-                    reduced: result.reduced,
-                    context: result.context,
-                })
-                .map_err(|error| {
-                    if error.is_cancelled() {
-                        OperationError::Cancelled
-                    } else {
-                        operation_failure(error)
-                    }
-                })
-        })
-    }
-    fn set_reminder(&self, request: ReminderRequest) -> Result<OperationHandle<()>, Failure> {
-        self.link
-            .session()
-            .map_err(failure)?
-            .set_exit_reminder(request.title, request.description, request.cancellation)
-            .map_err(failure)
-    }
-    fn clear_reminder(
-        &self,
-        request: ClearReminderRequest,
-    ) -> Result<OperationHandle<bool>, Failure> {
-        self.link
-            .session()
-            .map_err(failure)?
-            .clear_exit_reminder(request.title, request.cancellation)
-            .map_err(failure)
-    }
-    fn status(&self) -> Result<Self::Status, Failure> {
-        self.link
-            .scope()
-            .map_err(failure)?
-            .get_service::<AgentSessionServices<S>>()
-            .map(|services| services.activity.capture())
-            .map_err(failure)
-    }
-}
-
 /// The scheduler and retained tools belong to the session. Their forwarding
 /// edge back to that same session must therefore be weak, not a second owner.
 struct ScopedTaskSession<S: RestrictableAccessSnapshot + 'static> {
@@ -1508,11 +1429,7 @@ where
                     progress: progress.clone(),
                     status: status.clone(),
                 });
-                let context_control = Arc::new(ContextControl::new(ancillary.clone()));
-                let context_services = Arc::new(ContextServices::<S, _, _>::new(
-                    ancillary,
-                    context_control.clone(),
-                ));
+                let context_services = Arc::new(ContextServices::<S, _>::new(ancillary));
                 let activity = Arc::new(AgentSessionActivity::new(self.config.clock.clone()));
                 let bound_catalog = Arc::new(BoundCatalog::new());
                 let tool_execution = ToolExecutionConfig {
@@ -1675,9 +1592,6 @@ where
                 link.session
                     .set(Arc::downgrade(&actual_session))
                     .map_err(|_| child("agent session already bound"))?;
-                context_control
-                    .bind_session(Arc::downgrade(&actual_session))
-                    .map_err(child)?;
                 let process_services = Arc::new(ProcessToolServices {
                     owner: processes.clone(),
                     agent: ProcessAgent {
@@ -1827,7 +1741,6 @@ where
                         ServiceRegistration::new(asks.clone()),
                         ServiceRegistration::new(runtime_status),
                         ServiceRegistration::new(status),
-                        ServiceRegistration::new(context_control),
                         ServiceRegistration::new(context_services),
                         ServiceRegistration::new(binding),
                     ],

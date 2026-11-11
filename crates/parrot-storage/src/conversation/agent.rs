@@ -35,7 +35,7 @@ impl ConversationRepository {
         let item = self
             .events
             .transaction(move |tx| {
-                crate::events::record(tx, &event, None, &timestamp())?;
+                crate::events::record(tx, &event, &timestamp())?;
                 crate::events::projection::project(tx, &projected_agent, &message, &timestamp())
             })
             .await?;
@@ -210,12 +210,6 @@ impl AgentHistoryView {
             .peek_pending_input(self.agent.clone())
             .await
     }
-    pub async fn inputs_for_next_promotion(&self) -> Result<Vec<AdmittedInput>, EventError> {
-        self.repository
-            .events
-            .inputs_for_next_promotion(self.agent.clone())
-            .await
-    }
     pub async fn capture_pending_input_ids(&self) -> Result<Vec<String>, EventError> {
         self.repository
             .events
@@ -236,9 +230,6 @@ impl AgentHistoryView {
             .events
             .notices(self.agent.clone(), kind)
             .await
-    }
-    pub async fn messages(&self) -> Result<Vec<String>, EventError> {
-        self.repository.messages(self.agent.clone()).await
     }
     pub async fn materialize(
         &self,
@@ -262,18 +253,6 @@ impl AgentHistoryView {
     ) -> Result<std::collections::BTreeSet<i64>, EventError> {
         self.repository
             .active_checkpoint_assistant_sequences(self.agent.clone())
-            .await
-    }
-    pub async fn read_conversation_state(&self) -> Result<ConversationHistorySnapshot, EventError> {
-        self.repository
-            .read_conversation_state(self.agent.clone())
-            .await
-    }
-    pub async fn effective_conversation_groups(
-        &self,
-    ) -> Result<EffectiveConversationHistory, EventError> {
-        self.repository
-            .effective_conversation_groups(self.agent.clone())
             .await
     }
     pub async fn compaction_history(&self) -> Result<Option<CompactionContext>, EventError> {
@@ -347,28 +326,6 @@ impl AgentHistoryView {
         self.repository
             .events
             .find_request_usage(self.agent.clone(), tool_call_id)
-            .await
-    }
-    pub async fn initialize_fork(
-        &self,
-        source: String,
-        boundary: HistoryForkBoundary,
-        selection: HistoryForkSelection,
-        fallback: Option<HistoryForkSource>,
-    ) -> Result<(), ForkError> {
-        self.repository
-            .initialize_forked_agent_history(
-                source,
-                self.agent.clone(),
-                boundary,
-                selection,
-                fallback,
-            )
-            .await
-    }
-    pub async fn cleanup_fork(&self) -> Result<(), EventError> {
-        self.repository
-            .cleanup_forked_agent_history(self.agent.clone())
             .await
     }
     pub async fn refresh(&self) -> Result<(), EventError> {
@@ -452,18 +409,6 @@ impl AgentConversation {
     }
     pub async fn materialize(&self, item: ConversationItem) -> Result<ModelMessage, EventError> {
         materialize(&self.history, item).await
-    }
-    pub fn is_answerable(&self) -> bool {
-        matches!(
-            self.messages
-                .lock()
-                .expect("conversation poisoned")
-                .iter()
-                .rev()
-                .find(|message| message.role != MessageRole::System)
-                .map(|message| message.role),
-            Some(MessageRole::User | MessageRole::Tool)
-        )
     }
 }
 async fn materialize(

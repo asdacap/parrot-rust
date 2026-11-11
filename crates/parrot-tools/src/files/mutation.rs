@@ -34,10 +34,6 @@ impl<S: AuthorizedMutationService> WriteTool<S> {
         }
     }
 
-    pub const fn name(&self) -> &'static str {
-        "write"
-    }
-
     pub async fn execute(
         &self,
         invocation: &FileToolInvocation,
@@ -108,10 +104,6 @@ impl<S: AuthorizedMutationService> EditTool<S> {
             paths,
             definition,
         }
-    }
-
-    pub const fn name(&self) -> &'static str {
-        "edit"
     }
 
     pub async fn execute(

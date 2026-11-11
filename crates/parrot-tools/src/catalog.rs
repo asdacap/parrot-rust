@@ -1,7 +1,7 @@
 //! Agent-session-local built-ins. Only family DTOs are adapted here; services,
 //! security capture and production lifetime routing remain supplied by the host.
 
-use std::{collections::HashSet, fmt, marker::PhantomData, sync::Arc};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 use parrot_domain::{
     contracts::{
@@ -40,37 +40,6 @@ use crate::{
         tasks::{TaskQuery, TaskSnapshot, TaskTool, TaskToolKind, TaskUpdate},
     },
 };
-
-pub const BUILTIN_NAMES: [&str; 28] = [
-    "exec_command",
-    "write_stdin",
-    "interrupt_process",
-    "monitor",
-    "question",
-    "ask",
-    "reply",
-    "read",
-    "read_image",
-    "imagegen",
-    "glob",
-    "write",
-    "edit",
-    "web_fetch",
-    "agent_spawn",
-    "set_agent_tasks",
-    "get_agent_tasks",
-    "set_checkpoint",
-    "set_exit_reminder",
-    "clear_exit_reminder",
-    "agent_send",
-    "agent_interrupt",
-    "agent_status",
-    "wait",
-    "status",
-    "compact_context",
-    "request_write_permission",
-    "progress",
-];
 
 /// Converts the actual Foundation-loaded definitions without rewriting schemas.
 pub fn configured_definitions(configuration: &Configuration) -> ToolDefinitionCatalog {
@@ -809,103 +778,4 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
     pub fn factories(&self) -> &[Factory<S, T>] {
         &self.factories
     }
-    pub fn snapshot(&self) -> Result<Snapshot<S, T>, SnapshotError> {
-        Snapshot::document(
-            &self.factories,
-            &self
-                .factories
-                .iter()
-                .map(Factory::supports)
-                .collect::<Vec<_>>(),
-        )
-    }
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SnapshotError(pub String);
-impl fmt::Display for SnapshotError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for SnapshotError {}
-
-pub struct Snapshot<S, T> {
-    entries: Vec<Factory<S, T>>,
-}
-impl<S, T> Clone for Snapshot<S, T> {
-    fn clone(&self) -> Self {
-        Self {
-            entries: self.entries.clone(),
-        }
-    }
-}
-impl<S: AccessSnapshot + 'static, T: Send + 'static> Snapshot<S, T> {
-    pub fn document(
-        factories: &[Factory<S, T>],
-        supported: &[bool],
-    ) -> Result<Self, SnapshotError> {
-        if factories.len() != supported.len() {
-            return Err(SnapshotError(
-                "Tool support flags and definitions must match the tool inventory.".into(),
-            ));
-        }
-        let mut names = HashSet::new();
-        let mut entries = Vec::new();
-        for (factory, supported) in factories.iter().zip(supported) {
-            for name in std::iter::once(factory.name()).chain(factory.aliases().iter().copied()) {
-                if !names.insert(name) {
-                    return Err(SnapshotError(format!(
-                        "tool '{name}' is registered more than once"
-                    )));
-                }
-            }
-            if *supported {
-                entries.push(factory.clone());
-            }
-        }
-        Ok(Self { entries })
-    }
-    pub fn factories(&self) -> &[Factory<S, T>] {
-        &self.entries
-    }
-    pub fn definitions(&self) -> Vec<parrot_provider::sessions::model::Tool> {
-        self.entries
-            .iter()
-            .map(|factory| parrot_provider::sessions::model::Tool {
-                name: factory.name().into(),
-                description: factory.definition().description.clone(),
-                parameters_json: factory.definition().parameters_json.clone(),
-            })
-            .collect()
-    }
-    pub fn find(&self, name: &str) -> Option<&Factory<S, T>> {
-        self.entries
-            .iter()
-            .find(|f| f.name() == name || f.aliases().contains(&name))
-    }
-    pub fn permitted_by(&self, is_permitted: impl Fn(&str) -> bool) -> Self {
-        Self {
-            entries: self
-                .entries
-                .iter()
-                .filter(|f| is_permitted(f.name()))
-                .cloned()
-                .collect(),
-        }
-    }
-    pub fn enabled_after_interruption(&self) -> Self {
-        Self {
-            entries: self
-                .entries
-                .iter()
-                .filter(|f| f.tool.enabled_after_interruption())
-                .cloned()
-                .collect(),
-        }
-    }
-}
-
-#[cfg(test)]
-#[path = "../tests/catalog/snapshot_cases.rs"]
-mod snapshot_cases;

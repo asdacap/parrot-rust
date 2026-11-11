@@ -35,8 +35,6 @@ struct Case {
     family: String,
     protocol: String,
     #[serde(default)]
-    mode: String,
-    #[serde(default)]
     outcome: String,
     #[serde(default)]
     credential: String,
@@ -95,9 +93,7 @@ impl Credentials {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.entered.notify_waiters();
         match self.mode.as_str() {
-            "cancelled" => Err(Error::Cancellation(
-                "synthetic credential cancellation".into(),
-            )),
+            "cancelled" => Err(Error::Cancelled),
             "empty" => Ok(String::new()),
             "gated" => loop {
                 let changed = self.changed.notified();
@@ -153,7 +149,7 @@ impl Connector for Socket {
     ) -> BoxFuture<'a, Result<ConnectedSocket, WebSocketError>> {
         Box::pin(async {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(WebSocketError::InvalidOperation(
+            Err(WebSocketError::Wire(
                 "synthetic unexpected connector invocation".into(),
             ))
         })
@@ -346,20 +342,10 @@ async fn malformed(case: &Case) -> Result<(Value, Value), Error> {
         5,
         sleeper.clone(),
     );
-    let session = if case.mode == "session" {
-        Some(retry.open_session()?)
-    } else {
-        None
-    };
-    let mut stream = if let Some(session) = &session {
-        session.call(super::request())?
-    } else {
-        retry.call(super::request())?
-    };
+    let session = retry.open_session()?;
+    let mut stream = session.call(super::request())?;
     let (events, failure) = drain(stream.as_mut(), &Cancel::default()).await;
-    if let Some(session) = session {
-        session.close().await?
-    }
+    session.close().await?;
     // Only this exact deliberately malformed Chat/SSE fixture has a parser-native
     // semantic projection. No other Encode/provider/domain error is normalized.
     let semantic_error = failure.as_ref().map(|error| match error {
@@ -448,7 +434,7 @@ async fn partial(case: &Case) -> Result<Value, Error> {
         None,
     );
     let caller = Arc::new(Cancel::default());
-    let mut stream = session.call_cancellable(super::request(), caller.clone())?;
+    let mut stream = session.call(super::request())?;
     let mut events = Vec::new();
     for _ in 0..2 {
         if let Some(e) = stream.next(caller.as_ref()).await? {
@@ -503,11 +489,7 @@ async fn pending(case: &Case) -> Result<Value, Error> {
         false,
     )?;
     let session = provider.open_session()?;
-    let mut stream = if case.mode == "session" {
-        session.call(super::request())?
-    } else {
-        provider.call(super::request())?
-    };
+    let mut stream = session.call(super::request())?;
     let caller = Cancel::default();
     let mut snapshots = Vec::new();
     {

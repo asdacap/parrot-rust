@@ -328,9 +328,7 @@ impl AuthorizedMutationService for ProductionFilesystem {
 mod unix_fs {
     use super::*;
     use parrot_domain::contracts::{
-        filesystem::EntryKind,
-        paths::{ReadOrigin, ResolvedRead},
-        security::AccessSnapshot,
+        filesystem::EntryKind, paths::ResolvedRead, security::AccessSnapshot,
     };
     use rustix::fs::{AtFlags, CWD, Mode, OFlags, Stat};
     #[cfg(target_os = "linux")]
@@ -658,7 +656,6 @@ mod unix_fs {
             .check_read(&ResolvedRead::new(
                 lexical.to_path_buf(),
                 physical.to_path_buf(),
-                ReadOrigin::Explicit,
             ))
             .map_err(OperationError::Failed)
     }

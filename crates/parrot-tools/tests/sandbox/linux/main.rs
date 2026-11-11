@@ -1,4 +1,4 @@
-use parrot_tools::process::execution::LaunchSpec;
+use parrot_tools::process::execution::{LaunchSpec, ProcessSandbox};
 use parrot_tools::sandbox::linux::{
     LinuxAccessRule, LinuxBubblewrapSandbox, LinuxSandboxPolicy, ReadOnlyExecCommandClassifier,
     UnavailableProcessSandbox, UnsandboxedProcessSandbox,
@@ -178,7 +178,6 @@ fn unavailable_is_not_the_explicit_unconfined_adapter() {
         std::io::ErrorKind::Unsupported
     );
     assert!(!UnavailableProcessSandbox.sandbox_available());
-    assert!(UnavailableProcessSandbox.pipe_launch().is_err());
     assert!(UnsandboxedProcessSandbox.sandbox_available());
     let launch = UnsandboxedProcessSandbox.pipe_launch(
         "printf '%s' \"$T38\"; exit 19",
@@ -232,26 +231,16 @@ fn executable_validation_resolves_symlinks_and_rejects_writable_parent_chain() {
 #[test]
 fn pty_inner_argv_binds_helper_before_devices_and_attaches_after_chdir() {
     let root = Fixture::new();
-    fs::write(root.path("bwrap"), "not executed").unwrap();
-    fs::write(root.path("helper"), "not executed").unwrap();
-    let sandbox = LinuxBubblewrapSandbox::new(&root.path("bwrap"), false).unwrap();
-    let args = strings(
-        sandbox
-            .pseudo_terminal_arguments(
-                &LinuxSandboxPolicy::default(),
-                &root.path("helper"),
-                "echo hi",
-                Path::new("/"),
-                &[],
-            )
-            .unwrap(),
-    );
-    let executable = root.path("bwrap").canonicalize().unwrap();
+    let args = strings(LinuxSandboxPolicy::default().arguments(
+        "echo hi",
+        Path::new("/"),
+        &[],
+        Some(&root.path("helper")),
+    ));
     let helper = root.path("helper").display().to_string();
     assert_eq!(
         args,
         [
-            executable.to_str().unwrap(),
             "--die-with-parent",
             "--new-session",
             "--unshare-ipc",
@@ -278,19 +267,6 @@ fn pty_inner_argv_binds_helper_before_devices_and_attaches_after_chdir() {
             "-c",
             "echo hi",
         ]
-    );
-    assert_eq!(
-        sandbox
-            .pseudo_terminal_arguments(
-                &LinuxSandboxPolicy::default(),
-                &root.path("missing"),
-                "true",
-                Path::new("/"),
-                &[]
-            )
-            .unwrap_err()
-            .kind(),
-        std::io::ErrorKind::NotFound
     );
 }
 

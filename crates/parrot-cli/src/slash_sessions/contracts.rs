@@ -95,16 +95,6 @@ pub trait SlashSessionBinding: Send {
     ) -> BoxFuture<'a, Result<(), SlashFailure>>;
 }
 
-/// The terminal owner calls `commit` at the same point it commits its binding.
-/// Failure restores the previous slash session even if commit was already called.
-pub trait ExistingSessionBinding: Send {
-    fn bind<'a>(
-        &'a mut self,
-        commit: &'a mut (dyn FnMut() + Send),
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>>;
-}
-
 pub trait SlashSession: Send {
     fn current_session(&self) -> &UserSession;
     fn id(&self) -> &str {
@@ -165,12 +155,6 @@ pub trait SlashSession: Send {
     /// Start a fresh session using the configured default model and mode.
     fn start_new<'a>(
         &'a mut self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>>;
-    fn load_existing<'a>(
-        &'a mut self,
-        replacement: UserSession,
-        binding: &'a mut dyn ExistingSessionBinding,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>>;
     fn set_goal<'a>(

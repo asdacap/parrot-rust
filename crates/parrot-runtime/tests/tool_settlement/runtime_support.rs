@@ -163,7 +163,7 @@ pub(super) async fn runtime_with_publisher(
         image_bytes_per_cycle: 1024 * 1024,
     };
     let tools = factory.clone();
-    let backend = RuntimeBackend::new(RuntimeConfig {
+    let runtime_config = RuntimeConfig {
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
             ..Default::default()
@@ -192,7 +192,11 @@ pub(super) async fn runtime_with_publisher(
         parent_completion: Arc::new(Parent),
         ancestors: vec![],
         event_id: Arc::new(id),
-    })
+    };
+    let backend = RuntimeBackend::with_sessions(
+        runtime_config,
+        parrot_provider::sessions::ProviderSessions::new(),
+    )
     .await
     .unwrap();
     let store = test_agent_state_store(&fixture.path.join("agent-state"), "agent").await;

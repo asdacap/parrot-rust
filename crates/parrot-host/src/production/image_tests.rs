@@ -25,9 +25,6 @@ impl Provider for FailingImageProvider {
     fn id(&self) -> &str {
         "local"
     }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.script.stream()
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
     }
@@ -152,7 +149,6 @@ async fn production_image_tool_sanitizes_typed_authentication_and_network_errors
         Error::Http(HttpError::Transport(format!(
             "TLS handshake failed: {PRIVATE_DIAGNOSTIC}"
         ))),
-        Error::Http(HttpError::Http(PRIVATE_DIAGNOSTIC.into())),
     ] {
         let events = image_failure(error).await;
         assert_eq!(result(&events), SANITIZED);
@@ -188,12 +184,7 @@ async fn production_image_tool_sanitizes_typed_authentication_and_network_errors
 
 #[tokio::test]
 async fn production_image_tool_preserves_provider_cancellation_without_error_text() {
-    for error in [
-        Error::Cancelled,
-        Error::Cancellation(PRIVATE_DIAGNOSTIC.into()),
-        Error::Http(HttpError::Cancelled),
-        Error::Http(HttpError::RequestCancelled(PRIVATE_DIAGNOSTIC.into())),
-    ] {
+    for error in [Error::Cancelled, Error::Http(HttpError::Cancelled)] {
         let events = image_failure(error).await;
         let cancelled: Vec<_> = events
             .iter()

@@ -161,10 +161,6 @@ struct LocalTransport {
     client: GrpcTransportClient,
 }
 impl ProductionHost {
-    pub fn new(config: ProductionHostConfig) -> protocol::Result<Self> {
-        Self::with_event_load_progress(config, None)
-    }
-
     pub fn with_event_load_progress(
         config: ProductionHostConfig,
         progress: Option<SessionEventLoadProgress>,

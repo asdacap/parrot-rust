@@ -812,30 +812,8 @@ async fn native_session_forwards_all_current_id_operations_and_persists_selected
     fixture.close().await;
 }
 
-struct ExistingBinding {
-    commit: bool,
-    fail: bool,
-}
-impl ExistingSessionBinding for ExistingBinding {
-    fn bind<'a>(
-        &'a mut self,
-        commit: &'a mut (dyn FnMut() + Send),
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        Box::pin(async move {
-            if self.commit {
-                commit();
-            }
-            if self.fail {
-                Err(SlashFailure::Command("bind failed".into()))
-            } else {
-                Ok(())
-            }
-        })
-    }
-}
 #[tokio::test]
-async fn native_session_new_and_existing_binding_failures_restore_complete_previous_session() {
+async fn native_session_new_binding_failure_restores_complete_previous_session() {
     let mut fixture = Fixture::start(|method, _| {
         assert_eq!(method, "create_session");
         Ok(wire::UserSession {
@@ -857,52 +835,6 @@ async fn native_session_new_and_existing_binding_failures_restore_complete_previ
     let stop = Stop::new();
     assert!(session.start_new(&stop).await.is_err());
     assert_eq!(*session.current_session(), previous);
-    for commit in [false, true] {
-        assert!(
-            session
-                .load_existing(
-                    wire::UserSession {
-                        id: "loaded".into(),
-                        ..Default::default()
-                    },
-                    &mut ExistingBinding { commit, fail: true },
-                    &stop
-                )
-                .await
-                .is_err()
-        );
-        assert_eq!(*session.current_session(), previous);
-    }
-    session
-        .load_existing(
-            wire::UserSession {
-                id: "loaded".into(),
-                ..Default::default()
-            },
-            &mut ExistingBinding {
-                commit: false,
-                fail: false,
-            },
-            &stop,
-        )
-        .await
-        .unwrap();
-    assert_eq!(*session.current_session(), previous);
-    session
-        .load_existing(
-            wire::UserSession {
-                id: "loaded".into(),
-                ..Default::default()
-            },
-            &mut ExistingBinding {
-                commit: true,
-                fail: false,
-            },
-            &stop,
-        )
-        .await
-        .unwrap();
-    assert_eq!(session.id(), "loaded");
     fixture.close().await;
 }
 

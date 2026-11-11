@@ -1,3 +1,4 @@
+use crate::support::animate;
 use parrot_cli::presenters::{tools::exec_command::ExecCommandToolPresenter, *};
 use parrot_cli::terminal_frames::{
     LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
@@ -185,7 +186,7 @@ fn elapsed_clock_survives_animation_frames() {
         (3, 3723, "⠸ $ dotnet test (running 1h 02m 03s)"),
     ] {
         seconds.store(seconds_now, Ordering::SeqCst);
-        let live = live.animate(frame);
+        let live = animate(&live, frame);
         assert_eq!(
             LiveBufferItem::render(
                 &live,

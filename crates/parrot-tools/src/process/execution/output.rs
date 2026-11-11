@@ -155,20 +155,6 @@ impl StreamOutputFile {
         })
     }
 
-    pub fn open_for_append(path: impl AsRef<Path>) -> io::Result<Self> {
-        let mut options = OpenOptions::new();
-        options.append(true).create(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        Ok(Self {
-            file: Some(options.open(path)?),
-            encoder: Utf16Writer::default(),
-        })
-    }
-
     pub fn append(&mut self, text: &str) -> io::Result<()> {
         self.append_utf16(&text.encode_utf16().collect::<Vec<_>>())
     }
@@ -380,9 +366,6 @@ impl ProcessOutput {
     pub fn temporary_path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
-    pub fn copy_to(&self, writer: &mut impl Write) -> io::Result<()> {
-        self.copy_to_cancellable(writer, &|| false)
-    }
     fn copy_to_cancellable(
         &self,
         writer: &mut impl Write,
@@ -494,23 +477,6 @@ impl ProcessOutputBlobStore {
             directory: directory.into(),
         }
     }
-    pub fn persist(
-        &self,
-        exit_code: i32,
-        elapsed_ms: i64,
-        stdout: &ProcessOutput,
-        stderr: &ProcessOutput,
-    ) -> io::Result<PathBuf> {
-        let names = HaikunatorNameGenerator::default();
-        self.persist_with(
-            exit_code,
-            elapsed_ms,
-            stdout,
-            stderr,
-            || names.next_filename(),
-            || false,
-        )
-    }
     pub fn persist_with(
         &self,
         exit_code: i32,
@@ -546,23 +512,6 @@ impl ProcessOutputBlobStore {
                     "The operation was canceled.",
                 ));
             }
-            writer.flush()
-        })
-    }
-    pub fn persist_immediately(
-        &self,
-        exit_code: i32,
-        elapsed_ms: i64,
-        stdout: &ProcessOutput,
-    ) -> io::Result<PathBuf> {
-        let names = HaikunatorNameGenerator::default();
-        self.write_unique(&mut || names.next_filename(), |writer| {
-            write!(
-                writer,
-                "{}\n[stdout]\n",
-                format_completion(exit_code, elapsed_ms)
-            )?;
-            stdout.copy_to(writer)?;
             writer.flush()
         })
     }
@@ -626,6 +575,12 @@ pub(crate) mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    pub(crate) fn copy_output(output: &ProcessOutput) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        output.copy_to_cancellable(&mut bytes, &|| false).unwrap();
+        bytes
     }
 
     // PipeProcessOutputFilesTests.Eagerly_creates_separate_concurrently_readable_files_and_preserves_unicode
@@ -826,9 +781,7 @@ pub(crate) mod tests {
         fs::write(&path, &expected).unwrap();
         let borrowed = ProcessOutput::from_utf8_file(&path, false).unwrap();
         assert_eq!(borrowed.len(), expected.encode_utf16().count() as u64);
-        let mut bytes = Vec::new();
-        borrowed.copy_to(&mut bytes).unwrap();
-        assert_eq!(bytes, expected.as_bytes());
+        assert_eq!(copy_output(&borrowed), expected.as_bytes());
         borrowed.delete_temporary_file().unwrap();
         assert!(path.exists());
         ProcessOutput::from_utf8_file(&path, true)

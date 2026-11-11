@@ -5,7 +5,7 @@ use parrot_provider::{
         ImageHttpRequest, ImageTransport,
         client::{
             ImageGenerationClient, ImageGenerationReference, ImageGenerationRequest, ImageHeaders,
-            MAXIMUM_RESPONSE_BYTES, decode_response, prepare,
+            MAXIMUM_RESPONSE_BYTES, prepare,
         },
     },
     sessions::Error,
@@ -127,7 +127,11 @@ fn request() -> ImageGenerationRequest {
     }
 }
 fn png() -> Vec<u8> {
-    decode_response(&success()).unwrap().data
+    "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4890000000D49444154789C63F8CFC0F01F00050001FF89993D1D0000000049454E44AE426082"
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
 }
 
 #[tokio::test]
@@ -320,8 +324,8 @@ async fn advertised_oversized_response_is_rejected_and_precancel_stops_before_cr
     assert_eq!(headers.0.load(Ordering::SeqCst), 1);
     assert_eq!(transport.requests.lock().unwrap().len(), 1);
 }
-#[test]
-fn source_encoder_escaping_and_response_duplicate_last_assignment_are_preserved() {
+#[tokio::test]
+async fn source_encoder_escaping_and_response_duplicate_last_assignment_are_preserved() {
     let mut req = request();
     req.prompt = "\"'<>+&`é😀".into();
     let body = String::from_utf8(prepare(&req).unwrap()).unwrap();
@@ -331,7 +335,11 @@ fn source_encoder_escaping_and_response_duplicate_last_assignment_are_preserved(
     let response = format!(
         "{{\"data\":[],\"data\":[{{\"b64_json\":\"bad\",\"b64_json\":\"{PNG}\",\"ignored\":1e999}}]}}"
     );
-    assert_eq!(decode_response(response.as_bytes()).unwrap().data, png());
+    let (client, _, _) = fixture(200, response.into_bytes(), None);
+    assert_eq!(
+        client.generate(request(), &Never).await.unwrap().data,
+        png()
+    );
 }
 
 struct SignalCancellation {

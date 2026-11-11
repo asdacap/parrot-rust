@@ -6,7 +6,7 @@ use binding::Fixture;
 use parrot_domain::contracts::{async_ops::OperationError, tools::ParallelSafety};
 use parrot_provider::{chat_completions, sessions::model::Request};
 use parrot_tools::{
-    catalog::{self, BUILTIN_NAMES, Invocation},
+    catalog::{self, Invocation},
     files::{FileToolOutcome, ImageBudget},
 };
 use serde_json::{Value, json};
@@ -36,27 +36,14 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
             })
             .chain(std::iter::once("progress"))
             .collect::<Vec<_>>(),
-        BUILTIN_NAMES
-    );
-    assert_eq!(definitions.definitions().len(), 28);
-    assert_eq!(
         fixture
             .catalog
             .factories()
             .iter()
             .map(|f| f.name())
-            .collect::<Vec<_>>(),
-        BUILTIN_NAMES
+            .collect::<Vec<_>>()
     );
-    let snapshot = fixture.catalog.snapshot().unwrap();
-    assert_eq!(
-        snapshot
-            .definitions()
-            .iter()
-            .map(|d| d.name.as_str())
-            .collect::<Vec<_>>(),
-        BUILTIN_NAMES
-    );
+    assert_eq!(definitions.definitions().len(), 28);
     for factory in fixture.catalog.factories() {
         let configured = &fixture.configuration.runtime.tools[factory.name()];
         assert_eq!(factory.definition().description, configured.description);
@@ -65,10 +52,6 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
             configured.parameters_json
         );
         assert_eq!(factory.create().definition(), factory.definition());
-        assert!(Arc::ptr_eq(
-            &factory.create(),
-            &snapshot.find(factory.name()).unwrap().create()
-        ));
         assert!(Arc::ptr_eq(&factory.create(), &factory.create()));
         assert!(factory.supports());
     }
@@ -76,14 +59,9 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
         definitions.describe("missing").unwrap_err().to_string(),
         "tools.missing is not defined"
     );
-    assert!(Arc::ptr_eq(
-        &snapshot.find("bash").unwrap().create(),
-        &snapshot.find("exec_command").unwrap().create()
-    ));
-    assert!(snapshot.find("Bash").is_none());
-    assert!(snapshot.find("answer").is_none());
+    assert_eq!(fixture.find("bash").unwrap().name(), "exec_command");
+    assert!(fixture.find("answer").is_none());
     assert!(!fixture.configuration.runtime.tools.contains_key("answer"));
-    assert!(!snapshot.definitions().iter().any(|d| d.name == "bash"));
     assert!(fixture.services.calls().is_empty());
     fixture.close().await;
 }
@@ -99,15 +77,13 @@ async fn legacy_queue_definitions_do_not_restore_retired_tools() {
         .unwrap();
     }
     let fixture = Fixture::new(&overrides, true, 0);
-    let snapshot = fixture.catalog.snapshot().unwrap();
-    assert_eq!(snapshot.factories().len(), 28);
+    assert_eq!(fixture.catalog.factories().len(), 28);
     for name in REMOVED_QUEUE_TOOLS {
         assert!(fixture.configuration.runtime.tools.contains_key(name));
-        assert!(snapshot.find(name).is_none());
-        assert!(!snapshot.definitions().iter().any(|tool| tool.name == name));
+        assert!(fixture.find(name).is_none());
     }
-    assert!(snapshot.find("set_agent_tasks").is_some());
-    assert!(snapshot.find("progress").is_some());
+    assert!(fixture.find("set_agent_tasks").is_some());
+    assert!(fixture.find("progress").is_some());
     fixture.close().await;
 }
 
@@ -117,11 +93,9 @@ const GLOB_DESCRIPTION: &str = "Find paths beneath an optional root with determi
 #[tokio::test]
 async fn exact_t26_native_configuration_actual_read_glob_catalog_to_real_provider_prepare() {
     let fixture = Fixture::new(READ_OVERRIDE, true, 0);
-    let snapshot = fixture.catalog.snapshot().unwrap();
-    let selected = snapshot.permitted_by(|name| matches!(name, "read" | "glob"));
     let request = Request {
         model: "vendor/model".into(),
-        tools: selected.definitions(),
+        tools: fixture.definitions(|name| matches!(name, "read" | "glob")),
         ..Request::default()
     };
     let prepared = chat_completions::prepare(&request, "test").unwrap();
@@ -170,15 +144,22 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
 {
     let fixture = Fixture::new("", false, 1);
     assert_eq!(fixture.catalog.factories().len(), 28);
-    let snapshot = fixture.catalog.snapshot().unwrap();
-    assert_eq!(snapshot.factories().len(), 26);
-    assert!(snapshot.find("request_write_permission").is_none());
-    assert!(snapshot.find("question").is_none());
-    assert!(snapshot.find("answer").is_none());
-    assert!(snapshot.find("ask").is_some());
-    assert!(snapshot.find("reply").is_some());
+    assert_eq!(
+        fixture
+            .catalog
+            .factories()
+            .iter()
+            .filter(|f| f.supports())
+            .count(),
+        26
+    );
+    assert!(fixture.find("request_write_permission").is_none());
+    assert!(fixture.find("question").is_none());
+    assert!(fixture.find("answer").is_none());
+    assert!(fixture.find("ask").is_some());
+    assert!(fixture.find("reply").is_some());
     let source = &fixture.configuration.runtime.tools["agent_send"];
-    let send = snapshot.find("agent_send").unwrap();
+    let send = fixture.find("agent_send").unwrap();
     assert_eq!(send.definition().parameters_json, source.parameters_json);
     assert_eq!(
         send.definition().description,
@@ -192,11 +173,12 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
             .unwrap()
     );
     assert_ne!(send.definition().description, source.description);
-    let surviving = snapshot.enabled_after_interruption();
     assert_eq!(
-        surviving
+        fixture
+            .catalog
             .factories()
             .iter()
+            .filter(|f| f.supports() && f.create().enabled_after_interruption())
             .map(|f| f.name())
             .collect::<Vec<_>>(),
         vec![
@@ -209,14 +191,7 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
             "wait"
         ]
     );
-    assert_eq!(snapshot.factories().len(), 26);
-    for factory in surviving.factories() {
-        assert!(Arc::ptr_eq(
-            &factory.create(),
-            &snapshot.find(factory.name()).unwrap().create()
-        ));
-    }
-    let exec = snapshot.find("exec_command").unwrap().create();
+    let exec = fixture.find("exec_command").unwrap().create();
     assert_eq!(
         exec.parallel_safety(&Invocation::new(
             "call",
@@ -235,7 +210,7 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
     );
     for name in ["read", "read_image", "glob", "web_fetch"] {
         assert_eq!(
-            snapshot
+            fixture
                 .find(name)
                 .unwrap()
                 .create()
@@ -331,7 +306,15 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         ),
         ("progress", json!({"steps":0,"total_steps":2})),
     ];
-    assert_eq!(cases.iter().map(|c| c.0).collect::<Vec<_>>(), BUILTIN_NAMES);
+    assert_eq!(
+        cases.iter().map(|c| c.0).collect::<Vec<_>>(),
+        fixture
+            .catalog
+            .factories()
+            .iter()
+            .map(|f| f.name())
+            .collect::<Vec<_>>()
+    );
     let mut observed = serde_json::Map::new();
     for (name, args) in cases {
         let result = fixture
@@ -445,8 +428,7 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
 #[tokio::test]
 async fn retained_identity_budget_templates_and_cancellation_survive_binding() {
     let fixture = Fixture::new("", true, 0);
-    let snapshot = fixture.catalog.snapshot().unwrap();
-    let read = snapshot.find("read_image").unwrap().create();
+    let read = fixture.find("read_image").unwrap().create();
     let budget = Arc::new(parrot_domain::values::tools::ToolCycleImageBudget::new(1));
     assert!(!budget.try_accept(2).unwrap());
     let mut invocation = Invocation::new("image-budget", "not json", fixture.templates.clone());
@@ -480,7 +462,7 @@ async fn retained_identity_budget_templates_and_cancellation_survive_binding() {
             Box::pin(async {})
         }
     }
-    let write = snapshot.find("write").unwrap().create();
+    let write = fixture.find("write").unwrap().create();
     let result = write
         .invoke(
             Invocation::new(

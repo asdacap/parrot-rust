@@ -2,8 +2,7 @@ use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::events::error::EventError;
 use parrot_storage::events::projection::project;
 use parrot_storage::events::tools::{
-    append_tool_settlement, append_tool_synthetic, has_tool_synthetic, tool_terminals,
-    tool_terminals_of_calls,
+    append_tool_settlement, append_tool_synthetic, has_tool_synthetic, tool_terminals_of_calls,
 };
 use parrot_storage::events::types::{
     ConversationMessage, ConversationOrigin, ConversationPart, MessageRole, ToolExecutionStatus,
@@ -110,8 +109,12 @@ fn result_identity_is_agent_scoped_and_compares_metadata_and_ordered_content() {
             .unwrap()
             .is_some()
     );
-    assert_eq!(tool_terminals(&tx, "agent").unwrap(), vec![first.clone()]);
-    assert_eq!(tool_terminals(&tx, "other").unwrap(), vec![first]);
+    for agent in ["agent", "other"] {
+        assert_eq!(
+            tool_terminals_of_calls(&tx, agent, &["call".into()]).unwrap(),
+            vec![first.clone()]
+        );
+    }
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 2);
     assert_eq!(count(&connection, "conversation_item"), 4);
@@ -145,7 +148,10 @@ fn settlement_stores_complete_content_once_and_retry_preserves_the_original_even
         .unwrap()
         .is_none()
     );
-    assert_eq!(tool_terminals(&tx, "agent").unwrap(), vec![terminal]);
+    assert_eq!(
+        tool_terminals_of_calls(&tx, "agent", &["call".into()]).unwrap(),
+        vec![terminal]
+    );
     assert_eq!(
         parrot_storage::conversation::reads::read_conversation_item(&tx, item.sequence).unwrap(),
         item
@@ -193,7 +199,13 @@ fn settlement_preserves_image_only_empty_text_and_empty_content() {
         assert_eq!(item.message.parts, result.result_parts);
         assert_eq!(result.content(), "");
     }
-    assert_eq!(tool_terminals(&tx, "agent").unwrap().len(), 3);
+    let calls = (0..3)
+        .map(|index| format!("call-{index}"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tool_terminals_of_calls(&tx, "agent", &calls).unwrap().len(),
+        3
+    );
     tx.commit().unwrap();
     assert_eq!(count(&connection, "event"), 3);
 }
@@ -341,8 +353,18 @@ fn result_reads_preserve_call_input_order_duplicates_and_all_statuses() {
         .unwrap();
         expected.push(value);
     }
-    assert_eq!(tool_terminals(&tx, "agent").unwrap(), expected);
-    assert!(tool_terminals(&tx, "other").unwrap().is_empty());
+    let calls = (0..4)
+        .map(|index| format!("call-{index}"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tool_terminals_of_calls(&tx, "agent", &calls).unwrap(),
+        expected
+    );
+    assert!(
+        tool_terminals_of_calls(&tx, "other", &calls)
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         tool_terminals_of_calls(
             &tx,
@@ -367,10 +389,6 @@ fn result_reads_preserve_call_input_order_duplicates_and_all_statuses() {
     )
     .unwrap();
     assert_eq!(
-        tool_terminals(&tx, "agent").unwrap_err().to_string(),
-        "unknown tool execution status unknown"
-    );
-    assert_eq!(
         tool_terminals_of_calls(&tx, "agent", &["call-0".into()])
             .unwrap_err()
             .to_string(),
@@ -384,7 +402,6 @@ fn ordinary_tool_messages_are_not_completed_execution_results() {
     let mut message = ConversationMessage::text(MessageRole::Tool, "ordinary message");
     message.tool_call_id = "ordinary".into();
     project(&tx, "agent", &message, AT).unwrap();
-    assert!(tool_terminals(&tx, "agent").unwrap().is_empty());
     assert!(
         tool_terminals_of_calls(&tx, "agent", &["ordinary".into()])
             .unwrap()

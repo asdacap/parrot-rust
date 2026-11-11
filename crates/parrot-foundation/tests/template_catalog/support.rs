@@ -1,5 +1,8 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
-use parrot_foundation::{config::ConfigError, template_catalog::PromptTemplateCatalog};
+use parrot_foundation::{
+    config::{ConfigError, Configuration, templates::TemplateSpec},
+    template_catalog::PromptTemplateCatalog,
+};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -23,6 +26,16 @@ pub fn environment() -> BTreeMap<String, String> {
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
     .collect()
+}
+
+pub fn template_specs(content: &str) -> Vec<TemplateSpec> {
+    let mut specs = Vec::new();
+    Configuration::from_content(content, &environment(), |spec| {
+        specs.push(spec.clone());
+        Ok(())
+    })
+    .unwrap();
+    specs
 }
 
 pub enum CancellationState {

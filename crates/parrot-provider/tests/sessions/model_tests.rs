@@ -58,14 +58,6 @@ fn common_request_borrows_all_adapters_without_losing_raw_json() {
         request.provider_preferences
     );
     assert_eq!(
-        anthropic::RequestView::provider_preferences(&request),
-        request.provider_preferences
-    );
-    assert_eq!(
-        anthropic::RequestView::reasoning_summary(&request),
-        Some("detailed")
-    );
-    assert_eq!(
         responses::ResponsesRequestView::reasoning_effort(&request),
         "high"
     );
@@ -93,11 +85,6 @@ fn common_request_borrows_all_adapters_without_losing_raw_json() {
             assert!(body.contains(value), "{value}: {body}");
         }
     }
-    assert!(
-        responses::prepare(&request, "provider")
-            .unwrap()
-            .include_router_metadata()
-    );
 }
 
 #[test]

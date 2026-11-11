@@ -1,45 +1,9 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-
-use futures_util::stream;
 use parrot_cli::presenters::streams::{
-    ProviderCallUsageStreamReader, QueueSnapshotStreamReader, SessionUsageSnapshotStreamReader,
-    ShellProcessSnapshotStreamReader, StreamObservation,
+    QueueSnapshotStreamReader, ShellProcessSnapshotStreamReader, StreamObservation,
 };
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::protocol::messages::{parrot as wire, process, queue};
 use protobuf::Message;
-use tonic::{Code, Status};
-
-#[derive(Default)]
-struct TestCancellation {
-    cancelled: AtomicBool,
-    notify: tokio::sync::Notify,
-}
-impl TestCancellation {
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
-    }
-}
-impl Cancellation for TestCancellation {
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            loop {
-                let notified = self.notify.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if self.is_cancelled() {
-                    return;
-                }
-                notified.await;
-            }
-        })
-    }
-}
+use tonic::Code;
 
 fn visible(id: &str) -> wire::Event {
     wire::Event {
@@ -150,114 +114,8 @@ fn process_result(
     }
 }
 
-#[tokio::test]
-async fn usage_is_consumed_and_never_forwarded() {
-    let usage = wire::ProviderCallUsage {
-        input_tokens: 1,
-        output_tokens: 2,
-        ..Default::default()
-    };
-    let mut source = stream::iter([
-        Ok(wire::Event {
-            agent_session_id: "child".into(),
-            payload: Some(wire::event::Payload::ProviderCallUsage(usage.clone())),
-            ..Default::default()
-        }),
-        Ok(wire::Event {
-            payload: Some(wire::event::Payload::TurnStarted(
-                wire::TurnStarted::default(),
-            )),
-            ..Default::default()
-        }),
-    ]);
-    let received = Arc::new(Mutex::new(Vec::new()));
-    let mut reader = ProviderCallUsageStreamReader::new();
-    let cancellation = TestCancellation::default();
-    let callback = received.clone();
-    let forwarded = reader
-        .next(
-            &mut source,
-            move |value, _| {
-                callback.lock().unwrap().push(value);
-                Box::pin(async { Ok(()) })
-            },
-            &cancellation,
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(matches!(
-        forwarded.payload,
-        Some(wire::event::Payload::TurnStarted(_))
-    ));
-    assert_eq!(*received.lock().unwrap(), vec![usage]);
-    assert!(
-        reader
-            .next(
-                &mut source,
-                |_, _| Box::pin(async { panic!("unexpected callback") }),
-                &cancellation
-            )
-            .await
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[tokio::test]
-async fn snapshots_update_modeline_usage_and_are_not_rendered() {
-    let snapshot = wire::SessionUsageSnapshot {
-        revision: 3,
-        input_tokens: 2400,
-        ..Default::default()
-    };
-    let expected = wire::Event {
-        agent_session_id: "root".into(),
-        payload: Some(wire::event::Payload::TurnStarted(
-            wire::TurnStarted::default(),
-        )),
-        ..Default::default()
-    };
-    let mut source = stream::iter([
-        Ok(wire::Event {
-            payload: Some(wire::event::Payload::SessionUsageSnapshot(snapshot.clone())),
-            ..Default::default()
-        }),
-        Ok(expected.clone()),
-    ]);
-    let received = Arc::new(Mutex::new(Vec::new()));
-    let mut reader = SessionUsageSnapshotStreamReader::new();
-    let callback = received.clone();
-    assert_eq!(
-        reader
-            .next(
-                &mut source,
-                move |value, _| {
-                    callback.lock().unwrap().push(value);
-                    Box::pin(async { Ok(()) })
-                },
-                &TestCancellation::default()
-            )
-            .await
-            .unwrap(),
-        Some(expected)
-    );
-    assert_eq!(*received.lock().unwrap(), vec![snapshot]);
-    assert!(
-        reader
-            .next(
-                &mut source,
-                |_, _| Box::pin(async { panic!("unexpected callback") }),
-                &TestCancellation::default()
-            )
-            .await
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[tokio::test]
-async fn queue_applies_only_complete_ordered_replacements_and_preserves_owners() {
+#[test]
+fn queue_applies_only_complete_ordered_replacements_and_preserves_owners() {
     let events = [
         queue_event(
             "root",
@@ -323,29 +181,16 @@ async fn queue_applies_only_complete_ordered_replacements_and_preserves_owners()
         ),
         visible("next"),
     ];
-    let mut source = stream::iter(events.into_iter().map(Ok));
     let mut reader = QueueSnapshotStreamReader::new();
-    let received = Arc::new(Mutex::new(Vec::new()));
-    for id in ["visible", "next"] {
-        let callback = received.clone();
-        assert_eq!(
-            reader
-                .next(
-                    &mut source,
-                    move |value, _| {
-                        callback.lock().unwrap().push(value);
-                        Box::pin(async { Ok(()) })
-                    },
-                    &TestCancellation::default()
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .id,
-            id
-        );
+    let mut forwarded = Vec::new();
+    let mut values = Vec::new();
+    for event in &events {
+        match reader.observe(event).unwrap() {
+            StreamObservation::Forward => forwarded.push(event.id.as_str()),
+            StreamObservation::Consumed(value) => values.extend(value),
+        }
     }
-    let values = received.lock().unwrap();
+    assert_eq!(forwarded, ["visible", "next"]);
     assert_eq!(values.len(), 2);
     assert_eq!(values[0].1.root_agent_session_id, "root");
     let rows = |snapshot: &queue::QueueSnapshot| {
@@ -451,8 +296,8 @@ fn queue_partitions_interleaved_owners_and_rejects_stale_or_removed_generations(
     }
 }
 
-#[tokio::test]
-async fn process_applies_complete_ordered_snapshots_and_bypasses_activity_stream() {
+#[test]
+fn process_applies_complete_ordered_snapshots_and_bypasses_activity_stream() {
     let completed = process::CompletedShellProcess {
         process_id: "done".into(),
         elapsed_ms: Some(7123),
@@ -515,29 +360,16 @@ async fn process_applies_complete_ordered_snapshots_and_bypasses_activity_stream
         ),
         visible("next"),
     ];
-    let mut source = stream::iter(events.into_iter().map(Ok));
     let mut reader = ShellProcessSnapshotStreamReader::new();
-    let received = Arc::new(Mutex::new(Vec::new()));
-    for id in ["visible", "next"] {
-        let callback = received.clone();
-        assert_eq!(
-            reader
-                .next(
-                    &mut source,
-                    move |value, _| {
-                        callback.lock().unwrap().push(value);
-                        Box::pin(async { Ok(()) })
-                    },
-                    &TestCancellation::default()
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .id,
-            id
-        );
+    let mut forwarded = Vec::new();
+    let mut values = Vec::new();
+    for event in &events {
+        match reader.observe(event).unwrap() {
+            StreamObservation::Forward => forwarded.push(event.id.as_str()),
+            StreamObservation::Consumed(value) => values.extend(value),
+        }
     }
-    let values = received.lock().unwrap();
+    assert_eq!(forwarded, ["visible", "next"]);
     assert_eq!(values.len(), 2);
     assert_eq!(
         values[0]
@@ -825,103 +657,4 @@ fn both_inventory_filters_consume_invalid_identity_forward_other_kinds_and_rejec
         queue_reader.observe(&event).unwrap(),
         StreamObservation::Forward
     );
-}
-
-#[tokio::test]
-async fn stream_filters_propagate_transport_and_observer_failures_without_forwarding() {
-    let mut reader = ProviderCallUsageStreamReader::new();
-    let mut source = stream::iter([Err(Status::unavailable("source failure"))]);
-    let error = reader
-        .next(
-            &mut source,
-            |_, _| Box::pin(async { panic!("observer called") }),
-            &TestCancellation::default(),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), Code::Unavailable);
-    assert_eq!(error.message(), "source failure");
-    let mut source = stream::iter([
-        Ok(wire::Event {
-            payload: Some(wire::event::Payload::ProviderCallUsage(
-                wire::ProviderCallUsage::default(),
-            )),
-            ..Default::default()
-        }),
-        Ok(visible("not yet forwarded")),
-    ]);
-    let error = reader
-        .next(
-            &mut source,
-            |_, _| Box::pin(async { Err(Status::aborted("observer failure")) }),
-            &TestCancellation::default(),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), Code::Aborted);
-    assert_eq!(error.message(), "observer failure");
-    assert_eq!(
-        reader
-            .next(
-                &mut source,
-                |_, _| Box::pin(async { Ok(()) }),
-                &TestCancellation::default()
-            )
-            .await
-            .unwrap()
-            .unwrap()
-            .id,
-        "not yet forwarded"
-    );
-}
-
-#[tokio::test]
-async fn cancellation_is_observed_before_read_and_while_waiting_without_signals() {
-    let mut reader = ProviderCallUsageStreamReader::new();
-    let cancellation = Arc::new(TestCancellation::default());
-    cancellation.cancel();
-    let mut source = stream::iter([Ok(visible("not consumed"))]);
-    assert_eq!(
-        reader
-            .next(
-                &mut source,
-                |_, _| Box::pin(async { Ok(()) }),
-                cancellation.as_ref()
-            )
-            .await
-            .unwrap_err()
-            .code(),
-        Code::Cancelled
-    );
-    assert_eq!(
-        reader
-            .next(
-                &mut source,
-                |_, _| Box::pin(async { Ok(()) }),
-                &TestCancellation::default()
-            )
-            .await
-            .unwrap()
-            .unwrap()
-            .id,
-        "not consumed"
-    );
-    let cancellation = Arc::new(TestCancellation::default());
-    let cancel = cancellation.clone();
-    let cancelling = async move {
-        tokio::task::yield_now().await;
-        cancel.cancel();
-    };
-    let reading = async {
-        let mut pending = stream::pending::<Result<wire::Event, Status>>();
-        reader
-            .next(
-                &mut pending,
-                |_, _| Box::pin(async { Ok(()) }),
-                cancellation.as_ref(),
-            )
-            .await
-    };
-    let (result, ()) = tokio::join!(reading, cancelling);
-    assert_eq!(result.unwrap_err().code(), Code::Cancelled);
 }

@@ -75,10 +75,6 @@ where
         }
         Ok(())
     }
-    pub async fn build_catalog(&mut self, cancellation: &dyn Cancellation) -> PromptResult<String> {
-        let entries = self.read_catalog(cancellation).await?;
-        render_skill_catalog_entries(&entries, &self.templates).map(|(_, text)| text)
-    }
     async fn read_catalog(
         &mut self,
         cancellation: &dyn Cancellation,

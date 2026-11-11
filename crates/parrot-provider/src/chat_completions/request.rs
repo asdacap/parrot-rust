@@ -12,7 +12,6 @@ pub trait RequestView {
     fn messages(&self) -> &[Self::Message];
     fn tools(&self) -> &[Self::Tool];
     fn reasoning_effort(&self) -> Option<&str>;
-    fn reasoning_summary(&self) -> Option<&str>;
     fn provider_preferences(&self) -> &str;
     fn include_router_metadata(&self) -> bool;
     fn max_output_tokens(&self) -> i32;

@@ -85,7 +85,7 @@ impl EdgeRuntime {
             .await
             .unwrap(),
         );
-        let backend = RuntimeBackend::new(RuntimeConfig {
+        let runtime_config = RuntimeConfig {
             tool_execution: tool_execution_config(
                 &fixture.history,
                 templates.clone(),
@@ -128,7 +128,11 @@ impl EdgeRuntime {
             parent_completion: Arc::new(Parent(trace)),
             ancestors: vec![],
             event_id: Arc::new(id),
-        })
+        };
+        let backend = RuntimeBackend::with_sessions(
+            runtime_config,
+            parrot_provider::sessions::ProviderSessions::new(),
+        )
         .await
         .unwrap();
         Self {

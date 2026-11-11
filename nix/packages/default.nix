@@ -16,7 +16,6 @@
     "tests/stress/scheduler.rs"
     "tests/stress/task_scheduler.rs"
     "tests/fixtures/regressions/T77/campaign.json"
-    "crates/parrot-storage/tests/history_files/fixtures/duplicate-fields.json"
     "tests/fixtures/regressions/T77/path-regressions.json"
     "tests/fixtures/regressions/T77/stream-regressions.json"
   ];

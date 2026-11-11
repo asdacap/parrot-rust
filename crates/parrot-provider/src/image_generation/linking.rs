@@ -25,7 +25,7 @@ struct State {
     bucket: Arc<dyn ImageBucket>,
     links: Mutex<HashMap<String, Upload>>,
 }
-/// Uploads are shared by exact path across direct calls and all sessions.
+/// Uploads are shared by exact path across all sessions.
 pub struct ImageLinkingProvider {
     inner: Arc<dyn Provider>,
     state: Arc<State>,
@@ -39,27 +39,6 @@ impl ImageLinkingProvider {
                 links: Mutex::new(HashMap::new()),
             }),
         }
-    }
-    fn stream(
-        &self,
-        request: Request,
-        target: Target,
-        scope: Arc<AtomicBool>,
-    ) -> Box<dyn EventStream> {
-        Box::new(LinkStream {
-            target,
-            state: self.state.clone(),
-            scope,
-            original: Some(request),
-            initialized: false,
-            verification: None,
-            linked: None,
-            rewritten: false,
-            current: None,
-            repaired: false,
-            visible: false,
-            done: false,
-        })
     }
 }
 impl Provider for ImageLinkingProvider {
@@ -75,13 +54,6 @@ impl Provider for ImageLinkingProvider {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<super::ImageGenerationResult, Error>> {
         self.inner.generate_image(request, cancellation)
-    }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(self.stream(
-            request,
-            Target::Provider(self.inner.clone()),
-            Arc::new(AtomicBool::new(false)),
-        ))
     }
     fn has_credential<'a>(
         &'a self,
@@ -117,7 +89,8 @@ struct LinkSession {
 impl LinkSession {
     fn stream(&self, request: Request, trace: Option<Arc<CallTrace>>) -> Box<dyn EventStream> {
         Box::new(LinkStream {
-            target: Target::Session(self.inner.clone(), trace),
+            session: self.inner.clone(),
+            trace,
             state: self.state.clone(),
             scope: self.scope.clone(),
             original: Some(request),
@@ -321,21 +294,9 @@ fn url_rejection(error: &Error) -> bool {
         && !is_engine_overloaded(&failure)
         && matches!(failure, Failure::Response { .. } | Failure::Http { status: 400..=499, .. } if !matches!(&failure, Failure::Http { status: 401 | 403 | 408 | 429, .. }))
 }
-enum Target {
-    Provider(Arc<dyn Provider>),
-    Session(Arc<dyn Session>, Option<Arc<CallTrace>>),
-}
-impl Target {
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        match self {
-            Self::Provider(provider) => provider.call(request),
-            Self::Session(session, Some(trace)) => session.call_with_trace(request, trace.clone()),
-            Self::Session(session, None) => session.call(request),
-        }
-    }
-}
 struct LinkStream {
-    target: Target,
+    session: Arc<dyn Session>,
+    trace: Option<Arc<CallTrace>>,
     state: Arc<State>,
     scope: Arc<AtomicBool>,
     original: Option<Request>,
@@ -373,7 +334,10 @@ impl LinkStream {
         if self.current.is_none() {
             let request = self.linked.take().expect("prepared linking request");
             self.verification = self.rewritten.then(|| request.clone());
-            self.current = Some(self.target.call(request)?);
+            self.current = Some(match &self.trace {
+                Some(trace) => self.session.call_with_trace(request, trace.clone()),
+                None => self.session.call(request),
+            }?);
         }
         let result = self.current.as_mut().unwrap().next(cancellation).await;
         match result {

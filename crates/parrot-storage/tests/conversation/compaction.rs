@@ -1,3 +1,4 @@
+use super::conversation_state;
 use parrot_core::{StatusKey, StatusStanding};
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::protocol::messages::parrot::Event;
@@ -120,7 +121,7 @@ async fn compaction_is_conversation_owned_without_a_separate_history_table() {
         .unwrap();
     assert!(!tables.iter().any(|table| table == "agent_history"));
     assert_eq!(tables.len(), 5);
-    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    let state = conversation_state(&repo, "agent").await.unwrap();
     assert_eq!(state.snapshot, Some(snapshot("summary", covered)));
     assert_eq!(state.items.len(), 1);
     assert_eq!(
@@ -129,7 +130,6 @@ async fn compaction_is_conversation_owned_without_a_separate_history_table() {
     );
     let conversation = repo.conversation("agent".into()).await.unwrap();
     assert_eq!(conversation.len(), 2);
-    assert_eq!(repo.model_history("agent".into()).await.unwrap().len(), 2);
     let history = repo.agent_history("agent".into()).await.unwrap();
     let summary_sequence = history.last().unwrap().sequence();
     assert!(matches!(
@@ -144,13 +144,7 @@ async fn compaction_is_conversation_owned_without_a_separate_history_table() {
     );
     repo.events().database().close().await.unwrap();
     let reopened = fixture.repository();
-    assert_eq!(
-        reopened
-            .read_conversation_state("agent".into())
-            .await
-            .unwrap(),
-        state
-    );
+    assert_eq!(conversation_state(&reopened, "agent").await.unwrap(), state);
     reopened.events().database().close().await.unwrap();
 }
 
@@ -420,11 +414,7 @@ async fn status_standing_belongs_to_its_assembly_message_after_reopen() {
     )
     .await
     .unwrap();
-    let items = repo
-        .read_conversation_state("agent".into())
-        .await
-        .unwrap()
-        .items;
+    let items = conversation_state(&repo, "agent").await.unwrap().items;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].item.message.role, MessageRole::System);
     assert_eq!(
@@ -616,7 +606,7 @@ async fn final_request_state_survives_later_messages_and_reopen_without_duplicat
     let messages = repo.conversation("agent".into()).await.unwrap();
     assert_eq!(messages.len(), 5);
     assert!(messages.iter().all(|item| item.final_phase));
-    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    let state = conversation_state(&repo, "agent").await.unwrap();
     assert_eq!(state.items.len(), 5);
     assert!(state.items.iter().all(|item| item.item.final_phase));
     repo.events().database().close().await.unwrap();

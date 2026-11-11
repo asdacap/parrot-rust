@@ -5,12 +5,13 @@
 //! composition, provider execution, skill discovery or permission authorization.
 #[path = "support.rs"]
 pub(super) mod support;
+use super::stream::bounded_client_stream;
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
     protocol::messages::parrot as wire,
     values::{context::ContextSize, identifiers::UserSessionId},
 };
-use parrot_host::composition::protocol::{stream::bounded_client_stream, *};
+use parrot_host::composition::protocol::*;
 use parrot_runtime::{
     interactions::*,
     prompt_context::{SkillLoadError, SkillMetadata, SkillScope},
@@ -1751,7 +1752,7 @@ async fn listen_forwards_replay_cursor_unknown_fields_and_turn_end_without_endin
     owner
         .resources
         .events
-        .append_raw(unknown.clone(), None)
+        .append(wire::Event::parse_from_bytes(&unknown).unwrap(), None)
         .await
         .unwrap();
     let mut stream = f
@@ -2259,8 +2260,7 @@ async fn unsupported_schema_resume_is_failed_precondition_without_replacing_or_m
 
 #[tokio::test]
 async fn legacy_only_resume_uses_eligible_metadata_and_preserves_validation_and_history() {
-    let f = Fixture::new();
-    f.admissions.set_legacy_path_read_fallback(true);
+    let f = Fixture::with_legacy_path_read_fallback();
     let original = f.create().await;
     let id = original.id();
     let sent = f
@@ -2347,8 +2347,7 @@ async fn legacy_only_resume_is_not_found_when_fallback_is_disabled() {
 #[tokio::test]
 async fn resume_metadata_prefers_current_even_when_current_metadata_is_corrupt() {
     for corrupt_current in [false, true] {
-        let f = Fixture::new();
-        f.admissions.set_legacy_path_read_fallback(true);
+        let f = Fixture::with_legacy_path_read_fallback();
         let id = f.create().await.id();
         f.close().await;
         let current = f.state.join("sessions").join(&id);

@@ -2,8 +2,30 @@
 //! These use the real FrameView, T73 presenter, and T71 renderer; no key is read.
 
 use super::*;
+use crate::presenters::SessionReplayContext;
 use crate::terminal_frames::ScrollbackRenderContext;
 use std::sync::atomic::AtomicUsize;
+
+fn session_presenter(columns: usize) -> EnhancedSessionPresenter {
+    EnhancedSessionPresenter::with_registry(
+        columns,
+        false,
+        Arc::new(Mutex::new(SessionReplayContext::new(false))),
+        Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
+            Vec::new(),
+            Arc::new(SkillReadPathFormatter::default()),
+        )),
+    )
+}
+
+fn observe(
+    presenter: &mut EnhancedSessionPresenter,
+    published: &wire::Event,
+) -> PresentationUpdate {
+    let mut update = presenter.apply_event(published).unwrap();
+    update.live = presenter.snapshot().unwrap();
+    update
+}
 
 #[test]
 fn enhanced_run_future_preserves_existing_send_contract() {
@@ -177,7 +199,7 @@ fn frame_copies_owned_input_and_places_modeline_before_prompt() {
     let mut original = vec![prompt("first> ", "draft", 0)];
     let (view, output, reads) = frame_view(80, original.clone());
     original[0] = prompt("changed> ", "not owned", 0);
-    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    let mut presenter = session_presenter(80);
     view.apply(
         presenter
             .set_session("build", "provider/model", false)
@@ -202,7 +224,7 @@ fn question_countdown_preserves_input_and_clears_without_another_key() {
     // Both original Arguments rows are retained, not replaced with a wide-only case.
     for columns in [20, 80] {
         let (view, output, reads) = frame_view(columns, vec![prompt("> ", "typed answer", 4)]);
-        let mut presenter = EnhancedSessionPresenter::new(columns, false, false);
+        let mut presenter = session_presenter(columns);
         presenter
             .set_session("build", "provider/model", false)
             .unwrap();
@@ -334,33 +356,31 @@ fn failed_commit_retains_same_arc_and_does_not_replay_successful_prefix() {
 #[test]
 fn deferred_failures_flush_queued_reasoning_before_errors_and_remove_the_live_row() {
     let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
-    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
-    view.apply(
-        presenter
-            .observe(&wire::Event {
-                agent_session_id: "root".into(),
-                payload: Some(wire::event::Payload::TurnStarted(
-                    wire::TurnStarted::default(),
-                )),
-                ..Default::default()
-            })
-            .unwrap(),
-    )
+    let mut presenter = session_presenter(80);
+    view.apply(observe(
+        &mut presenter,
+        &wire::Event {
+            agent_session_id: "root".into(),
+            payload: Some(wire::event::Payload::TurnStarted(
+                wire::TurnStarted::default(),
+            )),
+            ..Default::default()
+        },
+    ))
     .unwrap();
-    view.apply(
-        presenter
-            .observe(&wire::Event {
-                agent_session_id: "root".into(),
-                payload: Some(wire::event::Payload::ReasoningChunk(wire::ReasoningChunk {
-                    kind: wire::ReasoningKind::REASONING_KIND_SUMMARY.into(),
-                    fragment: "Planning".into(),
-                    completed: true,
-                    ..Default::default()
-                })),
+    view.apply(observe(
+        &mut presenter,
+        &wire::Event {
+            agent_session_id: "root".into(),
+            payload: Some(wire::event::Payload::ReasoningChunk(wire::ReasoningChunk {
+                kind: wire::ReasoningKind::REASONING_KIND_SUMMARY.into(),
+                fragment: "Planning".into(),
+                completed: true,
                 ..Default::default()
-            })
-            .unwrap(),
-    )
+            })),
+            ..Default::default()
+        },
+    ))
     .unwrap();
     assert!(output.text().contains("✦ Planning"));
     output.0.lock().unwrap().clear();
@@ -400,7 +420,7 @@ fn deferred_failures_flush_queued_reasoning_before_errors_and_remove_the_live_ro
 #[test]
 fn pending_reasoning_is_published_live_then_committed_once_before_dialog_output() {
     let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
-    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    let mut presenter = session_presenter(80);
     view.enqueue(
         presenter
             .apply_event(&wire::Event {
@@ -440,9 +460,10 @@ fn pending_reasoning_is_published_live_then_committed_once_before_dialog_output(
     assert!(output.text().contains("> draft"));
     output.0.lock().unwrap().clear();
     let update = presenter
-        .commit(Arc::new(
-            crate::presenters::ImmediateScrollbackValue::trusted(vec!["dialog output".into()]),
-        ))
+        .commit(Arc::new(crate::presenters::Presentation::Lines {
+            lines: vec!["dialog output".into()],
+            layout: crate::terminal_frames::ScrollbackLayout::Compact,
+        }))
         .unwrap();
     view.apply(update).unwrap();
     let flushed = output.text();
@@ -459,20 +480,21 @@ fn pending_reasoning_is_published_live_then_committed_once_before_dialog_output(
 #[test]
 fn replacement_cleanup_commits_unfinished_reasoning_without_leaving_it_live() {
     let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 0)]);
-    let mut old = EnhancedSessionPresenter::new(80, false, false);
-    view.apply(
-        old.observe(&wire::Event {
+    let mut old = session_presenter(80);
+    view.apply(observe(
+        &mut old,
+        &wire::Event {
             agent_session_id: "root".into(),
             payload: Some(wire::event::Payload::TurnStarted(
                 wire::TurnStarted::default(),
             )),
             ..Default::default()
-        })
-        .unwrap(),
-    )
+        },
+    ))
     .unwrap();
-    view.apply(
-        old.observe(&wire::Event {
+    view.apply(observe(
+        &mut old,
+        &wire::Event {
             agent_session_id: "root".into(),
             payload: Some(wire::event::Payload::ReasoningChunk(wire::ReasoningChunk {
                 kind: wire::ReasoningKind::REASONING_KIND_SUMMARY.into(),
@@ -480,15 +502,14 @@ fn replacement_cleanup_commits_unfinished_reasoning_without_leaving_it_live() {
                 ..Default::default()
             })),
             ..Default::default()
-        })
-        .unwrap(),
-    )
+        },
+    ))
     .unwrap();
     assert!(output.text().contains("✦ Old planning"));
     output.0.lock().unwrap().clear();
     view.apply(old.cancel().unwrap()).unwrap();
     assert!(old.cancel().unwrap().commits.is_empty());
-    let mut replacement = EnhancedSessionPresenter::new(80, false, false);
+    let mut replacement = session_presenter(80);
     view.apply(
         replacement
             .set_session("build", "replacement", false)
@@ -600,25 +621,24 @@ fn fresh_body_publication_refreshes_time_dependent_item_even_with_the_same_arc()
 fn progress_snapshot_redraw_preserves_modeline_and_owned_input_without_a_key() {
     use parrot_domain::values::progress::{PROGRESS_INVENTORY_KIND, Progress, ProgressSnapshot};
     let (view, output, reads) = frame_view(80, vec![prompt("> ", "draft", 2)]);
-    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    let mut presenter = session_presenter(80);
     view.apply(
         presenter
             .set_session("build", "provider/model", false)
             .unwrap(),
     )
     .unwrap();
-    view.apply(
-        presenter
-            .observe(&wire::Event {
-                agent_session_id: "root".into(),
-                payload: Some(wire::event::Payload::AgentStarted(wire::AgentStarted {
-                    name: "main".into(),
-                    ..Default::default()
-                })),
+    view.apply(observe(
+        &mut presenter,
+        &wire::Event {
+            agent_session_id: "root".into(),
+            payload: Some(wire::event::Payload::AgentStarted(wire::AgentStarted {
+                name: "main".into(),
                 ..Default::default()
-            })
-            .unwrap(),
-    )
+            })),
+            ..Default::default()
+        },
+    ))
     .unwrap();
     let mut snapshot = ProgressSnapshot {
         revision: 1,
@@ -635,23 +655,22 @@ fn progress_snapshot_redraw_preserves_modeline_and_owned_input_without_a_key() {
             snapshot.progress = None;
         }
         let before = output.text().len();
-        view.apply(
-            presenter
-                .observe(&wire::Event {
-                    agent_session_id: "root".into(),
-                    payload: Some(wire::event::Payload::ToolSnapshot(wire::ToolSnapshot {
-                        kind: PROGRESS_INVENTORY_KIND.into(),
-                        owner_agent_session_id: "root".into(),
-                        inventory_instance_id: "scope".into(),
-                        revision: snapshot.revision,
-                        final_chunk: true,
-                        data: serde_json::to_vec(&snapshot).unwrap(),
-                        ..Default::default()
-                    })),
+        view.apply(observe(
+            &mut presenter,
+            &wire::Event {
+                agent_session_id: "root".into(),
+                payload: Some(wire::event::Payload::ToolSnapshot(wire::ToolSnapshot {
+                    kind: PROGRESS_INVENTORY_KIND.into(),
+                    owner_agent_session_id: "root".into(),
+                    inventory_instance_id: "scope".into(),
+                    revision: snapshot.revision,
+                    final_chunk: true,
+                    data: serde_json::to_vec(&snapshot).unwrap(),
                     ..Default::default()
-                })
-                .unwrap(),
-        )
+                })),
+                ..Default::default()
+            },
+        ))
         .unwrap();
         let rendered = output.text();
         let redraw = &rendered[before..];
