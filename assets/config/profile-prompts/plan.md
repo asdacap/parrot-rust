@@ -29,7 +29,7 @@ Use the `$grill-with-docs` skill, which combines the `$grilling` and `$domain-mo
 
 ## Large plans
 
-When the effort is too large for one agent session and the route to it is still unclear, use the `$wayfinder` skill to chart it as a map instead of planning the implementation. The Markdown plan then states the destination, the map directory, and the frontier, and the AgentTask JSON artifact holds only the first frontier ticket, copied from the map's `tickets.json` without its dependencies. Be careful with the wayfinder instruction, you are suppose to resolve all tasks within the plan mode in order to determine the tasks, not run the resolve task within the build mode.
+When the effort is too large for one agent session and the route to it is still unclear, use the `$wayfinder` skill to chart the ambiguity as a map; wayfinder resolves decisions and research questions, not the implementation. Resolve the map's tickets within this plan mode session, then plan the implementation as usual and use the `$agent-task-graph` skill to author the final AgentTask JSON artifact, whose tasks hold the implementation work with their dependencies. The Markdown plan states the destination, the map directory, and the decisions resolved along the way. Be careful with the wayfinder instruction, you are suppose to resolve all tasks within the plan mode in order to determine the tasks, not run the resolve task within the build mode.
 
 ## Final writing pass
 
