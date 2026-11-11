@@ -164,4 +164,4 @@ changes; do not use broad cleanup commands.
 ## Nomenclature
 
 - A user-conversation-turn is from first message to final message.
-- A tool-call-cycle is the provider request -> response.
+- A step is the provider request -> response.

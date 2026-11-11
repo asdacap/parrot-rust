@@ -16,6 +16,10 @@ A user's input and the response messages and tool activity that follow it. A com
 **Turn result**:
 A no-tool assistant response at the end of the visible conversation turn, which may be a completion candidate. It does not by itself mean the turn has been accepted as complete.
 
+**Step**:
+One provider request and its response within a conversation turn; a turn spans many steps. The same unit as an ATIF Step and a DeepSWE API turn.
+_Avoid_: Tool-call-cycle, API turn
+
 **Pending message**:
 Input accepted for delivery but not yet admitted into the conversation.
 
