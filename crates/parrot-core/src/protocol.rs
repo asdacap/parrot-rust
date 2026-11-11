@@ -16,7 +16,7 @@ mod states;
 mod tool;
 mod turn;
 
-pub use cancellation::{Cancellation, CancellationToken, Cancelled};
+pub use cancellation::{Cancellation, CancellationToken, Cancelled, NeverCancelled};
 pub use compaction::{
     CompactionConfiguration, CompactionFailure, CompactionGroup, CompactionHistoryGroup,
     CompactionInput, CompactionPlan, CompactionProgress, CompactionResult, FittedCompaction,

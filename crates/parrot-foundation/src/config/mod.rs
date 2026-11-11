@@ -9,6 +9,7 @@ pub mod runtime;
 pub mod templates;
 pub mod yaml;
 pub use configuration::Configuration;
+pub use opaque_json::json_string;
 pub use opaque_json::yaml_json;
 
 use std::fmt;

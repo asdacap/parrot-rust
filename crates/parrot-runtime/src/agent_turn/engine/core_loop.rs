@@ -1,8 +1,8 @@
 use super::*;
 use parrot_core::{
     ContextCompaction as CoreContextCompaction, ContextSnapshot as CoreContextSnapshot,
-    Error as CoreError, ErrorCode, ErrorKind, ProviderRequest, ProviderResponse,
-    States as CoreStates, TokenCalibration, ToolCatalog, ToolDefinition, TurnOptions,
+    Error as CoreError, ErrorKind, ProviderRequest, ProviderResponse, States as CoreStates,
+    TokenCalibration, ToolCatalog, ToolDefinition, TurnOptions,
 };
 
 mod conversation;
@@ -71,23 +71,7 @@ impl From<TurnError> for CoreError {
                 } else {
                     ErrorKind::Failed
                 };
-                let code = match error.diagnostic_code() {
-                    "cancelled" => ErrorCode::Cancelled,
-                    "access_denied" => ErrorCode::AccessDenied,
-                    "io" => ErrorCode::Io,
-                    "timeout" => ErrorCode::Timeout,
-                    "http" => ErrorCode::Http,
-                    "argument" => ErrorCode::Argument,
-                    "invalid_operation" => ErrorCode::InvalidOperation,
-                    "websocket_closed" => ErrorCode::WebSocketClosed,
-                    "websocket" => ErrorCode::WebSocket,
-                    "wire_protocol" => ErrorCode::WireProtocol,
-                    "websocket_upgrade" => ErrorCode::WebSocketUpgrade,
-                    "websocket_message_too_large" => ErrorCode::WebSocketMessageTooLarge,
-                    "request_too_large" => ErrorCode::RequestTooLarge,
-                    "websocket_transport" => ErrorCode::WebSocketTransport,
-                    _ => ErrorCode::Unexpected,
-                };
+                let code = error.diagnostic_code();
                 Self {
                     kind,
                     code,

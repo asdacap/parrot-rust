@@ -2,6 +2,7 @@ use super::view::{
     ContentKind, ContentView, MessageView, RequestView, Role, ToolCallView, ToolDefinitionView,
 };
 use super::wire_json::{normalize_raw_json, quote};
+use crate::wire::encode_base64;
 use serde_json::value::RawValue;
 use std::{fmt, io};
 
@@ -181,7 +182,7 @@ fn ordinary_blocks(message: &impl MessageView) -> Result<Vec<String>, EncodeErro
                 format!(
                     "{{\"type\":\"base64\",\"media_type\":{},\"data\":{}}}",
                     quote(part.media_type()),
-                    quote(&base64(&bytes))
+                    quote(&encode_base64(&bytes))
                 )
             };
             blocks.push(format!("{{\"type\":\"image\",\"source\":{source}}}"));
@@ -209,29 +210,6 @@ fn ordinary_blocks(message: &impl MessageView) -> Result<Vec<String>, EncodeErro
         ));
     }
     Ok(blocks)
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let bits = (u32::from(chunk[0]) << 16)
-            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
-            | u32::from(*chunk.get(2).unwrap_or(&0));
-        output.push(char::from(ALPHABET[((bits >> 18) & 63) as usize]));
-        output.push(char::from(ALPHABET[((bits >> 12) & 63) as usize]));
-        output.push(if chunk.len() > 1 {
-            char::from(ALPHABET[((bits >> 6) & 63) as usize])
-        } else {
-            '='
-        });
-        output.push(if chunk.len() > 2 {
-            char::from(ALPHABET[(bits & 63) as usize])
-        } else {
-            '='
-        });
-    }
-    output
 }
 
 /// Only parsing/non-object input falls back. A valid object may still fail when

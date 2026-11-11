@@ -334,17 +334,8 @@ impl S3ImageBucket {
             }
             bytes.extend_from_slice(&buffer[..count]);
         }
-        let mut body = String::from_utf8_lossy(&bytes).into_owned();
-        const LIMIT: usize = 64 << 10;
-        const MARKER: &str = "\n… [truncated]";
-        if body.len() > LIMIT {
-            let mut end = LIMIT - MARKER.len();
-            while !body.is_char_boundary(end) {
-                end -= 1;
-            }
-            body.truncate(end);
-            body.push_str(MARKER);
-        }
+        let raw_body = String::from_utf8_lossy(&bytes).into_owned();
+        let body = crate::wire::bound_body(&raw_body);
         let uri = endpoint.as_url();
         let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
         Err(Error::Provider(format!(

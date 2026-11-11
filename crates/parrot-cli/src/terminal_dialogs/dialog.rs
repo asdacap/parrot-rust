@@ -323,15 +323,7 @@ impl Drop for ResetInput {
     }
 }
 
-struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+use parrot_core::NeverCancelled;
 fn cancelled() -> Status {
     Status::cancelled("operation cancelled")
 }

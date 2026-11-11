@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     fmt,
     io::{self, Write},
     sync::{
@@ -22,6 +22,10 @@ use tonic::{Code, Status};
 
 use crate::{
     attachments::uploader::AttachmentError,
+    chat_loops::{
+        Binding, Interaction, Interactions, SessionSnapshot, application_exit, interrupt_loop,
+        reconcile_interactions, stop_binding, terminal_commands,
+    },
     dispatch::{
         dialog::SlashDialog,
         interrupts::{CliInterruptListener, Interrupts},
@@ -32,11 +36,11 @@ use crate::{
         tools::read::SkillReadPathFormatter,
     },
     slash_sessions::{
-        CallbackApplicationExit, CallbackSessionBinding, CommandContext, NavigationFailure,
-        PollingSlashActivity, RpcSlashSession, SkillCompletion, SkillRefresh,
-        SlashCommandCompletion, SlashCommands, SlashFailure, SlashSession,
+        CallbackSessionBinding, CommandContext, NavigationFailure, PollingSlashActivity,
+        RpcSlashSession, SkillCompletion, SkillRefresh, SlashCommandCompletion, SlashFailure,
+        SlashSession,
     },
-    slash_settings::{AuthServices, SettingsServices},
+    slash_settings::AuthServices,
     terminal_frames::{
         CancellationToken, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
         SPINNER_INTERVAL, ScrollbackItem, TerminalFrameRenderer,
@@ -370,7 +374,7 @@ impl EnhancedCli {
                 () = cancellation.cancelled() => {},
             }
             lifetime.cancel();
-            shared.stop_binding();
+            stop_binding(&shared.binding_stop);
             // Every future is retained on this stack and cooperatively joined.
             // No dropped JoinHandle or second executor hides terminal work.
             if input_result.is_none() {
@@ -407,7 +411,7 @@ impl EnhancedCli {
         }
         .await;
         lifetime.cancel();
-        shared.stop_binding();
+        stop_binding(&shared.binding_stop);
         shared.binding.lock().await.stream.close();
         let flushed = shared.apply_presenter(|presenter| presenter.cancel());
         let clear = frame.clear();
@@ -482,23 +486,12 @@ impl EnhancedInput {
             !exit_on_completion,
             Box::new(binding),
         );
-        let application = Arc::new(CallbackApplicationExit({
-            let lifetime = shared.lifetime.clone();
-            Arc::new(move || {
-                let lifetime = lifetime.clone();
-                Box::pin(async move {
-                    lifetime.cancel();
-                    Ok(())
-                })
-            })
-        }));
+        let application = application_exit(shared.lifetime.clone());
         let create_registry = |client| {
-            SlashCommands::create_terminal(
-                SettingsServices {
-                    client,
-                    auth: self.auth.clone(),
-                },
-                Some(application.clone()),
+            terminal_commands(
+                client,
+                self.auth.clone(),
+                application.clone(),
                 self.version.clone(),
                 controller.clone(),
             )
@@ -1086,12 +1079,6 @@ impl FrameView {
     }
 }
 
-#[derive(Clone)]
-struct SessionSnapshot {
-    session: wire::UserSession,
-    client: WebClient,
-    generation: u64,
-}
 struct SessionState {
     session: wire::UserSession,
     client: WebClient,
@@ -1110,42 +1097,6 @@ impl SessionState {
         );
         self.prepared_skills = Some(skills);
         true
-    }
-}
-struct Binding {
-    stream: PreparedSessionStream,
-    stop: Arc<Signal>,
-}
-
-#[derive(Default)]
-struct Interactions {
-    pending: VecDeque<Interaction>,
-    questions: HashSet<String>,
-    permissions: HashSet<String>,
-}
-enum Interaction {
-    Question {
-        generation: u64,
-        session_id: String,
-        pending: wire::PendingQuestion,
-    },
-    Permission {
-        generation: u64,
-        session_id: String,
-        pending: wire::PendingPermission,
-    },
-    Plan {
-        generation: u64,
-        completed: wire::PlanCompleted,
-    },
-}
-impl Interaction {
-    fn generation(&self) -> u64 {
-        match self {
-            Self::Question { generation, .. }
-            | Self::Permission { generation, .. }
-            | Self::Plan { generation, .. } => *generation,
-        }
     }
 }
 
@@ -1191,12 +1142,6 @@ impl EnhancedSession {
             .expect("enhanced session poisoned")
             .prepared_skills
             .take()
-    }
-    fn stop_binding(&self) {
-        self.binding_stop
-            .lock()
-            .expect("binding stop poisoned")
-            .cancel();
     }
     fn apply_presenter(
         &self,
@@ -1302,12 +1247,12 @@ impl EnhancedSession {
         }
         if let Some(wire::event::Payload::PermissionPending(pending)) = &event.payload {
             let mut interactions = self.interactions.lock().expect("interactions poisoned");
-            if interactions.permissions.insert(pending.id.clone()) {
-                interactions.pending.push_front(Interaction::Permission {
-                    generation: snapshot.generation,
-                    session_id: snapshot.session.id.clone(),
-                    pending: pending.clone(),
-                });
+            if interactions.offer_permission(
+                snapshot.generation,
+                &snapshot.session.id,
+                pending,
+                true,
+            ) {
                 self.changed.notify_one();
             }
         }
@@ -1379,98 +1324,28 @@ impl EnhancedSession {
         }
     }
     async fn interrupt_loop(&self) -> Result<(), EnhancedFailure> {
-        loop {
-            let notified = self.interrupted.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if self.interrupt_pending.swap(false, Ordering::AcqRel) {
-                let snapshot = self.snapshot();
-                crate::slash_sessions::native_call(
-                    snapshot.client.clone().interrupt(wire::InterruptRequest {
-                        user_session_id: snapshot.session.id,
-                        ..Default::default()
-                    }),
-                    self.lifetime.as_ref(),
-                )
-                .await?;
-            }
-            tokio::select! { biased; () = self.lifetime.cancelled() => return Ok(()), () = notified => {} }
-        }
+        interrupt_loop(
+            || self.snapshot(),
+            &self.lifetime,
+            &self.interrupt_pending,
+            &self.interrupted,
+        )
+        .await
+        .map_err(EnhancedFailure::from)
     }
     async fn reconcile_loop(&self) -> Result<(), EnhancedFailure> {
         let mut interval = tokio::time::interval(RECONCILIATION_INTERVAL);
         loop {
             tokio::select! { biased; () = self.lifetime.cancelled() => return Ok(()), _ = interval.tick() => {} }
             let snapshot = self.snapshot();
-            let questions = crate::slash_sessions::native_call(
-                snapshot
-                    .client
-                    .clone()
-                    .list_pending_questions(wire::ListPendingQuestionsRequest {
-                        user_session_id: snapshot.session.id.clone(),
-                        ..Default::default()
-                    }),
-                self.lifetime.as_ref(),
+            reconcile_interactions(
+                snapshot,
+                |generation| generation != self.snapshot().generation,
+                &self.lifetime,
+                &self.interactions,
+                &self.changed,
             )
-            .await;
-            let permissions = crate::slash_sessions::native_call(
-                snapshot.client.clone().list_pending_permissions(
-                    wire::ListPendingPermissionsRequest {
-                        user_session_id: snapshot.session.id.clone(),
-                        ..Default::default()
-                    },
-                ),
-                self.lifetime.as_ref(),
-            )
-            .await;
-            if snapshot.generation != self.snapshot().generation {
-                continue;
-            }
-            let mut interactions = self.interactions.lock().expect("interactions poisoned");
-            match questions {
-                Ok(listed) => {
-                    interactions
-                        .questions
-                        .retain(|id| listed.questions.iter().any(|question| &question.id == id));
-                    for pending in listed.questions {
-                        if interactions.questions.insert(pending.id.clone()) {
-                            interactions.pending.push_back(Interaction::Question {
-                                generation: snapshot.generation,
-                                session_id: snapshot.session.id.clone(),
-                                pending,
-                            });
-                        }
-                    }
-                }
-                Err(SlashFailure::Rpc(_)) if self.lifetime.is_cancelled() => return Ok(()),
-                Err(SlashFailure::Rpc(_)) => {}
-                Err(error) => return Err(error.into()),
-            }
-            match permissions {
-                Ok(listed) => {
-                    interactions.permissions.retain(|id| {
-                        listed
-                            .permissions
-                            .iter()
-                            .any(|permission| &permission.id == id)
-                    });
-                    for pending in listed.permissions {
-                        if interactions.permissions.insert(pending.id.clone()) {
-                            interactions.pending.push_back(Interaction::Permission {
-                                generation: snapshot.generation,
-                                session_id: snapshot.session.id.clone(),
-                                pending,
-                            });
-                        }
-                    }
-                }
-                Err(SlashFailure::Rpc(status))
-                    if matches!(status.code(), Code::Unimplemented | Code::NotFound) => {}
-                Err(error) => return Err(error.into()),
-            }
-            if !interactions.pending.is_empty() {
-                self.changed.notify_one();
-            }
+            .await?;
         }
     }
 }
@@ -1524,7 +1399,7 @@ impl SessionReplacement for EnhancedSession {
             self.frame
                 .apply(update)
                 .map_err(|error| NavigationFailure::Recoverable(error.to_string()))?;
-            self.stop_binding();
+            stop_binding(&self.binding_stop);
             let mut binding = self.binding.lock().await;
             binding.stream.close();
             commit();

@@ -118,53 +118,7 @@ impl ContextCompactionPolicy {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextSnapshot {
-    pub estimated_tokens: i64,
-    pub context_limit: i32,
-    pub usage_percent: Option<i32>,
-    pub trigger_percent: i32,
-    pub input_limit: i32,
-    pub trigger_tokens: Option<i64>,
-    pub has_context_limit_override: bool,
-}
-
-impl ContextSnapshot {
-    pub fn new(
-        estimated_tokens: i64,
-        context_limit: i32,
-        usage_percent: Option<i32>,
-        trigger_percent: i32,
-    ) -> Self {
-        Self {
-            estimated_tokens,
-            context_limit,
-            usage_percent,
-            trigger_percent,
-            input_limit: context_limit,
-            trigger_tokens: (context_limit > 0)
-                .then(|| i64::from(context_limit) * i64::from(trigger_percent) / 100),
-            has_context_limit_override: false,
-        }
-    }
-
-    pub fn is_available(&self) -> bool {
-        self.context_limit > 0
-    }
-
-    pub fn exceeds_input_limit(&self) -> bool {
-        self.input_limit > 0 && self.estimated_tokens > i64::from(self.input_limit)
-    }
-
-    pub fn exceeds_trigger(&self) -> bool {
-        self.exceeds_compaction_trigger(self.estimated_tokens)
-    }
-
-    pub fn exceeds_compaction_trigger(&self, input_tokens: i64) -> bool {
-        self.trigger_tokens
-            .is_some_and(|trigger_tokens| input_tokens > trigger_tokens)
-    }
-}
+pub use parrot_core::ContextSnapshot;
 
 pub struct TokenEstimator;
 

@@ -27,16 +27,7 @@ impl Drop for TempDir {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+pub use parrot_core::NeverCancelled;
 
 #[derive(Clone, Copy)]
 pub struct Cancelled;

@@ -15,12 +15,7 @@ pub enum ResponsesReasoningKind {
     Raw,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResponsesToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments_json: String,
-}
+pub use parrot_core::ToolCall as ResponsesToolCall;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResponsesCompletion {
@@ -431,7 +426,7 @@ impl ResponsesParser {
                     error_type: string_field(&failure, "type"),
                     error_code: string_field(&failure, "code"),
                     detail: string_field(&failure, "message"),
-                    response_body: bound_response_body(data),
+                    response_body: crate::wire::bound_body(data),
                 });
             }
             _ => {}
@@ -757,28 +752,6 @@ struct ToolState {
     call_id: String,
     name: String,
     arguments: String,
-}
-const MAX_RESPONSE_BODY_BYTES: usize = 64 * 1024;
-const RESPONSE_BODY_TRUNCATION_MARKER: &str = "\n… [truncated]";
-
-fn bound_response_body(body: &str) -> String {
-    if body.len() <= MAX_RESPONSE_BODY_BYTES {
-        return body.to_owned();
-    }
-
-    let prefix_limit = MAX_RESPONSE_BODY_BYTES - RESPONSE_BODY_TRUNCATION_MARKER.len();
-    let mut prefix_length = 0;
-    for (offset, character) in body.char_indices() {
-        let end = offset + character.len_utf8();
-        if end > prefix_limit {
-            break;
-        }
-        prefix_length = end;
-    }
-    let mut bounded = String::with_capacity(MAX_RESPONSE_BODY_BYTES);
-    bounded.push_str(&body[..prefix_length]);
-    bounded.push_str(RESPONSE_BODY_TRUNCATION_MARKER);
-    bounded
 }
 
 fn wire(message: &str) -> ResponsesError {

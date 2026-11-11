@@ -467,12 +467,4 @@ impl SeekRead for File {
     }
 }
 
-struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> parrot_domain::contracts::async_ops::BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+use parrot_core::NeverCancelled;

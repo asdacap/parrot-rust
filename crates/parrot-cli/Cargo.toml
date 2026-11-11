@@ -13,6 +13,7 @@ parrot-domain = { path = "../parrot-domain" }
 parrot-foundation = { path = "../parrot-foundation" }
 parrot-runtime = { path = "../parrot-runtime" }
 parrot-storage = { path = "../parrot-storage" }
+parrot-core = { path = "../parrot-core" }
 parrot-host = { path = "../parrot-host", default-features = false }
 parrot-tools = { path = "../parrot-tools" }
 parrot-provider = { path = "../parrot-provider" }

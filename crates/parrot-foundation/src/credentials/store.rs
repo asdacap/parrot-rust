@@ -742,15 +742,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    struct NeverCancelled;
-    impl Cancellation for NeverCancelled {
-        fn is_cancelled(&self) -> bool {
-            false
-        }
-        fn cancelled(&self) -> BoxFuture<'_, ()> {
-            Box::pin(std::future::pending())
-        }
-    }
+    use parrot_core::NeverCancelled;
     static NEVER: NeverCancelled = NeverCancelled;
 
     struct AlreadyCancelled;

@@ -2,7 +2,6 @@
 //! stdin descriptor and construction Runtime until `run` and all its joins end.
 
 use std::{
-    collections::{HashSet, VecDeque},
     fmt,
     io::{self, Write},
     sync::{
@@ -24,12 +23,15 @@ use tonic::{Code, Status};
 
 use crate::{
     attachments::uploader::AttachmentError,
-    slash_sessions::{
-        CallbackApplicationExit, CallbackSessionBinding, CommandContext, NavigationFailure,
-        PollingSlashActivity, RpcSlashSession, SkillRefresh, SlashCommands, SlashFailure,
-        SlashSession, native_call,
+    chat_loops::{
+        Binding, Interaction, Interactions, SessionSnapshot, application_exit, interrupt_loop,
+        reconcile_interactions, stop_binding, terminal_commands,
     },
-    slash_settings::{AuthServices, SettingsServices, model_alias},
+    slash_sessions::{
+        CallbackSessionBinding, CommandContext, NavigationFailure, PollingSlashActivity,
+        RpcSlashSession, SkillRefresh, SlashFailure, SlashSession, native_call,
+    },
+    slash_settings::{AuthServices, model_alias},
     terminal_dialogs::{
         ExplicitRemoteTerminalSessionNavigation, TerminalSessionController,
         TerminalSessionNavigation,
@@ -442,7 +444,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
                 stop: stop.clone(),
             }),
             binding_stop: Mutex::new(stop),
-            state: Mutex::new(Snapshot {
+            state: Mutex::new(SessionSnapshot {
                 session: initial.clone(),
                 client: self.client.clone(),
                 generation: 0,
@@ -498,7 +500,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         }
         let was_stopping = application.is_cancelled();
         application.cancel();
-        shared.stop_binding();
+        stop_binding(&shared.binding_stop);
         interrupts.remove();
         if input_result.is_none() {
             input_result = Some(input_loop.await);
@@ -547,25 +549,14 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             let shared = shared.clone();
             Arc::new(move || shared.busy.load(Ordering::Acquire))
         });
-        let exit = Arc::new(CallbackApplicationExit({
-            let application = shared.application.clone();
-            Arc::new(move || {
-                let application = application.clone();
-                Box::pin(async move {
-                    application.cancel();
-                    Ok(())
-                })
-            })
-        }));
+        let exit = application_exit(shared.application.clone());
         let mut snapshot = shared.snapshot();
         let mut session = make_session(&shared, &snapshot, self.configuration.clone());
         let registry = |client: WebClient| {
-            SlashCommands::create_terminal(
-                SettingsServices {
-                    client,
-                    auth: self.auth.clone(),
-                },
-                Some(exit.clone()),
+            terminal_commands(
+                client,
+                self.auth.clone(),
+                exit.clone(),
                 self.version.clone(),
                 controller.clone(),
             )
@@ -738,51 +729,10 @@ impl<R: DialogInput> DialogInput for InputBorrow<'_, R> {
     }
 }
 
-#[derive(Clone)]
-struct Snapshot {
-    session: wire::UserSession,
-    client: WebClient,
-    generation: u64,
-}
-struct Binding {
-    stream: PreparedSessionStream,
-    stop: Arc<Signal>,
-}
-#[derive(Default)]
-struct Interactions {
-    pending: VecDeque<Interaction>,
-    questions: HashSet<String>,
-    permissions: HashSet<String>,
-}
-enum Interaction {
-    Question {
-        generation: u64,
-        session_id: String,
-        pending: wire::PendingQuestion,
-    },
-    Permission {
-        generation: u64,
-        session_id: String,
-        pending: wire::PendingPermission,
-    },
-    Plan {
-        generation: u64,
-        completed: wire::PlanCompleted,
-    },
-}
-impl Interaction {
-    fn generation(&self) -> u64 {
-        match self {
-            Self::Question { generation, .. }
-            | Self::Permission { generation, .. }
-            | Self::Plan { generation, .. } => *generation,
-        }
-    }
-}
 struct BasicSession {
     binding: tokio::sync::Mutex<Binding>,
     binding_stop: Mutex<Arc<Signal>>,
-    state: Mutex<Snapshot>,
+    state: Mutex<SessionSnapshot>,
     application: Arc<Signal>,
     busy: Arc<AtomicBool>,
     interrupt_requested: AtomicBool,
@@ -796,17 +746,11 @@ struct BasicSession {
     error: SharedWriter,
 }
 impl BasicSession {
-    fn snapshot(&self) -> Snapshot {
+    fn snapshot(&self) -> SessionSnapshot {
         self.state.lock().expect("Basic state poisoned").clone()
     }
     fn update_settings(&self, session: wire::UserSession) {
         self.state.lock().expect("Basic state poisoned").session = session;
-    }
-    fn stop_binding(&self) {
-        self.binding_stop
-            .lock()
-            .expect("Basic binding stop poisoned")
-            .cancel();
     }
     fn start_rendering(&self) {
         self.rendering.store(true, Ordering::Release);
@@ -860,29 +804,14 @@ impl BasicSession {
         true
     }
     async fn interrupt_loop(&self) -> Result<(), BasicFailure> {
-        loop {
-            let notified = self.interrupted.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if self.interrupt_pending.swap(false, Ordering::AcqRel) {
-                let snapshot = self.snapshot();
-                if let Err(error) = native_call(
-                    snapshot.client.clone().interrupt(wire::InterruptRequest {
-                        user_session_id: snapshot.session.id,
-                        ..Default::default()
-                    }),
-                    self.application.as_ref(),
-                )
-                .await
-                {
-                    if self.application.is_cancelled() {
-                        return Ok(());
-                    }
-                    return Err(error.into());
-                }
-            }
-            tokio::select! { biased; () = self.application.cancelled() => return Ok(()), () = notified => () }
-        }
+        interrupt_loop(
+            || self.snapshot(),
+            &self.application,
+            &self.interrupt_pending,
+            &self.interrupted,
+        )
+        .await
+        .map_err(BasicFailure::from)
     }
     async fn render_loop(&self) -> Result<(), BasicFailure> {
         let mut renderer = BasicRenderer::new();
@@ -943,12 +872,12 @@ impl BasicSession {
                             .interactions
                             .lock()
                             .expect("Basic interactions poisoned");
-                        if interactions.permissions.insert(pending.id.clone()) {
-                            interactions.pending.push_back(Interaction::Permission {
-                                generation,
-                                session_id: current.session.id.clone(),
-                                pending: pending.clone(),
-                            });
+                        if interactions.offer_permission(
+                            generation,
+                            &current.session.id,
+                            pending,
+                            false,
+                        ) {
                             self.changed.notify_one();
                         }
                     }
@@ -989,82 +918,14 @@ impl BasicSession {
         loop {
             tokio::select! { biased; () = self.application.cancelled() => return Ok(()), _ = interval.tick() => () }
             let snapshot = self.snapshot();
-            let questions = native_call(
-                snapshot
-                    .client
-                    .clone()
-                    .list_pending_questions(wire::ListPendingQuestionsRequest {
-                        user_session_id: snapshot.session.id.clone(),
-                        ..Default::default()
-                    }),
-                self.application.as_ref(),
+            reconcile_interactions(
+                snapshot,
+                |generation| generation != self.snapshot().generation,
+                &self.application,
+                &self.interactions,
+                &self.changed,
             )
-            .await;
-            let permissions = native_call(
-                snapshot.client.clone().list_pending_permissions(
-                    wire::ListPendingPermissionsRequest {
-                        user_session_id: snapshot.session.id.clone(),
-                        ..Default::default()
-                    },
-                ),
-                self.application.as_ref(),
-            )
-            .await;
-            if snapshot.generation != self.snapshot().generation {
-                continue;
-            }
-            let mut interactions = self
-                .interactions
-                .lock()
-                .expect("Basic interactions poisoned");
-            match questions {
-                Ok(listed) => {
-                    interactions
-                        .questions
-                        .retain(|id| listed.questions.iter().any(|pending| &pending.id == id));
-                    for pending in listed.questions {
-                        if interactions.questions.insert(pending.id.clone()) {
-                            interactions.pending.push_back(Interaction::Question {
-                                generation: snapshot.generation,
-                                session_id: snapshot.session.id.clone(),
-                                pending,
-                            });
-                        }
-                    }
-                }
-                Err(error) if self.application.is_cancelled() => {
-                    let _ = error;
-                    return Ok(());
-                }
-                Err(SlashFailure::Rpc(_)) => {}
-                Err(error) => return Err(error.into()),
-            }
-            match permissions {
-                Ok(listed) => {
-                    interactions
-                        .permissions
-                        .retain(|id| listed.permissions.iter().any(|pending| &pending.id == id));
-                    for pending in listed.permissions {
-                        if interactions.permissions.insert(pending.id.clone()) {
-                            interactions.pending.push_back(Interaction::Permission {
-                                generation: snapshot.generation,
-                                session_id: snapshot.session.id.clone(),
-                                pending,
-                            });
-                        }
-                    }
-                }
-                Err(SlashFailure::Rpc(status))
-                    if matches!(status.code(), Code::Unimplemented | Code::NotFound) => {}
-                Err(error) if self.application.is_cancelled() => {
-                    let _ = error;
-                    return Ok(());
-                }
-                Err(error) => return Err(error.into()),
-            }
-            if !interactions.pending.is_empty() {
-                self.changed.notify_one();
-            }
+            .await?;
         }
     }
     async fn replace_stream(
@@ -1088,7 +949,7 @@ impl BasicSession {
             }
         };
         check(c)?;
-        self.stop_binding();
+        stop_binding(&self.binding_stop);
         let mut binding = self.binding.lock().await;
         binding.stream.close();
         commit();
@@ -1144,7 +1005,7 @@ impl SessionReplacement for BasicSession {
 }
 fn make_session(
     shared: &Arc<BasicSession>,
-    snapshot: &Snapshot,
+    snapshot: &SessionSnapshot,
     configuration: Arc<Mutex<Configuration>>,
 ) -> RpcSlashSession {
     RpcSlashSession::new(
@@ -1413,7 +1274,11 @@ mod tests {
             transport::{GrpcServer, GrpcTransportClient},
         };
         use parrot_storage::diagnostics::FileDiagnosticLog;
-        use std::{path::PathBuf, sync::atomic::AtomicU64};
+        use std::{
+            collections::{HashSet, VecDeque},
+            path::PathBuf,
+            sync::atomic::AtomicU64,
+        };
         use tonic::{Request, Response};
 
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -1662,7 +1527,7 @@ mod tests {
                         stop: stop.clone(),
                     }),
                     binding_stop: Mutex::new(stop),
-                    state: Mutex::new(Snapshot {
+                    state: Mutex::new(SessionSnapshot {
                         session: wire::UserSession {
                             id: SESSION.into(),
                             ..Default::default()

@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
 use parrot_domain::values::identifiers::Identifier;
+use parrot_foundation::clock::SystemClock;
 
 use super::pending::{Entry, Store, lock};
 use super::*;
@@ -197,7 +198,7 @@ impl ChildQuestionCoordinator {
                 Arc::clone(&entry),
                 cancellation,
                 None,
-                &TokioClock,
+                &SystemClock,
                 QuestionReply::user_away(),
             )
             .await

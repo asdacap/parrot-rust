@@ -148,15 +148,8 @@ mod tests {
     use super::super::model::Credential;
     use super::*;
     use parrot_domain::contracts::async_ops::BoxFuture;
-    struct NeverCancelled;
-    impl Cancellation for NeverCancelled {
-        fn is_cancelled(&self) -> bool {
-            false
-        }
-        fn cancelled(&self) -> BoxFuture<'_, ()> {
-            Box::pin(std::future::pending())
-        }
-    }
+
+    use parrot_core::NeverCancelled;
     static NEVER: NeverCancelled = NeverCancelled;
     struct AlreadyCancelled;
     impl Cancellation for AlreadyCancelled {

@@ -3,8 +3,8 @@
 //! The caller supplies correlation/request IDs and invokes `cancel` from its
 //! cancellation watcher, so terminal records do not depend on another read or
 //! on the consumer disposing its stream.
+use parrot_core::ErrorCode;
 use std::{
-    io,
     sync::{Arc, Mutex, MutexGuard, Weak},
     time::{Duration, Instant},
 };
@@ -68,59 +68,6 @@ pub trait DiagnosticSink: Send + Sync {
     fn write(&self, event: DiagnosticEvent);
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FailureKind {
-    Cancelled,
-    AccessDenied,
-    Io,
-    Timeout,
-    Http,
-    Argument,
-    InvalidOperation,
-    WebSocketClosed,
-    WebSocket,
-    WireProtocol,
-    WebSocketUpgrade,
-    WebSocketMessageTooLarge,
-    RequestTooLarge,
-    WebSocketTransport,
-    Unexpected,
-}
-impl FailureKind {
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Cancelled => "cancelled",
-            Self::AccessDenied => "access_denied",
-            Self::Io => "io",
-            Self::Timeout => "timeout",
-            Self::Http => "http",
-            Self::Argument => "argument",
-            Self::InvalidOperation => "invalid_operation",
-            Self::WebSocketClosed => "websocket_closed",
-            Self::WebSocket => "websocket",
-            Self::WireProtocol => "wire_protocol",
-            Self::WebSocketUpgrade => "websocket_upgrade",
-            Self::WebSocketMessageTooLarge => "websocket_message_too_large",
-            Self::RequestTooLarge => "request_too_large",
-            Self::WebSocketTransport => "websocket_transport",
-            Self::Unexpected => "unexpected",
-        }
-    }
-
-    /// Source transport wrappers expose the inner failure classification.
-    pub fn websocket_transport(inner: Option<Self>) -> Self {
-        inner.unwrap_or(Self::WebSocketTransport)
-    }
-
-    pub fn from_io(error: &io::Error) -> Self {
-        match error.kind() {
-            io::ErrorKind::PermissionDenied => Self::AccessDenied,
-            io::ErrorKind::InvalidInput => Self::Argument,
-            _ => Self::Io,
-        }
-    }
-}
-
 mod archive;
 
 use archive::AttemptCapture;
@@ -159,17 +106,17 @@ pub enum TraceOutcome {
     Completed,
     Disposed,
     Cancelled,
-    Failed(FailureKind),
+    Failed(ErrorCode),
 }
 impl TraceOutcome {
-    fn fields(self) -> (&'static str, DiagnosticSeverity, Option<FailureKind>) {
+    fn fields(self) -> (&'static str, DiagnosticSeverity, Option<ErrorCode>) {
         match self {
             Self::Completed => ("completed", DiagnosticSeverity::Information, None),
             Self::Disposed => ("disposed", DiagnosticSeverity::Information, None),
-            Self::Cancelled | Self::Failed(FailureKind::Cancelled) => (
+            Self::Cancelled | Self::Failed(ErrorCode::Cancelled) => (
                 "cancelled",
                 DiagnosticSeverity::Information,
-                Some(FailureKind::Cancelled),
+                Some(ErrorCode::Cancelled),
             ),
             Self::Failed(kind) => ("failed", DiagnosticSeverity::Error, Some(kind)),
         }

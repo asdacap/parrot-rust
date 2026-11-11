@@ -1,5 +1,7 @@
 //! Caller-owned session values and borrowed protocol views. Opaque JSON stays raw.
 use crate::{anthropic, chat_completions, responses, responses_websocket};
+pub use parrot_core::ToolDefinition as Tool;
+pub use parrot_core::{Reasoning, Role, ToolCall};
 use std::{io, path::Path, time::Duration};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -13,21 +15,6 @@ pub struct Request {
     pub reasoning: Option<Reasoning>,
     pub provider_preferences: String,
     pub include_router_metadata: bool,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Reasoning {
-    pub effort: String,
-    pub summary: String,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum Role {
-    System,
-    #[default]
-    User,
-    Assistant,
-    Tool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -123,19 +110,6 @@ impl Content {
             Self::Text(_) => Ok(Vec::new()),
         }
     }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Tool {
-    pub name: String,
-    pub description: String,
-    pub parameters_json: String,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments_json: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -577,33 +551,6 @@ impl Event {
     }
 }
 
-impl From<chat_completions::ToolCall> for ToolCall {
-    fn from(call: chat_completions::ToolCall) -> Self {
-        Self {
-            id: call.id,
-            name: call.name,
-            arguments_json: call.arguments_json,
-        }
-    }
-}
-impl From<responses::ResponsesToolCall> for ToolCall {
-    fn from(call: responses::ResponsesToolCall) -> Self {
-        Self {
-            id: call.id,
-            name: call.name,
-            arguments_json: call.arguments_json,
-        }
-    }
-}
-impl From<anthropic::ToolCall> for ToolCall {
-    fn from(call: anthropic::ToolCall) -> Self {
-        Self {
-            id: call.id,
-            name: call.name,
-            arguments_json: call.arguments_json,
-        }
-    }
-}
 impl From<chat_completions::ChatCompletion> for Completion {
     fn from(completion: chat_completions::ChatCompletion) -> Self {
         let (provider_id, provider_content) = completion.provider_content.map_or_else(
@@ -638,7 +585,7 @@ impl From<chat_completions::ChatCompletion> for Completion {
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
             assistant_text: completion.assistant_text,
-            tool_calls: completion.tool_calls.into_iter().map(Into::into).collect(),
+            tool_calls: completion.tool_calls,
             provider_id,
             provider_content,
         }
@@ -653,7 +600,7 @@ impl From<responses::ResponsesCompletion> for Completion {
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
             assistant_text: completion.assistant_text,
-            tool_calls: completion.tool_calls.into_iter().map(Into::into).collect(),
+            tool_calls: completion.tool_calls,
             provider_id: completion.provider_id,
             provider_content: completion.provider_content.unwrap_or_default(),
         }
@@ -668,7 +615,7 @@ impl From<anthropic::CompletedMessage> for Completion {
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
             assistant_text: completion.assistant_text,
-            tool_calls: completion.tool_calls.into_iter().map(Into::into).collect(),
+            tool_calls: completion.tool_calls,
             provider_id: completion.provider_id,
             provider_content: completion.provider_content,
         }
@@ -691,7 +638,7 @@ impl From<chat_completions::ChatEvent> for Event {
                 part_id: String::new(),
                 completed: false,
             },
-            chat_completions::ChatEvent::ToolCallDelta(call) => Self::ToolCallDelta(call.into()),
+            chat_completions::ChatEvent::ToolCallDelta(call) => Self::ToolCallDelta(call),
             chat_completions::ChatEvent::Completed(completion) => {
                 Self::Completed(completion.into())
             }
@@ -719,7 +666,7 @@ impl From<responses::ResponsesEvent> for Event {
             responses::ResponsesEvent::EncryptedReasoningReceived => {
                 Self::EncryptedReasoningReceived
             }
-            responses::ResponsesEvent::ToolCallDelta(call) => Self::ToolCallDelta(call.into()),
+            responses::ResponsesEvent::ToolCallDelta(call) => Self::ToolCallDelta(call),
             responses::ResponsesEvent::Completed(completion) => Self::Completed(completion.into()),
         }
     }
@@ -738,7 +685,7 @@ impl From<anthropic::AnthropicEvent> for Event {
                 part_id,
                 completed,
             },
-            anthropic::AnthropicEvent::ToolCallDelta(call) => Self::ToolCallDelta(call.into()),
+            anthropic::AnthropicEvent::ToolCallDelta(call) => Self::ToolCallDelta(call),
             anthropic::AnthropicEvent::Completed(completion) => Self::Completed(completion.into()),
         }
     }

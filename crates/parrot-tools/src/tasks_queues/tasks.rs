@@ -46,12 +46,7 @@ pub struct TaskQuery {
     pub name: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TaskDetail {
-    pub task: Task,
-    pub agent_name: Option<String>,
-    pub assigned_to: Option<TaskAssignee>,
-}
+pub use parrot_runtime::task_scheduler::TaskDetail;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TaskSnapshot {

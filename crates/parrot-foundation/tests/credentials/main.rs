@@ -8,15 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-struct NeverCancelled;
-impl parrot_domain::contracts::async_ops::Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> parrot_domain::contracts::async_ops::BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+use parrot_core::NeverCancelled;
 static NEVER: NeverCancelled = NeverCancelled;
 fn run<T>(
     future: impl std::future::Future<

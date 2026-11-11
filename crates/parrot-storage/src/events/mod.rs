@@ -15,7 +15,7 @@ pub use terminal::{CloseTurnError, TurnClosure, TurnCommit, TurnKey};
 pub use types::*;
 
 use crate::database::{DatabaseError, SessionDatabase, Transaction, extract_usage_keys};
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::storage::{AdmissionError, CommitTicket, Committed};
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_domain::values::identifiers::Identifier;
@@ -148,16 +148,7 @@ impl EventRepository {
     }
 }
 
-/// Always uncancelled for actor-owned internal read/replay operations.
-pub struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+pub use parrot_core::NeverCancelled;
 
 /// Insert, never upsert/deduplicate. Explicit raw bytes are parsed and retained
 /// verbatim; callers cannot supply conflicting envelope/key metadata.

@@ -943,7 +943,7 @@ where
                             self.activity.turn_finished(
                                 &key.start_event_id,
                                 "failed",
-                                Some(error.diagnostic_code()),
+                                Some(error.diagnostic_code().code()),
                             );
                         }
                         self.fail(error.to_string(), error.response_body().to_owned())

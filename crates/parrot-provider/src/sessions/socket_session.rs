@@ -388,10 +388,10 @@ impl responses_websocket::WebSocketAttemptObserver for WebSocketTraceAttempt {
             responses_websocket::WebSocketAttemptOutcome::Completed => TraceOutcome::Completed,
             responses_websocket::WebSocketAttemptOutcome::Disposed => TraceOutcome::Disposed,
             responses_websocket::WebSocketAttemptOutcome::Failed(error) => {
-                TraceOutcome::Failed(super::diagnostic_session::socket_failure_kind(error))
+                TraceOutcome::Failed(super::diagnostic_session::socket_failure_code(error))
             }
             responses_websocket::WebSocketAttemptOutcome::CredentialsFailed(error) => {
-                TraceOutcome::Failed(super::diagnostic_session::failure_kind(error))
+                TraceOutcome::Failed(super::diagnostic_session::failure_code(error))
             }
         });
     }

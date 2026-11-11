@@ -1,5 +1,5 @@
 use super::compaction::{CompactionFailure, PlanningError};
-use std::fmt;
+use std::{fmt, io};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorKind {
@@ -46,6 +46,15 @@ impl ErrorCode {
             Self::RequestTooLarge => "request_too_large",
             Self::WebSocketTransport => "websocket_transport",
             Self::Unexpected => "unexpected",
+        }
+    }
+
+    /// Classifies a filesystem or socket failure that carries no provider detail.
+    pub fn from_io(error: &io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::PermissionDenied => Self::AccessDenied,
+            io::ErrorKind::InvalidInput => Self::Argument,
+            _ => Self::Io,
         }
     }
 }

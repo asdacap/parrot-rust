@@ -1,3 +1,5 @@
+use parrot_core::ErrorCode;
+use parrot_provider::sessions::Error;
 use parrot_provider::sessions::diagnostics::*;
 use std::{
     fs,
@@ -283,7 +285,7 @@ fn response_headers_without_a_body_read_report_zero_and_no_headers_report_none()
     request.mark_response_obtained();
     request.finish(TraceOutcome::Disposed);
     let no_headers = call.begin_request("http_sse", "no-headers");
-    no_headers.finish(TraceOutcome::Failed(FailureKind::Timeout));
+    no_headers.finish(TraceOutcome::Failed(ErrorCode::Timeout));
     let finished: Vec<_> = sink
         .entries()
         .into_iter()
@@ -341,7 +343,7 @@ fn cancellation_records_immediately_without_another_read_or_dispose_and_only_onc
         entries.last().unwrap().error_code.as_deref(),
         Some("cancelled")
     );
-    assert!(!request.finish(TraceOutcome::Failed(FailureKind::Io)));
+    assert!(!request.finish(TraceOutcome::Failed(ErrorCode::Io)));
     assert!(!call.finish(TraceOutcome::Completed));
     drop(request);
     drop(call);
@@ -357,7 +359,7 @@ fn terminal_drop_and_failure_are_once_only_even_with_cloned_handles() {
     let copy = request.clone();
     drop(request);
     assert_eq!(sink.entries().len(), 2);
-    copy.finish(TraceOutcome::Failed(FailureKind::WebSocketClosed));
+    copy.finish(TraceOutcome::Failed(ErrorCode::WebSocketClosed));
     drop(copy);
     drop(call);
     let finished: Vec<_> = sink
@@ -398,41 +400,40 @@ fn concurrent_terminal_signals_write_one_terminal_per_scope() {
 #[test]
 fn failure_classification_is_allowlisted_and_transport_wrappers_use_inner_kind() {
     for (kind, code) in [
-        (FailureKind::Cancelled, "cancelled"),
-        (FailureKind::AccessDenied, "access_denied"),
-        (FailureKind::Io, "io"),
-        (FailureKind::Timeout, "timeout"),
-        (FailureKind::Http, "http"),
-        (FailureKind::Argument, "argument"),
-        (FailureKind::InvalidOperation, "invalid_operation"),
-        (FailureKind::WebSocketClosed, "websocket_closed"),
-        (FailureKind::WebSocket, "websocket"),
-        (FailureKind::WireProtocol, "wire_protocol"),
-        (FailureKind::WebSocketUpgrade, "websocket_upgrade"),
+        (ErrorCode::Cancelled, "cancelled"),
+        (ErrorCode::AccessDenied, "access_denied"),
+        (ErrorCode::Io, "io"),
+        (ErrorCode::Timeout, "timeout"),
+        (ErrorCode::Http, "http"),
+        (ErrorCode::Argument, "argument"),
+        (ErrorCode::InvalidOperation, "invalid_operation"),
+        (ErrorCode::WebSocketClosed, "websocket_closed"),
+        (ErrorCode::WebSocket, "websocket"),
+        (ErrorCode::WireProtocol, "wire_protocol"),
+        (ErrorCode::WebSocketUpgrade, "websocket_upgrade"),
         (
-            FailureKind::WebSocketMessageTooLarge,
+            ErrorCode::WebSocketMessageTooLarge,
             "websocket_message_too_large",
         ),
-        (FailureKind::RequestTooLarge, "request_too_large"),
-        (FailureKind::WebSocketTransport, "websocket_transport"),
-        (FailureKind::Unexpected, "unexpected"),
+        (ErrorCode::RequestTooLarge, "request_too_large"),
+        (ErrorCode::WebSocketTransport, "websocket_transport"),
+        (ErrorCode::Unexpected, "unexpected"),
     ] {
         assert_eq!(kind.code(), code);
     }
     assert_eq!(
-        FailureKind::websocket_transport(Some(FailureKind::Io)),
-        FailureKind::Io
+        parrot_provider::sessions::diagnostic_session::failure_code(&Error::WebSocketTransport {
+            message: "wrapper keeps the typed inner classification.".into(),
+            cause: Box::new(Error::Io("SECRET".into())),
+        }),
+        ErrorCode::Io
     );
     assert_eq!(
-        FailureKind::websocket_transport(None),
-        FailureKind::WebSocketTransport
-    );
-    assert_eq!(
-        FailureKind::from_io(&std::io::Error::new(
+        ErrorCode::from_io(&std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "SECRET"
         )),
-        FailureKind::AccessDenied
+        ErrorCode::AccessDenied
     );
     let clock = MonotonicDiagnosticClock::default();
     let _ = clock.now_millis();
@@ -545,7 +546,7 @@ fn archive_preserves_websocket_boundaries_binary_bytes_and_partial_messages() {
     capture.finish_message();
     capture.append(&[0xff]);
     capture.append(&[0x01]);
-    assert!(request.finish(TraceOutcome::Failed(FailureKind::WireProtocol)));
+    assert!(request.finish(TraceOutcome::Failed(ErrorCode::WireProtocol)));
     let record = archived_request(&root, 1);
     assert_eq!(record.full_request, record.request);
     assert_eq!(record.request, Some(ArchivedBody::Bytes(vec![0xff, 0x01])));
@@ -565,7 +566,7 @@ fn archive_preserves_websocket_boundaries_binary_bytes_and_partial_messages() {
 fn archive_timestamps_each_response_at_its_last_received_fragment() {
     for outcome in [
         TraceOutcome::Completed,
-        TraceOutcome::Failed(FailureKind::WireProtocol),
+        TraceOutcome::Failed(ErrorCode::WireProtocol),
         TraceOutcome::Cancelled,
     ] {
         let root = TestRoot::new("archive-timestamps");
@@ -735,7 +736,7 @@ fn archive_records_null_requests_and_disposal_without_replacing_latest_body() {
     first.dump_prepared_body(b"latest");
     first.finish(TraceOutcome::Completed);
     let failed = call.begin_request("websocket", "connect-failure");
-    failed.finish(TraceOutcome::Failed(FailureKind::WebSocketUpgrade));
+    failed.finish(TraceOutcome::Failed(ErrorCode::WebSocketUpgrade));
     drop(call.begin_request("websocket", "disposed"));
     let record = archived_request(&root, 2);
     assert_eq!(record.request, None);

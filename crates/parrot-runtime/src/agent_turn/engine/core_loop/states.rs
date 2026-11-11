@@ -248,7 +248,7 @@ where
                     Ok(ConfigValue::Turn(TurnOptions {
                         maximum_requests: selection.profile.maximum_requests,
                         model: selection.model.canonical_model.model.id.clone(),
-                        reasoning: selection.model.canonical_model.reasoning().map(Into::into),
+                        reasoning: selection.model.canonical_model.reasoning(),
                         provider_preferences: String::new(),
                         include_router_metadata: false,
                     }))
@@ -341,18 +341,7 @@ where
                 .clone()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
             let slots = status
-                .slots(
-                    &crate::compaction::ContextSnapshot {
-                        estimated_tokens: context.estimated_tokens,
-                        context_limit: context.context_limit,
-                        usage_percent: context.usage_percent,
-                        trigger_percent: context.trigger_percent,
-                        input_limit: context.input_limit,
-                        trigger_tokens: context.trigger_tokens,
-                        has_context_limit_override: context.has_context_limit_override,
-                    },
-                    self.cancellation,
-                )
+                .slots(&context, self.cancellation)
                 .await
                 .map_err(TurnError::Context)?;
             Ok(slots)
@@ -625,8 +614,7 @@ where
         result: Result<Option<parrot_core::compaction::FittedCompaction>, CoreError>,
     ) -> BoxFuture<'a, Result<CoreContextCompaction, CoreError>> {
         Box::pin(async move {
-            let definitions: Vec<sessions::Tool> =
-                definitions.iter().cloned().map(Into::into).collect();
+            let definitions: Vec<sessions::Tool> = definitions.to_vec();
 
             let mut guard = self.state.lock().await;
             let state = &mut *guard;

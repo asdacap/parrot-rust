@@ -4,10 +4,7 @@ use crate::agent_turn::{
     services::{ParentCompletion, TurnError},
 };
 use parrot_domain::{
-    contracts::{
-        async_ops::{BoxFuture, Cancellation},
-        security::RestrictableAccessSnapshot,
-    },
+    contracts::{async_ops::BoxFuture, security::RestrictableAccessSnapshot},
     protocol::messages::parrot::{Delivery, InputSource},
 };
 use parrot_storage::events::ConversationPart;
@@ -255,15 +252,8 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentCompletion for ParentScope<S
         })
     }
 }
-struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+
+use parrot_core::NeverCancelled;
 fn append_bounded(target: &mut String, value: &str) {
     let remaining = (1024 * 1024usize).saturating_sub(target.len());
     let mut end = value.len().min(remaining);

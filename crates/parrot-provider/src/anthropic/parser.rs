@@ -23,12 +23,7 @@ pub enum AnthropicEvent {
     Completed(CompletedMessage),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments_json: String,
-}
+pub use parrot_core::ToolCall;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletedMessage {
@@ -248,7 +243,7 @@ impl AnthropicParser {
                     error_type: string(error, "type")?,
                     error_code: String::new(),
                     detail: string(error, "message")?,
-                    response_body: bound_response_body(data),
+                    response_body: crate::wire::bound_body(data),
                 });
             }
             _ => {}
@@ -476,17 +471,4 @@ fn read_integer(scope: &Object<'_>, name: &str) -> Result<Option<i32>, ParserErr
 
 fn integer(scope: &Object<'_>, name: &str) -> Result<i32, ParserError> {
     Ok(read_integer(scope, name)?.unwrap_or_default())
-}
-
-fn bound_response_body(body: &str) -> String {
-    const LIMIT: usize = 64 << 10;
-    const MARKER: &str = "\n… [truncated]";
-    if body.len() <= LIMIT {
-        return body.to_owned();
-    }
-    let mut end = LIMIT - MARKER.len();
-    while !body.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}{MARKER}", &body[..end])
 }

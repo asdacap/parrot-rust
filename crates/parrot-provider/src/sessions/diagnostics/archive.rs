@@ -1,5 +1,6 @@
-use super::{DiagnosticEvent, DiagnosticSeverity, DiagnosticSink, FailureKind, TraceOutcome, lock};
+use super::{DiagnosticEvent, DiagnosticSeverity, DiagnosticSink, TraceOutcome, lock};
 use chrono::{DateTime, SecondsFormat, Utc};
+use parrot_core::ErrorCode;
 use serde::Serialize;
 use std::{
     collections::BTreeMap,
@@ -287,7 +288,7 @@ impl LastRequestDumper {
         state.record.response = std::mem::take(&mut state.response);
         let (outcome, _, failure) = outcome.fields();
         state.record.outcome = outcome;
-        state.record.error_code = failure.map(FailureKind::code);
+        state.record.error_code = failure.map(ErrorCode::code);
         let result = archive
             .records
             .get(&state.record.number)
@@ -300,7 +301,7 @@ impl LastRequestDumper {
         if let Err(error) = result {
             let mut event =
                 DiagnosticEvent::provider("last_request_dump_failed", DiagnosticSeverity::Error);
-            event.error_code = Some(FailureKind::from_io(&error).code().into());
+            event.error_code = Some(ErrorCode::from_io(&error).code().into());
             self.sink.write(event);
         }
     }

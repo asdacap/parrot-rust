@@ -66,12 +66,7 @@ impl MessageRole {
         }
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments_json: String,
-}
+pub use parrot_core::ToolCall;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProviderContent {
     pub provider_id: String,

@@ -1,16 +1,6 @@
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_core::NeverCancelled;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use std::collections::BTreeMap;
-
-struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
 
 #[test]
 fn progress_messages_render_from_the_production_catalog() {

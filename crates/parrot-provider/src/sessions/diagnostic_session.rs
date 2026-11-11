@@ -2,8 +2,8 @@
 use super::{
     Event, Request,
     diagnostics::{
-        CallContext, CallTrace, DiagnosticClock, DiagnosticSink, FailureKind, LastRequestDumper,
-        RequestTrace, TraceOutcome,
+        CallContext, CallTrace, DiagnosticClock, DiagnosticSink, LastRequestDumper, RequestTrace,
+        TraceOutcome,
     },
     runtime::{Error, EventStream, Session},
 };
@@ -12,6 +12,7 @@ use crate::{
     responses::ResponsesError,
     responses_websocket::{SocketErrorCode, WebSocketError},
 };
+use parrot_core::ErrorCode;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::sync::{
     Arc,
@@ -175,7 +176,7 @@ impl DiagnosticStream {
             trace.finish(
                 failure
                     .as_ref()
-                    .map_or(outcome, |error| TraceOutcome::Failed(failure_kind(error))),
+                    .map_or(outcome, |error| TraceOutcome::Failed(failure_code(error))),
             );
         }
         if let Some(watcher) = self.watcher.take() {
@@ -319,7 +320,7 @@ impl RequestTraceStream {
             trace.finish(
                 failure
                     .as_ref()
-                    .map_or(outcome, |error| TraceOutcome::Failed(failure_kind(error))),
+                    .map_or(outcome, |error| TraceOutcome::Failed(failure_code(error))),
             );
         }
         self.done = true;
@@ -401,64 +402,60 @@ impl Cancellation for PullCancellation<'_> {
     }
 }
 
-pub fn failure_kind(error: &Error) -> FailureKind {
+pub fn failure_code(error: &Error) -> ErrorCode {
     match error {
-        Error::WebSocketTransport { cause, .. } => {
-            FailureKind::websocket_transport(Some(failure_kind(cause)))
-        }
+        Error::WebSocketTransport { cause, .. } => failure_code(cause),
         Error::Authentication(error) => match error {
             parrot_foundation::oauth::AuthError::Transport
-            | parrot_foundation::oauth::AuthError::TransportWithMessage(_) => FailureKind::Http,
+            | parrot_foundation::oauth::AuthError::TransportWithMessage(_) => ErrorCode::Http,
             parrot_foundation::oauth::AuthError::Io
-            | parrot_foundation::oauth::AuthError::IoWithMessage(_) => FailureKind::Io,
-            parrot_foundation::oauth::AuthError::InvalidOperation(_) => {
-                FailureKind::InvalidOperation
-            }
+            | parrot_foundation::oauth::AuthError::IoWithMessage(_) => ErrorCode::Io,
+            parrot_foundation::oauth::AuthError::InvalidOperation(_) => ErrorCode::InvalidOperation,
             parrot_foundation::oauth::AuthError::ArgumentOutOfRange(_)
             | parrot_foundation::oauth::AuthError::ArgumentOutOfRangeWithParameter { .. } => {
-                FailureKind::Argument
+                ErrorCode::Argument
             }
-            _ => FailureKind::Unexpected,
+            _ => ErrorCode::Unexpected,
         },
         Error::Cancelled
         | Error::Cancellation(_)
         | Error::Http(HttpError::Cancelled | HttpError::RequestCancelled(_)) => {
-            FailureKind::Cancelled
+            ErrorCode::Cancelled
         }
-        Error::Http(HttpError::ProviderHttp(_)) => FailureKind::Unexpected,
-        Error::Io(_) => FailureKind::Io,
+        Error::Http(HttpError::ProviderHttp(_)) => ErrorCode::Unexpected,
+        Error::Io(_) => ErrorCode::Io,
         Error::InvalidOperation(_) | Error::Disposed | Error::Http(HttpError::Disposed) => {
-            FailureKind::InvalidOperation
+            ErrorCode::InvalidOperation
         }
         Error::Wire(_)
         | Error::Http(HttpError::Wire(_))
-        | Error::Response(ResponsesError::WireProtocol(_)) => FailureKind::WireProtocol,
-        Error::Http(HttpError::Transport(_) | HttpError::Http(_)) => FailureKind::Http,
-        Error::Http(HttpError::RequestTooLarge(_)) => FailureKind::RequestTooLarge,
-        Error::Socket(error) => socket_failure_kind(error),
-        _ => FailureKind::Unexpected,
+        | Error::Response(ResponsesError::WireProtocol(_)) => ErrorCode::WireProtocol,
+        Error::Http(HttpError::Transport(_) | HttpError::Http(_)) => ErrorCode::Http,
+        Error::Http(HttpError::RequestTooLarge(_)) => ErrorCode::RequestTooLarge,
+        Error::Socket(error) => socket_failure_code(error),
+        _ => ErrorCode::Unexpected,
     }
 }
-pub(super) fn socket_failure_kind(error: &WebSocketError) -> FailureKind {
+pub(super) fn socket_failure_code(error: &WebSocketError) -> ErrorCode {
     match error {
-        WebSocketError::Cancelled => FailureKind::Cancelled,
-        WebSocketError::Upgrade { .. } => FailureKind::WebSocketUpgrade,
-        WebSocketError::TransportFailure { cause, .. } => socket_failure_kind(cause),
-        WebSocketError::Transport(_) => FailureKind::WebSocketTransport,
+        WebSocketError::Cancelled => ErrorCode::Cancelled,
+        WebSocketError::Upgrade { .. } => ErrorCode::WebSocketUpgrade,
+        WebSocketError::TransportFailure { cause, .. } => socket_failure_code(cause),
+        WebSocketError::Transport(_) => ErrorCode::WebSocketTransport,
         WebSocketError::Socket {
             code: SocketErrorCode::ConnectionClosedPrematurely,
             ..
-        } => FailureKind::WebSocketClosed,
-        WebSocketError::Socket { .. } => FailureKind::WebSocket,
+        } => ErrorCode::WebSocketClosed,
+        WebSocketError::Socket { .. } => ErrorCode::WebSocket,
         WebSocketError::Wire(_) | WebSocketError::Response(ResponsesError::WireProtocol(_)) => {
-            FailureKind::WireProtocol
+            ErrorCode::WireProtocol
         }
-        WebSocketError::RequestTooLarge { .. } => FailureKind::RequestTooLarge,
-        WebSocketError::MessageTooLarge => FailureKind::WebSocketMessageTooLarge,
-        WebSocketError::InvalidRequest(_) => FailureKind::Argument,
+        WebSocketError::RequestTooLarge { .. } => ErrorCode::RequestTooLarge,
+        WebSocketError::MessageTooLarge => ErrorCode::WebSocketMessageTooLarge,
+        WebSocketError::InvalidRequest(_) => ErrorCode::Argument,
         WebSocketError::InvalidOperation(_) | WebSocketError::Disposed => {
-            FailureKind::InvalidOperation
+            ErrorCode::InvalidOperation
         }
-        _ => FailureKind::Unexpected,
+        _ => ErrorCode::Unexpected,
     }
 }

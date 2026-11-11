@@ -3,6 +3,7 @@ use super::view::{
     ResponsesContentKind, ResponsesContentView, ResponsesMessageView, ResponsesRequestView,
     ResponsesRole, ResponsesToolCallView, ResponsesToolDefinitionView,
 };
+use crate::wire::encode_base64;
 use serde_json::value::RawValue;
 use std::io;
 
@@ -210,7 +211,7 @@ fn add_message<M: ResponsesMessageView>(
 }
 
 fn image_reference(bytes: Vec<u8>, media_type: &str) -> String {
-    format!("data:{media_type};base64,{}", base64(&bytes))
+    format!("data:{media_type};base64,{}", encode_base64(&bytes))
 }
 
 fn replayable_output(raw: &str) -> Option<Vec<String>> {
@@ -282,26 +283,4 @@ fn object(fields: Vec<(&str, String)>) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!("{{{fields}}}")
-}
-fn base64(input: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let value = (u32::from(chunk[0]) << 16)
-            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
-            | u32::from(*chunk.get(2).unwrap_or(&0));
-        output.push(TABLE[((value >> 18) & 63) as usize] as char);
-        output.push(TABLE[((value >> 12) & 63) as usize] as char);
-        output.push(if chunk.len() > 1 {
-            TABLE[((value >> 6) & 63) as usize] as char
-        } else {
-            '='
-        });
-        output.push(if chunk.len() > 2 {
-            TABLE[(value & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    output
 }

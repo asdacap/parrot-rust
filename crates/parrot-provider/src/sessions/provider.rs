@@ -2,7 +2,7 @@
 use super::diagnostics::CallTrace;
 use super::http::{HttpDriver, HttpEventsBridge, Protocol};
 use super::socket_session::{ResponseCallFactory, ResponsePrepared, ResponseSession};
-use super::{Error, Event, EventStream, Provider, Request, Session};
+use super::{Error, EventStream, Provider, Request, Session};
 use crate::{
     catalogs::{
         self, CatalogError, LiteLlmModelInfoDecoder, Model, StandardModelDecoder,
@@ -14,6 +14,7 @@ use crate::{
         ImageGenerationClient, ImageGenerationRequest, ImageGenerationResult, ImageHeaders,
         ImageTransport,
     },
+    lazy_stream::LazyEventStream,
     responses,
     responses_websocket::{
         self, Connector, HeaderSource, HttpEvents, HttpFallback, WebSocketClient, WebSocketError,
@@ -21,13 +22,7 @@ use crate::{
     },
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 pub trait ApiKeySource: Send + Sync {
     fn api_key<'a>(
@@ -890,131 +885,18 @@ fn lazy_http(
     request: Request,
     trace: Option<Arc<CallTrace>>,
 ) -> Box<dyn EventStream> {
-    Box::new(LazyHttp {
-        core,
-        session_id,
-        request: Some(request),
-        initializing: None,
-        initialization_stop: Arc::new(InitializationStop::default()),
-        driver: None,
-        done: false,
-        trace,
-    })
-}
-struct LazyHttp {
-    core: Arc<Core>,
-    session_id: String,
-    request: Option<Request>,
-    initializing: Option<BoxFuture<'static, Result<HttpDriver, Error>>>,
-    initialization_stop: Arc<InitializationStop>,
-    driver: Option<HttpDriver>,
-    done: bool,
-    trace: Option<Arc<CallTrace>>,
-}
-impl EventStream for LazyHttp {
-    fn next<'a>(
-        &'a mut self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<Event>, Error>> {
+    Box::new(LazyEventStream::new(request, move |request, stop| {
+        let core = core.clone();
+        let session_id = session_id.clone();
+        let trace = trace.clone();
         Box::pin(async move {
-            if self.done {
-                return Ok(None);
-            }
-            if let Some(request) = self.request.take() {
-                if cancellation.is_cancelled() {
-                    self.initialization_stop.cancel();
-                }
-                let core = self.core.clone();
-                let session_id = self.session_id.clone();
-                let trace = self.trace.clone();
-                let stop = self.initialization_stop.clone();
-                self.initializing = Some(Box::pin(async move {
-                    tokio::select! {
-                        biased;
-                        result = core.open_http(request, &session_id, "", stop.as_ref(), trace) => result,
-                        _ = stop.cancelled() => Err(Error::Cancelled),
-                    }
-                }));
-            }
-            if let Some(initializing) = self.initializing.as_mut() {
-                let stop = self.initialization_stop.clone();
-                let result = tokio::select! {
-                    biased;
-                    result = initializing.as_mut() => result,
-                    _ = cancellation.cancelled() => { stop.cancel(); initializing.await },
-                };
-                self.initializing = None;
-                match result {
-                    Ok(driver) => self.driver = Some(driver),
-                    Err(error) => {
-                        self.done = true;
-                        return Err(error);
-                    }
-                }
-            }
-            let result = self
-                .driver
-                .as_mut()
-                .expect("initialized HTTP stream")
-                .next(cancellation)
-                .await;
-            if !matches!(result, Ok(Some(_))) {
-                self.done = true;
-            }
-            result
-        })
-    }
-    fn close(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.done = true;
-            self.request = None;
-            self.initialization_stop.cancel();
-            if let Some(initializing) = self.initializing.take()
-                && let Ok(mut driver) = initializing.await
-            {
-                driver.close().await?;
-            }
-            if let Some(mut driver) = self.driver.take() {
-                driver.close().await?;
-            }
-            Ok(())
-        })
-    }
-}
-
-impl Drop for LazyHttp {
-    fn drop(&mut self) {
-        self.initialization_stop.cancel();
-    }
-}
-#[derive(Default)]
-struct InitializationStop {
-    cancelled: AtomicBool,
-    notify: tokio::sync::Notify,
-}
-impl InitializationStop {
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        self.notify.notify_waiters();
-    }
-}
-impl Cancellation for InitializationStop {
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            loop {
-                let notified = self.notify.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if self.is_cancelled() {
-                    return;
-                }
-                notified.await;
+            tokio::select! {
+                biased;
+                result = core.open_http(request, &session_id, "", stop.as_ref(), trace) => result,
+                _ = stop.cancelled() => Err(Error::Cancelled),
             }
         })
-    }
+    }))
 }
 
 fn decode_chatgpt_models(provider_id: &str, body: &str) -> Result<Vec<Model>, CatalogError> {

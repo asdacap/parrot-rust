@@ -1,11 +1,11 @@
 //! Runtime composition over the actual Anthropic adapter and owning stream.
-use super::auth::OwnedCancellation;
 use crate::{
     anthropic::{
         self, AnthropicProvider, AnthropicStream, EncodeError, ParserError, ProviderError,
     },
     catalogs::{Model, StandardModelError},
     chat_completions::ProviderFailure,
+    lazy_stream::LazyEventStream,
     sessions::{Content, Error, Event, EventStream, Provider, Request, Session},
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
@@ -144,89 +144,32 @@ impl Session for Stateless {
     }
 }
 fn lazy(provider: Arc<AnthropicProvider>, request: Request) -> Box<dyn EventStream> {
-    Box::new(LazyAnthropic {
-        provider,
-        request: Some(request),
-        initializing: None,
-        stop: Arc::new(OwnedCancellation::new(false)),
-        stream: None,
-        done: false,
-    })
+    Box::new(LazyEventStream::new(request, move |request, stop| {
+        let provider = provider.clone();
+        Box::pin(async move {
+            provider
+                .call(&request, stop.as_ref())
+                .await
+                .map(AnthropicEventStream)
+                .map_err(map_provider_error)
+        })
+    }))
 }
-struct LazyAnthropic {
-    provider: Arc<AnthropicProvider>,
-    request: Option<Request>,
-    initializing: Option<BoxFuture<'static, Result<AnthropicStream, ProviderError>>>,
-    stop: Arc<OwnedCancellation>,
-    stream: Option<AnthropicStream>,
-    done: bool,
-}
-impl EventStream for LazyAnthropic {
+struct AnthropicEventStream(AnthropicStream);
+impl EventStream for AnthropicEventStream {
     fn next<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<Event>, Error>> {
         Box::pin(async move {
-            if self.done {
-                return Ok(None);
-            }
-            if let Some(request) = self.request.take() {
-                if cancellation.is_cancelled() {
-                    self.stop.cancel();
-                }
-                let provider = self.provider.clone();
-                let stop = self.stop.clone();
-                self.initializing = Some(Box::pin(async move {
-                    provider.call(&request, stop.as_ref()).await
-                }));
-            }
-            if let Some(initializing) = self.initializing.as_mut() {
-                let stop = self.stop.clone();
-                let result = tokio::select! {
-                    biased;
-                    result = initializing.as_mut() => result,
-                    _ = cancellation.cancelled() => { stop.cancel(); initializing.await },
-                };
-                self.initializing = None;
-                match result {
-                    Ok(stream) => self.stream = Some(stream),
-                    Err(error) => {
-                        self.done = true;
-                        return Err(map_provider_error(error));
-                    }
-                }
-            }
-            let result = self
-                .stream
-                .as_mut()
-                .expect("initialized Anthropic stream")
+            self.0
                 .next(cancellation)
                 .await
                 .map(|event| event.map(Event::from))
-                .map_err(map_provider_error);
-            if !matches!(result, Ok(Some(_))) {
-                self.done = true;
-                self.stream = None;
-            }
-            result
+                .map_err(map_provider_error)
         })
     }
     fn close(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.done = true;
-            self.request = None;
-            self.stop.cancel();
-            if let Some(initializing) = self.initializing.as_mut() {
-                drop(initializing.await);
-            }
-            self.initializing = None;
-            self.stream = None;
-            Ok(())
-        })
-    }
-}
-impl Drop for LazyAnthropic {
-    fn drop(&mut self) {
-        self.stop.cancel();
+        Box::pin(async { Ok(()) })
     }
 }
