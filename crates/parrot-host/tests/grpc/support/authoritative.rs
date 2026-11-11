@@ -471,7 +471,6 @@ fn runtime_identity() -> RuntimeIdentity {
             process_start_token: Some("start".into()),
         }),
     )
-    .with_proven_comparable_process_start_tokens()
 }
 impl Fixture {
     pub async fn new() -> Self {

@@ -633,7 +633,6 @@ pub struct OpenedSession {
     pub loaded: bool,
     pub initialization: SessionInitialization,
     pub resources: Arc<SessionResourceLease>,
-    clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
 impl OpenedSession {
     pub fn session(&self) -> &dyn StoredUserSession {
@@ -643,7 +642,7 @@ impl OpenedSession {
     pub fn record_opened(&self) -> Result<(), SessionStoreError> {
         self.resources
             .index
-            .record_opened(&(self.clock)())
+            .record_opened(&timestamp())
             .map_err(SessionStoreError::failure)
     }
     pub async fn close(&mut self) -> Result<(), SessionStoreError> {
@@ -665,7 +664,6 @@ pub struct SessionStore {
     router: Arc<dyn SessionModelRouter>,
     workspace: Arc<dyn SessionWorkspaceResolver>,
     global: Arc<FileDiagnosticLog>,
-    clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
 impl SessionStore {
     #[allow(clippy::too_many_arguments)]
@@ -686,12 +684,7 @@ impl SessionStore {
             router,
             workspace,
             global,
-            clock: Arc::new(timestamp),
         }
-    }
-    pub fn with_clock(mut self, clock: Arc<dyn Fn() -> String + Send + Sync>) -> Self {
-        self.clock = clock;
-        self
     }
     pub fn discover_latest(&self) -> Result<SessionAdmission, SessionStoreError> {
         self.admissions
@@ -960,7 +953,7 @@ impl SessionStore {
                 metadata.mode = Some(initialization.mode.clone());
                 metadata.extra_concurrent_tasks = initialization.extra_concurrent_tasks;
                 metadata.fast_mode = initialization.fast_mode;
-                metadata.created_at = Some((self.clock)());
+                metadata.created_at = Some(timestamp());
                 lease
                     .index
                     .initialize(
@@ -985,7 +978,7 @@ impl SessionStore {
                 .map_err(SessionStoreError::failure)?;
             lease
                 .index
-                .record_opened(&(self.clock)())
+                .record_opened(&timestamp())
                 .map_err(SessionStoreError::failure)?;
             self.stage(&context, stage, "complete", started, None);
             let mut event = DiagnosticEvent::new(
@@ -1008,7 +1001,6 @@ impl SessionStore {
                 loaded: existing.is_some(),
                 initialization,
                 resources: lease,
-                clock: self.clock,
             }),
             Err(error) => {
                 self.stage(&context, stage, "failure", started, Some(&error));

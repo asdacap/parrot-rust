@@ -46,7 +46,6 @@ fn identity(status: ProcessIdentityStatus, observed_start: Option<String>) -> Ru
             process_start_token: observed_start.clone(),
         }),
     )
-    .with_proven_comparable_process_start_tokens()
 }
 fn assert_admission(
     actual: &AdmissionResult,
@@ -152,8 +151,6 @@ fn legacy_recovery_requires_process_evidence_even_when_boot_identity_differs() {
     use ClaimDisposition::{Live, Resumed};
     use ProcessIdentityStatus::{Found, Missing, Unreadable};
 
-    // Boot strings alone never prove a process dead. Keep the eight historical
-    // boot pairs crossed with the fourteen distinct process-evidence cases.
     for (recorded_boot, current_boot) in [
         (Some("unavailable"), "unavailable"),
         (Some("unavailable-123"), "unavailable"),
@@ -167,13 +164,7 @@ fn legacy_recovery_requires_process_evidence_even_when_boot_identity_differs() {
         for (recorded_start, status, observed_start, disposition, generation) in [
             (Some("old-start"), Missing, None, Resumed, Some(1)),
             (Some("old-start"), Found, Some("old-start"), Live, None),
-            (
-                Some("old-start"),
-                Found,
-                Some("new-start"),
-                Resumed,
-                Some(1),
-            ),
+            (Some("old-start"), Found, Some("new-start"), Live, None),
             (Some("old-start"), Unreadable, None, Live, None),
             (Some("old-start"), Found, None, Live, None),
             (Some("old-start"), Found, Some(""), Live, None),
@@ -215,8 +206,7 @@ fn legacy_recovery_requires_process_evidence_even_when_boot_identity_differs() {
                         process_start_token: observed_start.map(str::to_owned),
                     }
                 }),
-            )
-            .with_proven_comparable_process_start_tokens();
+            );
             let claim = WorkingDirectoryClaim::new(&state.0, runtime);
             let actual = claim
                 .resume(
@@ -359,61 +349,4 @@ fn active_owner_blocks_default_open_and_explicit_takeover() {
     );
     assert!(!activation.join("v2.json").exists());
     drop(owner);
-}
-
-#[test]
-fn pid_reuse_recovers_ownership_and_stale_release_cannot_fence_the_successor() {
-    let state = State::new();
-    let old = WorkingDirectoryClaim::new(
-        &state.0,
-        identity(ProcessIdentityStatus::Found, Some("old-start".into())),
-    );
-    let id =
-        parrot_domain::values::identifiers::UserSessionId::parse("user-session-reuse").unwrap();
-    let owner = old.create_fresh(Path::new(WORKSPACE), &id).unwrap();
-    let reused = WorkingDirectoryClaim::new(
-        &state.0,
-        identity(ProcessIdentityStatus::Found, Some("new-start".into())),
-    );
-    let successor = reused.resume(Path::new(WORKSPACE), &id, false).unwrap();
-    assert_admission(
-        &successor,
-        ClaimDisposition::Resumed,
-        id.value(),
-        Some(2),
-        OpenOperation::Resume,
-    );
-    let activation = state.0.join("owners/activations").join(id.value());
-    let before = fs::read(activation.join("v2.json")).unwrap();
-    owner.activation_lease.as_ref().unwrap().release().unwrap();
-    assert_eq!(fs::read(activation.join("v2.json")).unwrap(), before);
-    assert!(!activation.join("v3.json").exists());
-    let head = WorkingDirectoryClaim::current(&activation)
-        .unwrap()
-        .unwrap();
-    assert_eq!(head.generation, Some(2));
-    assert_eq!(head.state.as_deref(), Some("Active"));
-    assert_eq!(
-        head.lease_id.as_deref(),
-        Some(
-            successor
-                .activation_lease
-                .as_ref()
-                .unwrap()
-                .lease_id
-                .as_str()
-        )
-    );
-    successor
-        .activation_lease
-        .as_ref()
-        .unwrap()
-        .release()
-        .unwrap();
-    let head = WorkingDirectoryClaim::current(&activation)
-        .unwrap()
-        .unwrap();
-    assert_eq!(head.version, Some(3));
-    assert_eq!(head.generation, Some(2));
-    assert_eq!(head.state.as_deref(), Some("Inactive"));
 }

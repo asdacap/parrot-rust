@@ -115,7 +115,6 @@ fn runtime(status: ProcessIdentityStatus) -> RuntimeIdentity {
             process_start_token: Some("synthetic-start".into()),
         }),
     )
-    .with_proven_comparable_process_start_tokens()
 }
 fn id(value: &str) -> UserSessionId {
     UserSessionId::parse(value).unwrap()

@@ -27,8 +27,7 @@ impl Fixture {
                 status: ProcessIdentityStatus::Found,
                 process_start_token: Some("start".into()),
             }),
-        )
-        .with_proven_comparable_process_start_tokens();
+        );
         let admissions = Arc::new(SessionAdmissions::new(
             OwnershipRoots::new(root.join("new"), root.join("old")).unwrap(),
             runtime.clone(),
@@ -54,7 +53,6 @@ impl Fixture {
                 FileDiagnosticLog::open_global(self.root.join("logs"), "global", |_| {}).unwrap(),
             ),
         )
-        .with_clock(Arc::new(|| "2026-10-17T00:00:00.0000000+00:00".into()))
     }
     fn id(&self) -> UserSessionId {
         UserSessionId::parse("user-session-test").unwrap()
@@ -187,6 +185,7 @@ async fn initializes_before_publication_then_closes_real_resources_and_fenced_ac
     let fixture = Fixture::new();
     let factory = Arc::new(Factory::default());
     let store = fixture.store(factory.clone());
+    let before_open = timestamp();
     let mut opened = store
         .open_admitted(
             fixture.workspace.clone(),
@@ -210,7 +209,11 @@ async fn initializes_before_publication_then_closes_real_resources_and_fenced_ac
     );
     let metadata = opened.resources.index.find().unwrap().unwrap();
     assert_eq!(metadata.mode.as_deref(), Some("query"));
-    assert_eq!(metadata.created_at, metadata.last_opened_at);
+    let created_at = metadata.created_at.as_ref().unwrap();
+    let last_opened_at = metadata.last_opened_at.as_ref().unwrap();
+    assert!(created_at >= &before_open);
+    assert!(last_opened_at >= created_at);
+    assert!(last_opened_at <= &timestamp());
     let log = root.path().join("session.log");
     opened.close().await.unwrap();
     assert_eq!(factory.disposed.load(Ordering::Acquire), 1);
@@ -479,14 +482,22 @@ async fn legacy_resume_preserves_selected_root_and_metadata_and_uses_selector_fa
     assert_eq!(published.working_directory, metadata.working_directory);
     assert_eq!(published.root_agent_name, metadata.root_agent_name);
     assert!(!fixture.root.join("new/sessions").exists());
-    let prior = published.last_opened_at;
-    opened.clock = Arc::new(|| "later-success".into());
-    assert_eq!(index.find().unwrap().unwrap().last_opened_at, prior);
+    let mut retained = published;
+    retained.last_opened_at = Some("2000-01-01T00:00:00Z".into());
+    fs::write(
+        index.metadata_path(),
+        serde_json::to_vec(&retained).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(index.find().unwrap().unwrap(), retained);
+    let before_open = timestamp();
     opened.record_opened().unwrap();
-    assert_eq!(
-        index.find().unwrap().unwrap().last_opened_at.as_deref(),
-        Some("later-success")
-    );
+    let updated = index.find().unwrap().unwrap();
+    let last_opened_at = updated.last_opened_at.as_ref().unwrap();
+    assert!(last_opened_at >= &before_open);
+    assert!(last_opened_at <= &timestamp());
+    retained.last_opened_at = updated.last_opened_at.clone();
+    assert_eq!(updated, retained);
     opened.close().await.unwrap();
 }
 
@@ -1835,6 +1846,7 @@ async fn same_owned_metadata_index_preserves_identity_timestamps_and_serializes_
     assert_eq!(changed.model.as_deref(), Some("other/model"));
     assert_eq!(changed.selector.as_deref(), Some("alias"));
     assert_eq!(changed.mode, original.mode);
+    let before_open = timestamp();
     opened.record_opened().unwrap();
     opened
         .resources
@@ -1846,7 +1858,9 @@ async fn same_owned_metadata_index_preserves_identity_timestamps_and_serializes_
         })
         .unwrap();
     let latest = opened.resources.index.find().unwrap().unwrap();
-    assert_eq!(latest.last_opened_at, Some((opened.clock)()));
+    let last_opened_at = latest.last_opened_at.as_ref().unwrap();
+    assert!(last_opened_at >= &before_open);
+    assert!(last_opened_at <= &timestamp());
     assert_eq!(latest.provider_id.as_deref(), Some("latest"));
     opened.close().await.unwrap();
 }
@@ -2028,6 +2042,7 @@ async fn metadata_updater_uses_record_opened_gate_and_preserves_failures() {
         )
         .await
         .unwrap();
+    let before_open = timestamp();
     std::thread::scope(|scope| {
         scope.spawn(|| opened.record_opened().unwrap());
         scope.spawn(|| {
@@ -2043,7 +2058,9 @@ async fn metadata_updater_uses_record_opened_gate_and_preserves_failures() {
         });
     });
     let latest = opened.resources.index.find().unwrap().unwrap();
-    assert_eq!(latest.last_opened_at, Some((opened.clock)()));
+    let last_opened_at = latest.last_opened_at.as_ref().unwrap();
+    assert!(last_opened_at >= &before_open);
+    assert!(last_opened_at <= &timestamp());
     assert_eq!(latest.provider_id.as_deref(), Some("gate-provider"));
     let path = opened.resources.index.metadata_path();
     let bytes = fs::read(path).unwrap();

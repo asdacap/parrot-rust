@@ -19,13 +19,9 @@ use std::sync::{
 fn id() -> UserSessionId {
     UserSessionId::parse("protected-target").unwrap()
 }
-fn runtime(
-    status: ProcessIdentityStatus,
-    observed: Option<&str>,
-    comparable: bool,
-) -> RuntimeIdentity {
+fn runtime(status: ProcessIdentityStatus, observed: Option<&str>) -> RuntimeIdentity {
     let observed = observed.map(str::to_owned);
-    let runtime = RuntimeIdentity::new(
+    RuntimeIdentity::new(
         fingerprint_host("synthetic-host"),
         "boot".into(),
         4312,
@@ -35,12 +31,7 @@ fn runtime(
             status,
             process_start_token: observed.clone(),
         }),
-    );
-    if comparable {
-        runtime.with_proven_comparable_process_start_tokens()
-    } else {
-        runtime
-    }
+    )
 }
 fn write_owner(
     root: &Path,
@@ -163,10 +154,8 @@ fn unproven_local_found_token_is_protected_for_exact_fractional_large_and_missin
             fs::create_dir(&workspace).unwrap();
             let root = temp.0.join("state");
             let (path, bytes) = write_owner(&root, &workspace, recorded, 4312);
-            let claim = WorkingDirectoryClaim::new(
-                &root,
-                runtime(ProcessIdentityStatus::Found, observed, false),
-            );
+            let claim =
+                WorkingDirectoryClaim::new(&root, runtime(ProcessIdentityStatus::Found, observed));
             let record: OwnerRecord = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(
                 claim.determine_status(Some(&record)),
@@ -194,45 +183,31 @@ fn unproven_local_found_token_is_protected_for_exact_fractional_large_and_missin
 }
 
 #[test]
-fn only_missing_or_proven_comparable_distinct_incarnation_reclaims_local_target() {
-    for (status, observed, comparable, disposition) in [
+fn only_missing_process_reclaims_local_target() {
+    for (status, observed, disposition) in [
         (
             ProcessIdentityStatus::Missing,
             None,
-            false,
             ClaimDisposition::Resumed,
         ),
         (
             ProcessIdentityStatus::Found,
             Some("owner-start"),
-            true,
             ClaimDisposition::Live,
         ),
         (
             ProcessIdentityStatus::Found,
             Some("distinct-start"),
-            true,
-            ClaimDisposition::Resumed,
-        ),
-        (
-            ProcessIdentityStatus::Found,
-            Some("distinct-start"),
-            false,
             ClaimDisposition::Live,
         ),
-        (
-            ProcessIdentityStatus::Found,
-            None,
-            true,
-            ClaimDisposition::Live,
-        ),
+        (ProcessIdentityStatus::Found, None, ClaimDisposition::Live),
     ] {
         let temp = TempRoot::new("a009-proof");
         let workspace = temp.0.join("workspace");
         fs::create_dir(&workspace).unwrap();
         let root = temp.0.join("state");
         write_owner(&root, &workspace, Some("owner-start"), 4312);
-        let claim = WorkingDirectoryClaim::new(root, runtime(status, observed, comparable));
+        let claim = WorkingDirectoryClaim::new(root, runtime(status, observed));
         assert_eq!(
             claim.resume(&workspace, &id(), true).unwrap().disposition,
             disposition

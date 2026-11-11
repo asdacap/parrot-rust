@@ -118,8 +118,7 @@ impl Context {
                 status: ProcessIdentityStatus::Found,
                 process_start_token: Some("fixture-start".into()),
             }),
-        )
-        .with_proven_comparable_process_start_tokens();
+        );
         let diagnostics =
             Arc::new(FileDiagnosticLog::open_global(root.join("logs"), "startup", |_| {}).unwrap());
         let progress = Arc::new(Mutex::new(Vec::new()));

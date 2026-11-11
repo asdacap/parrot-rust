@@ -147,7 +147,6 @@ pub type ActivationGuard =
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivationStatus {
     Inactive,
-    Active,
     Uncertain,
     /// A009 safety divergence: a local PID is live, but its persisted start
     /// timestamp does not prove a comparable process incarnation. Not overridable.
@@ -155,8 +154,7 @@ pub enum ActivationStatus {
 }
 impl ActivationStatus {
     pub(crate) fn prevents_acquisition(self, take_over: bool) -> bool {
-        matches!(self, Self::Active | Self::LiveOwnerNotDisproved)
-            || (self == Self::Uncertain && !take_over)
+        self == Self::LiveOwnerNotDisproved || (self == Self::Uncertain && !take_over)
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,7 +184,6 @@ pub struct RuntimeIdentity {
     pub process_start_token: String,
     pub runtime_instance_id: String,
     pub inspect: Arc<dyn Fn(i32) -> ProcessIdentity + Send + Sync>,
-    pub(crate) process_start_tokens_comparable: bool,
 }
 impl RuntimeIdentity {
     pub fn new(
@@ -204,17 +201,7 @@ impl RuntimeIdentity {
             process_start_token,
             runtime_instance_id,
             inspect,
-            process_start_tokens_comparable: false,
         }
-    }
-
-    /// Assert that both persisted records and this inspector use one proven,
-    /// stable incarnation scheme. Intended for controlled injected inspectors;
-    /// untagged native/.NET legacy timestamps do not establish this proof.
-    /// Numeric equality, proximity, or a btime conversion is not sufficient.
-    pub fn with_proven_comparable_process_start_tokens(mut self) -> Self {
-        self.process_start_tokens_comparable = true;
-        self
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

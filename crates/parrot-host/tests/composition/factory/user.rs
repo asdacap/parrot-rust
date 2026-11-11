@@ -510,8 +510,7 @@ async fn real_lease() -> Arc<SessionResourceLease> {
             status: ProcessIdentityStatus::Found,
             process_start_token: Some("start".into()),
         }),
-    )
-    .with_proven_comparable_process_start_tokens();
+    );
     let admissions = SessionAdmissions::new(
         OwnershipRoots::new(root.join("new"), root.join("old")).unwrap(),
         runtime,

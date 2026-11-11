@@ -36,7 +36,6 @@ impl Fixture {
                 process_start_token: start.clone(),
             }),
         )
-        .with_proven_comparable_process_start_tokens()
     }
     fn claim(
         &self,
@@ -203,16 +202,17 @@ fn admission_safety_uses_any_legacy_id_unless_target_v2_supersedes_it() {
     );
     assert_eq!(
         claim.admission_safety_status(&target, &canonical).unwrap(),
-        (ActivationStatus::Active, false)
+        (ActivationStatus::LiveOwnerNotDisproved, false)
     );
     let distinct = claim
         .create_fresh(&f.workspace, &id("user-session-distinct"))
         .unwrap();
     assert_eq!(
         claim.admission_safety_status(&target, &canonical).unwrap(),
-        (ActivationStatus::Active, false)
+        (ActivationStatus::LiveOwnerNotDisproved, false)
     );
-    let created = claim.create_fresh(&f.workspace, &target).unwrap();
+    let inactive = f.claim("host", ProcessIdentityStatus::Missing, None);
+    let created = inactive.create_fresh(&f.workspace, &target).unwrap();
     created.activation_lease.unwrap().release().unwrap();
     assert_eq!(
         claim.admission_safety_status(&target, &canonical).unwrap(),
@@ -363,8 +363,7 @@ fn foreign_host_does_not_inspect_pid_and_requires_explicit_takeover() {
                     process_start_token: None,
                 }
             }),
-        )
-        .with_proven_comparable_process_start_tokens(),
+        ),
     );
     let result = local.resume(&f.workspace, &session, false).unwrap();
     assert_eq!(result.disposition, ClaimDisposition::Live);
@@ -382,19 +381,6 @@ fn foreign_host_does_not_inspect_pid_and_requires_explicit_takeover() {
             .as_deref(),
         Some("local")
     );
-}
-
-#[test]
-fn reused_pid_with_exact_original_session_id_is_inactive() {
-    let f = Fixture::new();
-    let first = f.claim("host", ProcessIdentityStatus::Found, Some("old-start"));
-    let session = id("user-session-reused-pid");
-    let owner = first.create_fresh(&f.workspace, &session).unwrap();
-    let second = f.claim("host", ProcessIdentityStatus::Found, Some("new-start"));
-    let result = second.resume(&f.workspace, &session, false).unwrap();
-    assert_eq!(result.disposition, ClaimDisposition::Resumed);
-    assert_eq!(result.session_id.as_ref(), Some(&session));
-    drop(owner);
 }
 
 #[test]
@@ -423,12 +409,12 @@ fn boot_identity_does_not_override_process_liveness_matrix() {
                 (
                     ProcessIdentityStatus::Found,
                     Some("old-start"),
-                    ActivationStatus::Active,
+                    ActivationStatus::LiveOwnerNotDisproved,
                 ),
                 (
                     ProcessIdentityStatus::Found,
                     Some("new-start"),
-                    ActivationStatus::Inactive,
+                    ActivationStatus::LiveOwnerNotDisproved,
                 ),
                 (
                     ProcessIdentityStatus::Found,
@@ -453,13 +439,6 @@ fn boot_identity_does_not_override_process_liveness_matrix() {
                     boot_identity: boot.map(str::to_owned),
                     process_start_token: recorded_start.map(str::to_owned),
                     ..Default::default()
-                };
-                let expected = if status == ProcessIdentityStatus::Found
-                    && recorded_start.is_none_or(|s| s.trim().is_empty())
-                {
-                    ActivationStatus::Active
-                } else {
-                    expected
                 };
                 assert_eq!(
                     claim.determine_status(Some(&record)),

@@ -138,7 +138,7 @@ impl WorkingDirectoryClaim {
     pub fn is_active(&self, id: &UserSessionId, working_directory: &Path) -> io::Result<bool> {
         Ok(matches!(
             self.read_activation(id, &Self::canonicalize(working_directory)?)?,
-            Some(ActivationStatus::Active | ActivationStatus::LiveOwnerNotDisproved)
+            Some(ActivationStatus::LiveOwnerNotDisproved)
         ))
     }
     pub fn create_fresh(
@@ -252,44 +252,10 @@ impl WorkingDirectoryClaim {
             return ActivationStatus::Uncertain;
         };
         let process = (self.runtime.inspect)(pid);
-        if process.status == ProcessIdentityStatus::Found
-            && (!self.runtime.process_start_tokens_comparable
-                || (record
-                    .process_start_token
-                    .as_deref()
-                    .is_some_and(|s| !s.trim().is_empty())
-                    && process
-                        .process_start_token
-                        .as_deref()
-                        .is_none_or(|s| s.trim().is_empty())))
-        {
-            return ActivationStatus::LiveOwnerNotDisproved;
-        }
-        if unknown_state {
-            return ActivationStatus::Uncertain;
-        }
         match process.status {
-            ProcessIdentityStatus::Unreadable => ActivationStatus::Uncertain,
-            ProcessIdentityStatus::Missing => ActivationStatus::Inactive,
-            ProcessIdentityStatus::Found => {
-                if record
-                    .process_start_token
-                    .as_deref()
-                    .is_none_or(|s| s.trim().is_empty())
-                {
-                    ActivationStatus::Active
-                } else if process
-                    .process_start_token
-                    .as_deref()
-                    .is_none_or(|s| s.trim().is_empty())
-                {
-                    ActivationStatus::Uncertain
-                } else if record.process_start_token == process.process_start_token {
-                    ActivationStatus::Active
-                } else {
-                    ActivationStatus::Inactive
-                }
-            }
+            ProcessIdentityStatus::Found => ActivationStatus::LiveOwnerNotDisproved,
+            ProcessIdentityStatus::Missing if !unknown_state => ActivationStatus::Inactive,
+            _ => ActivationStatus::Uncertain,
         }
     }
     fn activate(

@@ -33,8 +33,7 @@ async fn current_metadata_in_legacy_root_binds_real_host_and_reopens_in_place() 
             status: ProcessIdentityStatus::Found,
             process_start_token: Some("start".into()),
         }),
-    )
-    .with_proven_comparable_process_start_tokens();
+    );
     let claim = WorkingDirectoryClaim::new(fixture.root.join("old"), runtime)
         .create_fresh(&workspace, &id)
         .unwrap();

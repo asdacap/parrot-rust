@@ -125,8 +125,7 @@ impl RpcFixture {
                     status: ProcessIdentityStatus::Found,
                     process_start_token: Some("start".into()),
                 }),
-            )
-            .with_proven_comparable_process_start_tokens(),
+            ),
         ));
         let diagnostics = Arc::new(
             FileDiagnosticLog::open_global(root.join("rpc-logs"), "actual-rpc-test", |_| {})
