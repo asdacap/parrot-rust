@@ -396,7 +396,7 @@ async fn exercise_replay(count: usize, duplicate: usize, context: &str) {
         {
             let release = release.clone();
             let persisted = persisted.clone();
-            move || async move {
+            move |_: String| async move {
                 release.acquire().await.unwrap().forget();
                 Ok::<_, ()>(persisted)
             }
