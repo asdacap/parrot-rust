@@ -67,20 +67,6 @@ impl Effects {
             .sum())
     }
 
-    pub fn estimate_summary_tokens(
-        &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[Message],
-    ) -> Result<i64, Error> {
-        Ok(if preceding_summary.is_empty() {
-            0
-        } else {
-            preceding_summary.len() as i64 + 7
-        } + chunk_tokens
-            + self.estimate_tokens(next_group)?)
-    }
-
     pub fn estimate_context_tokens(
         &self,
         instructions: &str,
@@ -144,18 +130,6 @@ impl Provider {
 }
 
 impl parrot_core::Provider for Provider {
-    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
-        self.estimates.estimate_tokens(messages)
-    }
-    fn estimate_summary_tokens(
-        &self,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[Message],
-    ) -> Result<i64, Error> {
-        self.estimates
-            .estimate_summary_tokens(preceding_summary, chunk_tokens, next_group)
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,

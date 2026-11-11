@@ -182,7 +182,13 @@ async fn original_openai_image_cost_retention_and_summary_chunk_assertions() {
     let requests = provider.requests.lock().unwrap().clone();
     assert!(requests.len() > 1);
     assert!(requests.iter().all(|request| {
-        CompactionPlanner::estimate_tokens(&selection.canonical_model, &request.messages).unwrap()
+        CompactionPlanner::estimate_input_tokens(
+            &selection.canonical_model,
+            &request.instructions,
+            &request.tools,
+            &request.messages,
+        )
+        .unwrap()
             <= 600
     }));
     assert_eq!(

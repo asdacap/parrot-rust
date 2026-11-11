@@ -241,7 +241,6 @@ where
                     event_id: backend.event_id.as_ref(),
                     output: backend.output.as_ref(),
                     activity: backend.activity.as_ref(),
-                    compactor: &backend.compactor,
                     state: &backend.state,
                     events: ContextEmitter::new(
                         &backend.history,

@@ -694,9 +694,11 @@ async fn chunk_budget_folds_in_order_carrying_only_previous_summary() {
     );
     for request in &requests {
         assert!(
-            parrot_runtime::compaction::CompactionPlanner::estimate_tokens(
+            parrot_runtime::compaction::CompactionPlanner::estimate_input_tokens(
                 &fixture.selection.canonical_model,
-                &request.messages
+                &request.instructions,
+                &request.tools,
+                &request.messages,
             )
             .unwrap()
                 <= 100
@@ -1193,15 +1195,16 @@ async fn preceding_summary_can_force_a_later_tool_group_to_spill_once() {
     let compactor = compactor(140);
     let raw = group_messages(&history);
     assert!(raw[..2].iter().all(|group| {
-        compactor
-            .planner()
-            .estimate_summary_request_tokens(
-                &fixture.selection.canonical_model,
-                "",
-                0,
-                group.messages,
-            )
-            .unwrap()
+        let messages = std::iter::once(Message::system("Sum."))
+            .chain(group.messages.iter().cloned())
+            .collect::<Vec<_>>();
+        parrot_runtime::compaction::CompactionPlanner::estimate_input_tokens(
+            &fixture.selection.canonical_model,
+            "",
+            &[],
+            &messages,
+        )
+        .unwrap()
             <= 140
     }));
     let result = fixture

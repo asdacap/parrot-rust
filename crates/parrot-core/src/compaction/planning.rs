@@ -137,19 +137,16 @@ impl CompactionPlan {
             return Ok(None);
         };
         let mut keep = groups.len() - 1;
-        let fixed = provider.estimate_input_tokens(
-            &input.instructions,
-            definitions,
-            std::slice::from_ref(&input.fixed_message),
-        )?;
-        let mut suffix = vec![0; groups.len() + 1];
-        for index in (0..groups.len()).rev() {
-            suffix[index] = add(
-                suffix[index + 1],
-                provider.estimate_tokens(&groups[index].messages)?,
-            )?;
-        }
-        let estimate = |index: usize| add(add(fixed, suffix[index])?, 1);
+        let estimate = |index: usize| {
+            let messages: Vec<_> = std::iter::once(&input.fixed_message)
+                .chain(groups[index..].iter().flat_map(|group| &group.messages))
+                .cloned()
+                .collect();
+            add(
+                provider.estimate_input_tokens(&input.instructions, definitions, &messages)?,
+                1,
+            )
+        };
         let natural_exceeds = estimate(keep)? > target;
         let input_limit = configuration.context.model.calculate_input_limit();
         let mut nearest = None;
@@ -212,7 +209,12 @@ impl CompactionPlan {
     pub fn select_spill_groups(&self, provider: &dyn Provider) -> Result<Vec<usize>, Error> {
         let mut spill_groups = Vec::new();
         for (index, group) in self.groups[..self.keep_group_from].iter().enumerate() {
-            if provider.estimate_summary_tokens("", 0, &group.messages)? > self.input_budget {
+            if provider.estimate_input_tokens(
+                "",
+                &[],
+                &self.compose_summary_messages("", &group.messages),
+            )? > self.input_budget
+            {
                 if !group.can_spill() {
                     return Err(PlanningError::GroupExceedsBudget.into());
                 }

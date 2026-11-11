@@ -164,7 +164,7 @@ fn core_builds_private_summary_requests_and_preserves_the_retained_suffix() {
 #[test]
 fn chunking_uses_the_actual_previous_summary_without_replaying_consumed_groups() {
     let mut plan = plan(&["first-14-bytes!", "other-14-bytes!", "tail"]);
-    plan.input_budget = 25;
+    plan.input_budget = 12 + 25;
     let mut effects = Effects::default();
     let provider = Provider::new([
         SummaryResponse::Summary("x".into()),
@@ -177,6 +177,88 @@ fn chunking_uses_the_actual_previous_summary_without_replaying_consumed_groups()
         texts(&requests[1]),
         ["instructions", "prefix:x", "other-14-bytes!"]
     );
+    assert_eq!(result.summary.contents, [Content::Text("prefix:y".into())]);
+}
+
+#[test]
+fn compaction_uses_one_estimator_for_complete_summary_requests() {
+    struct InputOnlyProvider {
+        provider: Provider,
+        estimates: std::sync::Mutex<Vec<ProviderRequest>>,
+    }
+
+    impl parrot_core::Provider for InputOnlyProvider {
+        fn estimate_input_tokens(
+            &self,
+            instructions: &str,
+            definitions: &[parrot_core::ToolDefinition],
+            messages: &[parrot_core::Message],
+        ) -> Result<i64, Error> {
+            self.estimates.lock().unwrap().push(ProviderRequest {
+                instructions: instructions.into(),
+                tools: definitions.to_vec(),
+                messages: messages.to_vec(),
+                ..ProviderRequest::default()
+            });
+            Ok(4 + messages
+                .iter()
+                .flat_map(|message| &message.contents)
+                .map(|content| match content {
+                    Content::Text(text) => text.len() as i64,
+                    _ => panic!("these summary requests contain only text"),
+                })
+                .sum::<i64>())
+        }
+
+        fn summarize<'a, 'c>(
+            &'a self,
+            request: ProviderRequest,
+            cancellation: CancellationToken<'c>,
+        ) -> parrot_core::BoxFuture<'a, Result<SummaryResponse, Error>>
+        where
+            'c: 'a,
+        {
+            parrot_core::Provider::summarize(&self.provider, request, cancellation)
+        }
+    }
+
+    let mut plan = plan(&["first-14-bytes!", "other-14-bytes!", "tail"]);
+    plan.input_budget = 40;
+    let mut effects = Effects::default();
+    let provider = InputOnlyProvider {
+        provider: Provider::new([
+            SummaryResponse::Summary("x".into()),
+            SummaryResponse::Summary("y".into()),
+        ]),
+        estimates: std::sync::Mutex::new(Vec::new()),
+    };
+    let publisher = progress_publisher::ProgressPublisher {
+        progress: effects.progress.clone(),
+    };
+    let result = finish(compact(
+        Some(plan),
+        &mut effects,
+        &provider,
+        &publisher,
+        CancellationToken::uncancelled(),
+    ))
+    .unwrap()
+    .unwrap();
+    let requests = provider.provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(texts(&requests[0]), ["instructions", "first-14-bytes!"]);
+    assert_eq!(
+        texts(&requests[1]),
+        ["instructions", "prefix:x", "other-14-bytes!"]
+    );
+    let estimates = provider.estimates.lock().unwrap();
+    for request in requests.iter() {
+        assert!(estimates.iter().any(|estimate| {
+            estimate.instructions == request.instructions
+                && estimate.tools == request.tools
+                && estimate.messages == request.messages
+        }));
+    }
     assert_eq!(result.summary.contents, [Content::Text("prefix:y".into())]);
 }
 
@@ -220,7 +302,7 @@ fn initial_spills_commit_in_source_order_before_a_later_ineligible_group_fails()
         "too large plain user group",
         "tail",
     ]);
-    plan.input_budget = 5;
+    plan.input_budget = 12 + 5;
     plan.groups[0].messages[0].role = Role::Assistant;
     plan.groups[0].messages[0].tool_calls.push(ToolCall {
         id: "call".into(),
@@ -252,7 +334,7 @@ fn initial_spills_commit_in_source_order_before_a_later_ineligible_group_fails()
 #[test]
 fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
     let mut plan = plan(&["first-14-bytes!", "other-14-bytes!", "tail"]);
-    plan.input_budget = 25;
+    plan.input_budget = 12 + 25;
     plan.groups[1].messages[0].role = Role::Assistant;
     plan.groups[1].messages[0].tool_calls.push(ToolCall {
         id: "call".into(),
@@ -288,7 +370,7 @@ fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
 #[test]
 fn oversized_groups_write_json_with_image_path_before_rendering_the_notice() {
     let mut plan = plan(&["oversized tool call", "tail"]);
-    plan.input_budget = 5;
+    plan.input_budget = 12 + 5;
     plan.groups[0].messages[0].role = Role::Assistant;
     plan.groups[0].messages[0].tool_calls.push(ToolCall {
         id: "call".into(),
@@ -345,7 +427,7 @@ fn cancelled_group_serialization_does_not_write_scratch_or_invoke_the_provider()
     }
 
     let mut plan = plan(&["oversized tool group", "tail"]);
-    plan.input_budget = 5;
+    plan.input_budget = 12 + 5;
     plan.groups[0].messages[0].role = Role::Assistant;
     plan.groups[0].messages[0].tool_calls.push(ToolCall {
         id: "call".into(),

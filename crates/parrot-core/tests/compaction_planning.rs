@@ -60,7 +60,7 @@ fn estimate(messages: &[Message]) -> Result<i64, Error> {
                 panic!("these planning inputs contain only text")
             };
             total
-                .checked_add(text.parse::<i64>().unwrap())
+                .checked_add(text.parse::<i64>().unwrap_or(text.len() as i64))
                 .ok_or_else(|| planning_error(PlanningError::TokenOverflow))
         })
 }
@@ -72,24 +72,6 @@ struct PlanningProvider {
 }
 
 impl Provider for PlanningProvider {
-    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
-        assert!(
-            !self.reject_estimates,
-            "an unavailable cut must not estimate groups"
-        );
-        match &self.failure {
-            Some(error) => Err(error.clone()),
-            None => estimate(messages),
-        }
-    }
-    fn estimate_summary_tokens(
-        &self,
-        _: &str,
-        _: i64,
-        next_group: &[Message],
-    ) -> Result<i64, Error> {
-        self.estimate_tokens(next_group)
-    }
     fn estimate_input_tokens(
         &self,
         _: &str,
@@ -100,7 +82,10 @@ impl Provider for PlanningProvider {
             !self.reject_estimates,
             "an unavailable cut must not estimate context"
         );
-        estimate(messages)
+        match &self.failure {
+            Some(error) => Err(error.clone()),
+            None => estimate(messages),
+        }
     }
 }
 
@@ -318,6 +303,36 @@ fn selection_preserves_plan_boundaries_and_checked_suffix_overflow() {
         select(&input(&[1, i64::MAX]), Some(100)),
         Err(planning_error(PlanningError::TokenOverflow))
     );
+}
+
+#[test]
+fn checkpoint_selection_counts_request_overhead_once_for_the_retained_suffix() {
+    struct RequestOverheadProvider;
+
+    impl Provider for RequestOverheadProvider {
+        fn estimate_input_tokens(
+            &self,
+            _: &str,
+            _: &[ToolDefinition],
+            messages: &[Message],
+        ) -> Result<i64, Error> {
+            Ok(20 + estimate(messages)?)
+        }
+    }
+
+    let mut input = input(&[100, 10, 10, 10]);
+    input.groups[1].has_checkpoint_before = true;
+    let plan = CompactionPlan::select_for_target(
+        &input,
+        &[],
+        &configuration(),
+        Some(51),
+        &RequestOverheadProvider,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(plan.keep_group_from, 1);
+    assert_eq!(plan.watermark, 1);
 }
 
 #[test]

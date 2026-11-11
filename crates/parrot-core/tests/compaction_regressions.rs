@@ -153,25 +153,15 @@ impl parrot_core::Cancellation for SummaryCancellation<'_> {
 }
 
 impl Provider for ScriptedSummaryProvider {
-    fn estimate_tokens(&self, messages: &[Message]) -> Result<i64, Error> {
-        Ok(messages.len() as i64)
-    }
-
-    fn estimate_summary_tokens(
-        &self,
-        _: &str,
-        chunk_tokens: i64,
-        next_group: &[Message],
-    ) -> Result<i64, Error> {
-        Ok(chunk_tokens + next_group.len() as i64)
-    }
-
     fn estimate_input_tokens(
         &self,
-        _: &str,
+        instructions: &str,
         _: &[parrot_core::ToolDefinition],
-        _: &[Message],
+        messages: &[Message],
     ) -> Result<i64, Error> {
+        if instructions.is_empty() {
+            return Ok(messages.len() as i64);
+        }
         self.trace.lock().unwrap().push("fit");
         if self.fail_at == Some("fit") {
             Err(native_error("fit"))
@@ -258,7 +248,7 @@ impl Fixture {
                 input_budget: 100,
                 summary_output_tokens: 10,
                 input_token_limit: 100,
-                instructions: String::new(),
+                instructions: "conversation instructions".into(),
                 tools: Vec::new(),
                 fixed_message: Message::default(),
                 summary_instructions: "summarize".into(),

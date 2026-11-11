@@ -309,31 +309,6 @@ impl CompactionPlanner {
         })
     }
 
-    /// Estimate a real next summary request's message shape, without calling the provider.
-    pub fn estimate_summary_request_tokens(
-        &self,
-        selected: &ProviderModel,
-        preceding_summary: &str,
-        chunk_tokens: i64,
-        next_group: &[Message],
-    ) -> Result<i64, PlanningError> {
-        let mut tokens = Self::estimate_message_tokens(
-            selected,
-            &Message::system(&self.settings.summary_instructions),
-        )?;
-        if !preceding_summary.is_empty() {
-            let summary = Message::system(format!(
-                "{}{preceding_summary}",
-                self.settings.summary_prefix
-            ));
-            tokens = add(tokens, Self::estimate_message_tokens(selected, &summary)?)?;
-        }
-        add(
-            add(tokens, Self::estimate_tokens(selected, next_group)?)?,
-            chunk_tokens,
-        )
-    }
-
     pub fn plan_selected(
         &self,
         selected: &ResolvedModelSelection,
@@ -357,7 +332,7 @@ impl CompactionPlanner {
     ) -> Result<Option<RetentionPlan>, PlanningError> {
         let configuration = self.capture_model_configuration(selected);
         let definitions: Vec<_> = input.tools.iter().cloned().map(Into::into).collect();
-        let provider = PlanningProvider::new(self, selected);
+        let provider = PlanningProvider::new(selected);
         let Some(plan) = CompactionPlan::select_for_target(
             &input.capture_input(),
             &definitions,
@@ -383,27 +358,16 @@ impl CompactionPlanner {
 }
 
 pub(crate) struct PlanningProvider<'a> {
-    planner: &'a CompactionPlanner,
     selected: &'a ProviderModel,
 }
 
 impl<'a> PlanningProvider<'a> {
-    pub(crate) fn new(planner: &'a CompactionPlanner, selected: &'a ProviderModel) -> Self {
-        Self { planner, selected }
+    pub(crate) fn new(selected: &'a ProviderModel) -> Self {
+        Self { selected }
     }
 }
 
 impl parrot_core::Provider for PlanningProvider<'_> {
-    fn estimate_tokens(
-        &self,
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        CompactionPlanner::estimate_tokens(
-            self.selected,
-            &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
-        )
-        .map_err(Into::into)
-    }
     fn estimate_input_tokens(
         &self,
         instructions: &str,
@@ -421,21 +385,6 @@ impl parrot_core::Provider for PlanningProvider<'_> {
             &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
         )
         .map_err(Into::into)
-    }
-    fn estimate_summary_tokens(
-        &self,
-        preceding: &str,
-        tokens: i64,
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        self.planner
-            .estimate_summary_request_tokens(
-                self.selected,
-                preceding,
-                tokens,
-                &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
-            )
-            .map_err(Into::into)
     }
 }
 
