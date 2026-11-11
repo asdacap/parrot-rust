@@ -296,8 +296,7 @@ struct TextRequestBody {
 }
 
 impl TextRequestBody {
-    #[allow(clippy::result_large_err)] // returns the vendored tonic Status, which is unboxably large
-    fn decode(&mut self, bytes: &[u8]) -> Result<Bytes, Status> {
+    fn decode(&mut self, bytes: &[u8]) -> Result<Bytes, base64::DecodeError> {
         let mut input = std::mem::take(&mut self.carry);
         input.extend_from_slice(bytes);
         let complete = input.len() / 4 * 4;
@@ -310,11 +309,7 @@ impl TextRequestBody {
                 .iter()
                 .position(|byte| *byte == b'=')
                 .map_or(complete, |index| (start + index) / 4 * 4 + 4);
-            decoded.extend_from_slice(
-                &STANDARD
-                    .decode(&input[start..end])
-                    .map_err(|_| Status::invalid_argument("invalid gRPC-Web base64 request"))?,
-            );
+            decoded.extend_from_slice(&STANDARD.decode(&input[start..end])?);
             start = end;
         }
         Ok(Bytes::from(decoded))
@@ -345,7 +340,10 @@ impl Body for TextRequestBody {
                     Ok(data) => match self.decode(&data) {
                         Ok(decoded) if decoded.is_empty() => continue,
                         Ok(decoded) => return Poll::Ready(Some(Ok(Frame::data(decoded)))),
-                        Err(status) => return self.fail(status),
+                        Err(_) => {
+                            return self
+                                .fail(Status::invalid_argument("invalid gRPC-Web base64 request"));
+                        }
                     },
                     Err(frame) => {
                         if !self.carry.is_empty() {

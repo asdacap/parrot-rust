@@ -31,7 +31,7 @@ pub(crate) enum DynamicRepeated {
 }
 
 impl ReflectRepeated for DynamicRepeated {
-    fn reflect_iter(&self) -> ReflectRepeatedIter {
+    fn reflect_iter(&self) -> ReflectRepeatedIter<'_> {
         match self {
             DynamicRepeated::U32(v) => ReflectRepeatedIter::new_slice(&v),
             DynamicRepeated::U64(v) => ReflectRepeatedIter::new_slice(&v),
@@ -53,7 +53,7 @@ impl ReflectRepeated for DynamicRepeated {
         }
     }
 
-    fn reflect_drain_iter(&mut self) -> ReflectRepeatedDrainIter {
+    fn reflect_drain_iter(&mut self) -> ReflectRepeatedDrainIter<'_> {
         match self {
             DynamicRepeated::U32(v) => ReflectRepeatedDrainIter::new_vec(v),
             DynamicRepeated::U64(v) => ReflectRepeatedDrainIter::new_vec(v),
@@ -90,7 +90,7 @@ impl ReflectRepeated for DynamicRepeated {
         }
     }
 
-    fn get(&self, index: usize) -> ReflectValueRef {
+    fn get(&self, index: usize) -> ReflectValueRef<'_> {
         match self {
             DynamicRepeated::U32(v) => ReflectValueRef::U32(v[index]),
             DynamicRepeated::U64(v) => ReflectValueRef::U64(v[index]),

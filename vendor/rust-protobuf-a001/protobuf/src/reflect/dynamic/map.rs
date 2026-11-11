@@ -137,7 +137,7 @@ impl<'a, K: ProtobufValue + Eq + Hash + 'static> ReflectMapIterTrait<'a>
 }
 
 impl ReflectMap for DynamicMap {
-    fn reflect_iter(&self) -> ReflectMapIter {
+    fn reflect_iter(&self) -> ReflectMapIter<'_> {
         match &self.maps {
             Maps::U32(m) => ReflectMapIter::new(DynamicMapIterImpl {
                 iter: m.iter(),

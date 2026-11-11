@@ -20,10 +20,10 @@ use crate::reflect::ReflectValueBox;
 use crate::reflect::RuntimeType;
 
 pub(crate) trait ReflectRepeated: Sync + 'static + fmt::Debug {
-    fn reflect_iter(&self) -> ReflectRepeatedIter;
-    fn reflect_drain_iter(&mut self) -> ReflectRepeatedDrainIter;
+    fn reflect_iter(&self) -> ReflectRepeatedIter<'_>;
+    fn reflect_drain_iter(&mut self) -> ReflectRepeatedDrainIter<'_>;
     fn len(&self) -> usize;
-    fn get(&self, index: usize) -> ReflectValueRef;
+    fn get(&self, index: usize) -> ReflectValueRef<'_>;
     /// Set element at index.
     ///
     /// # Panics
@@ -87,7 +87,7 @@ impl<V: ProtobufValue> ReflectRepeated for Vec<V> {
         Vec::len(self)
     }
 
-    fn get(&self, index: usize) -> ReflectValueRef {
+    fn get(&self, index: usize) -> ReflectValueRef<'_> {
         V::RuntimeType::as_ref(&self[index])
     }
 

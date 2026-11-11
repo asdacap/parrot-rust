@@ -115,7 +115,7 @@ impl<'a> Parser<'a> {
 
     fn read_i32(&mut self) -> ParseResult<i32> {
         let value = self.read_i64()?;
-        if value < i32::min_value() as i64 || value > i32::max_value() as i64 {
+        if value < i32::MIN as i64 || value > i32::MAX as i64 {
             return Err(ParseErrorWithoutLoc::IntegerOverflow);
         }
         Ok(value as i32)

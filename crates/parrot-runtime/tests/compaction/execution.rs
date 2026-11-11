@@ -27,8 +27,8 @@ use parrot_provider::{
     },
 };
 use parrot_runtime::compaction::{
-    CompactionError, CompactionObserver, CompactionResult, CompactionSettings, Compactor,
-    PlanningError, PlanningInput,
+    CompactionError, CompactionObserver, CompactionResources, CompactionResult, CompactionSettings,
+    Compactor, PlanningError, PlanningInput,
 };
 use parrot_storage::artifacts::compaction::CompactionGroupBlobStore;
 use std::{
@@ -260,10 +260,12 @@ impl Fixture {
                     base_watermark: 0,
                     fixed_message: &Message::system("status"),
                 },
-                &mut self.blobs,
-                &self.sessions,
-                &self.observer,
-                self.token.as_ref(),
+                CompactionResources {
+                    blobs: &mut self.blobs,
+                    sessions: &self.sessions,
+                    observer: &self.observer,
+                    cancellation: self.token.as_ref(),
+                },
             )
             .await
     }

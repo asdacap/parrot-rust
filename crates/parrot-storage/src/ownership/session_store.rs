@@ -666,7 +666,6 @@ pub struct SessionStore {
     global: Arc<FileDiagnosticLog>,
 }
 impl SessionStore {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         admissions: Arc<SessionAdmissions>,
         launch_directory: PathBuf,

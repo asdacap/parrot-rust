@@ -795,7 +795,16 @@ async fn malformed_and_truncated_text_returns_status_without_rpc_dispatch() {
         let frames = frames(&decode_text(&body));
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].0, 0x80);
-        assert!(String::from_utf8_lossy(&frames[0].1).contains("grpc-status: 3\r\n"));
+        let trailers = String::from_utf8_lossy(&frames[0].1);
+        assert!(trailers.contains("grpc-status: 3\r\n"));
+        assert_native_message(
+            &trailers,
+            if invalid == "AAA" {
+                "incomplete gRPC-Web base64 request"
+            } else {
+                "invalid gRPC-Web base64 request"
+            },
+        );
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     server.close().await.unwrap();

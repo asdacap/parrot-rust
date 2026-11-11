@@ -1,7 +1,9 @@
 //! Provider budgets, causal summary execution and awaited durable context epochs.
 mod budget;
 mod execution;
-pub use execution::{CompactionError, CompactionObserver, CompactionResult, Compactor};
+pub use execution::{
+    CompactionError, CompactionObserver, CompactionResources, CompactionResult, Compactor,
+};
 pub(crate) use execution::{CompactionEstimates, SummaryText, progress_event};
 mod context;
 mod conversation;

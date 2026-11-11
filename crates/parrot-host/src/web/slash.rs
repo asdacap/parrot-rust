@@ -141,7 +141,7 @@ impl ParrotWeb for WebSlashService {
         request: Request<web::RunSlashCommandRequest>,
     ) -> Result<Response<Self::RunSlashCommandStream>, Status> {
         let request = request.into_inner();
-        let run_id = random_id()?;
+        let run_id = random_id().map_err(|error| Status::internal(error.to_string()))?;
         let (frames, receiver) = mpsc::unbounded_channel();
         let dialog = Arc::new(WebSlashDialog::new(frames));
         self.runs

@@ -38,9 +38,6 @@ pub(crate) trait ProtobufTypeTrait: Send + Sync + Clone + Sized + 'static {
         &_ProtobufTypeDynamicImpl::<Self>(marker::PhantomData)
     }
 
-    /// Wire type for encoding objects of this type
-    const WIRE_TYPE: WireType;
-
     /// Read a value from `CodedInputStream`
     fn read(is: &mut CodedInputStream) -> Result<Self::ProtobufValue>;
 
@@ -50,32 +47,10 @@ pub(crate) trait ProtobufTypeTrait: Send + Sync + Clone + Sized + 'static {
     /// Compute serialized size of a value
     fn _compute_size(value: &Self::ProtobufValue) -> u64;
 
-    /// Compute size adding length prefix if wire type is length delimited
-    /// (i. e. string, bytes, message)
-    fn _compute_size_with_length_delimiter(value: &Self::ProtobufValue) -> u64 {
-        let size = Self::_compute_size(value);
-        if Self::WIRE_TYPE == WireType::LengthDelimited {
-            rt::compute_raw_varint64_size(size) + size
-        } else {
-            size
-        }
-    }
-
     /// Get previously computed size
     #[inline]
     fn _get_cached_size(value: &Self::ProtobufValue) -> u32 {
         Self::_compute_size(value) as u32
-    }
-
-    /// Get previously cached size with length prefix
-    #[inline]
-    fn _get_cached_size_with_length_delimiter(value: &Self::ProtobufValue) -> u32 {
-        let size = Self::_get_cached_size(value);
-        if Self::WIRE_TYPE == WireType::LengthDelimited {
-            rt::compute_raw_varint32_size(size) as u32 + size
-        } else {
-            size
-        }
     }
 
     /// Write a value with previously cached size
@@ -159,8 +134,6 @@ pub struct ProtobufTypeMessage<M: Message>(marker::PhantomData<M>);
 impl ProtobufTypeTrait for ProtobufTypeFloat {
     type ProtobufValue = f32;
 
-    const WIRE_TYPE: WireType = WireType::Fixed32;
-
     fn read(is: &mut CodedInputStream) -> Result<f32> {
         is.read_float()
     }
@@ -191,8 +164,6 @@ impl ProtobufTypeFixed for ProtobufTypeFloat {
 
 impl ProtobufTypeTrait for ProtobufTypeDouble {
     type ProtobufValue = f64;
-
-    const WIRE_TYPE: WireType = WireType::Fixed64;
 
     fn read(is: &mut CodedInputStream) -> Result<f64> {
         is.read_double()
@@ -225,8 +196,6 @@ impl ProtobufTypeFixed for ProtobufTypeDouble {
 impl ProtobufTypeTrait for ProtobufTypeInt32 {
     type ProtobufValue = i32;
 
-    const WIRE_TYPE: WireType = WireType::Varint;
-
     fn read(is: &mut CodedInputStream) -> Result<i32> {
         is.read_int32()
     }
@@ -258,8 +227,6 @@ impl ProtobufTypeTrait for ProtobufTypeInt32 {
 impl ProtobufTypeTrait for ProtobufTypeInt64 {
     type ProtobufValue = i64;
 
-    const WIRE_TYPE: WireType = WireType::Varint;
-
     fn read(is: &mut CodedInputStream) -> Result<i64> {
         is.read_int64()
     }
@@ -286,8 +253,6 @@ impl ProtobufTypeTrait for ProtobufTypeInt64 {
 
 impl ProtobufTypeTrait for ProtobufTypeUint32 {
     type ProtobufValue = u32;
-
-    const WIRE_TYPE: WireType = WireType::Varint;
 
     fn read(is: &mut CodedInputStream) -> Result<u32> {
         is.read_uint32()
@@ -316,8 +281,6 @@ impl ProtobufTypeTrait for ProtobufTypeUint32 {
 impl ProtobufTypeTrait for ProtobufTypeUint64 {
     type ProtobufValue = u64;
 
-    const WIRE_TYPE: WireType = WireType::Varint;
-
     fn read(is: &mut CodedInputStream) -> Result<u64> {
         is.read_uint64()
     }
@@ -345,8 +308,6 @@ impl ProtobufTypeTrait for ProtobufTypeUint64 {
 impl ProtobufTypeTrait for ProtobufTypeSint32 {
     type ProtobufValue = i32;
 
-    const WIRE_TYPE: WireType = WireType::Varint;
-
     fn read(is: &mut CodedInputStream) -> Result<i32> {
         is.read_sint32()
     }
@@ -371,8 +332,6 @@ impl ProtobufTypeTrait for ProtobufTypeSint32 {
 impl ProtobufTypeTrait for ProtobufTypeSint64 {
     type ProtobufValue = i64;
 
-    const WIRE_TYPE: WireType = WireType::Varint;
-
     fn read(is: &mut CodedInputStream) -> Result<i64> {
         is.read_sint64()
     }
@@ -396,8 +355,6 @@ impl ProtobufTypeTrait for ProtobufTypeSint64 {
 
 impl ProtobufTypeTrait for ProtobufTypeFixed32 {
     type ProtobufValue = u32;
-
-    const WIRE_TYPE: WireType = WireType::Fixed32;
 
     fn read(is: &mut CodedInputStream) -> Result<u32> {
         is.read_fixed32()
@@ -430,8 +387,6 @@ impl ProtobufTypeFixed for ProtobufTypeFixed32 {
 impl ProtobufTypeTrait for ProtobufTypeFixed64 {
     type ProtobufValue = u64;
 
-    const WIRE_TYPE: WireType = WireType::Fixed64;
-
     fn read(is: &mut CodedInputStream) -> Result<u64> {
         is.read_fixed64()
     }
@@ -462,8 +417,6 @@ impl ProtobufTypeFixed for ProtobufTypeFixed64 {
 
 impl ProtobufTypeTrait for ProtobufTypeSfixed32 {
     type ProtobufValue = i32;
-
-    const WIRE_TYPE: WireType = WireType::Fixed32;
 
     fn read(is: &mut CodedInputStream) -> Result<i32> {
         is.read_sfixed32()
@@ -496,8 +449,6 @@ impl ProtobufTypeFixed for ProtobufTypeSfixed32 {
 impl ProtobufTypeTrait for ProtobufTypeSfixed64 {
     type ProtobufValue = i64;
 
-    const WIRE_TYPE: WireType = WireType::Fixed64;
-
     fn read(is: &mut CodedInputStream) -> Result<i64> {
         is.read_sfixed64()
     }
@@ -529,8 +480,6 @@ impl ProtobufTypeFixed for ProtobufTypeSfixed64 {
 impl ProtobufTypeTrait for ProtobufTypeBool {
     type ProtobufValue = bool;
 
-    const WIRE_TYPE: WireType = WireType::Varint;
-
     fn read(is: &mut CodedInputStream) -> Result<bool> {
         is.read_bool()
     }
@@ -558,8 +507,6 @@ impl ProtobufTypeTrait for ProtobufTypeBool {
 impl ProtobufTypeTrait for ProtobufTypeString {
     type ProtobufValue = String;
 
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
-
     fn read(is: &mut CodedInputStream) -> Result<String> {
         is.read_string()
     }
@@ -586,8 +533,6 @@ impl ProtobufTypeTrait for ProtobufTypeString {
 
 impl ProtobufTypeTrait for ProtobufTypeBytes {
     type ProtobufValue = Vec<u8>;
-
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
     fn read(is: &mut CodedInputStream) -> Result<Vec<u8>> {
         is.read_bytes()
@@ -617,8 +562,6 @@ impl ProtobufTypeTrait for ProtobufTypeBytes {
 impl ProtobufTypeTrait for ProtobufTypeTokioBytes {
     type ProtobufValue = bytes::Bytes;
 
-    const WIRE_TYPE: WireType = ProtobufTypeBytes::WIRE_TYPE;
-
     fn read(is: &mut CodedInputStream) -> Result<Bytes> {
         is.read_tokio_bytes()
     }
@@ -644,8 +587,6 @@ impl ProtobufTypeTrait for ProtobufTypeTokioBytes {
 impl ProtobufTypeTrait for ProtobufTypeTokioChars {
     type ProtobufValue = Chars;
 
-    const WIRE_TYPE: WireType = ProtobufTypeBytes::WIRE_TYPE;
-
     fn read(is: &mut CodedInputStream) -> Result<Chars> {
         is.read_tokio_chars()
     }
@@ -670,8 +611,6 @@ impl ProtobufTypeTrait for ProtobufTypeTokioChars {
 impl<E: Enum> ProtobufTypeTrait for ProtobufTypeEnumOrUnknown<E> {
     type ProtobufValue = EnumOrUnknown<E>;
 
-    const WIRE_TYPE: WireType = WireType::Varint;
-
     fn read(is: &mut CodedInputStream) -> Result<EnumOrUnknown<E>> {
         is.read_enum_or_unknown()
     }
@@ -695,8 +634,6 @@ impl<E: Enum> ProtobufTypeTrait for ProtobufTypeEnumOrUnknown<E> {
 
 impl<M: Message + Clone + Default> ProtobufTypeTrait for ProtobufTypeMessage<M> {
     type ProtobufValue = M;
-
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
     fn read(is: &mut CodedInputStream) -> Result<M> {
         is.read_message()

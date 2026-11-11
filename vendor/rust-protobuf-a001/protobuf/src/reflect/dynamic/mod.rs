@@ -68,7 +68,7 @@ enum DynamicFieldValue {
 }
 
 impl DynamicFieldValue {
-    fn as_ref(&self) -> ReflectFieldRef {
+    fn as_ref(&self) -> ReflectFieldRef<'_> {
         match self {
             DynamicFieldValue::Singular(v) => ReflectFieldRef::Optional(v.reflect_singlar_ref()),
             DynamicFieldValue::Repeated(r) => ReflectFieldRef::Repeated(ReflectRepeatedRef::new(r)),

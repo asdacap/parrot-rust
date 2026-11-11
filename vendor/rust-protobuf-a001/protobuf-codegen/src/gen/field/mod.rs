@@ -97,7 +97,7 @@ pub(crate) enum SingularOrOneofField<'a> {
 }
 
 impl<'a> SingularOrOneofField<'a> {
-    fn elem(&self) -> &FieldElem {
+    fn elem(&self) -> &FieldElem<'_> {
         match self {
             SingularOrOneofField::Singular(SingularField { ref elem, .. }) => elem,
             SingularOrOneofField::Oneof(OneofField { ref elem, .. }) => elem,
@@ -289,7 +289,7 @@ impl<'a> FieldGen<'a> {
         }
     }
 
-    pub(crate) fn elem(&self) -> &FieldElem {
+    pub(crate) fn elem(&self) -> &FieldElem<'_> {
         match self.kind {
             FieldKind::Singular(SingularField { ref elem, .. }) => &elem,
             FieldKind::Repeated(RepeatedField { ref elem, .. }) => &elem,
