@@ -107,6 +107,41 @@ async fn raw_cost_messages_preserve_nan_bits_without_partial_eq_rejection() {
 }
 
 #[tokio::test]
+async fn replay_after_cursor_returns_the_suffix_and_unknown_cursor_returns_everything() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    for id in ["before", "cursor", "after", "later"] {
+        let mut event = Event::new();
+        event.id = id.into();
+        event.agent_session_id = "agent".into();
+        repository
+            .transaction(move |tx| {
+                parrot_storage::events::record(tx, &event, None, "2026-01-02T03:04:05Z")
+            })
+            .await
+            .unwrap();
+    }
+    let all = repository.replay().await.unwrap();
+    assert_eq!(
+        all.iter()
+            .map(|event| event.id.as_str())
+            .collect::<Vec<_>>(),
+        ["before", "cursor", "after", "later"]
+    );
+    let suffix = repository.replay_after("cursor").await.unwrap();
+    assert_eq!(
+        suffix
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect::<Vec<_>>(),
+        ["after", "later"]
+    );
+    assert_eq!(repository.replay_after("missing").await.unwrap(), all);
+    assert_eq!(repository.replay_after("").await.unwrap(), all);
+    repository.database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn actor_repository_errors_roll_back_and_replay_retains_exact_raw_bytes() {
     use protobuf::Message;
     let fixture = Fixture::new();

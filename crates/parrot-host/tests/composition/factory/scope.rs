@@ -1101,7 +1101,7 @@ async fn legacy_queue_files_do_not_block_completion_or_publish_inventory() {
         .broker
         .listen(
             None,
-            || async { Ok::<_, RpcError>(Vec::new()) },
+            |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
             || async { Ok::<_, RpcError>(Vec::new()) },
         )
         .await
@@ -1144,7 +1144,7 @@ async fn actual_constructor_rejections_do_not_register_or_keep_owned_producers_a
             .broker
             .listen(
                 None,
-                || async { Ok::<_, RpcError>(Vec::new()) },
+                |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
                 || async { Ok::<_, RpcError>(Vec::new()) },
             )
             .await
@@ -1326,7 +1326,7 @@ async fn dropped_hosted_permission_reply_observer_is_joined_before_actual_broker
         .broker
         .listen(
             None,
-            || async { Ok::<_, RpcError>(Vec::new()) },
+            |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
             || async { Ok::<_, RpcError>(Vec::new()) },
         )
         .await
@@ -2157,7 +2157,7 @@ fn actual_hosted_status_live_build_survives_observer_runtime_drop_and_blocks_clo
             .broker
             .listen(
                 None,
-                || async { Ok::<_, RpcError>(Vec::new()) },
+                |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
                 || async { Ok::<_, RpcError>(Vec::new()) },
             )
             .await

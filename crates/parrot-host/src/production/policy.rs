@@ -125,11 +125,11 @@ impl ProductionWriteTarget {
     }
 
     fn permits(&self, path: &Path) -> bool {
-        self.validate().is_ok()
-            && match self.kind {
-                WriteTargetKind::Directory => path.starts_with(&self.path),
-                WriteTargetKind::File => path == self.path,
-            }
+        let matches = match self.kind {
+            WriteTargetKind::Directory => path.starts_with(&self.path),
+            WriteTargetKind::File => path == self.path,
+        };
+        matches && self.validate().is_ok()
     }
 }
 

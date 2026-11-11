@@ -303,7 +303,13 @@ where
         self.broker
             .listen(
                 cursor.as_deref(),
-                || self.history.repository().events().replay(),
+                |cursor| async move {
+                    self.history
+                        .repository()
+                        .events()
+                        .replay_after(&cursor)
+                        .await
+                },
                 move || async move {
                     let mut snapshots = capture_scopes().await?;
                     let mut usage = Event::new();

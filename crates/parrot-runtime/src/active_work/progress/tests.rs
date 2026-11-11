@@ -249,7 +249,7 @@ async fn initial_capture_after_live_update_returns_current_state_without_a_new_t
     ));
     let (release, captured) = tokio::sync::oneshot::channel();
     let subscription = broker
-        .listen(None, || async { Ok::<_, ChildError>(vec![]) }, {
+        .listen(None, |_| async { Ok::<_, ChildError>(vec![]) }, {
             let publisher = publisher.clone();
             move || async move {
                 captured.await.unwrap();

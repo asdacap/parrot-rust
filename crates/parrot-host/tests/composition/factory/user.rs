@@ -42,7 +42,7 @@ fn stream(
         let subscription = broker
             .listen(
                 cursor.as_deref(),
-                move || async move { Ok::<_, RpcError>(replay) },
+                move |_cursor| async move { Ok::<_, RpcError>(replay) },
                 move || async move { Ok::<_, RpcError>(initial) },
             )
             .await?;
@@ -65,7 +65,7 @@ async fn actual_broker_listen_replays_then_snapshots_then_deduplicated_live_and_
         let subscription = captured
             .listen(
                 Some("anchor"),
-                move || async move {
+                move |_cursor| async move {
                     during_replay.publish_retained(&event("replayed"));
                     during_replay.publish_retained(&event("live"));
                     Ok::<_, RpcError>(vec![event("anchor"), event("replayed")])
@@ -134,7 +134,7 @@ async fn canceled_next_preserves_pending_initialization_and_subscription_lifetim
         let subscription = input
             .listen(
                 None,
-                || async { Ok::<_, RpcError>(Vec::new()) },
+                |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
                 || async { Ok::<_, RpcError>(vec![event("initial")]) },
             )
             .await?;
@@ -831,7 +831,7 @@ async fn actual_permission_adapter_publishes_exact_durably_stored_event() {
     let subscription = broker
         .listen(
             None,
-            || async { Ok::<_, RpcError>(Vec::new()) },
+            |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
             || async { Ok::<_, RpcError>(Vec::new()) },
         )
         .await
@@ -900,7 +900,7 @@ async fn dropped_request_observer_keeps_actual_append_publication_and_pending_cl
     let subscription = broker
         .listen(
             None,
-            || async { Ok::<_, RpcError>(Vec::new()) },
+            |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
             || async { Ok::<_, RpcError>(Vec::new()) },
         )
         .await

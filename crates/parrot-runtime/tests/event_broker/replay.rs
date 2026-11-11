@@ -73,15 +73,19 @@ async fn real_store_commit_during_replay_then_initial_capture_has_no_gap_or_doub
     let listener = broker
         .listen(
             Some("cursor"),
-            || async {
-                // listen must already own its live subscription when storage
-                // is called. This event lands in both the real store and live.
-                let overlap = fixture.commit(event("overlap")).await;
-                broker
-                    .publish_committed(&overlap, &NeverCancelled)
-                    .await
-                    .unwrap();
-                fixture.repository.replay().await
+            |cursor| {
+                let fixture = &fixture;
+                let broker = &broker;
+                async move {
+                    // listen must already own its live subscription when storage
+                    // is called. This event lands in both the real store and live.
+                    let overlap = fixture.commit(event("overlap")).await;
+                    broker
+                        .publish_committed(&overlap, &NeverCancelled)
+                        .await
+                        .unwrap();
+                    fixture.repository.replay_after(&cursor).await
+                }
             },
             || async {
                 // A genuine update during initial snapshot capture must remain
@@ -137,7 +141,7 @@ async fn no_cursor_skips_storage_but_does_not_deduplicate_initial_against_live()
     let listener = broker
         .listen(
             None,
-            || async { panic!("None must not load persisted events") },
+            |_cursor| async { panic!("None must not load persisted events") },
             || async {
                 broker
                     .publish_transient(event("same-id"), &NeverCancelled)
@@ -173,7 +177,10 @@ async fn empty_or_unknown_cursor_replays_actual_stored_duplicate_terminal_payloa
         let listener = broker
             .listen(
                 Some(cursor),
-                || fixture.repository.replay(),
+                |cursor| {
+                    let repository = &fixture.repository;
+                    async move { repository.replay_after(&cursor).await }
+                },
                 || async { Ok::<_, EventError>(vec![usage()]) },
             )
             .await
@@ -202,7 +209,7 @@ async fn replay_failure_is_returned_without_capturing_initial_state() {
     let result = broker
         .listen(
             Some("cursor"),
-            || async { Err::<Vec<Event>, _>("read failed") },
+            |_cursor| async { Err::<Vec<Event>, _>("read failed") },
             || async { panic!("failed replay must stop assembly") },
         )
         .await;
@@ -221,7 +228,7 @@ async fn initial_capture_failure_is_visible_only_after_the_persisted_suffix() {
     let listener = broker
         .listen(
             Some("cursor"),
-            || async { Ok(vec![event("persisted")]) },
+            |_cursor| async { Ok(vec![event("persisted")]) },
             || async { Err::<Vec<Event>, _>("capture failed") },
         )
         .await
@@ -251,7 +258,7 @@ async fn dropping_pending_assembly_does_not_close_the_broker_or_replay_old_live_
     let token = Token::default();
     let mut pending = Box::pin(broker.listen(
         Some("cursor"),
-        std::future::pending::<Result<Vec<Event>, ()>>,
+        |_cursor| std::future::pending::<Result<Vec<Event>, ()>>(),
         || async { Ok(vec![usage()]) },
     ));
     assert!(poll_once(pending.as_mut()).is_pending());
@@ -263,7 +270,7 @@ async fn dropping_pending_assembly_does_not_close_the_broker_or_replay_old_live_
     let listener = broker
         .listen(
             None,
-            || async { panic!("no replay") },
+            |_cursor| async { panic!("no replay") },
             || async { Ok::<_, ()>(vec![usage()]) },
         )
         .await
@@ -289,7 +296,10 @@ async fn slow_replay_consumer_captures_fresh_inventory_only_after_consuming_repl
     let listener = broker
         .listen(
             Some("unknown"),
-            || fixture.repository.replay(),
+            |cursor| {
+                let repository = &fixture.repository;
+                async move { repository.replay_after(&cursor).await }
+            },
             || async {
                 captures.fetch_add(1, Ordering::SeqCst);
                 let mut initial = inventory("queue", "child", revision.load(Ordering::SeqCst), 1);
@@ -336,7 +346,7 @@ async fn dropping_an_initial_read_observation_does_not_skip_or_restart_capture()
     let listener = broker
         .listen(
             Some("unknown"),
-            || async { Ok::<_, ()>(vec![event("persisted")]) },
+            |_cursor| async { Ok::<_, ()>(vec![event("persisted")]) },
             || async {
                 captures.fetch_add(1, Ordering::SeqCst);
                 ready.notified().await;
@@ -374,7 +384,7 @@ async fn cancelling_initial_observation_preserves_owned_capture_for_a_later_read
     let listener = broker
         .listen(
             None,
-            || async { panic!("no replay") },
+            |_cursor| async { panic!("no replay") },
             || async {
                 captures.fetch_add(1, Ordering::SeqCst);
                 ready.notified().await;
