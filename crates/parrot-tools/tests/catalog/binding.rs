@@ -218,7 +218,7 @@ impl Fixture {
             self.templates.clone(),
         );
         invocation.assistant_sequence = 9_007_199_254_740_993;
-        invocation.prompt_templates = Some(self.templates.clone());
+        invocation.prompt_templates = self.templates.clone();
         let tool = self.find(name).unwrap().create();
         tool.invoke(
             invocation,

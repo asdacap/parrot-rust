@@ -121,8 +121,7 @@ async fn main() {
         "during-transaction" => {
             repository
                 .transaction(move |transaction| -> Result<(), EventError> {
-                    let outcome =
-                        close_turn_if_open(transaction, &key, &proposed, Some(&message))?;
+                    let outcome = close_turn_if_open(transaction, &key, &proposed, Some(&message))?;
                     assert_eq!(outcome.closure, TurnClosure::NewlyClosed);
                     assert_eq!(count_rows(transaction, "event"), 2);
                     for table in ["conversation_part", "conversation_item"] {
