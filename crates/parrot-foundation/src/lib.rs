@@ -1,5 +1,6 @@
 //! Configuration, prompt templates, credentials, and authentication.
 
+pub mod clock;
 pub mod config;
 pub mod credentials;
 pub mod oauth;

@@ -14,6 +14,7 @@ parrot-domain = { path = "../parrot-domain" }
 parrot-foundation = { path = "../parrot-foundation" }
 parrot-provider = { path = "../parrot-provider" }
 parrot-storage = { path = "../parrot-storage" }
+parrot-runtime = { path = "../parrot-runtime" }
 protobuf = "=3.7.2"
 reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "=1.0.229", default-features = false, features = ["std"] }

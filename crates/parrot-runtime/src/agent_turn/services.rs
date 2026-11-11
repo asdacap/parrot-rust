@@ -5,6 +5,7 @@ use crate::{
     event_broker::BrokerError,
     prompt_context::{AgentSkills, PromptError, PromptResult},
 };
+use parrot_core::ErrorCode;
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation, OperationError},
     filesystem::AuthorizedReadService,
@@ -238,52 +239,48 @@ impl TurnError {
             super::lifecycle::LifecycleError::Failed(self.to_string())
         }
     }
-    pub fn diagnostic_code(&self) -> &'static str {
-        use parrot_provider::sessions::{
-            diagnostic_session::failure_kind, diagnostics::FailureKind,
-        };
+    pub fn diagnostic_code(&self) -> ErrorCode {
+        use parrot_provider::sessions::diagnostic_session::failure_code;
         if self.is_cancelled() {
-            return "cancelled";
+            return ErrorCode::Cancelled;
         }
         match self {
-            Self::Core(error) => error.code.code(),
+            Self::Core(error) => error.code,
             Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) => {
-                failure_kind(error).code()
+                failure_code(error)
             }
-            Self::ProviderCall(ProviderCallError::Output(error)) => {
-                FailureKind::from_io(error).code()
-            }
+            Self::ProviderCall(ProviderCallError::Output(error)) => ErrorCode::from_io(error),
             Self::Storage(error) | Self::ProviderCall(ProviderCallError::Storage(error)) => {
                 storage_code(error)
             }
             Self::Context(ContextError::Compaction(
                 crate::compaction::CompactionError::Provider(error),
-            )) => failure_kind(error).code(),
+            )) => failure_code(error),
             Self::Context(ContextError::History(error)) => storage_code(error),
-            Self::Context(ContextError::InvalidOperation(_)) => "invalid_operation",
-            Self::Context(ContextError::Argument(_)) => "argument",
+            Self::Context(ContextError::InvalidOperation(_)) => ErrorCode::InvalidOperation,
+            Self::Context(ContextError::Argument(_)) => ErrorCode::Argument,
             Self::Planning(error)
             | Self::Context(ContextError::Compaction(
                 crate::compaction::CompactionError::Planning(error),
             )) => planning_code(*error),
-            Self::Context(ContextError::Identifier(error)) => FailureKind::from_io(error).code(),
+            Self::Context(ContextError::Identifier(error)) => ErrorCode::from_io(error),
             Self::Prompt(error) | Self::Context(ContextError::Prompt(error)) => prompt_code(error),
             Self::Context(ContextError::Compaction(
                 crate::compaction::CompactionError::InvalidOperation(_),
-            )) => "invalid_operation",
+            )) => ErrorCode::InvalidOperation,
             Self::Context(ContextError::Compaction(crate::compaction::CompactionError::Blob(
                 error,
             ))) => match error.kind {
                 parrot_storage::artifacts::compaction::CompactionErrorKind::Io => error
                     .native_error
                     .as_ref()
-                    .map_or("io", |error| FailureKind::from_io(error).code()),
+                    .map_or(ErrorCode::Io, ErrorCode::from_io),
                 parrot_storage::artifacts::compaction::CompactionErrorKind::InvalidOperation => {
-                    "invalid_operation"
+                    ErrorCode::InvalidOperation
                 }
-                _ => "unexpected",
+                _ => ErrorCode::Unexpected,
             },
-            _ => "unexpected",
+            _ => ErrorCode::Unexpected,
         }
     }
     pub fn is_cancelled(&self) -> bool {
@@ -318,38 +315,38 @@ impl TurnError {
         )
     }
 }
-fn planning_code(error: crate::compaction::PlanningError) -> &'static str {
+fn planning_code(error: crate::compaction::PlanningError) -> ErrorCode {
     match error {
-        crate::compaction::PlanningError::TokenOverflow => "unexpected",
-        _ => "invalid_operation",
+        crate::compaction::PlanningError::TokenOverflow => ErrorCode::Unexpected,
+        _ => ErrorCode::InvalidOperation,
     }
 }
-fn storage_code(error: &EventError) -> &'static str {
+fn storage_code(error: &EventError) -> ErrorCode {
     match error {
         EventError::Database(parrot_storage::database::DatabaseError::Io(error)) => {
-            parrot_provider::sessions::diagnostics::FailureKind::from_io(error).code()
+            ErrorCode::from_io(error)
         }
-        EventError::Database(parrot_storage::database::DatabaseError::Protobuf(_)) => "io",
+        EventError::Database(parrot_storage::database::DatabaseError::Protobuf(_)) => ErrorCode::Io,
         EventError::Database(parrot_storage::database::DatabaseError::Closed)
         | EventError::Invalid(_)
-        | EventError::Conflict(_) => "invalid_operation",
-        EventError::Argument(_) => "argument",
-        _ => "unexpected",
+        | EventError::Conflict(_) => ErrorCode::InvalidOperation,
+        EventError::Argument(_) => ErrorCode::Argument,
+        _ => ErrorCode::Unexpected,
     }
 }
-fn prompt_code(error: &PromptError) -> &'static str {
+fn prompt_code(error: &PromptError) -> ErrorCode {
     use parrot_domain::contracts::filesystem::FileReadErrorKind;
     match error {
-        PromptError::Cancelled => "cancelled",
-        PromptError::InvalidProviderKey => "argument",
+        PromptError::Cancelled => ErrorCode::Cancelled,
+        PromptError::InvalidProviderKey => ErrorCode::Argument,
         PromptError::Read(error) => match error.kind {
-            FileReadErrorKind::Denied => "access_denied",
-            FileReadErrorKind::InvalidPath => "argument",
-            FileReadErrorKind::InvalidOperation => "invalid_operation",
-            FileReadErrorKind::NotSupported => "unexpected",
-            _ => "io",
+            FileReadErrorKind::Denied => ErrorCode::AccessDenied,
+            FileReadErrorKind::InvalidPath => ErrorCode::Argument,
+            FileReadErrorKind::InvalidOperation => ErrorCode::InvalidOperation,
+            FileReadErrorKind::NotSupported => ErrorCode::Unexpected,
+            _ => ErrorCode::Io,
         },
-        _ => "unexpected",
+        _ => ErrorCode::Unexpected,
     }
 }
 fn provider_cancelled(error: &sessions::Error) -> bool {

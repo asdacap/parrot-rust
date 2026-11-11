@@ -12,6 +12,7 @@ use parrot_domain::contracts::runtime::AgentRuntime;
 use parrot_domain::contracts::security::InvocationContext;
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
+use parrot_foundation::config::json_string;
 
 use input::{SendInput, SpawnInput, WaitInput, parse_interrupt_name, parse_status_name};
 use status::{StatusFormatter, StatusSnapshot};
@@ -389,30 +390,4 @@ impl Cancellation for Uncancelled {
     fn cancelled(&self) -> BoxFuture<'_, ()> {
         Box::pin(std::future::pending())
     }
-}
-
-fn json_string(value: &str) -> String {
-    use std::fmt::Write;
-    let mut output = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            '\u{8}' => output.push_str("\\b"),
-            '\u{c}' => output.push_str("\\f"),
-            ' '..='~' if !matches!(character, '"' | '\'' | '&' | '<' | '>' | '+' | '`') => {
-                output.push(character)
-            }
-            _ => {
-                let mut units = [0; 2];
-                for unit in character.encode_utf16(&mut units) {
-                    write!(output, "\\u{unit:04X}").expect("string write");
-                }
-            }
-        }
-    }
-    output.push('"');
-    output
 }

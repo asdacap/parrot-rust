@@ -1,3 +1,4 @@
+use crate::wire::encode_base64;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -271,30 +272,8 @@ fn image_reference(content: &impl ContentView) -> Result<String, RequestError> {
     Ok(format!(
         "data:{};base64,{}",
         content.media_type(),
-        base64(&content.read_image()?)
+        encode_base64(&content.read_image()?)
     ))
-}
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let a = chunk[0];
-        let b = *chunk.get(1).unwrap_or(&0);
-        let c = *chunk.get(2).unwrap_or(&0);
-        output.push(ALPHABET[(a >> 2) as usize] as char);
-        output.push(ALPHABET[(((a & 3) << 4) | (b >> 4)) as usize] as char);
-        output.push(if chunk.len() > 1 {
-            ALPHABET[(((b & 15) << 2) | (c >> 6)) as usize] as char
-        } else {
-            '='
-        });
-        output.push(if chunk.len() > 2 {
-            ALPHABET[(c & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    output
 }
 fn wrap_system_update(text: &str) -> String {
     let escaped = text

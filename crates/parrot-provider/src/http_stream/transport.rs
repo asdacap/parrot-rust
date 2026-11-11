@@ -353,7 +353,7 @@ async fn parse_error(
         error_type: sanitize(&fields.0, 128),
         error_code: sanitize(&fields.1, 128),
         detail,
-        response_body: bound_response_body(&body),
+        response_body: crate::wire::bound_body(&body),
     }))
 }
 
@@ -443,26 +443,14 @@ fn sanitize(value: &str, limit: usize) -> String {
     )
 }
 
-fn bound_response_body(body: &str) -> String {
-    const MARKER: &str = "\n… [truncated]";
-    if body.len() <= MAX_ERROR_BYTES {
-        return body.to_owned();
-    }
-    let mut end = MAX_ERROR_BYTES - MARKER.len();
-    while !body.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}{MARKER}", &body[..end])
-}
-
 #[cfg(test)]
 mod original_helper_tests {
-    use super::bound_response_body;
+    use crate::wire::bound_body;
 
     #[test]
     fn source_response_bodies_are_bounded_without_splitting_utf8() {
         let body = "界".repeat(30_000);
-        let bounded = bound_response_body(&body);
+        let bounded = bound_body(&body);
         let within_limit = bounded.len() <= 64 << 10;
         let has_suffix = bounded.ends_with("… [truncated]");
         let no_replacement_character = !bounded.contains('�');

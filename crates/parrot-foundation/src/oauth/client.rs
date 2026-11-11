@@ -3,7 +3,7 @@ use crate::credentials::{OAuthCredential, Secret};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use parrot_domain::contracts::async_ops::{
-    BoxFuture, Cancellation, Cancelled, Clock, OperationError, OperationResult,
+    BoxFuture, Cancellation, Clock, OperationError, OperationResult,
 };
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
@@ -20,29 +20,6 @@ pub const CALLBACK_URL: &str = "http://localhost:1455/auth/callback";
 const MAX_JSON_BYTES: usize = 1 << 20;
 const TOKEN_EXPIRY_RANGE: &str = "Value to add was out of range. (Parameter 'value')";
 
-pub struct SystemOAuthClock;
-impl Clock for SystemOAuthClock {
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-    fn utc_now(&self) -> SystemTime {
-        SystemTime::now()
-    }
-    fn sleep_until<'a>(
-        &'a self,
-        deadline: Instant,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), Cancelled>> {
-        Box::pin(async move {
-            tokio::select! {
-                biased;
-                _ = cancellation.cancelled() => Err(Cancelled),
-                _ = tokio::time::sleep_until(deadline.into()) => Ok(()),
-            }
-        })
-    }
-}
-
 pub struct OpenAiOAuthOptions {
     pub issuer: String,
     pub clock: Arc<dyn Clock>,
@@ -53,7 +30,7 @@ impl Default for OpenAiOAuthOptions {
     fn default() -> Self {
         Self {
             issuer: DEFAULT_ISSUER.into(),
-            clock: Arc::new(SystemOAuthClock),
+            clock: Arc::new(crate::clock::SystemClock),
             login_timeout: Duration::from_secs(300),
             polling_safety_margin: Duration::from_secs(3),
         }
@@ -793,6 +770,7 @@ fn format_expiry(value: SystemTime) -> Result<String, AuthError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parrot_domain::contracts::async_ops::Cancelled;
     use std::sync::{
         Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},

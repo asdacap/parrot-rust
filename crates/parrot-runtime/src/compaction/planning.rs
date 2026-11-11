@@ -1,6 +1,6 @@
 use super::{ContextSize, ContextSnapshot, PlanningError, TokenEstimator};
 use parrot_core::{
-    ContextConfiguration, ContextModel, ContextSnapshot as CoreContextSnapshot,
+    ContextConfiguration, ContextModel,
     compaction::{self as core, CompactionConfiguration},
 };
 use parrot_domain::values::config::ModelProfiles;
@@ -204,7 +204,7 @@ impl CompactionPlanner {
             profile_maximum_input_tokens: profile.maximum_input_tokens,
             profile_summary_output_tokens: profile.summary_output_tokens,
             model: selected.model.id.clone(),
-            reasoning: selected.reasoning().map(Into::into),
+            reasoning: selected.reasoning(),
             summary_instructions: self.settings.summary_instructions.clone(),
             summary_prefix: self.settings.summary_prefix.clone(),
         }
@@ -234,16 +234,7 @@ impl CompactionPlanner {
         configuration: &ContextConfiguration,
     ) -> Result<ContextSnapshot, PlanningError> {
         let estimated = Self::estimate_input_tokens(selected, instructions, tools, history)?;
-        let snapshot = CoreContextSnapshot::estimate(estimated, configuration);
-        Ok(ContextSnapshot {
-            estimated_tokens: snapshot.estimated_tokens,
-            context_limit: snapshot.context_limit,
-            usage_percent: snapshot.usage_percent,
-            trigger_percent: snapshot.trigger_percent,
-            input_limit: snapshot.input_limit,
-            trigger_tokens: snapshot.trigger_tokens,
-            has_context_limit_override: snapshot.has_context_limit_override,
-        })
+        Ok(ContextSnapshot::estimate(estimated, configuration))
     }
 }
 
@@ -267,11 +258,7 @@ impl parrot_core::Provider for PlanningProvider<'_> {
         CompactionPlanner::estimate_input_tokens(
             self.selected,
             instructions,
-            &definitions
-                .iter()
-                .cloned()
-                .map(Into::into)
-                .collect::<Vec<_>>(),
+            definitions,
             &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
         )
         .map_err(Into::into)

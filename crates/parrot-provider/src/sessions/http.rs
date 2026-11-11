@@ -1,5 +1,5 @@
 //! Owning HTTP/SSE composition over the protocol adapters and T25 transport.
-use super::diagnostics::{CallTrace, FailureKind, RequestTrace, ResponseCapture, TraceOutcome};
+use super::diagnostics::{CallTrace, RequestTrace, ResponseCapture, TraceOutcome};
 use super::{Error, Event, EventStream};
 use crate::{
     chat_completions::{ChatStream, ChatStreamError},
@@ -10,6 +10,7 @@ use crate::{
     responses::{ResponsesEvent, ResponsesParser},
     responses_websocket::{HttpEvents, SessionEvent, WebSocketError},
 };
+use parrot_core::ErrorCode;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{
     collections::VecDeque,
@@ -242,7 +243,7 @@ impl HttpDriver {
         self.account();
         match &result {
             Ok(None) => self.finish(TraceOutcome::Completed),
-            Err(error) => self.finish(TraceOutcome::Failed(failure_kind(error))),
+            Err(error) => self.finish(TraceOutcome::Failed(failure_code(error))),
             Ok(Some(_)) => {}
         }
         result
@@ -366,23 +367,23 @@ fn chat_error(error: ChatStreamError) -> Error {
         other => Error::Encode(other.to_string()),
     }
 }
-fn failure_kind(error: &Error) -> FailureKind {
+fn failure_code(error: &Error) -> ErrorCode {
     match error {
         Error::Cancelled
         | Error::Http(HttpError::Cancelled)
-        | Error::Socket(WebSocketError::Cancelled) => FailureKind::Cancelled,
-        Error::Http(HttpError::RequestTooLarge(_)) => FailureKind::RequestTooLarge,
+        | Error::Socket(WebSocketError::Cancelled) => ErrorCode::Cancelled,
+        Error::Http(HttpError::RequestTooLarge(_)) => ErrorCode::RequestTooLarge,
         Error::Http(HttpError::Wire(_))
         | Error::Wire(_)
         | Error::Response(crate::responses::ResponsesError::WireProtocol(_)) => {
-            FailureKind::WireProtocol
+            ErrorCode::WireProtocol
         }
-        Error::Http(HttpError::Transport(_)) => FailureKind::Http,
+        Error::Http(HttpError::Transport(_)) => ErrorCode::Http,
         Error::Disposed | Error::InvalidOperation(_) | Error::Http(HttpError::Disposed) => {
-            FailureKind::InvalidOperation
+            ErrorCode::InvalidOperation
         }
-        Error::Io(_) => FailureKind::Io,
-        _ => FailureKind::Unexpected,
+        Error::Io(_) => ErrorCode::Io,
+        _ => ErrorCode::Unexpected,
     }
 }
 

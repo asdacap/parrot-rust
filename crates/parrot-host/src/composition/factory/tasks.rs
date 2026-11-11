@@ -20,7 +20,7 @@ use parrot_tools::{
     task_artifacts::TaskArtifactParserAdapter,
     tasks_queues::{
         FailureKind, ToolFailure,
-        tasks::{TaskDetail, TaskQuery, TaskSnapshot, TaskUpdate},
+        tasks::{TaskQuery, TaskSnapshot, TaskUpdate},
     },
 };
 
@@ -54,15 +54,7 @@ where
         match query.name {
             Some(name) => TaskSnapshot {
                 tasks: Vec::new(),
-                detail: self
-                    .scheduler
-                    .capture_detail(&name)
-                    .await
-                    .map(|detail| TaskDetail {
-                        task: detail.task,
-                        agent_name: detail.agent_name,
-                        assigned_to: detail.assigned_to,
-                    }),
+                detail: self.scheduler.capture_detail(&name).await,
             },
             None => TaskSnapshot {
                 tasks: self.scheduler.capture_views().await,

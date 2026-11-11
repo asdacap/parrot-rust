@@ -2,7 +2,7 @@ use parrot_domain::{
     contracts::filenames::FilenameGenerator,
     values::{activity::AgentSessionActivity, identifiers::Identifier},
 };
-use parrot_foundation::{oauth::SystemOAuthClock, template_catalog::PromptTemplateCatalog};
+use parrot_foundation::{clock::SystemClock, template_catalog::PromptTemplateCatalog};
 use parrot_runtime::tool_settlement::{ToolDiagnostics, ToolExecutionConfig, ToolPublisher};
 use parrot_storage::{
     artifacts::output_blobs::ToolOutputBlobStore, conversation::AgentHistoryView,
@@ -37,7 +37,7 @@ pub fn tool_execution_config(
             .unwrap(),
         ),
         publisher,
-        activity: Arc::new(AgentSessionActivity::new(Arc::new(SystemOAuthClock))),
+        activity: Arc::new(AgentSessionActivity::new(Arc::new(SystemClock))),
         diagnostics: Arc::new(Diagnostics),
         image_bytes_per_cycle: 0,
         path_variables: BTreeMap::new(),

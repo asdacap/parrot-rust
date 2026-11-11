@@ -17,12 +17,7 @@ pub enum ReasoningKind {
     Raw,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments_json: String,
-}
+pub use parrot_core::ToolCall;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChatReplay {
     pub provider_id: String,
@@ -268,7 +263,7 @@ fn parse_data_text(data: &str, state: &mut ParseState) -> Result<Vec<ChatEvent>,
             error_type: raw_string(&error, "type"),
             error_code: raw_scalar(data, "code"),
             message: raw_string(&error, "message"),
-            response_body: bound_body(data),
+            response_body: crate::wire::bound_body(data),
         }));
     }
     let mut events = Vec::new();
@@ -423,17 +418,4 @@ fn raw_scalar(body: &str, name: &str) -> String {
     } else {
         String::new()
     }
-}
-
-fn bound_body(body: &str) -> String {
-    const LIMIT: usize = 64 << 10;
-    const MARKER: &str = "\n… [truncated]";
-    if body.len() <= LIMIT {
-        return body.to_owned();
-    }
-    let mut end = LIMIT - MARKER.len();
-    while !body.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}{MARKER}", &body[..end])
 }

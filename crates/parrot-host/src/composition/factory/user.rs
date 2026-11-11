@@ -41,7 +41,7 @@ use parrot_runtime::{
     event_broker::{EventBroker, Subscription},
     interactions::{
         AgentAskBroker, InteractionDiagnostics, InteractionError, PermissionBroker,
-        PermissionTargetDescription, PermissionTargetDescriptionKind, QuestionBroker, TokioClock,
+        PermissionTargetDescription, PermissionTargetDescriptionKind, QuestionBroker,
         map_pending_permission,
     },
     plan_mode::{
@@ -296,7 +296,7 @@ pub struct UserSessionFactory<S: RestrictableAccessSnapshot + 'static> {
 }
 impl<S: RestrictableAccessSnapshot + 'static> UserSessionFactory<S> {
     pub fn new(config: UserSessionFactoryConfig<S>) -> Self {
-        Self::with_question_clock(config, Arc::new(TokioClock))
+        Self::with_question_clock(config, Arc::new(parrot_foundation::clock::SystemClock))
     }
 
     /// Uses the supplied clock for real session-owned question deadlines and pending projections.

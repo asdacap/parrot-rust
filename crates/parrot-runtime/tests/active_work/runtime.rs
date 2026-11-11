@@ -19,6 +19,7 @@ use parrot_domain::{
         agent_tasks::{ExecutionStatus as TaskState, Task, TaskPayload},
     },
 };
+use parrot_foundation::clock::SystemClock;
 use parrot_provider::sessions;
 use parrot_runtime::{
     active_work::{
@@ -526,7 +527,7 @@ impl Harness {
             histories: histories.clone(),
             ask_broker: Arc::new(AgentAskBroker::new(
                 Duration::from_secs(300),
-                Arc::new(TokioClock),
+                Arc::new(SystemClock),
             )),
             built: Mutex::new(BTreeMap::new()),
             providers: Mutex::new(BTreeMap::new()),

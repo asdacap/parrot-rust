@@ -1390,6 +1390,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "openssl",
+ "parrot-core",
  "parrot-domain",
  "parrot-foundation",
  "parrot-host",

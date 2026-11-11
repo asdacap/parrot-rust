@@ -1,4 +1,4 @@
-use super::{Completion, Content, Message, Reasoning, Request, Role, Tool, ToolCall};
+use super::{Completion, Content, Message, Request};
 use parrot_core::FinishReason;
 
 impl From<Request> for parrot_core::ProviderRequest {
@@ -7,9 +7,9 @@ impl From<Request> for parrot_core::ProviderRequest {
             model: request.model,
             instructions: request.instructions,
             messages: request.messages.into_iter().map(Into::into).collect(),
-            tools: request.tools.into_iter().map(Into::into).collect(),
+            tools: request.tools,
             max_output_tokens: request.max_output_tokens,
-            reasoning: request.reasoning.map(Into::into),
+            reasoning: request.reasoning,
             provider_preferences: request.provider_preferences,
             include_router_metadata: request.include_router_metadata,
         }
@@ -23,9 +23,9 @@ impl From<parrot_core::ProviderRequest> for Request {
             model: request.model,
             instructions: request.instructions,
             messages: request.messages.into_iter().map(Into::into).collect(),
-            tools: request.tools.into_iter().map(Into::into).collect(),
+            tools: request.tools,
             max_output_tokens: request.max_output_tokens,
-            reasoning: request.reasoning.map(Into::into),
+            reasoning: request.reasoning,
             provider_preferences: request.provider_preferences,
             include_router_metadata: request.include_router_metadata,
         }
@@ -49,7 +49,7 @@ impl From<Completion> for parrot_core::ProviderResponse {
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
             assistant_text: completion.assistant_text,
-            tool_calls: completion.tool_calls.into_iter().map(Into::into).collect(),
+            tool_calls: completion.tool_calls,
             provider_id: completion.provider_id,
             provider_content: completion.provider_content,
         }
@@ -73,7 +73,7 @@ impl From<parrot_core::ProviderResponse> for Completion {
             cached_input_tokens: response.cached_input_tokens,
             output_tokens: response.output_tokens,
             assistant_text: response.assistant_text,
-            tool_calls: response.tool_calls.into_iter().map(Into::into).collect(),
+            tool_calls: response.tool_calls,
             provider_id: response.provider_id,
             provider_content: response.provider_content,
         }
@@ -83,9 +83,9 @@ impl From<parrot_core::ProviderResponse> for Completion {
 impl From<Message> for parrot_core::Message {
     fn from(message: Message) -> Self {
         Self {
-            role: message.role.into(),
+            role: message.role,
             contents: message.contents().iter().cloned().map(Into::into).collect(),
-            tool_calls: message.tool_calls.into_iter().map(Into::into).collect(),
+            tool_calls: message.tool_calls,
             tool_call_id: message.tool_call_id,
             provider_id: message.provider_id,
             provider_content: message.provider_content,
@@ -96,10 +96,10 @@ impl From<Message> for parrot_core::Message {
 impl From<parrot_core::Message> for Message {
     fn from(message: parrot_core::Message) -> Self {
         let mut converted = Self::new(
-            message.role.into(),
+            message.role,
             message.contents.into_iter().map(Into::into).collect(),
         );
-        converted.tool_calls = message.tool_calls.into_iter().map(Into::into).collect();
+        converted.tool_calls = message.tool_calls;
         converted.tool_call_id = message.tool_call_id;
         converted.provider_id = message.provider_id;
         converted.provider_content = message.provider_content;
@@ -156,89 +156,10 @@ impl From<parrot_core::Content> for Content {
     }
 }
 
-impl From<Role> for parrot_core::Role {
-    fn from(role: Role) -> Self {
-        match role {
-            Role::System => Self::System,
-            Role::User => Self::User,
-            Role::Assistant => Self::Assistant,
-            Role::Tool => Self::Tool,
-        }
-    }
-}
-
-impl From<parrot_core::Role> for Role {
-    fn from(role: parrot_core::Role) -> Self {
-        match role {
-            parrot_core::Role::System => Self::System,
-            parrot_core::Role::User => Self::User,
-            parrot_core::Role::Assistant => Self::Assistant,
-            parrot_core::Role::Tool => Self::Tool,
-        }
-    }
-}
-
-impl From<Reasoning> for parrot_core::Reasoning {
-    fn from(reasoning: Reasoning) -> Self {
-        Self {
-            effort: reasoning.effort,
-            summary: reasoning.summary,
-        }
-    }
-}
-
-impl From<parrot_core::Reasoning> for Reasoning {
-    fn from(reasoning: parrot_core::Reasoning) -> Self {
-        Self {
-            effort: reasoning.effort,
-            summary: reasoning.summary,
-        }
-    }
-}
-
-impl From<Tool> for parrot_core::ToolDefinition {
-    fn from(tool: Tool) -> Self {
-        Self {
-            name: tool.name,
-            description: tool.description,
-            parameters_json: tool.parameters_json,
-        }
-    }
-}
-
-impl From<parrot_core::ToolDefinition> for Tool {
-    fn from(tool: parrot_core::ToolDefinition) -> Self {
-        Self {
-            name: tool.name,
-            description: tool.description,
-            parameters_json: tool.parameters_json,
-        }
-    }
-}
-
-impl From<ToolCall> for parrot_core::ToolCall {
-    fn from(call: ToolCall) -> Self {
-        Self {
-            id: call.id,
-            name: call.name,
-            arguments_json: call.arguments_json,
-        }
-    }
-}
-
-impl From<parrot_core::ToolCall> for ToolCall {
-    fn from(call: parrot_core::ToolCall) -> Self {
-        Self {
-            id: call.id,
-            name: call.name,
-            arguments_json: call.arguments_json,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions::model::{Reasoning, Role, Tool, ToolCall};
     use parrot_core::{Content as CoreContent, Message as CoreMessage};
 
     #[test]
@@ -426,52 +347,6 @@ mod tests {
                 content
             );
         }
-    }
-
-    #[test]
-    fn role_round_trip_preserves_every_variant() {
-        for role in [Role::System, Role::User, Role::Assistant, Role::Tool] {
-            assert_eq!(Role::from(parrot_core::Role::from(role)), role);
-        }
-    }
-
-    #[test]
-    fn reasoning_round_trip_preserves_both_strings() {
-        let reasoning = Reasoning {
-            effort: "future-effort ".into(),
-            summary: "raw\nsummary".into(),
-        };
-        assert_eq!(
-            Reasoning::from(parrot_core::Reasoning::from(reasoning.clone())),
-            reasoning
-        );
-    }
-
-    #[test]
-    fn tool_definition_round_trip_preserves_raw_schema() {
-        let tool = Tool {
-            name: "name".into(),
-            description: "description".into(),
-            parameters_json: " { \"integer\" : 12345678901234567890.0001, \"extra\" : true } "
-                .into(),
-        };
-        assert_eq!(
-            Tool::from(parrot_core::ToolDefinition::from(tool.clone())),
-            tool
-        );
-    }
-
-    #[test]
-    fn tool_call_round_trip_preserves_raw_arguments() {
-        let call = ToolCall {
-            id: "  id  ".into(),
-            name: "alias.name".into(),
-            arguments_json: " {\"unknown\": [1.2300,\"escaped\\\\line\"]} ".into(),
-        };
-        assert_eq!(
-            ToolCall::from(parrot_core::ToolCall::from(call.clone())),
-            call
-        );
     }
 
     #[test]

@@ -31,15 +31,8 @@ impl Provider for AmbiguousAfterRefresh {
         UnusedProvider.open_session()
     }
 }
-struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+
+use parrot_core::NeverCancelled;
 
 #[tokio::test(flavor = "current_thread")]
 async fn alias_usage_survives_a_real_route_failure_and_cache_uses_snapshot_identity() {

@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Cancelled, Clock};
+use parrot_domain::contracts::async_ops::Clock;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InteractionErrorKind {
@@ -140,29 +140,8 @@ pub trait InteractionDiagnostics: Send + Sync {
     fn write(&self, event: BrokerDiagnostic);
 }
 
-/// The normal Tokio adapter for the existing domain monotonic-clock contract.
-/// Tests can inject another Clock without changing the original deadline.
-pub struct TokioClock;
-
-impl Clock for TokioClock {
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-    fn utc_now(&self) -> SystemTime {
-        SystemTime::now()
-    }
-    fn sleep_until<'a>(
-        &'a self,
-        deadline: Instant,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), Cancelled>> {
-        Box::pin(async move {
-            tokio::select! {
-                _ = cancellation.cancelled() => Err(Cancelled),
-                _ = tokio::time::sleep_until(deadline.into()) => Ok(()),
-            }
-        })
-    }
+pub(crate) fn default_clock() -> Arc<dyn Clock> {
+    Arc::new(parrot_foundation::clock::SystemClock)
 }
 
 pub(crate) fn validate_timeout(
@@ -176,10 +155,6 @@ pub(crate) fn validate_timeout(
         ));
     }
     Ok(())
-}
-
-pub(crate) fn default_clock() -> Arc<dyn Clock> {
-    Arc::new(TokioClock)
 }
 
 pub(crate) fn failure_code(error: &InteractionError) -> &'static str {

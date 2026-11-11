@@ -249,8 +249,7 @@ impl ContextController {
             .compactor
             .planner()
             .capture_compaction_configuration(input.selection, target);
-        let definitions: Vec<parrot_core::ToolDefinition> =
-            input.tools.iter().cloned().map(Into::into).collect();
+        let definitions: Vec<parrot_core::ToolDefinition> = input.tools.to_vec();
         let estimates = CompactionEstimates::new(input.selection);
         let errors = NativeErrors::new();
         let templates = self.templates.clone();
@@ -651,18 +650,7 @@ impl parrot_core::States for EpochStates<'_> {
     ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, parrot_core::Error>> {
         Box::pin(async move {
             self.status
-                .slots(
-                    &ContextSnapshot {
-                        estimated_tokens: context.estimated_tokens,
-                        context_limit: context.context_limit,
-                        usage_percent: context.usage_percent,
-                        trigger_percent: context.trigger_percent,
-                        input_limit: context.input_limit,
-                        trigger_tokens: context.trigger_tokens,
-                        has_context_limit_override: context.has_context_limit_override,
-                    },
-                    self.cancellation,
-                )
+                .slots(&context, self.cancellation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -709,11 +697,7 @@ impl parrot_core::States for EpochStates<'_> {
         result: Result<Option<parrot_core::FittedCompaction>, parrot_core::Error>,
     ) -> BoxFuture<'a, Result<parrot_core::ContextCompaction, parrot_core::Error>> {
         Box::pin(async move {
-            let definitions = definitions
-                .iter()
-                .cloned()
-                .map(Into::into)
-                .collect::<Vec<_>>();
+            let definitions = definitions.to_vec();
             let result = result.map_err(|error| self.errors.restore(error, ContextError::from));
             let recorded = self
                 .controller

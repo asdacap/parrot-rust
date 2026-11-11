@@ -816,7 +816,7 @@ mod fixture {
                 providers: Mutex::new(BTreeMap::new()),
                 asks: Arc::new(parrot_runtime::interactions::AgentAskBroker::new(
                     std::time::Duration::from_secs(300),
-                    Arc::new(parrot_runtime::interactions::TokioClock),
+                    Arc::new(parrot_foundation::clock::SystemClock),
                 )),
                 user_questions: Arc::new(
                     parrot_runtime::interactions::QuestionBroker::new(

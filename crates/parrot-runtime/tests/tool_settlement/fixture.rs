@@ -147,7 +147,7 @@ impl Fixture {
             .unwrap()
     }
     pub async fn batch(&self, calls: Vec<sessions::ToolCall>) -> i64 {
-        let fresh_calls = calls.iter().cloned().map(Into::into).collect();
+        let fresh_calls = calls.to_vec();
         let mut event = Event::new();
         event.id = id();
         event.agent_session_id = "agent".into();

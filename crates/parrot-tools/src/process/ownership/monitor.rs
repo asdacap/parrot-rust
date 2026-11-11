@@ -6,9 +6,9 @@
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Cancelled, Clock};
+use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Clock};
 
 use crate::process::execution::output::Utf8Decoder;
 
@@ -138,8 +138,14 @@ impl ShellProcessMonitor {
         sink: &dyn MonitorSink,
         lifetime: &dyn Cancellation,
     ) {
-        self.observe_with_clock(identity, execution, sink, &SystemMonitorClock, lifetime)
-            .await;
+        self.observe_with_clock(
+            identity,
+            execution,
+            sink,
+            &parrot_foundation::clock::SystemClock,
+            lifetime,
+        )
+        .await;
     }
 
     /// The injected monotonic clock is also used by real file-observer tests;
@@ -345,32 +351,6 @@ impl LiveStdout {
             self.initial_text = false;
         }
         Ok(text)
-    }
-}
-
-struct SystemMonitorClock;
-
-impl Clock for SystemMonitorClock {
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-
-    fn utc_now(&self) -> SystemTime {
-        SystemTime::now()
-    }
-
-    fn sleep_until<'a>(
-        &'a self,
-        deadline: Instant,
-        lifetime: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), Cancelled>> {
-        Box::pin(async move {
-            lifetime.check()?;
-            tokio::select! {
-                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => Ok(()),
-                _ = lifetime.cancelled() => Err(Cancelled),
-            }
-        })
     }
 }
 

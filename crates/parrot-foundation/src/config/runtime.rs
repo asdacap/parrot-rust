@@ -10,6 +10,7 @@ use super::node::{
     Kind, Node, Style, boolean, mapping, nonnegative_integer, positive_integer, scalar_or_empty,
     validate_keys,
 };
+use super::opaque_json::json_string;
 use super::{ConfigError, Result};
 
 /// Configuration collection exposing the source's read-only list API.
@@ -147,11 +148,7 @@ pub struct ImageUploadConfig {
     pub secret_key_env: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfiguredToolDefinition {
-    pub description: String,
-    pub parameters_json: String,
-}
+pub use parrot_domain::values::tools::ConfiguredToolDefinition;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AgentLimitsConfig {
@@ -1098,29 +1095,4 @@ fn is_json_number(value: &str) -> bool {
         }
     }
     index == bytes.len()
-}
-
-pub fn json_string(value: &str) -> String {
-    let mut result = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '\\' => result.push_str("\\\\"),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            '\u{0008}' => result.push_str("\\b"),
-            '\u{000c}' => result.push_str("\\f"),
-            character
-                if !((' '..='~').contains(&character))
-                    || matches!(character, '"' | '\'' | '&' | '+' | '<' | '>' | '`') =>
-            {
-                for unit in character.encode_utf16(&mut [0; 2]).iter() {
-                    result.push_str(&format!("\\u{unit:04X}"));
-                }
-            }
-            character => result.push(character),
-        }
-    }
-    result.push('"');
-    result
 }

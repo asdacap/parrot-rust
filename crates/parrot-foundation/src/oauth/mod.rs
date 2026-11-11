@@ -18,7 +18,7 @@ pub use api_key_source::{ApiKeyEnvironment, StoredApiKeySource};
 pub use browser::{BrowserLaunchError, BrowserLauncher, SystemBrowserOpener};
 pub use client::{
     CALLBACK_URL, CLIENT_ID, DEFAULT_ISSUER, OpenAiOAuthClient, OpenAiOAuthOptions,
-    SystemOAuthClock, extract_account_id,
+    extract_account_id,
 };
 pub use flows::{AuthDiagnostic, AuthDiagnosticLog, AuthFlows, AuthOutput, DiagnosticSeverity};
 pub use model::{

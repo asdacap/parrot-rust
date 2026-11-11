@@ -25,6 +25,7 @@ use parrot_domain::{
         tools::ConfiguredToolDefinition,
     },
 };
+use parrot_foundation::clock::SystemClock;
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -48,7 +49,6 @@ use parrot_runtime::{
     children::*,
     compaction::ContextStatus,
     event_broker::EventBroker,
-    interactions::TokioClock,
     prompt_context::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
@@ -317,7 +317,7 @@ impl ScopeFactory<Security> for Factory {
                     .await
                     .unwrap(),
             );
-            let activity = Arc::new(AgentSessionActivity::new(Arc::new(TokioClock)));
+            let activity = Arc::new(AgentSessionActivity::new(Arc::new(SystemClock)));
             let statistics = prepared
                 .history
                 .repository()

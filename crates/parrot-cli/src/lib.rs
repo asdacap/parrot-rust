@@ -1,6 +1,7 @@
 //! Command-line entry points and terminal user interfaces.
 
 pub mod attachments;
+pub mod chat_loops;
 pub mod dispatch;
 pub mod presenters;
 pub mod slash_sessions;

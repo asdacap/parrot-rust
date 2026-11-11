@@ -348,16 +348,7 @@ mod tests {
         }
     }
 
-    struct NeverCancelled;
-    impl Cancellation for NeverCancelled {
-        fn is_cancelled(&self) -> bool {
-            false
-        }
-
-        fn cancelled(&self) -> BoxFuture<'_, ()> {
-            Box::pin(std::future::pending())
-        }
-    }
+    use parrot_core::NeverCancelled;
 
     fn ready<T>(mut future: BoxFuture<'_, T>) -> T {
         match Future::poll(

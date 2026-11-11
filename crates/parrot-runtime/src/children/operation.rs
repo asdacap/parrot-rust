@@ -64,7 +64,7 @@ impl From<TurnError> for ChildError {
         if error.is_cancelled() {
             Self::Cancelled
         } else {
-            Self::failure(error.diagnostic_code(), error.to_string())
+            Self::failure(error.diagnostic_code().code(), error.to_string())
         }
     }
 }

@@ -434,15 +434,8 @@ impl parrot_domain::contracts::filenames::FilenameGenerator for FixedFilename {
         "selected-arse.dat".into()
     }
 }
-struct NeverCancelled;
-impl parrot_domain::contracts::async_ops::Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> parrot_domain::contracts::async_ops::BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+
+use parrot_core::NeverCancelled;
 
 fn directory_files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     let mut files = Vec::new();

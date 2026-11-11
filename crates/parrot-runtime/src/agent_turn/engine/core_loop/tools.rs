@@ -58,18 +58,8 @@ where
             };
             let final_phase = normal.enabled_after_interruption();
             let catalog = ToolCatalog {
-                normal: normal
-                    .definitions()
-                    .iter()
-                    .cloned()
-                    .map(Into::into)
-                    .collect(),
-                final_phase: final_phase
-                    .definitions()
-                    .iter()
-                    .cloned()
-                    .map(Into::into)
-                    .collect(),
+                normal: normal.definitions().to_vec(),
+                final_phase: final_phase.definitions().to_vec(),
             };
             *self.captured.lock().expect("captured tools poisoned") = Some(CapturedTools {
                 normal,

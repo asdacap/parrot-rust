@@ -1,6 +1,5 @@
 //! The managed-owner boundary over the real native execution component.
 
-use std::future::pending;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -120,15 +119,7 @@ impl Cancellation for ProcessLifetime {
     }
 }
 
-pub struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(pending())
-    }
-}
+pub use parrot_core::NeverCancelled;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Failure {

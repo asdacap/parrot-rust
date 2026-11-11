@@ -46,6 +46,24 @@ impl ContextModel {
 }
 
 impl ContextSnapshot {
+    pub fn new(
+        estimated_tokens: i64,
+        context_limit: i32,
+        usage_percent: Option<i32>,
+        trigger_percent: i32,
+    ) -> Self {
+        Self {
+            estimated_tokens,
+            context_limit,
+            usage_percent,
+            trigger_percent,
+            input_limit: context_limit,
+            trigger_tokens: (context_limit > 0)
+                .then(|| i64::from(context_limit) * i64::from(trigger_percent) / 100),
+            has_context_limit_override: false,
+        }
+    }
+
     pub fn estimate(estimated_tokens: i64, configuration: &ContextConfiguration) -> Self {
         let context_limit = configuration.model.context_window;
         let input_limit = configuration.model.calculate_input_limit();

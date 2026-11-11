@@ -77,7 +77,7 @@ async fn process_kill_does_not_replay_an_unfinished_tool_effect() {
             .fresh_batches
             .lock()
             .unwrap()
-            .push_back((sequence, vec![call("kill-effect", "counter").into()]));
+            .push_back((sequence, vec![call("kill-effect", "counter")]));
         let tool = Arc::new(PersistentEffectTool::new(
             fixture.path.join("external-effect"),
         ));

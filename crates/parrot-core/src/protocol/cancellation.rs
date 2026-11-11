@@ -30,6 +30,19 @@ pub trait Cancellation: Send + Sync {
     }
 }
 
+/// A [`Cancellation`] that never fires, for call sites with no cancellation scope.
+pub struct NeverCancelled;
+
+impl Cancellation for NeverCancelled {
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        Box::pin(std::future::pending())
+    }
+}
+
 /// Borrows live cancellation observation without owning a signal or background work.
 #[derive(Clone, Copy)]
 pub struct CancellationToken<'a> {

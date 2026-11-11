@@ -610,7 +610,7 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
             }),
             web_fetcher: Arc::new(WebFetcher::production(address_policy)),
             prompts,
-            clock: Arc::new(parrot_runtime::interactions::TokioClock),
+            clock: Arc::new(parrot_foundation::clock::SystemClock),
             profiles: self.configuration.models.model_profiles.clone(),
         });
         let parts = actual.create(services.clone())?;

@@ -1,6 +1,8 @@
 //! Provider protocols, model catalogs, streaming, and image integration.
 
+mod lazy_stream;
 mod provider_error;
+mod wire;
 
 pub mod anthropic;
 pub mod catalogs;

@@ -140,12 +140,12 @@ impl OAuthTokenSource for OAuthAdapter {
     }
 }
 
-pub(super) struct OwnedCancellation(watch::Sender<bool>);
+pub(crate) struct OwnedCancellation(watch::Sender<bool>);
 impl OwnedCancellation {
-    pub(super) fn new(cancelled: bool) -> Self {
+    pub(crate) fn new(cancelled: bool) -> Self {
         Self(watch::channel(cancelled).0)
     }
-    pub(super) fn cancel(&self) {
+    pub(crate) fn cancel(&self) {
         self.0.send_replace(true);
     }
 }

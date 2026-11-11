@@ -5,7 +5,7 @@ use crate::database::{DatabaseError, SessionDatabase};
 use crate::diagnostics::{DiagnosticEvent, DiagnosticSeverity, FileDiagnosticLog};
 use crate::events::{EventRepository, timestamp};
 use crate::history_files::{SessionCatalogEntry, SessionIndex, SessionMeta};
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_domain::contracts::async_ops::BoxFuture;
 use parrot_domain::contracts::paths::SelectedSessionRoot;
 use parrot_domain::values::identifiers::{Identifier, UserSessionId};
 use std::path::{Path, PathBuf};
@@ -626,15 +626,7 @@ impl Drop for OpeningResources {
     }
 }
 
-struct NeverCancelled;
-impl Cancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
+use parrot_core::NeverCancelled;
 
 pub struct OpenedSession {
     session: Option<Box<dyn StoredUserSession>>,

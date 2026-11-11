@@ -176,8 +176,7 @@ impl Compactor {
             .planner
             .capture_compaction_configuration(selected, target);
         let input_data = input.capture_input();
-        let definitions: Vec<parrot_core::ToolDefinition> =
-            input.tools.iter().cloned().map(Into::into).collect();
+        let definitions: Vec<parrot_core::ToolDefinition> = input.tools.to_vec();
         let estimates = CompactionEstimates::new(selected);
         let provider = super::planning::PlanningProvider::new(&estimates.selected);
         CompactionPlan::select(&input_data, &definitions, &configuration, &provider)
@@ -273,7 +272,7 @@ impl CompactionEstimates {
         messages: &[parrot_core::Message],
     ) -> Result<i64, CompactionError> {
         let messages: Vec<Message> = messages.iter().cloned().map(Into::into).collect();
-        let tools: Vec<Tool> = definitions.iter().cloned().map(Into::into).collect();
+        let tools: Vec<Tool> = definitions.to_vec();
         CompactionPlanner::estimate_input_tokens(&self.selected, instructions, &tools, &messages)
             .map_err(CompactionError::from)
     }

@@ -11,10 +11,11 @@ use parrot_domain::contracts::interactions::{
 };
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
+use parrot_foundation::clock::SystemClock;
 use parrot_runtime::interactions::{
     AgentAskBroker, AgentAskDelivery, AgentAskIdentity, AgentAskTemplates, AgentAsks,
     BrokerDiagnostic, InteractionDiagnostics, InteractionError, InteractionErrorKind,
-    PendingAgentAsk, QuestionBroker, TokioClock,
+    PendingAgentAsk, QuestionBroker,
 };
 use parrot_tools::agents::questions::{AskTool, QuestionTool, ReplyTool};
 use parrot_tools::agents::{AgentToolError, ResultTemplates};
@@ -315,7 +316,7 @@ impl AgentCommunication for Communication {
 fn ask_broker() -> Arc<AgentAskBroker> {
     Arc::new(AgentAskBroker::new(
         Duration::from_secs(300),
-        Arc::new(TokioClock),
+        Arc::new(SystemClock),
     ))
 }
 fn register(broker: &Arc<AgentAskBroker>, name: &str) -> Arc<AgentAsks> {
