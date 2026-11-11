@@ -1,6 +1,6 @@
 use std::io::{self, BufRead, Read};
 
-pub const DEFAULT_MODEL: &str = "opencode-go/glm-5.2";
+pub const DEFAULT_MODEL: &str = "opencode-go/glm-5.3";
 pub const DEFAULT_WEB_PORT: u16 = 7420;
 pub const AUTH_USAGE: &str =
     "usage: parrot auth login <provider> [--api-key-stdin] [--device] [--s3-stdin]";
