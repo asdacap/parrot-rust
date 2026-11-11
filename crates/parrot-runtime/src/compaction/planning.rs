@@ -2,7 +2,6 @@ use super::{ContextSize, ContextSnapshot, PlanningError, TokenEstimator};
 use parrot_core::{
     CompactionConfiguration, CompactionHistoryGroup, CompactionInput, ContextConfiguration,
     ContextModel,
-    compaction::{self as core},
 };
 use parrot_domain::values::config::ModelProfiles;
 use parrot_provider::{
