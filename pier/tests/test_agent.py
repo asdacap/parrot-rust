@@ -98,6 +98,18 @@ def test_network_allowlist_from_model_and_config(tmp_path: Path):
     domains = agent.network_allowlist().domains
     assert "api.openai.com" in domains
     assert "gw.example.com" in domains
+    assert "models.dev" in domains
+
+
+def test_network_allowlist_includes_binary_url_host(tmp_path: Path):
+    agent = ParrotAgent(
+        logs_dir=tmp_path,
+        model_name="openai/gpt-5.5",
+        binary_url="http://172.17.0.1:8765/parrot.tar.gz",
+    )
+    domains = agent.network_allowlist().domains
+    assert "172.17.0.1" in domains
+    assert "models.dev" in domains
 
 
 def test_register_config_command_writes_absent_config_only(tmp_path: Path):

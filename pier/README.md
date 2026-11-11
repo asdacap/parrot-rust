@@ -27,7 +27,8 @@ Useful agent kwargs (`--ak key=value`):
 
 - `binary_url` — tarball to install. Default points at this repository's
   GitHub release `parrot-x86_64-unknown-linux-musl.tar.gz`. The tarball must
-  contain the `parrot` binary at its root.
+  contain the `parrot` binary at its root. The download host is added to the
+  network allowlist, so a local HTTP server works under filtered egress.
 - `binary_sha256` — expected sha256 of the downloaded tarball.
 - `provider_config` — JSON object written to
   `~/.config/parrotrust/config.yaml` under `providers:` for custom gateways,
@@ -37,7 +38,15 @@ Useful agent kwargs (`--ak key=value`):
 
 Provider API keys are passed from the Pier job environment to the sandbox
 process (`agent.env`, or the host environment) matched by the model's provider
-id, e.g. `openai/...` needs `OPENAI_API_KEY`.
+id, e.g. `openai/...` needs `OPENAI_API_KEY`; `provider_config` entries can
+name their own `api_key_env`. OAuth-backed providers such as `chatgpt` have no
+environment key, so use API-key providers for benchmark runs.
+
+The network allowlist contains the provider endpoints (from the provider id
+and `provider_config` base URLs), `models.dev` (Parrot fetches the model
+catalog from it at startup, needed for unknown models), and the `binary_url`
+host. The `--model` value must be a fully qualified `provider/model`; the
+config's `model_aliases` are not reachable in a fresh sandbox.
 
 ## Files produced per trial
 

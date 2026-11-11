@@ -43,7 +43,9 @@ class ParrotAgent(BaseInstalledAgent):
     _JSONL_FILENAME = "parrot.jsonl"
 
     # Fallback domains by provider id from the model name; provider_config
-    # base URLs are allowlisted on top of these.
+    # base URLs are allowlisted on top of these, along with models.dev (the
+    # provider registry fetches the model catalog from it at startup) and
+    # the binary_url install source.
     _DEFAULT_PROVIDER_DOMAINS: dict[str, list[str]] = {
         "anthropic": ["api.anthropic.com"],
         "chatgpt": ["chatgpt.com", "ab.chatgpt.com"],
@@ -146,10 +148,16 @@ class ParrotAgent(BaseInstalledAgent):
 
     def network_allowlist(self) -> NetworkAllowlist:
         urls = collect_url_values(self._provider_config)
-        default_domains: list[str] = []
+        if self._binary_url:
+            urls.append(self._binary_url)
         if self.model_name and "/" in self.model_name:
             provider, _ = self.model_name.split("/", 1)
             default_domains = self._DEFAULT_PROVIDER_DOMAINS.get(provider, [])
+        else:
+            default_domains = []
+        # The provider registry eagerly fetches the model catalog, so an
+        # unknown model needs models.dev reachable even under filtered egress.
+        default_domains.append("models.dev")
         return allowlist_from_urls(urls, default_domains=default_domains)
 
     def _provider_env_keys(self) -> list[str]:

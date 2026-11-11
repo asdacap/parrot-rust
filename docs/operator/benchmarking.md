@@ -100,5 +100,41 @@ pier run -p deep-swe/tasks/<task-id> --agent-import-path parrot_agent:ParrotAgen
     --model openai/gpt-5.5 --env docker
 ```
 
+### Credentials and model selection
+
+Provider API keys flow from the Pier job environment into the sandbox through
+the agent `env` block or `--env-file`, matched by the model's provider id
+(`openai/...` takes `OPENAI_API_KEY`). A `provider_config` agent kwarg can add
+a gateway with its own `api_key_env`. OAuth-backed providers such as `chatgpt`
+have no environment key, so prefer API-key providers for benchmark runs.
+
+Pass the model as a fully qualified `provider/model` string. Parrot resolves
+it against the configured providers plus the models.dev catalog, which it
+fetches eagerly at startup; the wrapper allowlists `models.dev` for that. The
+config's `model_aliases` are user-session state and are not reachable in a
+fresh sandbox.
+
+### Iterating with a local build
+
+Pier bakes the agent install into a per-trial docker image keyed by the
+install spec fingerprint, so repeat runs with an unchanged install spec reuse
+the image. To benchmark an uncommitted local build, serve the tarball from the
+host and point `binary_url` at it:
+
+```sh
+cargo build -p parrot-cli --no-default-features --locked
+tar -czf /tmp/parrot.tar.gz -C target/debug parrot
+python3 -m http.server 8765 --bind 0.0.0.0 --directory /tmp &
+
+pier run -p deep-swe/tasks/<task-id> --agent-import-path parrot_agent:ParrotAgent \
+    --model openai/gpt-5.5 --env docker \
+    --ak binary_url=http://<host-ip-on-docker-bridge>:8765/parrot.tar.gz
+```
+
+Use the host IP on the docker bridge (often `172.17.0.1`) or an address the
+container can reach; the wrapper adds the `binary_url` host to the network
+allowlist. A local URL only works with `--env docker`; for `--env modal` push
+the tarball to a URL the sandbox can reach.
+
 Leaderboard submission is handled by the benchmark maintainers; see the
 DeepSWE run page for contact details.
