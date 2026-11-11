@@ -146,20 +146,25 @@ impl States for Preparation {
         })
     }
 
-    fn render_status<'a, 'c>(
+    fn read_status_offering<'a>(
         &'a self,
         context: ContextSnapshot,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
+    ) -> BoxFuture<'a, Result<parrot_core::StatusOffering, Error>> {
         Box::pin(async move {
             self.contexts.lock().unwrap().push(context);
             if self.failure == Some("status") {
                 return Err(native_error("status"));
             }
-            Ok("initial status".into())
+            let mut offering = parrot_core::StatusOffering::default();
+            offering.insert(
+                parrot_core::StatusKey::new("status"),
+                parrot_core::StatusOffer {
+                    hash: String::new(),
+                    text: "initial status".into(),
+                    is_auto_update: false,
+                },
+            );
+            Ok(offering)
         })
     }
 }
@@ -293,7 +298,6 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         &publisher,
         &definitions,
         &configuration(),
-        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
 
@@ -377,7 +381,6 @@ fn preparation_preserves_incomplete_roots_and_does_not_promote_orphaned_results(
         &publisher,
         &[],
         &configuration(),
-        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
     assert_eq!(input.base_watermark, 0);
@@ -420,7 +423,6 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
             &publisher,
             &[],
             &configuration(),
-            parrot_core::CancellationToken::uncancelled(),
         ));
         let error = if stage == "cancel" {
             Error::cancelled()
@@ -449,7 +451,6 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
             &publisher,
             &[],
             &configuration(),
-            parrot_core::CancellationToken::uncancelled()
         )),
         Err(native_error("failed publication"))
     );
@@ -471,7 +472,6 @@ fn compaction_preparation_preserves_complete_native_prompt_verbatim() {
         &PreparationEventPublisher::default(),
         &[],
         &configuration(),
-        parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap();
     let expected = "sampled instructions\n\nnative instructions\n\nliteral {{ untouched }}\n\ttext";

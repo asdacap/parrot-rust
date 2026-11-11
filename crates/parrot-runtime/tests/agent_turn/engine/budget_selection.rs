@@ -10,16 +10,6 @@ use std::time::{Instant, SystemTime};
 /// budget fixtures: one offered static slot steers the assembly once.
 struct InitialStatus(Arc<Trace>);
 impl ContextStatus for InitialStatus {
-    fn observe<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            self.0.push("status");
-            Ok("actual status".into())
-        })
-    }
     fn slots<'a>(
         &'a self,
         _: &'a ContextSnapshot,

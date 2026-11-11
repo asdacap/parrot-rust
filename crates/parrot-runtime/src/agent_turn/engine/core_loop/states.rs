@@ -15,8 +15,6 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) publisher: &'a Publisher,
     pub(super) usage: &'a SessionUsageRecorder,
     pub(super) compactor: &'a crate::compaction::Compactor,
-    pub(super) tool_snapshot: &'a std::sync::Mutex<Option<ToolSnapshot<S>>>,
-    pub(super) tool_factory: &'a Arc<dyn ToolFactory<S>>,
     pub(super) event_id: &'a Arc<dyn Fn() -> String + Send + Sync>,
     pub(super) events: ContextEmitter<'a>,
     pub(super) binding: &'a TurnBinding<S>,
@@ -330,14 +328,10 @@ where
         })
     }
 
-    fn render_status<'a, 'c>(
-        &'a self,
+    fn read_status_offering(
+        &self,
         context: CoreContextSnapshot,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, CoreError>>
-    where
-        'c: 'a,
-    {
+    ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, CoreError>> {
         adapt_operation(async move {
             let status = self
                 .state
@@ -346,8 +340,8 @@ where
                 .request_status
                 .clone()
                 .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            status
-                .observe(
+            let slots = status
+                .slots(
                     &crate::compaction::ContextSnapshot {
                         estimated_tokens: context.estimated_tokens,
                         context_limit: context.context_limit,
@@ -357,61 +351,11 @@ where
                         trigger_tokens: context.trigger_tokens,
                         has_context_limit_override: context.has_context_limit_override,
                     },
-                    &cancellation,
+                    self.cancellation,
                 )
                 .await
-                .map_err(Into::into)
-        })
-    }
-    fn read_status_offering(
-        &self,
-    ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, CoreError>> {
-        adapt_operation(async move {
-            let selection = self.binding.capture_selection()?;
-            let state = self.state.lock().await;
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
-            let context = self
-                .prompt
-                .capture(&selection.model, self.cancellation, |instructions| {
-                    let tools = {
-                        let mut materialized =
-                            self.tool_snapshot.lock().expect("tool catalog poisoned");
-                        if materialized.is_none() {
-                            *materialized =
-                                Some(ToolSnapshot::document(self.tool_factory.materialize()?)?);
-                        }
-                        materialized
-                            .as_ref()
-                            .expect("tool snapshot materialized above")
-                            .permitted_by(&selection.profile)
-                            .definitions()
-                            .to_vec()
-                    };
-                    let messages = state
-                        .conversation
-                        .messages()
-                        .iter()
-                        .map(provider_message)
-                        .collect::<Vec<_>>();
-                    self.compactor
-                        .planner()
-                        .estimate_selected_context(
-                            &selection.model,
-                            instructions,
-                            &tools,
-                            &messages,
-                        )
-                        .map_err(TurnError::Planning)
-                })
-                .await??;
-            let offering = status
-                .slots(&context, self.cancellation)
-                .await
                 .map_err(TurnError::Context)?;
-            Ok(offering)
+            Ok(slots)
         })
     }
     fn read_standing_statuses(

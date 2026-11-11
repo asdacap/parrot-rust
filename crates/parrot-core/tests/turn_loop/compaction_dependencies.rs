@@ -30,22 +30,31 @@ pub(super) struct MemoryStatus {
 }
 
 impl MemoryStatus {
-    pub(super) fn render<'a, 'c>(
-        &'a self,
+    pub(super) fn offering(
+        &self,
         context: ContextSnapshot,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.contexts.lock().unwrap().push(context);
+    ) -> BoxFuture<'_, Result<StatusOffering, Error>> {
+        let text = {
+            let mut contexts = self.contexts.lock().unwrap();
+            contexts.push(context);
             if let Some((call, error)) = &self.failure
-                && *call == self.contexts.lock().unwrap().len()
+                && *call == contexts.len()
             {
-                return Err(error.clone());
+                return Box::pin(async { Err(error.clone()) });
             }
-            Ok("fitted status".into())
+            "fitted status".to_owned()
+        };
+        Box::pin(async move {
+            let mut offering = StatusOffering::default();
+            offering.insert(
+                StatusKey::new("status"),
+                StatusOffer {
+                    hash: String::new(),
+                    text,
+                    is_auto_update: false,
+                },
+            );
+            Ok(offering)
         })
     }
 }

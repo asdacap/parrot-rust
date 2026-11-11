@@ -449,6 +449,8 @@ struct MemoryState {
     next_status_offering: Option<StatusOffering>,
     status_standing: StatusStanding,
     status_steered: Vec<(String, StatusStanding)>,
+    status_reads: AtomicUsize,
+    last_capture_request: Option<usize>,
     fail_at: Option<&'static str>,
     budget: AgentState,
     budget_read_error: Option<Error>,
@@ -575,6 +577,8 @@ impl MemoryState {
             next_status_offering: None,
             status_standing: StatusStanding::default(),
             status_steered: Vec::new(),
+            status_reads: AtomicUsize::new(0),
+            last_capture_request: None,
             fail_at: None,
             budget: AgentState::new(false),
             budget_read_error: None,
@@ -728,8 +732,14 @@ impl MemoryState {
     }
 }
 impl States for MemoryState {
-    fn read_status_offering(&self) -> BoxFuture<'_, Result<StatusOffering, Error>> {
-        Box::pin(async { Ok(self.status_offering.clone()) })
+    fn read_status_offering(
+        &self,
+        context: ContextSnapshot,
+    ) -> BoxFuture<'_, Result<StatusOffering, Error>> {
+        if self.status_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Box::pin(async { Ok(self.status_offering.clone()) });
+        }
+        Box::pin(async move { finish(self.compaction.lock().unwrap().status.offering(context)) })
     }
     fn read_standing_statuses(&self) -> BoxFuture<'_, Result<StatusStanding, Error>> {
         Box::pin(async { Ok(self.status_standing.clone()) })
@@ -943,24 +953,6 @@ impl States for MemoryState {
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
         })
     }
-    fn render_status<'a, 'c>(
-        &'a self,
-        context: ContextSnapshot,
-        cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            finish(
-                self.compaction
-                    .lock()
-                    .unwrap()
-                    .status
-                    .render(context, cancellation),
-            )
-        })
-    }
     fn write_to_scratch<'a, 'c>(
         &'a self,
         contents: &'a [u8],
@@ -987,20 +979,33 @@ impl States for MemoryState {
             if !compacting {
                 self.trace.step("render", self.fail_at)?;
             }
-            let mut request = self.request();
-            if let Some(rendered) = (!compacting)
-                .then(|| request.renderings.pop_front())
-                .flatten()
-            {
-                request.instructions = rendered.instructions;
-                request.context.configuration.model.maximum_output_tokens =
-                    rendered.maximum_output_tokens;
-                request.messages = rendered.messages;
-            }
-            let instructions = request.instructions.clone();
-            if !compacting {
-                request.rendered_instructions.push(instructions.clone());
-            }
+            let request_index = self.provider.requests.lock().unwrap().len();
+            let fresh = self.last_capture_request != Some(request_index);
+            let instructions = if fresh {
+                let rendered_instructions = {
+                    let mut request = self.request();
+                    if let Some(rendered) = (!compacting)
+                        .then(|| request.renderings.pop_front())
+                        .flatten()
+                    {
+                        request.instructions = rendered.instructions;
+                        request.context.configuration.model.maximum_output_tokens =
+                            rendered.maximum_output_tokens;
+                        request.messages = rendered.messages;
+                    }
+                    if !compacting {
+                        let instructions = request.instructions.clone();
+                        request.rendered_instructions.push(instructions.clone());
+                    }
+                    request.instructions.clone()
+                };
+                if !compacting {
+                    self.last_capture_request = Some(request_index);
+                }
+                rendered_instructions
+            } else {
+                self.request().instructions.clone()
+            };
             Ok(instructions)
         })
     }
@@ -1032,6 +1037,7 @@ impl States for MemoryState {
     ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>> {
         Box::pin(async move {
             self.step("promote")?;
+            self.status_reads.store(0, Ordering::SeqCst);
             self.admissions.push(admission);
             let mut promoted = Vec::new();
             while let Some(index) = self
@@ -1214,6 +1220,11 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "render",
             "messages",
             "context_configuration",
+            "estimate",
+            "instruction_state",
+            "render",
+            "messages",
+            "context_configuration",
             "token_calibration",
             "estimate",
             "messages",
@@ -1225,6 +1236,11 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "execute",
             "record_results",
             "promote",
+            "instruction_state",
+            "render",
+            "messages",
+            "context_configuration",
+            "estimate",
             "instruction_state",
             "render",
             "messages",
@@ -1287,8 +1303,8 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
             .iter()
             .all(|tools| tools == &["read"])
     );
-    assert!(state.final_requests.contains(&0));
-    assert_eq!(state.final_requests, [0, 1, 2, 3, 4]);
+    assert!(state.final_requests.contains(&1));
+    assert_eq!(state.final_requests, [1, 2, 3, 4, 5]);
     assert_eq!(
         state
             .trace
@@ -1355,7 +1371,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         }));
         assert_eq!(
             state.final_requests,
-            if disable_limits { vec![] } else { vec![0] }
+            if disable_limits { vec![] } else { vec![1] }
         );
         assert!(state.recorded_tools.is_empty());
         assert!(state.tools.requests.lock().unwrap().is_empty());
@@ -1465,7 +1481,7 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
     );
     assert_eq!(state.capture_catalogs()[1], ["read", "write"]);
     assert_eq!(state.capture_catalogs()[2], ["read"]);
-    assert_eq!(state.final_requests, [2]);
+    assert_eq!(state.final_requests, [3]);
 }
 
 #[test]
@@ -1606,7 +1622,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
             options.include_router_metadata
         );
     }
-    assert!(state.final_requests.contains(&5));
+    assert!(state.final_requests.contains(&6));
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
     let trace = state.trace.values();
     assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 2);
@@ -1716,8 +1732,8 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
     state.enqueue_message(Delivery::Queue, "second question");
     assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
     assert_eq!(state.request().rendered_instructions.len(), 6);
-    assert!(state.final_requests.contains(&0));
-    assert_eq!(state.final_requests, [0, 1, 2, 3, 4, 5]);
+    assert!(state.final_requests.contains(&1));
+    assert_eq!(state.final_requests, [1, 2, 3, 4, 5, 6]);
     assert_eq!(
         state
             .trace
@@ -1763,7 +1779,7 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     assert_eq!(catalogs[1], ["read"]);
     assert_eq!(catalogs[2], ["read"]);
     assert_eq!(catalogs[3], ["read", "write"]);
-    assert_eq!(state.final_requests, [1, 2, 4, 5, 6, 7, 8]);
+    assert_eq!(state.final_requests, [2, 3, 5, 6, 7, 8, 9]);
     assert!(catalogs[4..].iter().all(|tools| tools == &["read"]));
     assert!(state.tools.flags.lock().unwrap()[3].final_phase);
     assert!(
@@ -1928,7 +1944,7 @@ fn core_selects_phase_and_estimates_the_exact_advertised_tools() {
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(states.request().rendered_instructions.len(), 2);
     assert!(!states.tools.flags.lock().unwrap()[0].final_phase);
-    assert_eq!(states.final_requests, [1]);
+    assert_eq!(states.final_requests, [2]);
     let requests = states.provider.requests.lock().unwrap();
     let estimates = states.capture_request_estimates();
     assert_eq!(requests.len(), estimates.len());

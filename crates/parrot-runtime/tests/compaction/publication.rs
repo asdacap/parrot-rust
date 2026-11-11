@@ -1,41 +1,6 @@
 //! Real storage false/error paths must never create a committed status publication.
 use super::*;
 use parrot_domain::protocol::messages::parrot::CompactionPhase;
-use parrot_storage::conversation::CompactionSnapshot;
-
-struct RacingStatus {
-    history: AgentHistoryView,
-    observations: AtomicUsize,
-}
-impl ContextStatus for RacingStatus {
-    fn observe<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            let observed = self.observations.fetch_add(1, Ordering::SeqCst);
-            if observed == 0 {
-                return Ok("status".into());
-            }
-            if observed == 1 {
-                assert!(
-                    self.history
-                        .append_compaction_status(
-                            event("agent"),
-                            CompactionSnapshot {
-                                summary: "winner".into(),
-                                watermark: 1
-                            },
-                            "winner status".into()
-                        )
-                        .await?
-                );
-            }
-            Ok("fitted".into())
-        })
-    }
-}
 
 #[tokio::test]
 async fn committed_status_publication_requires_true_success_not_duplicate_or_sqlite_failure() {
@@ -56,14 +21,7 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
         let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
         let before = conversation.messages().to_vec();
         let prompt = EpochPrompt::default();
-        let status: Box<dyn ContextStatus> = if sqlite_failure {
-            Box::new(Status::default())
-        } else {
-            Box::new(RacingStatus {
-                history: history.clone(),
-                observations: AtomicUsize::new(0),
-            })
-        };
+        let status: Box<dyn ContextStatus> = Box::new(Status::default());
         let events = Events::new(history.clone());
         let mut controller = fixture.controller(history.clone(), 90);
         let error = controller

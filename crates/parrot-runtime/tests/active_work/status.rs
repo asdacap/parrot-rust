@@ -1066,19 +1066,29 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
     );
     let bound = runtime.bind_context(query(), "profile prompt".into());
     let first = bound
-        .observe(
+        .slots(
             &ContextSnapshot::new(100, 1000, Some(10), 90),
             &NeverCancelled,
         )
         .await
         .unwrap();
     let second = bound
-        .observe(
+        .slots(
             &ContextSnapshot::new(800, 1000, Some(80), 90),
             &NeverCancelled,
         )
         .await
         .unwrap();
+    let first = first
+        .values()
+        .map(|offer| offer.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let second = second
+        .values()
+        .map(|offer| offer.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
     assert!(first.starts_with("profile prompt\n\nContext: 10% used (100 estimated tokens / 1k limit); reminders every 10%; automatic compaction at 90%.\n\nThe time is: "));
     assert!(
         first.contains("Runtime:\n- agent: main\n\nActive profile: build\nModel: provider/model")
@@ -1091,7 +1101,7 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
     cancelled.cancel();
     assert!(matches!(
         bound
-            .observe(&ContextSnapshot::new(1, 10, Some(10), 90), &cancelled)
+            .slots(&ContextSnapshot::new(1, 10, Some(10), 90), &cancelled)
             .await,
         Err(ContextError::Cancelled)
     ));

@@ -370,15 +370,7 @@ impl TurnSkills for Skills {
     }
 }
 struct Status(Arc<Mutex<Vec<TurnSelection<Security>>>>);
-impl ContextStatus for Status {
-    fn observe<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async { Ok(String::new()) })
-    }
-}
+impl ContextStatus for Status {}
 impl TurnStatus<Security> for Status {
     fn bind(&self, selection: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
         self.0.lock().unwrap().push(selection.clone());

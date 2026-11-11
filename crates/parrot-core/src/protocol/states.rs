@@ -19,9 +19,14 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
         Box::pin(async { Err(Error::unsupported("States.add_conversation_messages")) })
     }
-    /// Reads the status slots offered to the core, each with a source-computed
-    /// hash. Defaults to no statuses, which steers nothing.
-    fn read_status_offering(&self) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
+    /// Reads the status slots offered for the supplied context snapshot, each
+    /// with a source-computed hash and rendered text. Callers join the slot
+    /// texts to assemble the full status. Defaults to no statuses, which
+    /// steers nothing.
+    fn read_status_offering(
+        &self,
+        _context: ContextSnapshot,
+    ) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
         Box::pin(async { Ok(crate::StatusOffering::default()) })
     }
     /// Reads the per-slot hashes recorded by the latest persisted status assembly.
@@ -51,17 +56,6 @@ pub trait States: Send + Sync {
     /// Joins accepted mutations and reads ordered completion blockers.
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.collect_completion_blockers")) })
-    }
-    /// Observes native status for the exact context selected by core.
-    fn render_status<'a, 'c>(
-        &'a self,
-        _context: ContextSnapshot,
-        _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async { Err(Error::unsupported("States.render_status")) })
     }
     /// Writes the supplied bytes to agent-local scratch storage and returns the saved path.
     fn write_to_scratch<'a, 'c>(

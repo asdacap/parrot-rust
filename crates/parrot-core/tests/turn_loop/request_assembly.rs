@@ -112,7 +112,9 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
             .into_iter()
             .filter(|step| matches!(step.as_str(), "render" | "messages" | "invoke"))
             .collect::<Vec<_>>(),
-        ["render", "messages", "messages", "invoke"]
+        [
+            "render", "messages", "render", "messages", "messages", "invoke"
+        ]
     );
 }
 
@@ -203,9 +205,13 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
         [
             "render",
             "messages",
+            "render",
+            "messages",
             "messages",
             "invoke",
             "record_results",
+            "render",
+            "messages",
             "render",
             "messages",
             "messages",

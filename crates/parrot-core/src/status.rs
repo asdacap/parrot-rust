@@ -1,7 +1,7 @@
 use crate::{
-    CancellationToken, ConfigKey, ConversationAddition, ConversationEvent, ConversationPersistence,
-    Error, Message, Provider, ProviderRequest, Role, States, ToolDefinition,
-    compaction::fit_status,
+    CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition, ConversationEvent,
+    ConversationPersistence, Error, Message, Provider, ProviderRequest, Role, States,
+    ToolDefinition, compaction::fit_status,
 };
 use std::{collections::BTreeMap, fmt};
 
@@ -59,6 +59,15 @@ pub fn status_steering_needed(offering: &StatusOffering, standing: &StatusStandi
             .any(|(key, offer)| standing.get(key) != Some(&offer.hash))
 }
 
+/// Joins every offered slot's rendered text in slot order.
+pub fn join_status_offering(offering: &StatusOffering) -> String {
+    offering
+        .values()
+        .map(|offer| offer.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 /// Injects full fitted status without a standing baseline. Later auto-update
 /// changes inject only auto-update slots with changed identities.
 /// Each message atomically records cumulative standing identities so unchanged
@@ -73,7 +82,15 @@ pub async fn steer_status(
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let offering = states.read_status_offering().await?;
+    let instructions = states.capture_system_prompt().await?;
+    let messages = states.read_provider_messages().await?;
+    let configuration = states
+        .get_config(ConfigKey::Context)
+        .await?
+        .into_context()?;
+    let tokens = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
+    let context = ContextSnapshot::estimate(tokens, &configuration);
+    let offering = states.read_status_offering(context).await?;
     let mut standing = states.read_standing_statuses().await?;
     if !status_steering_needed(&offering, &standing) {
         return Ok(());
@@ -81,17 +98,10 @@ pub async fn steer_status(
     let updates = offering
         .iter()
         .filter(|(key, offer)| {
-            standing.is_empty()
-                || (offer.is_auto_update && standing.get(key) != Some(&offer.hash))
+            standing.is_empty() || (offer.is_auto_update && standing.get(key) != Some(&offer.hash))
         })
         .collect::<Vec<_>>();
     let content = if standing.is_empty() {
-        let instructions = states.capture_system_prompt().await?;
-        let messages = states.read_provider_messages().await?;
-        let configuration = states
-            .get_config(ConfigKey::Context)
-            .await?
-            .into_context()?;
         fit_status(
             &ProviderRequest {
                 instructions,
@@ -102,7 +112,6 @@ pub async fn steer_status(
             &configuration,
             states,
             provider,
-            cancellation,
         )
         .await?
     } else {

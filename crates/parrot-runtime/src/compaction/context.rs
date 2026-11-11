@@ -7,9 +7,7 @@ use super::{
     PlanningError, ProviderTokenBudget,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
-use parrot_core::{
-    ContextConfiguration as CoreContextConfiguration, ContextSnapshot as CoreContextSnapshot,
-};
+use parrot_core::ContextConfiguration as CoreContextConfiguration;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -99,13 +97,8 @@ impl From<parrot_core::compaction::CompactionFailure> for ContextError {
 }
 pub type ContextResult<T> = Result<T, ContextError>;
 
-/// Renders status for the bound agent, profile, and selection using the supplied context.
+/// Offers the status slots for the bound agent, profile, and selection using the supplied context.
 pub trait ContextStatus: Send + Sync {
-    fn observe<'a>(
-        &'a self,
-        context: &'a ContextSnapshot,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>>;
     /// Offers the standing status slots for a safe point: source-computed
     /// hashes in registry order, over the supplied usage snapshot. Defaults
     /// to no slots, which steers nothing.
@@ -326,7 +319,6 @@ impl ContextController {
             conversation: input.conversation,
             prompt: input.prompt,
             selection: input.selection,
-            tools: input.tools,
             status: input.status,
             sessions: input.sessions,
             events: input.events,
@@ -411,7 +403,6 @@ impl ContextController {
                 conversation: input.conversation,
                 prompt: input.prompt,
                 selection: input.selection,
-                tools: input.tools,
                 status: input.status,
                 sessions: input.sessions,
                 events: input.events,
@@ -438,7 +429,6 @@ impl ContextController {
                 &publisher,
                 &definitions,
                 &configuration,
-                parrot_core::CancellationToken::new(cancellation),
             )
             .await
             .map_err(|error| errors.restore(error, ContextError::from))?;
@@ -751,7 +741,6 @@ struct EpochStates<'a> {
     conversation: &'a mut AgentConversation,
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
-    tools: &'a [Tool],
     status: &'a dyn ContextStatus,
     sessions: &'a ProviderSessions,
     events: &'a dyn ContextEvents,
@@ -830,29 +819,22 @@ impl parrot_core::States for EpochStates<'_> {
 
     fn read_status_offering(
         &self,
+        context: parrot_core::ContextSnapshot,
     ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, parrot_core::Error>> {
         Box::pin(async move {
-            let instructions = self
-                .prompt
-                .build(self.selection, self.cancellation)
-                .await
-                .map_err(|error| self.capture_error(error))?;
-            let messages = self
-                .conversation
-                .messages()
-                .iter()
-                .map(provider_message)
-                .collect::<Vec<_>>();
-            let context = {
-                let controller = self.controller.lock().await;
-                controller
-                    .compactor()
-                    .planner()
-                    .estimate_selected_context(self.selection, &instructions, self.tools, &messages)
-                    .map_err(|error| self.capture_error(error))?
-            };
             self.status
-                .slots(&context, self.cancellation)
+                .slots(
+                    &ContextSnapshot {
+                        estimated_tokens: context.estimated_tokens,
+                        context_limit: context.context_limit,
+                        usage_percent: context.usage_percent,
+                        trigger_percent: context.trigger_percent,
+                        input_limit: context.input_limit,
+                        trigger_tokens: context.trigger_tokens,
+                        has_context_limit_override: context.has_context_limit_override,
+                    },
+                    self.cancellation,
+                )
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -1017,32 +999,6 @@ impl parrot_core::States for EpochStates<'_> {
                 .lock()
                 .await
                 .read_checkpoint_sequences()
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-    fn render_status<'a, 'c>(
-        &'a self,
-        context: CoreContextSnapshot,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.status
-                .observe(
-                    &ContextSnapshot {
-                        estimated_tokens: context.estimated_tokens,
-                        context_limit: context.context_limit,
-                        usage_percent: context.usage_percent,
-                        trigger_percent: context.trigger_percent,
-                        input_limit: context.input_limit,
-                        trigger_tokens: context.trigger_tokens,
-                        has_context_limit_override: context.has_context_limit_override,
-                    },
-                    &cancellation,
-                )
                 .await
                 .map_err(|error| self.capture_error(error))
         })

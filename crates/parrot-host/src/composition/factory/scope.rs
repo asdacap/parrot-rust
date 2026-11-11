@@ -822,14 +822,6 @@ impl ScopedModeStatus {
     }
 }
 impl ContextStatus for ScopedModeStatus {
-    fn observe<'a>(
-        &'a self,
-        context: &'a ContextSnapshot,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move { self.context()?.observe(context, cancellation).await })
-    }
-
     fn slots<'a>(
         &'a self,
         context: &'a ContextSnapshot,

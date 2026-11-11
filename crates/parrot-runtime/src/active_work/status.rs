@@ -783,24 +783,6 @@ struct BoundContextStatus {
     profile_prompt: String,
 }
 impl crate::compaction::ContextStatus for BoundContextStatus {
-    fn observe<'a>(
-        &'a self,
-        context: &'a ContextSnapshot,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, crate::compaction::ContextResult<String>> {
-        Box::pin(async move {
-            self.runtime
-                .observe_with_context(
-                    &self.query,
-                    &self.profile_prompt,
-                    context.clone(),
-                    cancellation,
-                )
-                .await
-                .map_err(context_error)
-        })
-    }
-
     fn slots<'a>(
         &'a self,
         context: &'a ContextSnapshot,
