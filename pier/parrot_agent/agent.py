@@ -171,16 +171,19 @@ class ParrotAgent(BaseInstalledAgent):
         return keys
 
     def _build_register_config_command(self) -> str | None:
-        """Write provider overrides into the Parrot user config, if absent.
+        """Write provider overrides and sandbox off into the Parrot user config.
 
         Parrot seeds its own predefined config at startup, so the user config
-        only needs to override providers. A pre-existing config.yaml is left
+        only needs to override providers. The Pier sandbox is already the
+        isolation boundary and task containers ship no bubblewrap, so
+        Parrot's own sandbox stays off. A pre-existing config.yaml is left
         untouched; merging YAML from shell is unreliable, so a pre-baked
         config is the operator's escape hatch in that case.
         """
-        if not self._provider_config:
-            return None
-        document: dict[str, Any] = {"providers": self._provider_config}
+        document: dict[str, Any] = {
+            "providers": self._provider_config,
+            "sandbox": {"enabled": False},
+        }
         encoded = shlex.quote(json.dumps(document))
         return (
             "set -euo pipefail; "
