@@ -1,5 +1,4 @@
 use crate::{CancellationToken, ConfigKey, Content, Error, Message, Role, States, rendering};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use std::io::{self, Write};
 
@@ -39,7 +38,7 @@ struct MessageArtifact<'a> {
 struct ContentArtifact<'a> {
     kind: &'static str,
     text: &'a str,
-    image: String,
+    path: &'a str,
     media_type: &'a str,
 }
 
@@ -68,21 +67,15 @@ pub(super) async fn spill_group(
                 Content::Text(text) => ContentArtifact {
                     kind: "Text",
                     text,
-                    image: String::new(),
+                    path: "",
                     media_type: "",
                 },
                 Content::Image {
-                    path,
-                    bytes,
-                    media_type,
-                    ..
+                    path, media_type, ..
                 } => ContentArtifact {
                     kind: "Image",
                     text: "",
-                    image: match bytes {
-                        Some(bytes) => STANDARD.encode(bytes),
-                        None => STANDARD.encode(states.read_file(path, cancellation).await?),
-                    },
+                    path,
                     media_type,
                 },
                 Content::Artifact(_) => {
