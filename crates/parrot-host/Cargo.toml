@@ -33,6 +33,10 @@ rustix = { version = "=1.1.5", features = ["fs"] }
 subtle = "=2.6.1"
 getrandom = "=0.3.3"
 
+[features]
+default = ["web"]
+web = []
+
 [dev-dependencies]
 parrot-core = { path = "../parrot-core" }
 

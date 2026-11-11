@@ -271,6 +271,7 @@ pub struct BasicCli<R: DialogInput + 'static> {
     error: SharedWriter,
     version: String,
     prepare: PreparePrompt,
+    jsonl_log: String,
 }
 impl<R: DialogInput + 'static> BasicCli<R> {
     #[allow(clippy::too_many_arguments)]
@@ -285,6 +286,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         error: Box<dyn Write + Send>,
         version: String,
         prepare: PreparePrompt,
+        jsonl_log: String,
     ) -> Self {
         Self {
             client,
@@ -297,6 +299,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             error: SharedWriter::new(error),
             version,
             prepare,
+            jsonl_log,
         }
     }
 
@@ -390,11 +393,16 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             return Ok(EXIT_FAILURE);
         };
         native_call(self.client.send_message(message), application.as_ref()).await?;
+        let mut jsonl =
+            super::jsonl_log::JsonlEventLog::create(&self.jsonl_log).map_err(BasicFailure::Io)?;
         let completed = render_turn(
             &mut stream,
             &mut self.output,
             &mut self.error,
-            |_, _| Box::pin(async { Ok(()) }),
+            |event, _| {
+                let written = jsonl.write(event);
+                Box::pin(async move { written.map_err(RenderStreamError::Output) })
+            },
             || false,
             application.as_ref(),
         )
@@ -1842,6 +1850,7 @@ mod tests {
                 Box::new(Vec::<u8>::new()),
                 "initial-live-test".into(),
                 prepare,
+                String::new(),
             );
             let running = basic.run_loop(initial, application.clone(), true);
             tokio::pin!(running);
@@ -2071,6 +2080,7 @@ mod tests {
                 Box::new(Vec::<u8>::new()),
                 "plan-race-test".into(),
                 prepare,
+                String::new(),
             );
             let running = basic.run_loop(initial, application.clone(), false);
             tokio::pin!(running);
