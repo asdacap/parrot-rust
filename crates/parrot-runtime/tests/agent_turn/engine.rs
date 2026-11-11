@@ -716,31 +716,10 @@ impl TurnSkills for Skills {
     }
 }
 struct Status(Arc<Trace>);
-impl ContextStatus for Status {
-    fn observe<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            self.0.push("status");
-            Ok("actual status".into())
-        })
-    }
-}
+impl ContextStatus for Status {}
 /// Leaves steering inert by default so exact-history assertions stay unchanged.
 struct OfferingStatus(Arc<Trace>);
 impl ContextStatus for OfferingStatus {
-    fn observe<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async move {
-            self.0.push("status");
-            Ok("actual status".into())
-        })
-    }
     fn slots<'a>(
         &'a self,
         _: &'a ContextSnapshot,

@@ -177,7 +177,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
         Ok(Outcome::Completed("accepted answer".into()))
     );
     assert_eq!(state.request().rendered_instructions.len(), 4);
-    assert_eq!(state.final_requests, [0, 1, 2, 3]);
+    assert_eq!(state.final_requests, [1, 2, 3, 4]);
     assert!(
         state
             .capture_catalogs()

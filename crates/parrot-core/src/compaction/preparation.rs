@@ -3,8 +3,8 @@ use super::{
     ConversationState,
 };
 use crate::{
-    CancellationToken, Content, ContextSnapshot, Error, EventPublisher, HistoryGroupMember,
-    Message, Provider, Role, States, ToolDefinition, assemble_history_groups,
+    Content, ContextSnapshot, Error, EventPublisher, HistoryGroupMember, Message, Provider, Role,
+    States, ToolDefinition, assemble_history_groups, join_status_offering,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,7 +16,6 @@ pub async fn prepare_compaction(
     publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     configuration: &CompactionConfiguration,
-    cancellation: CancellationToken<'_>,
 ) -> Result<CompactionInput, Error> {
     publisher.report_compaction_started().await?;
     let outcome: Result<CompactionInput, Error> = async {
@@ -27,7 +26,7 @@ pub async fn prepare_compaction(
         let groups = assemble_groups(&raw);
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &raw.messages)?;
         let context = ContextSnapshot::estimate(estimate, &configuration.context);
-        let status = states.render_status(context, cancellation).await?;
+        let offering = states.read_status_offering(context).await?;
         Ok(CompactionInput {
             groups,
             base_watermark,
@@ -35,7 +34,7 @@ pub async fn prepare_compaction(
             messages: raw.messages,
             fixed_message: Message {
                 role: Role::System,
-                contents: vec![Content::Text(status)],
+                contents: vec![Content::Text(join_status_offering(&offering))],
                 ..Message::default()
             },
         })

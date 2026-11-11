@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     CancellationToken, Content, ContextConfiguration, ContextSnapshot, Error, EventPublisher,
-    Message, Provider, ProviderRequest, Role, States, ToolDefinition,
+    Message, Provider, ProviderRequest, Role, States, ToolDefinition, join_status_offering,
 };
 use std::future::Future;
 
@@ -14,7 +14,6 @@ pub async fn fit_status(
     configuration: &ContextConfiguration,
     states: &dyn States,
     provider: &dyn Provider,
-    cancellation: CancellationToken<'_>,
 ) -> Result<String, Error> {
     fit_status_with(
         |content: &str| {
@@ -28,7 +27,10 @@ pub async fn fit_status(
                 provider.estimate_input_tokens(&request.instructions, &request.tools, &messages)?;
             Ok(ContextSnapshot::estimate(tokens, configuration))
         },
-        |context| states.render_status(context, cancellation),
+        |context| async move {
+            let offering = states.read_status_offering(context).await?;
+            Ok(join_status_offering(&offering))
+        },
     )
     .await
 }
@@ -61,7 +63,6 @@ pub async fn fit_compaction(
     result: Option<CompactionResult>,
     states: &dyn States,
     provider: &dyn Provider,
-    cancellation: CancellationToken<'_>,
 ) -> Result<Option<FittedCompaction>, Error> {
     let result = result.filter(|result| result.watermark > input.base_watermark);
     let Some(result) = result else {
@@ -89,8 +90,9 @@ pub async fn fit_compaction(
         let tokens = provider.estimate_input_tokens(&input.instructions, definitions, &history)?;
         Ok(ContextSnapshot::estimate(tokens, &configuration.context))
     };
-    let fitted = fit_status_with(estimate, |context| {
-        states.render_status(context, cancellation)
+    let fitted = fit_status_with(estimate, |context| async move {
+        let offering = states.read_status_offering(context).await?;
+        Ok::<_, Error>(join_status_offering(&offering))
     })
     .await?;
     if estimate(&fitted)?.exceeds_input_limit() {
@@ -113,14 +115,5 @@ pub async fn compact_conversation(
 ) -> Result<Option<FittedCompaction>, Error> {
     let plan = CompactionPlan::select(input, definitions, configuration, provider)?;
     let result = compact(plan, states, provider, publisher, cancellation).await?;
-    fit_compaction(
-        input,
-        definitions,
-        configuration,
-        result,
-        states,
-        provider,
-        cancellation,
-    )
-    .await
+    fit_compaction(input, definitions, configuration, result, states, provider).await
 }

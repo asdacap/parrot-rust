@@ -54,7 +54,7 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.final_requests, [0, 1]);
+    assert_eq!(state.final_requests, [1, 2]);
     assert_eq!(state.capture_catalogs(), [vec!["read"], vec!["read"]]);
     assert!(state.tools.flags.lock().unwrap()[0].final_phase);
     let trace = state.trace.values();
@@ -63,7 +63,7 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
             .iter()
             .position(|step| step == "final_request")
             .unwrap()
-            < trace.iter().position(|step| step == "render").unwrap()
+            < trace.iter().rposition(|step| step == "render").unwrap()
     );
 }
 
@@ -87,6 +87,7 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
                 .calibration
                 .observe_usage("memory/model", 0, 950);
         }
+        state.request().estimate_script.push_back(0);
         state
             .request()
             .estimate_script

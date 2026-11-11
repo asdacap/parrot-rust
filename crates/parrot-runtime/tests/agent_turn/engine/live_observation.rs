@@ -373,14 +373,14 @@ impl ReentrantStatus {
     }
 }
 impl ContextStatus for ReentrantStatus {
-    fn observe<'a>(
+    fn slots<'a>(
         &'a self,
-        _: &'a ContextSnapshot,
+        _context: &'a ContextSnapshot,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
+    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
         Box::pin(async move {
             self.capture(cancellation).await?;
-            Ok("actual reentrant status".into())
+            Ok(parrot_core::StatusOffering::default())
         })
     }
 }

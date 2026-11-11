@@ -283,15 +283,7 @@ impl SystemPrompt for Prompt {
     }
 }
 pub struct Status;
-impl ContextStatus for Status {
-    fn observe<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async { Ok("status".into()) })
-    }
-}
+impl ContextStatus for Status {}
 impl TurnStatus<Security> for Status {
     fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
         Arc::new(Status)

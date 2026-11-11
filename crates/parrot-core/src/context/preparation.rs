@@ -17,15 +17,8 @@ pub(crate) async fn compact_context(
         .get_config(ConfigKey::Compaction)
         .await?
         .into_compaction()?;
-    let input = prepare_compaction(
-        states,
-        provider,
-        publisher,
-        definitions,
-        &configuration,
-        cancellation,
-    )
-    .await?;
+    let input =
+        prepare_compaction(states, provider, publisher, definitions, &configuration).await?;
     let compacted = compact_conversation(
         &input,
         definitions,

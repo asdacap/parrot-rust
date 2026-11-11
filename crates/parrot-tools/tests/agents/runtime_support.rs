@@ -46,7 +46,7 @@ use parrot_runtime::{
         services::*,
     },
     children::*,
-    compaction::{ContextResult, ContextSnapshot, ContextStatus},
+    compaction::ContextStatus,
     event_broker::EventBroker,
     interactions::TokioClock,
     prompt_context::{PromptResult, SystemPrompt},
@@ -237,15 +237,7 @@ impl TurnSkills for Skills {
     }
 }
 struct Status;
-impl ContextStatus for Status {
-    fn observe<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<String>> {
-        Box::pin(async { Ok(String::new()) })
-    }
-}
+impl ContextStatus for Status {}
 impl TurnStatus<Security> for Status {
     fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
         Arc::new(Self)
