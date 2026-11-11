@@ -146,40 +146,38 @@ fn read_git_metadata(path: impl AsRef<Path>) -> io::Result<String> {
 }
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
-    let mut chunks = bytes.chunks_exact(2);
+    let (chunks, remainder) = bytes.as_chunks::<2>();
     let units: Vec<_> = chunks
-        .by_ref()
+        .iter()
         .map(|chunk| {
-            let pair = [chunk[0], chunk[1]];
             if little_endian {
-                u16::from_le_bytes(pair)
+                u16::from_le_bytes(*chunk)
             } else {
-                u16::from_be_bytes(pair)
+                u16::from_be_bytes(*chunk)
             }
         })
         .collect();
     let mut text = String::from_utf16_lossy(&units);
-    if !chunks.remainder().is_empty() {
+    if !remainder.is_empty() {
         text.push(char::REPLACEMENT_CHARACTER);
     }
     text
 }
 
 fn decode_utf32(bytes: &[u8], little_endian: bool) -> String {
-    let mut chunks = bytes.chunks_exact(4);
+    let (chunks, remainder) = bytes.as_chunks::<4>();
     let mut text: String = chunks
-        .by_ref()
+        .iter()
         .map(|chunk| {
-            let word = [chunk[0], chunk[1], chunk[2], chunk[3]];
             let scalar = if little_endian {
-                u32::from_le_bytes(word)
+                u32::from_le_bytes(*chunk)
             } else {
-                u32::from_be_bytes(word)
+                u32::from_be_bytes(*chunk)
             };
             char::from_u32(scalar).unwrap_or(char::REPLACEMENT_CHARACTER)
         })
         .collect();
-    if !chunks.remainder().is_empty() {
+    if !remainder.is_empty() {
         text.push(char::REPLACEMENT_CHARACTER);
     }
     text
@@ -502,7 +500,7 @@ mod tests {
             fs::write(launch.join(".git"), pointer).unwrap();
             let workspace = discover_workspace(&launch).unwrap();
             assert_eq!(workspace.repository_root(), Some(launch.as_path()));
-            assert_eq!(workspace.writable_roots(), [launch.clone()]);
+            assert_eq!(workspace.writable_roots(), std::slice::from_ref(&launch));
         }
     }
 
@@ -524,7 +522,7 @@ mod tests {
             fs::write(admin.join(file), value).unwrap();
             let workspace = discover_workspace(&launch).unwrap();
             assert_eq!(workspace.repository_root(), Some(linked.as_path()));
-            assert_eq!(workspace.writable_roots(), [launch.clone()]);
+            assert_eq!(workspace.writable_roots(), std::slice::from_ref(&launch));
             fs::write(admin.join("gitdir"), "../../../../linked/.git").unwrap();
         }
     }
@@ -596,7 +594,7 @@ mod tests {
             fs::write(linked.join(".git"), pointer).unwrap();
             let workspace = discover_workspace(&linked).unwrap();
             assert_eq!(workspace.repository_root(), Some(linked.as_path()));
-            assert_eq!(workspace.writable_roots(), [linked.clone()]);
+            assert_eq!(workspace.writable_roots(), std::slice::from_ref(&linked));
         }
         assert!(common.is_dir());
     }

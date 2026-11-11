@@ -14,11 +14,9 @@ pub(crate) fn decode(
     let mut model = Model::new(id, provider_id);
     model.name = id.to_owned();
     let mut fields = ModelMetadataFields::NONE;
-    if read_name {
-        if let Some(name) = json_read::string(metadata, "name") {
-            model.name = name.to_owned();
-            fields.insert(ModelMetadataFields::NAME);
-        }
+    if read_name && let Some(name) = json_read::string(metadata, "name") {
+        model.name = name.to_owned();
+        fields.insert(ModelMetadataFields::NAME);
     }
     for field in context_fields {
         if let Some(context) = json_read::nonnegative_i32(metadata, field) {

@@ -639,7 +639,7 @@ fn preset_usage(command: &str) -> String {
 fn check(cancellation: &dyn Cancellation) -> Result<(), SlashFailure> {
     cancellation
         .check()
-        .map_err(|_| SlashFailure::Rpc(Status::cancelled("operation cancelled")))
+        .map_err(|_| SlashFailure::Rpc(Box::new(Status::cancelled("operation cancelled"))))
 }
 async fn show_auth_failure(
     dialog: &mut dyn SlashDialog,
@@ -676,7 +676,7 @@ impl AuthFailure {
 }
 impl From<Status> for AuthFailure {
     fn from(status: Status) -> Self {
-        Self::from(SlashFailure::Rpc(status))
+        Self::from(SlashFailure::Rpc(Box::new(status)))
     }
 }
 impl From<SlashFailure> for AuthFailure {

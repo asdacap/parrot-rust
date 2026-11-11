@@ -721,10 +721,10 @@ impl SessionEventStream for ReplayStream {
             if self.pending.is_none() {
                 let events = if let Some(after) = &self.replay {
                     let mut events = self.events.replay().await.map_err(internal)?;
-                    if !after.is_empty() {
-                        if let Some(index) = events.iter().position(|event| &event.id == after) {
-                            events.drain(..=index);
-                        }
+                    if !after.is_empty()
+                        && let Some(index) = events.iter().position(|event| &event.id == after)
+                    {
+                        events.drain(..=index);
                     }
                     events
                 } else {

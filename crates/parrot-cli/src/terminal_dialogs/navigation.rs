@@ -586,7 +586,7 @@ fn validate_id(selected: &wire::UserSession, id: &str) -> Result<(), NavigationF
     }
 }
 fn cancelled() -> NavigationFailure {
-    NavigationFailure::Rpc(Status::cancelled("operation cancelled"))
+    NavigationFailure::Rpc(Box::new(Status::cancelled("operation cancelled")))
 }
 fn check(cancellation: &dyn Cancellation) -> Result<(), NavigationFailure> {
     cancellation.check().map_err(|_| cancelled())
@@ -602,7 +602,7 @@ fn attach_failure(failure: AttachError) -> NavigationFailure {
         AttachError::Rpc(status) => NavigationFailure::Rpc(status),
         AttachError::Cancelled => cancelled(),
         AttachError::Timeout => {
-            NavigationFailure::Rpc(Status::deadline_exceeded(failure.to_string()))
+            NavigationFailure::Rpc(Box::new(Status::deadline_exceeded(failure.to_string())))
         }
         AttachError::DifferentSession | AttachError::Disposed => {
             NavigationFailure::Recoverable(failure.to_string())

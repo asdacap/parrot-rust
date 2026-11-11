@@ -228,10 +228,11 @@ pub(crate) fn supported_effort(value: &str) -> bool {
 
 pub(crate) fn from_efforts(efforts: &[String], default: &str) -> Vec<ModelVariant> {
     let mut ordered = efforts.to_vec();
-    if let Some(index) = ordered.iter().position(|effort| effort == default) {
-        if !default.is_empty() && index > 0 {
-            ordered.swap(0, index);
-        }
+    if let Some(index) = ordered.iter().position(|effort| effort == default)
+        && !default.is_empty()
+        && index > 0
+    {
+        ordered.swap(0, index);
     }
     ordered
         .into_iter()

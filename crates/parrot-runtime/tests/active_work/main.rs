@@ -647,12 +647,7 @@ async fn rehydrate_uses_oneof_presence_not_cleared_boolean_value() {
 #[tokio::test]
 async fn dropped_mutation_future_can_commit_but_requires_rehydration_and_later_owned_join() {
     use std::future::Future;
-    use std::task::{Context, Poll, Wake, Waker};
-
-    struct NoWake;
-    impl Wake for NoWake {
-        fn wake(self: Arc<Self>) {}
-    }
+    use std::task::{Context, Poll, Waker};
 
     let fixture = Fixture::new();
     let publisher = DurablePublisher::new(fixture.history());
@@ -670,9 +665,10 @@ async fn dropped_mutation_future_can_commit_but_requires_rehydration_and_later_o
         })
         .unwrap();
     let mut mutation = Box::pin(reminders.set("committed", "but unobserved", &NeverCancelled));
-    let waker = Waker::from(Arc::new(NoWake));
     assert!(matches!(
-        mutation.as_mut().poll(&mut Context::from_waker(&waker)),
+        mutation
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop())),
         Poll::Pending
     ));
     drop(mutation);

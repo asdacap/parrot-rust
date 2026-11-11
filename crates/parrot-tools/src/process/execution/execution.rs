@@ -119,12 +119,12 @@ struct Shared {
 impl Shared {
     fn stop(&self) {
         self.cancelled.store(true, Ordering::Release);
-        if let Some(native) = recover(&self.native).as_mut() {
-            if let Err(error) = native.request_cancel() {
-                let mut failure = recover(&self.failure);
-                if failure.is_none() {
-                    *failure = Some(Failure::capture(&error));
-                }
+        if let Some(native) = recover(&self.native).as_mut()
+            && let Err(error) = native.request_cancel()
+        {
+            let mut failure = recover(&self.failure);
+            if failure.is_none() {
+                *failure = Some(Failure::capture(&error));
             }
         }
     }
@@ -437,12 +437,11 @@ impl ShellProcessExecution {
                             blob_error(&directory, error)
                         }
                     });
-                if let Err(error) = &result {
-                    if error.kind() != io::ErrorKind::Interrupted
-                        || !shared.cancelled.load(Ordering::Acquire)
-                    {
-                        shared.fail(error);
-                    }
+                if let Err(error) = &result
+                    && (error.kind() != io::ErrorKind::Interrupted
+                        || !shared.cancelled.load(Ordering::Acquire))
+                {
+                    shared.fail(error);
                 }
                 result
             })?;
@@ -604,23 +603,23 @@ impl ShellProcessExecution {
         // Serialize the complete synchronous cleanup, including leftover drain
         // joins and transcript disposal if the supervisor itself failed.
         let mut supervisor = recover(&self.supervisor);
-        if let Some(observer) = recover(&self.cancellation_watch).take() {
-            if let Err(error) = observer.join() {
-                first = Some(error);
-            }
+        if let Some(observer) = recover(&self.cancellation_watch).take()
+            && let Err(error) = observer.join()
+        {
+            first = Some(error);
         }
-        if let Some(supervisor) = supervisor.take() {
-            if supervisor.join().is_err() {
-                let error = io::Error::other("The process supervisor panicked during cleanup.");
-                let mut state = recover(&self.state);
-                if state.result.is_none() {
-                    let failure = recover(&self.shared.failure)
-                        .clone()
-                        .unwrap_or_else(|| Failure::capture(&error));
-                    state.result = Some(Err(failure));
-                }
-                first.get_or_insert(error);
+        if let Some(supervisor) = supervisor.take()
+            && supervisor.join().is_err()
+        {
+            let error = io::Error::other("The process supervisor panicked during cleanup.");
+            let mut state = recover(&self.state);
+            if state.result.is_none() {
+                let failure = recover(&self.shared.failure)
+                    .clone()
+                    .unwrap_or_else(|| Failure::capture(&error));
+                state.result = Some(Err(failure));
             }
+            first.get_or_insert(error);
         }
         // Also covers partially constructed executions with no supervisor.
         let native = recover(&self.shared.native).take();
@@ -642,10 +641,10 @@ impl ShellProcessExecution {
                 }
             }
         }
-        if let Some(transcript) = &self.transcript {
-            if let Err(error) = transcript.dispose() {
-                first.get_or_insert_with(|| blob_error(&self.blob_directory, error));
-            }
+        if let Some(transcript) = &self.transcript
+            && let Err(error) = transcript.dispose()
+        {
+            first.get_or_insert_with(|| blob_error(&self.blob_directory, error));
         }
         if let Some(files) = &self.files {
             let mut files = recover(files);
@@ -735,10 +734,10 @@ fn finish(
         }
     })();
     for output in actual {
-        if let Err(error) = output.delete_temporary_file() {
-            if result.is_ok() {
-                result = Err(blob_error(directory, error));
-            }
+        if let Err(error) = output.delete_temporary_file()
+            && result.is_ok()
+        {
+            result = Err(blob_error(directory, error));
         }
     }
     result

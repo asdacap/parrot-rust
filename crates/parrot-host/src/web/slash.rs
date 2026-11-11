@@ -56,12 +56,12 @@ pub trait WebSlashRegistry: Send {
 }
 
 pub enum WebSlashFailure {
-    Rpc(Status),
+    Rpc(Box<Status>),
     Command(String),
 }
 impl From<Status> for WebSlashFailure {
     fn from(status: Status) -> Self {
-        Self::Rpc(status)
+        Self::Rpc(Box::new(status))
     }
 }
 
@@ -177,7 +177,7 @@ impl ParrotWeb for WebSlashService {
                 Err(WebSlashFailure::Command(message)) => {
                     dialog.show_error(&message, cancellation.as_ref()).await?
                 }
-                Err(WebSlashFailure::Rpc(status)) => return Err(status),
+                Err(WebSlashFailure::Rpc(status)) => return Err(*status),
             }
             let current = registry.current_session();
             Ok((current.id == initial.id
@@ -339,11 +339,11 @@ impl Stream for RunStream {
         if this.ended {
             return Poll::Ready(None);
         }
-        if let Some(dispatch) = this.dispatch.as_mut() {
-            if let Poll::Ready(result) = dispatch.as_mut().poll(cx) {
-                this.completion = Some(result);
-                this.dispatch.take();
-            }
+        if let Some(dispatch) = this.dispatch.as_mut()
+            && let Poll::Ready(result) = dispatch.as_mut().poll(cx)
+        {
+            this.completion = Some(result);
+            this.dispatch.take();
         }
         if let Poll::Ready(Some(frame)) = this.frames.poll_recv(cx) {
             return Poll::Ready(Some(Ok(frame)));

@@ -124,10 +124,10 @@ impl LiveInputHost for ScriptedHost {
                 frames.push(items);
                 frames.len()
             };
-            if let Some((at, cancellation)) = &self.cancel_after_frame {
-                if count == *at {
-                    cancellation.cancel();
-                }
+            if let Some((at, cancellation)) = &self.cancel_after_frame
+                && count == *at
+            {
+                cancellation.cancel();
             }
             Ok(())
         })

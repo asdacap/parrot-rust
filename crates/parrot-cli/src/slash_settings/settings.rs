@@ -276,8 +276,8 @@ impl SlashCommand for ModelPresetSelectCommand {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             check_cancelled(cancellation)?;
-            let name;
-            if arguments.trim().is_empty() {
+
+            let name = if arguments.trim().is_empty() {
                 context.activity.wait_until_idle(cancellation).await?;
                 let presets = load(
                     context.dialog,
@@ -304,7 +304,7 @@ impl SlashCommand for ModelPresetSelectCommand {
                 else {
                     return Ok(());
                 };
-                name = selected.id;
+                selected.id
             } else {
                 if validate_preset_name(arguments).is_err() {
                     context
@@ -314,8 +314,8 @@ impl SlashCommand for ModelPresetSelectCommand {
                     return Ok(());
                 }
                 context.activity.wait_until_idle(cancellation).await?;
-                name = arguments.to_owned();
-            }
+                arguments.to_owned()
+            };
             match context
                 .session
                 .select_model_preset(&name, cancellation)

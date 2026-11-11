@@ -1,6 +1,5 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, Content, Error, EventPublisher, Message, ProviderRequest,
-    Reasoning, Role,
+    BoxFuture, CancellationToken, Content, Error, Message, ProviderRequest, Reasoning, Role,
     compaction::{CompactionGroup, CompactionPlan, CompactionProgress, SummaryResponse},
 };
 use std::{
@@ -95,10 +94,10 @@ impl Effects {
             messages: messages.to_vec(),
             ..ProviderRequest::default()
         });
-        if let Some((call, error)) = &self.context_failure {
-            if *call == contexts.len() {
-                return Err(error.clone());
-            }
+        if let Some((call, error)) = &self.context_failure
+            && *call == contexts.len()
+        {
+            return Err(error.clone());
         }
         self.estimate_tokens(messages)
     }
@@ -217,42 +216,5 @@ impl parrot_core::States for Effects {
         'c: 'a,
     {
         self.write_to_scratch(contents, cancellation)
-    }
-}
-
-pub struct ProgressPublisher {
-    pub progress: Arc<Mutex<Vec<CompactionProgress>>>,
-}
-
-impl EventPublisher for ProgressPublisher {
-    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("ProgressPublisher.on_epoch_started")) })
-    }
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async {
-            Err(Error::unsupported(
-                "ProgressPublisher.report_compaction_started",
-            ))
-        })
-    }
-    fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async {
-            Err(Error::unsupported(
-                "ProgressPublisher.report_compaction_failed",
-            ))
-        })
-    }
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        progress: CompactionProgress,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.progress.lock().unwrap().push(progress);
-            Ok(())
-        })
     }
 }

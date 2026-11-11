@@ -658,7 +658,7 @@ impl GrpcTransportClient {
                         _ = tokio::time::sleep(Duration::from_millis(100)) => {}
                     }
                 }
-                Err(error) => return Err(AttachError::Rpc(error)),
+                Err(error) => return Err(AttachError::Rpc(Box::new(error))),
             }
         }
     }
@@ -699,7 +699,7 @@ pub enum AttachError {
     Timeout,
     DifferentSession,
     Disposed,
-    Rpc(Status),
+    Rpc(Box<Status>),
 }
 impl fmt::Display for AttachError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

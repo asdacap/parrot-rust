@@ -181,10 +181,10 @@ fn enhanced_replay_case(failed: bool) {
         if let Some(plan) = update.complete_plan {
             live_plans.push(plan.markdown);
         }
-        if update.live_event {
-            if let Some(Payload::PermissionPending(permission)) = &published.payload {
-                permissions.push(permission.id.clone());
-            }
+        if update.live_event
+            && let Some(Payload::PermissionPending(permission)) = &published.payload
+        {
+            permissions.push(permission.id.clone());
         }
         started += usize::from(update.started_main_turn);
         finished += usize::from(update.finished_main_turn);

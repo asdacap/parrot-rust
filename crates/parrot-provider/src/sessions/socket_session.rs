@@ -161,10 +161,10 @@ impl Session for ResponseSession {
             }
             let mut result = Ok(());
             for actor in actors {
-                if let Err(error) = actor.join().await {
-                    if result.is_ok() {
-                        result = Err(error);
-                    }
+                if let Err(error) = actor.join().await
+                    && result.is_ok()
+                {
+                    result = Err(error);
                 }
             }
             self.inner.session.lock().await.dispose();

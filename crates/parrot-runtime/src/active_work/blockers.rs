@@ -79,10 +79,10 @@ impl ActiveWorkReminder {
     pub async fn work_sections(&self) -> Result<String, TurnError> {
         let mut sections = String::new();
         for blocker in &self.blockers {
-            if let Some(result) = blocker.observe().await? {
-                if let Some(section) = result.work_section {
-                    sections.push_str(&section);
-                }
+            if let Some(result) = blocker.observe().await?
+                && let Some(section) = result.work_section
+            {
+                sections.push_str(&section);
             }
         }
         Ok(sections)

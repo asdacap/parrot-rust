@@ -116,7 +116,7 @@ async fn parent_scoped_questions_copy_validate_and_settle_once() {
     assert_eq!(coordinator.pending().len(), 1);
     let mut duplicate = Box::pin(coordinator.ask(child, vec![question()], &token));
     assert!(
-        matches!(duplicate.as_mut().poll(&mut Context::from_waker(&Waker::from(Arc::new(NoWake)))), Poll::Ready(Err(OperationError::Failed(error))) if error.message == "the child already has a pending question")
+        matches!(duplicate.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(Err(OperationError::Failed(error))) if error.message == "the child already has a pending question")
     );
     coordinator
         .reply_from_parent("parent", registry.as_ref(), "child", answer())

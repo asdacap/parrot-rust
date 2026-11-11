@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    task::{Context, Poll, Wake, Waker},
+    task::{Context, Poll, Waker},
 };
 
 use parrot_cli::{
@@ -532,11 +532,6 @@ pub fn refresh(record: Record) -> SkillRefresh {
     })
 }
 
-struct NoWake;
-impl Wake for NoWake {
-    fn wake(self: Arc<Self>) {}
-}
-
 pub fn run(
     command: &dyn SlashCommand,
     arguments: &str,
@@ -554,10 +549,9 @@ pub fn run(
         commands: &[],
     };
     let future = command.run(arguments, &mut context, cancellation);
-    let waker = Waker::from(Arc::new(NoWake));
     match std::pin::pin!(future)
         .as_mut()
-        .poll(&mut Context::from_waker(&waker))
+        .poll(&mut Context::from_waker(Waker::noop()))
     {
         Poll::Ready(result) => result,
         Poll::Pending => panic!("supplied controls transcript unexpectedly pending"),

@@ -153,10 +153,10 @@ fn read_statistics_events(
             progress(events.len());
         }
     }
-    if events.is_empty() {
-        if let Some(progress) = progress {
-            progress(0);
-        }
+    if events.is_empty()
+        && let Some(progress) = progress
+    {
+        progress(0);
     }
     Ok(events)
 }

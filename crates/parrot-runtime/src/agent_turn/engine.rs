@@ -913,14 +913,14 @@ where
             let outcome = async {
                 match result {
                     Ok(execution) => {
-                        if execution.status == ExecutionStatus::Failed {
-                            if let Some(key) = &failed_key {
-                                self.activity.turn_finished(
-                                    &key.start_event_id,
-                                    "failed",
-                                    Some("runaway"),
-                                );
-                            }
+                        if execution.status == ExecutionStatus::Failed
+                            && let Some(key) = &failed_key
+                        {
+                            self.activity.turn_finished(
+                                &key.start_event_id,
+                                "failed",
+                                Some("runaway"),
+                            );
                         }
                         Ok(execution)
                     }
@@ -1113,10 +1113,11 @@ where
                     "successful execution has no captured terminal assistant reference".into(),
                 ));
             }
-            if execution.status == ExecutionStatus::Succeeded && execution.output.is_empty() {
-                if let Some(item) = &candidate {
-                    execution.output = parrot_storage::events::content(&item.message.parts);
-                }
+            if execution.status == ExecutionStatus::Succeeded
+                && execution.output.is_empty()
+                && let Some(item) = &candidate
+            {
+                execution.output = parrot_storage::events::content(&item.message.parts);
             }
             Ok(ExecutionTerminal {
                 event_id: format!("{}.finished", checkpoint.execution_id),

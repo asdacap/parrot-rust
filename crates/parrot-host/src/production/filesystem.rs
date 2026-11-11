@@ -978,10 +978,9 @@ mod unix_fs {
                         descriptor.as_fd(),
                         name_c.as_c_str(),
                         Mode::from_raw_mode(0o777),
-                    ) {
-                        if error != rustix::io::Errno::EXIST {
-                            return Err(io(error.into()));
-                        }
+                    ) && error != rustix::io::Errno::EXIST
+                    {
+                        return Err(io(error.into()));
                     }
                     descriptor = open_at(descriptor.as_fd(), name, DIRECTORY_FLAGS, 0, true)?;
                 }

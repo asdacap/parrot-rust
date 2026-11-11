@@ -134,15 +134,16 @@ fn add_message<M: ResponsesMessageView>(
     provider_id: &str,
     input: &mut Vec<String>,
 ) -> Result<(), ResponsesPrepareError> {
-    if message.role() == ResponsesRole::Assistant && message.provider_id() == provider_id {
-        if let Some(items) = replayable_output(message.provider_content()) {
-            input.extend(
-                items
-                    .into_iter()
-                    .map(|item| source_compact(&item).expect("selected item was validated JSON")),
-            );
-            return Ok(());
-        }
+    if message.role() == ResponsesRole::Assistant
+        && message.provider_id() == provider_id
+        && let Some(items) = replayable_output(message.provider_content())
+    {
+        input.extend(
+            items
+                .into_iter()
+                .map(|item| source_compact(&item).expect("selected item was validated JSON")),
+        );
+        return Ok(());
     }
     if message.role() == ResponsesRole::Tool {
         input.push(object(vec![

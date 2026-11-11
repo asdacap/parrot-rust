@@ -139,10 +139,10 @@ where
             }
             found.reverse();
             let global = self.configuration_directory.join("AGENTS.md");
-            if !found.iter().any(|(path, _)| path == &global) {
-                if let Some(file) = self.file(global, &snapshot, cancellation).await? {
-                    found.insert(0, file);
-                }
+            if !found.iter().any(|(path, _)| path == &global)
+                && let Some(file) = self.file(global, &snapshot, cancellation).await?
+            {
+                found.insert(0, file);
             }
             self.sampled = Some(
                 found
@@ -206,7 +206,9 @@ pub(crate) fn decode_agents_text(bytes: &[u8]) -> String {
         if let Some(bytes) = bytes.strip_prefix(&prefix) {
             let mut text = String::from_utf16_lossy(
                 &bytes
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|chunk| {
                         if little_endian {
                             u16::from_le_bytes([chunk[0], chunk[1]])

@@ -322,13 +322,12 @@ fn capture_turn_state(data: &str, target: &mut Option<String>) {
         return;
     };
     for (key, value) in headers.0 {
-        if key.eq_ignore_ascii_case("x-codex-turn-state") {
-            if let Ok(value) = serde_json::from_str::<String>(value.get()) {
-                if !value.is_empty() {
-                    *target = Some(value);
-                    break;
-                }
-            }
+        if key.eq_ignore_ascii_case("x-codex-turn-state")
+            && let Ok(value) = serde_json::from_str::<String>(value.get())
+            && !value.is_empty()
+        {
+            *target = Some(value);
+            break;
         }
     }
 }

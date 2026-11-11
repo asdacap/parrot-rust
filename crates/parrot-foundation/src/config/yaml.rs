@@ -763,13 +763,12 @@ pub(crate) fn latest_alias_occurrence<'a>(root: &'a Node, value: &'a Node) -> &'
 }
 
 fn collect_anchor_payloads(node: &Node, payloads: &mut BTreeMap<u64, Node>) {
-    if let Some(identity) = node.anchor_identity {
-        if payloads
+    if let Some(identity) = node.anchor_identity
+        && payloads
             .get(&identity)
             .is_none_or(|existing| node.anchor_revision > existing.anchor_revision)
-        {
-            payloads.insert(identity, node.clone());
-        }
+    {
+        payloads.insert(identity, node.clone());
     }
     match &node.kind {
         Kind::Mapping(entries) => {

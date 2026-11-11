@@ -368,11 +368,11 @@ impl ResponsesParser {
                 };
                 if !is_done_item || is_function_call {
                     if let Some(index) = self.find_tool(&item_id, &call_id) {
-                        if !arguments.is_empty() {
-                            if let Some(tool) = self.tools.get_mut(&index) {
-                                tool.arguments.clear();
-                                tool.arguments.push_str(&arguments);
-                            }
+                        if !arguments.is_empty()
+                            && let Some(tool) = self.tools.get_mut(&index)
+                        {
+                            tool.arguments.clear();
+                            tool.arguments.push_str(&arguments);
                         }
                     } else {
                         self.add_tool(item_id, call_id, name, arguments);
@@ -677,10 +677,10 @@ impl ResponsesParser {
         Ok(!repeated_id && !repeated_position)
     }
     fn capture_output_item(&mut self, raw: &str, index: i32) {
-        if replayable_item(raw) {
-            if let Ok(item) = source_compact(raw) {
-                self.streamed_output.insert(index, item);
-            }
+        if replayable_item(raw)
+            && let Ok(item) = source_compact(raw)
+        {
+            self.streamed_output.insert(index, item);
         }
     }
     fn capture_completion(&mut self, raw: &str) {
@@ -691,15 +691,14 @@ impl ResponsesParser {
         if let Some(output) = response
             .get("output")
             .filter(|raw| raw.get().trim_start().starts_with('['))
+            && let Ok(items) = serde_json::from_str::<Vec<Box<RawValue>>>(output.get())
         {
-            if let Ok(items) = serde_json::from_str::<Vec<Box<RawValue>>>(output.get()) {
-                self.output.extend(
-                    items
-                        .iter()
-                        .filter(|item| replayable_item(item.get()))
-                        .filter_map(|item| source_compact(item.get()).ok()),
-                );
-            }
+            self.output.extend(
+                items
+                    .iter()
+                    .filter(|item| replayable_item(item.get()))
+                    .filter_map(|item| source_compact(item.get()).ok()),
+            );
         }
         if self.output.is_empty() {
             self.output.extend(self.streamed_output.values().cloned());

@@ -118,14 +118,13 @@ impl PlanArtifactStore {
             // reports a collision. Only this operation's created files belong
             // to its cleanup. Keep the source plan-then-tasks cleanup order.
             for (path, created) in [(paths.plan(), created_plan), (paths.tasks(), created_tasks)] {
-                if created {
-                    if let Err(cleanup) = fs::remove_file(path) {
-                        if cleanup.kind() != io::ErrorKind::NotFound {
-                            return Err(ModeError::Registry(format!(
-                                "mode: create and secure correlated plan files: {failure}; cleanup: {cleanup}"
-                            )));
-                        }
-                    }
+                if created
+                    && let Err(cleanup) = fs::remove_file(path)
+                    && cleanup.kind() != io::ErrorKind::NotFound
+                {
+                    return Err(ModeError::Registry(format!(
+                        "mode: create and secure correlated plan files: {failure}; cleanup: {cleanup}"
+                    )));
                 }
             }
             return Err(ModeError::Registry(format!(

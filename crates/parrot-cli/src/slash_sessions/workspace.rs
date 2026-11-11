@@ -26,14 +26,14 @@ pub trait WorkspaceNavigation: Send + Sync {
 
 #[derive(Debug)]
 pub enum NavigationFailure {
-    Rpc(tonic::Status),
+    Rpc(Box<tonic::Status>),
     /// Source InvalidOperationException, IOException, or TimeoutException.
     Recoverable(String),
     Other(String),
 }
 impl From<tonic::Status> for NavigationFailure {
     fn from(status: tonic::Status) -> Self {
-        Self::Rpc(status)
+        Self::Rpc(Box::new(status))
     }
 }
 impl From<SlashFailure> for NavigationFailure {

@@ -42,7 +42,7 @@ impl SlashActivity for Activity {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             c.check()
-                .map_err(|_| SlashFailure::Rpc(Status::cancelled("fixture cancelled")))?;
+                .map_err(|_| SlashFailure::Rpc(Box::new(Status::cancelled("fixture cancelled"))))?;
             self.waits.fetch_add(1, Ordering::SeqCst);
             self.trace.lock().unwrap().push("idle".into());
             Ok(())

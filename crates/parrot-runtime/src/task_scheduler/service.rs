@@ -347,8 +347,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                             "running task has no saved runner checkpoint",
                         ));
                     }
-                    if let Some(runner) = &worker.runner {
-                        if runner.original_task.name != entry.task.name
+                    if let Some(runner) = &worker.runner
+                        && (runner.original_task.name != entry.task.name
                             || runner.current_task.name != entry.task.name
                             || runner.generation_id.is_empty()
                             || runner.prompt_message_id.is_empty()
@@ -356,42 +356,38 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                             || runner
                                 .outcome
                                 .as_ref()
-                                .is_some_and(|outcome| outcome.name != entry.task.name)
-                        {
-                            return Err(ChildError::registry(
-                                "task runner checkpoint does not match its task",
-                            ));
-                        }
+                                .is_some_and(|outcome| outcome.name != entry.task.name))
+                    {
+                        return Err(ChildError::registry(
+                            "task runner checkpoint does not match its task",
+                        ));
                     }
                     if let Some(reference) = worker
                         .runner
                         .as_ref()
                         .and_then(|runner| runner.response_reference.as_ref())
-                    {
-                        if worker.worker_session_id.as_deref()
+                        && (worker.worker_session_id.as_deref()
                             != Some(reference.worker_session_id.as_str())
                             || worker.runner.as_ref().is_some_and(|runner| {
                                 runner.prompt_message_id != reference.initial_message_id
-                            })
-                        {
-                            return Err(ChildError::registry(
-                                "task response reference does not match its worker prompt",
-                            ));
-                        }
+                            }))
+                    {
+                        return Err(ChildError::registry(
+                            "task response reference does not match its worker prompt",
+                        ));
                     }
-                    if let Some(stop) = &worker.pending_stop {
-                        if worker.worker_session_id.as_deref()
+                    if let Some(stop) = &worker.pending_stop
+                        && (worker.worker_session_id.as_deref()
                             != Some(stop.worker_session_id.as_str())
                             || !saved.tasks.notifications.iter().any(|notice| {
                                 notice.message_id == stop.notice_message_id
                                     && notice.target_session_id == stop.worker_session_id
                                     && !notice.wake
-                            })
-                        {
-                            return Err(ChildError::registry(
-                                "task stop intent has no matching worker notification",
-                            ));
-                        }
+                            }))
+                    {
+                        return Err(ChildError::registry(
+                            "task stop intent has no matching worker notification",
+                        ));
                     }
                     let worker = Box::new(DedicatedExecution::restore(*worker));
                     if retiring {
@@ -645,10 +641,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 scheduler.owner()?;
                 let mut state = scheduler.gate.lock().await;
                 scheduler.ensure_healthy(&state)?;
-                if let Some(receipt) = Self::find_receipt(&state, &identity)? {
-                    if !matches!(receipt, TaskCallReceipt::Preparing { .. }) {
-                        return scheduler.restore_response(receipt).map(Some);
-                    }
+                if let Some(receipt) = Self::find_receipt(&state, &identity)?
+                    && !matches!(receipt, TaskCallReceipt::Preparing { .. })
+                {
+                    return scheduler.restore_response(receipt).map(Some);
                 }
                 let preparing = Self::has_preparing(&state);
                 scheduler.seal_preparing(&mut state).await?;
@@ -696,18 +692,17 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     "legacy task migration must complete before updates",
                 ));
             }
-            if let UpdateOrigin::Tool(identity) = &origin {
-                if let Some(receipt) = Self::find_receipt(&state, identity)? {
-                    if !matches!(receipt, TaskCallReceipt::Preparing { .. }) {
-                        return scheduler.restore_response(receipt).map(Some);
-                    }
-                }
+            if let UpdateOrigin::Tool(identity) = &origin
+                && let Some(receipt) = Self::find_receipt(&state, identity)?
+                && !matches!(receipt, TaskCallReceipt::Preparing { .. })
+            {
+                return scheduler.restore_response(receipt).map(Some);
             }
             scheduler.seal_preparing(&mut state).await?;
-            if let UpdateOrigin::Tool(identity) = &origin {
-                if let Some(receipt) = Self::find_receipt(&state, identity)? {
-                    return scheduler.restore_response(receipt).map(Some);
-                }
+            if let UpdateOrigin::Tool(identity) = &origin
+                && let Some(receipt) = Self::find_receipt(&state, identity)?
+            {
+                return scheduler.restore_response(receipt).map(Some);
             }
             let count = tasks.len();
             let names: HashSet<_> = tasks.iter().map(|task| task.name.as_str()).collect();
@@ -1187,8 +1182,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         {
             return Ok(changed);
         }
-        if !state.entries.iter().any(Entry::owns_self) {
-            if let Some(index) = state.entries.iter().enumerate().find_map(|(index, entry)| {
+        if !state.entries.iter().any(Entry::owns_self)
+            && let Some(index) = state.entries.iter().enumerate().find_map(|(index, entry)| {
                 (entry.task.state == ExecutionStatus::Pending
                     && effective(state, index) == ExecutionStatus::Pending
                     && entry.task.model.is_none()
@@ -1203,10 +1198,10 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         })
                     }))
                 .then_some(index)
-            }) {
-                self.assign_self(state, index).await?;
-                changed = true;
-            }
+            })
+        {
+            self.assign_self(state, index).await?;
+            changed = true;
         }
         state.waiting_for_capacity = false;
         for index in 0..state.entries.len() {
@@ -2460,16 +2455,16 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 entry.pending_stop = None;
                 entry.stopping_run = None;
             }
-            if let Some(notice) = &mut entry.terminal_notification {
-                if notice.message_id == id {
-                    notice.admitted = true;
-                }
-            }
-        }
-        if let Some(notice) = &mut state.completion_notification {
-            if notice.message_id == id {
+            if let Some(notice) = &mut entry.terminal_notification
+                && notice.message_id == id
+            {
                 notice.admitted = true;
             }
+        }
+        if let Some(notice) = &mut state.completion_notification
+            && notice.message_id == id
+        {
+            notice.admitted = true;
         }
         self.save_graph(&mut state).await?;
         let changed = self.reconcile(&mut state).await?;

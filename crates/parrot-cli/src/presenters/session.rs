@@ -284,10 +284,11 @@ impl EnhancedSessionPresenter {
                 main && matches!(published.payload, Some(Payload::TurnStarted(_)));
             self.observe_modeline(published, main);
         }
-        if let Some(Payload::PlanCompleted(plan)) = &published.payload {
-            if main && !replaying {
-                self.plan = Some(plan.clone());
-            }
+        if let Some(Payload::PlanCompleted(plan)) = &published.payload
+            && main
+            && !replaying
+        {
+            self.plan = Some(plan.clone());
         }
         let turn = self.turn.apply_event(published, replaying)?;
         if !turn.commits.is_empty() || !turn.errors.is_empty() {
@@ -301,11 +302,12 @@ impl EnhancedSessionPresenter {
             &mut update,
             &mut self.main_activity,
         );
-        if let Some(Payload::PlanCompleted(plan)) = &published.payload {
-            if main && replaying {
-                self.flush_reasoning_before_output(&published.agent_session_id, &mut update)?;
-                self.render_plan(plan, &mut update);
-            }
+        if let Some(Payload::PlanCompleted(plan)) = &published.payload
+            && main
+            && replaying
+        {
+            self.flush_reasoning_before_output(&published.agent_session_id, &mut update)?;
+            self.render_plan(plan, &mut update);
         }
         if update.completion.is_some() {
             update.finished_main_turn = true;
@@ -597,13 +599,13 @@ impl EnhancedSessionPresenter {
         } else {
             self.modeline_activity.clone()
         };
-        if let Some(start) = self.root_started {
-            if !activity.is_empty() {
-                activity.push_str(&format!(
-                    " (running {})",
-                    duration(self.elapsed.saturating_sub(start))
-                ));
-            }
+        if let Some(start) = self.root_started
+            && !activity.is_empty()
+        {
+            activity.push_str(&format!(
+                " (running {})",
+                duration(self.elapsed.saturating_sub(start))
+            ));
         }
         if self.awaiting_question {
             activity = "Waiting for your answer…".into();

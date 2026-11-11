@@ -208,7 +208,9 @@ fn root_preserves_explicit_rpc_io_and_cancellation_failure_categories() {
         matches!(failure, DispatchError::Rpc(ref status) if status.code() == tonic::Code::PermissionDenied && status.message() == "native detail")
     );
     let failure = basic_failure(dispatch::basic_loop::BasicFailure::Slash(
-        parrot_cli::slash_sessions::SlashFailure::Rpc(Status::cancelled("remote cancelled")),
+        parrot_cli::slash_sessions::SlashFailure::Rpc(Box::new(Status::cancelled(
+            "remote cancelled",
+        ))),
     ));
     assert!(
         matches!(failure, DispatchError::Rpc(ref status) if status.code() == tonic::Code::Cancelled)

@@ -49,21 +49,21 @@ fn decode_model(id: &str, provider_id: &str, item: &Value) -> Model {
         model.context_window = context;
         fields.insert(ModelMetadataFields::CONTEXT_WINDOW);
     }
-    if let Some(provider) = item.get("top_provider") {
-        if let Some(max_tokens) = json_read::signed_i32(provider, "max_completion_tokens") {
-            model.max_output_tokens = max_tokens;
-            fields.insert(ModelMetadataFields::MAX_OUTPUT_TOKENS);
-        }
+    if let Some(provider) = item.get("top_provider")
+        && let Some(max_tokens) = json_read::signed_i32(provider, "max_completion_tokens")
+    {
+        model.max_output_tokens = max_tokens;
+        fields.insert(ModelMetadataFields::MAX_OUTPUT_TOKENS);
     }
-    if let Some(reasoning) = item.get("reasoning").filter(|value| value.is_object()) {
-        if let Some(efforts) = json_read::strings(reasoning, "supported_efforts") {
-            model.capabilities.variants = from_efforts(
-                &efforts,
-                json_read::string(reasoning, "default_effort").unwrap_or_default(),
-            );
-            fields.insert(ModelMetadataFields::REASONING);
-            fields.insert(ModelMetadataFields::VARIANTS);
-        }
+    if let Some(reasoning) = item.get("reasoning").filter(|value| value.is_object())
+        && let Some(efforts) = json_read::strings(reasoning, "supported_efforts")
+    {
+        model.capabilities.variants = from_efforts(
+            &efforts,
+            json_read::string(reasoning, "default_effort").unwrap_or_default(),
+        );
+        fields.insert(ModelMetadataFields::REASONING);
+        fields.insert(ModelMetadataFields::VARIANTS);
     }
     if let Some(pricing) = item.get("pricing").filter(|value| value.is_object()) {
         set_price(

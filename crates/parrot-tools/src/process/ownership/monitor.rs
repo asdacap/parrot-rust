@@ -237,11 +237,12 @@ impl ShellProcessMonitor {
                 signal(execution, 15);
                 state.stopped = Some(clock.now());
             }
-            if let Some(stopped) = state.stopped {
-                if !state.killed && clock.now().duration_since(stopped) >= KILL_GRACE {
-                    signal(execution, 9);
-                    state.killed = true;
-                }
+            if let Some(stopped) = state.stopped
+                && !state.killed
+                && clock.now().duration_since(stopped) >= KILL_GRACE
+            {
+                signal(execution, 9);
+                state.killed = true;
             }
             clock
                 .sleep_until(clock.now() + POLL_INTERVAL, lifetime)

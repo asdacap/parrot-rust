@@ -1885,10 +1885,10 @@ where
                         failure = io_child(error);
                     }
                     asks.close();
-                    if let Some(progress) = progress_owner {
-                        if let Err(error) = progress.stop_publication().await {
-                            failure = child(error);
-                        }
+                    if let Some(progress) = progress_owner
+                        && let Err(error) = progress.stop_publication().await
+                    {
+                        failure = child(error);
                     }
                     Err(failure)
                 }

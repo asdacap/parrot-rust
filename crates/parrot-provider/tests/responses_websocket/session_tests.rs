@@ -294,13 +294,13 @@ fn request(items: &[&str], replay: Option<&str>, instructions: &str) -> WebSocke
             text: (*text).into(),
             replay: false,
         });
-        if index == 0 {
-            if let Some(replay) = replay {
-                messages.push(Message {
-                    text: replay.into(),
-                    replay: true,
-                });
-            }
+        if index == 0
+            && let Some(replay) = replay
+        {
+            messages.push(Message {
+                text: replay.into(),
+                replay: true,
+            });
         }
     }
     WebSocketRequest::new(

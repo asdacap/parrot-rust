@@ -9,6 +9,8 @@ use std::{
     thread,
 };
 
+#[path = "compaction/progress_publisher.rs"]
+mod progress_publisher;
 #[path = "compaction/support.rs"]
 mod support;
 use support::{Effects, Provider, message, plan};
@@ -43,7 +45,7 @@ fn run(
     provider: &Provider,
 ) -> Result<Option<parrot_core::compaction::CompactionResult>, Error> {
     let provider = provider.with_estimates(effects);
-    let publisher = support::ProgressPublisher {
+    let publisher = progress_publisher::ProgressPublisher {
         progress: effects.progress.clone(),
     };
     finish(compact(
@@ -352,7 +354,7 @@ fn cancelled_group_serialization_does_not_write_scratch_or_invoke_the_provider()
     });
     let mut effects = Effects::default();
     let provider = Provider::default().with_estimates(&effects);
-    let publisher = support::ProgressPublisher {
+    let publisher = progress_publisher::ProgressPublisher {
         progress: effects.progress.clone(),
     };
     let result = finish(compact(

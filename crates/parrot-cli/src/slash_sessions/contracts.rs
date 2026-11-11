@@ -15,7 +15,7 @@ use crate::dispatch::dialog::SlashDialog;
 /// the real web boundary. No status is flattened into a generic error frame.
 #[derive(Debug)]
 pub enum SlashFailure {
-    Rpc(Status),
+    Rpc(Box<Status>),
     Command(String),
 }
 
@@ -30,7 +30,7 @@ impl SlashFailure {
 
 impl From<Status> for SlashFailure {
     fn from(status: Status) -> Self {
-        Self::Rpc(status)
+        Self::Rpc(Box::new(status))
     }
 }
 

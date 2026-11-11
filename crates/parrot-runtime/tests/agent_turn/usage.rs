@@ -224,7 +224,7 @@ async fn actual_sqlite_request_facts_reuse_live_stats_and_rehydrate_exact_usage(
     assert!(!persisted.iter().any(|event| event.has_agent_statistics_updated() || event.has_session_usage_snapshot()));
     let publications: Vec<_> = std::iter::from_fn(|| listener.try_next()).collect();
     assert_eq!(publications.len(), 6);
-    for (index, batch) in publications.chunks_exact(3).enumerate() {
+    for (index, batch) in publications.as_chunks::<3>().0.iter().enumerate() {
         assert!(batch[0].has_request_usage_recorded());
         assert!(batch[1].has_agent_statistics_updated());
         assert!(batch[2].has_session_usage_snapshot());

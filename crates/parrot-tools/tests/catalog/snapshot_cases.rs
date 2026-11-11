@@ -99,7 +99,7 @@ fn enabled_after_interruption_keeps_only_flagged_tools_and_original_untouched() 
 #[test]
 fn invocation_aliases_do_not_change_model_definitions() {
     let factory = flagged("work", &["shell", "terminal"], false);
-    let snapshot = Snapshot::document(&[factory.clone()], &[true]).unwrap();
+    let snapshot = Snapshot::document(std::slice::from_ref(&factory), &[true]).unwrap();
     for name in ["work", "shell", "terminal"] {
         assert!(Arc::ptr_eq(
             &snapshot.find(name).unwrap().create(),
@@ -128,7 +128,7 @@ fn unsupported_tools_do_not_resolve_by_canonical_name_or_alias() {
 #[test]
 fn permission_filters_use_canonical_names_for_aliases() {
     let factory = flagged("work", &["shell"], false);
-    let snapshot = Snapshot::document(&[factory.clone()], &[true]).unwrap();
+    let snapshot = Snapshot::document(std::slice::from_ref(&factory), &[true]).unwrap();
     for (allowed, disabled, permitted) in [
         (vec!["work"], vec![], true),
         (vec!["shell"], vec![], false),

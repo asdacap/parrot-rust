@@ -132,10 +132,11 @@ impl Queue {
     }
 
     fn pop(&mut self) -> Option<Event> {
-        if self.active_inventory.is_empty() && (!self.prefer_event || self.events.is_empty()) {
-            if let Some(batch) = self.inventories.pop_front() {
-                self.active_inventory = batch.chunks;
-            }
+        if self.active_inventory.is_empty()
+            && (!self.prefer_event || self.events.is_empty())
+            && let Some(batch) = self.inventories.pop_front()
+        {
+            self.active_inventory = batch.chunks;
         }
         if let Some(event) = self.active_inventory.pop_front() {
             self.prefer_event = self.active_inventory.is_empty();

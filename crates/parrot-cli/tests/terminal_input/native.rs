@@ -437,7 +437,10 @@ mod pty {
             let fd = fd.parse().unwrap();
             // Only this subprocess installs a handler; production code never takes signal ownership.
             // SAFETY: the handler only stores to a lock-free AtomicBool; SIGTERM is 15 on both OSes.
-            assert_ne!(unsafe { signal(15, cancel_signal as usize) }, usize::MAX);
+            assert_ne!(
+                unsafe { signal(15, cancel_signal as *const () as usize) },
+                usize::MAX
+            );
             {
                 let mut raw = RawTerminal::open(fd).unwrap().unwrap();
                 println!("NATIVE_RAW_READY");

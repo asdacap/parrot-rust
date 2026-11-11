@@ -5,7 +5,7 @@ use parrot_storage::conversation::HistoryForkBoundary;
 use std::{
     future::Future,
     sync::{Arc, Mutex},
-    task::{Context, Poll, Wake, Waker},
+    task::{Context, Poll, Waker},
 };
 
 #[tokio::test]
@@ -129,11 +129,6 @@ async fn result_and_stop_errors_fail_only_their_task_and_allow_retry_without_res
     }
 }
 
-struct NoWake;
-impl Wake for NoWake {
-    fn wake(self: Arc<Self>) {}
-}
-
 #[tokio::test]
 async fn replacement_initial_enqueue_follows_durable_generation_without_holding_turn_gate() {
     let h = Harness::new();
@@ -191,8 +186,7 @@ async fn replacement_initial_enqueue_follows_durable_generation_without_holding_
             checkpoint.current_task.acceptance_criteria,
             "replacement acceptance"
         );
-        let waker = Waker::from(Arc::new(NoWake));
-        let mut context = Context::from_waker(&waker);
+        let mut context = Context::from_waker(Waker::noop());
         let mut snapshot = Box::pin(scheduler.snapshot());
         let snapshot_pending = matches!(snapshot.as_mut().poll(&mut context), Poll::Pending);
         let mut detail = Box::pin(scheduler.capture_detail("a"));

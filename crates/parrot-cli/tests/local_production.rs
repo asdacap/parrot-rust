@@ -722,7 +722,7 @@ fn executable_refuses_incompatible_session_then_starts_fresh_without_changing_ol
         assert!(!refused.status.success(), "{}", describe(&refused));
         let stderr = String::from_utf8_lossy(&refused.stderr);
         assert!(stderr.contains("--new-session"), "{stderr}");
-        assert_eq!(read_sessions(), [old_session.clone()]);
+        assert_eq!(read_sessions(), std::slice::from_ref(&old_session));
         assert_eq!(fixture.chat_requests().len(), 1);
         assert_old_data();
         assert!(socket_paths(&fixture.state).is_empty());

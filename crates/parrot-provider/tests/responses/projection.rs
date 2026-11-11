@@ -460,7 +460,7 @@ fn error_json(error: ResponsesError) -> Value {
                 .expect("serde_json diagnostics include line and column");
             json!({"type":"System.Text.Json.JsonReaderException","line_number":line_number,"byte_position_in_line":byte_position_in_line})
         }
-        ResponsesError::InvalidInteger { field: _, .. } => {
+        ResponsesError::InvalidInteger { .. } => {
             json!({"type":"Parrot.Llm.Wire.WireProtocolException","message":"responses: sequence_number must be an integer"})
         }
     }

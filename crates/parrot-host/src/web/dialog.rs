@@ -13,6 +13,9 @@ pub struct WebSlashDialog {
     prompts: Mutex<HashMap<String, oneshot::Sender<web::AnswerSlashPromptRequest>>>,
 }
 
+// Handlers return the generated wire Status, which the vendored tonic keeps
+// unboxed; the large-Err lint cannot be satisfied at these call sites.
+#[allow(clippy::result_large_err)]
 impl WebSlashDialog {
     pub fn new(frames: mpsc::UnboundedSender<web::SlashFrame>) -> Self {
         Self {
@@ -239,6 +242,7 @@ impl WebSlashDialog {
     }
 }
 
+#[allow(clippy::result_large_err)] // returns the vendored tonic Status, which is unboxably large
 pub(super) fn random_id() -> Result<String, Status> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes).map_err(|error| Status::internal(error.to_string()))?;

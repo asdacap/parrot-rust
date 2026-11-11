@@ -174,10 +174,10 @@ impl Fake {
                 if ancestor == current && !follow_final {
                     continue;
                 }
-                if let Some(node) = nodes.get(ancestor) {
-                    if let Some(target) = &node.target {
-                        replaced = Some(target.join(current.strip_prefix(ancestor).unwrap()));
-                    }
+                if let Some(node) = nodes.get(ancestor)
+                    && let Some(target) = &node.target
+                {
+                    replaced = Some(target.join(current.strip_prefix(ancestor).unwrap()));
                 }
             }
             if let Some(path) = replaced {

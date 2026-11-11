@@ -75,10 +75,10 @@ fn add_missing(
     models: &[Model],
 ) {
     for item in models {
-        if listed.insert(item.id.clone(), ()).is_none() {
-            if let Some(model) = configured.iter().find(|model| model.id == item.id) {
-                result.push(normalize(model.clone()));
-            }
+        if listed.insert(item.id.clone(), ()).is_none()
+            && let Some(model) = configured.iter().find(|model| model.id == item.id)
+        {
+            result.push(normalize(model.clone()));
         }
     }
 }

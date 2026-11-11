@@ -92,7 +92,7 @@ async fn remote_skill_roots_are_ready_before_replay_and_shared_with_completion()
         );
         assert_eq!(
             rpc.state.lock().unwrap().skill_list_requests,
-            [session.id.clone()]
+            std::slice::from_ref(&session.id)
         );
         rpc.start_read(
             &session.id,

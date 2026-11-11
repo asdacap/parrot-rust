@@ -501,7 +501,7 @@ fn render_tool(
         )
     } else {
         let values = ToolDisplayText::layout_details(
-            &[block.text.clone()],
+            std::slice::from_ref(&block.text),
             columns,
             maximum_lines,
             if block.kind == ToolBlockKind::Queue {

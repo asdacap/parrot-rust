@@ -103,14 +103,13 @@ impl FileRenderer {
         }
         self.output
             .push_str(&format!("total lines in file: {}\n", self.line_number));
-        if let Some(outline) = &self.outline {
-            if !outline.is_empty()
-                && (self.truncated
-                    || self.offset > 1
-                    || self.line_number >= self.offset.wrapping_add(self.limit))
-            {
-                self.output.push_str(&formatter.outline(&outline.render())?);
-            }
+        if let Some(outline) = &self.outline
+            && !outline.is_empty()
+            && (self.truncated
+                || self.offset > 1
+                || self.line_number >= self.offset.wrapping_add(self.limit))
+        {
+            self.output.push_str(&formatter.outline(&outline.render())?);
         }
         Ok(self.output)
     }

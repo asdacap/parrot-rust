@@ -904,7 +904,7 @@ mod tests {
         let target = ProductionWriteTarget::resolve(&path).unwrap();
         assert!(
             materializer
-                .approve_for_agent(&parent, &child_scratch, &[target.clone()])
+                .approve_for_agent(&parent, &child_scratch, std::slice::from_ref(&target))
                 .is_err()
         );
         let after = materializer
@@ -947,7 +947,7 @@ mod tests {
         fs::write(&path, b"x").unwrap();
         let target = ProductionWriteTarget::resolve(&path).unwrap();
         materializer
-            .approve(&fixture.scratch, &[target.clone()])
+            .approve(&fixture.scratch, std::slice::from_ref(&target))
             .unwrap();
         let old = fixture.capture(&materializer, &raw(false));
         fs::rename(&path, fixture.root.join("old-file")).unwrap();

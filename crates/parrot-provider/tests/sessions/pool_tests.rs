@@ -175,7 +175,7 @@ async fn configured_sessions_trace_once_per_call_and_retain_the_real_owner() {
     assert_eq!(provider.session(0).closes.load(Ordering::SeqCst), 1);
     let events = sink.0.lock().unwrap();
     assert_eq!(events.len(), 4);
-    for call in events.chunks_exact(2) {
+    for call in events.as_chunks::<2>().0 {
         assert_eq!(call[0].operation, "call_started");
         assert_eq!(call[1].operation, "call_finished");
         assert_eq!(call[1].outcome.as_deref(), Some("completed"));

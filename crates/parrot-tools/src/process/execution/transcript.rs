@@ -128,7 +128,9 @@ impl PtyTranscript {
         let mut bytes = vec![0; count * 2];
         file.read_exact(&mut bytes)?;
         let mut units: Vec<_> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|b| u16::from_le_bytes([b[0], b[1]]))
             .collect();
         if offset + (count as u64) < state.length

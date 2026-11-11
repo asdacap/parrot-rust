@@ -248,13 +248,17 @@ async fn concurrent_pipe_drains_survive_sustained_output() {
     assert_eq!(stderr.len(), 1 << 20);
     assert!(
         stdout
-            .chunks_exact(64)
+            .as_chunks::<64>()
+            .0
+            .iter()
             .all(|chunk| chunk
                 == b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
     );
     assert!(
         stderr
-            .chunks_exact(64)
+            .as_chunks::<64>()
+            .0
+            .iter()
             .all(|chunk| chunk
                 == b"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")
     );

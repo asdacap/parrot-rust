@@ -104,7 +104,7 @@ async fn live_and_restored_tool_messages_exclude_images_but_preserve_raw_results
         tool_call_id: "call".into(),
         provider_content: ProviderContent::default(),
     };
-    assert_eq!(conversation.messages(), [expected.clone()]);
+    assert_eq!(conversation.messages(), std::slice::from_ref(&expected));
     assert_eq!(
         conversation.materialize(item.clone()).await.unwrap(),
         expected

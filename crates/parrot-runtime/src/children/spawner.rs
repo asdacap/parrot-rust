@@ -556,14 +556,13 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentSpawner<S> {
                     .push(rejected.clone());
                 authority.track_rejected(rejected);
             }
-            if let Some(history) = history.filter(|_| !roster_write_attempted) {
-                if let Err(error) = history
+            if let Some(history) = history.filter(|_| !roster_write_attempted)
+                && let Err(error) = history
                     .repository()
                     .cleanup_forked_agent_history(history.agent_session_id().to_owned())
                     .await
-                {
-                    self.record_cleanup(&authority, error.into());
-                }
+            {
+                self.record_cleanup(&authority, error.into());
             }
         }
         result

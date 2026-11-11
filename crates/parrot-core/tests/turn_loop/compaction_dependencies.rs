@@ -40,10 +40,10 @@ impl MemoryStatus {
     {
         Box::pin(async move {
             self.contexts.lock().unwrap().push(context);
-            if let Some((call, error)) = &self.failure {
-                if *call == self.contexts.lock().unwrap().len() {
-                    return Err(error.clone());
-                }
+            if let Some((call, error)) = &self.failure
+                && *call == self.contexts.lock().unwrap().len()
+            {
+                return Err(error.clone());
             }
             Ok("fitted status".into())
         })

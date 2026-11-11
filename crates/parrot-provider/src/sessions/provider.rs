@@ -380,27 +380,27 @@ impl Core {
                 decoder(&self.id, &body).map_err(|error| Error::Provider(error.to_string()))?
             }
         };
-        if LiteLlmModelInfoDecoder::needs_supplement(&models) {
-            if let Some(endpoint) = &self.model_info_endpoint {
-                let supplement = async {
-                    let body = http_stream::get(
-                        self.transport.as_ref(),
-                        endpoint,
-                        headers,
-                        http_stream::MODELS_REFRESH_TIMEOUT,
-                        16 << 20,
-                        cancellation,
-                    )
-                    .await?;
-                    LiteLlmModelInfoDecoder::decode(&self.id, &body)
-                        .map_err(|e| Error::Provider(e.to_string()))
-                }
-                .await;
-                match supplement {
-                    Ok(extra) => models = catalogs::supplement_models(&models, &extra),
-                    Err(error) if cancellation.is_cancelled() => return Err(error),
-                    Err(_) => {}
-                }
+        if LiteLlmModelInfoDecoder::needs_supplement(&models)
+            && let Some(endpoint) = &self.model_info_endpoint
+        {
+            let supplement = async {
+                let body = http_stream::get(
+                    self.transport.as_ref(),
+                    endpoint,
+                    headers,
+                    http_stream::MODELS_REFRESH_TIMEOUT,
+                    16 << 20,
+                    cancellation,
+                )
+                .await?;
+                LiteLlmModelInfoDecoder::decode(&self.id, &body)
+                    .map_err(|e| Error::Provider(e.to_string()))
+            }
+            .await;
+            match supplement {
+                Ok(extra) => models = catalogs::supplement_models(&models, &extra),
+                Err(error) if cancellation.is_cancelled() => return Err(error),
+                Err(_) => {}
             }
         }
         Ok(catalogs::merge_models(
@@ -969,10 +969,10 @@ impl EventStream for LazyHttp {
             self.done = true;
             self.request = None;
             self.initialization_stop.cancel();
-            if let Some(initializing) = self.initializing.take() {
-                if let Ok(mut driver) = initializing.await {
-                    driver.close().await?;
-                }
+            if let Some(initializing) = self.initializing.take()
+                && let Ok(mut driver) = initializing.await
+            {
+                driver.close().await?;
             }
             if let Some(mut driver) = self.driver.take() {
                 driver.close().await?;
@@ -1081,10 +1081,9 @@ fn decode_chatgpt_models(provider_id: &str, body: &str) -> Result<Vec<Model>, Ca
                     .get("effort")
                     .and_then(|v| serde_json::from_str::<String>(v.get()).ok())
                     .filter(|v| !v.is_empty())
+                    && !efforts.contains(&effort)
                 {
-                    if !efforts.contains(&effort) {
-                        efforts.push(effort);
-                    }
+                    efforts.push(effort);
                 }
             }
         }

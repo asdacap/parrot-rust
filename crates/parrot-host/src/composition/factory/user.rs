@@ -486,14 +486,14 @@ impl OwnedMutations {
             .clone();
         for task in tasks {
             let mut slot = task.lock().await;
-            if let Some(task) = slot.as_mut() {
-                if let Err(error) = task.await {
-                    self.state
-                        .lock()
-                        .expect("user mutations poisoned")
-                        .failure
-                        .get_or_insert_with(|| internal(error));
-                }
+            if let Some(task) = slot.as_mut()
+                && let Err(error) = task.await
+            {
+                self.state
+                    .lock()
+                    .expect("user mutations poisoned")
+                    .failure
+                    .get_or_insert_with(|| internal(error));
             }
             *slot = None;
         }
@@ -804,13 +804,12 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 };
                 joined &= cleanup.is_ok();
             }
-            if let Some(scope) = &cleanup_scope {
-                if !cleanup_registry
+            if let Some(scope) = &cleanup_scope
+                && !cleanup_registry
                     .as_ref()
                     .is_some_and(|registry| registry.contains(scope))
-                {
-                    joined &= suspend_scopes(vec![scope.clone()]).await.is_ok();
-                }
+            {
+                joined &= suspend_scopes(vec![scope.clone()]).await.is_ok();
             }
             lifetime.cancel();
             services.questions.close();

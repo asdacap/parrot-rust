@@ -349,7 +349,9 @@ pub(crate) fn decode_stream_reader_bytes(bytes: &[u8]) -> String {
 
 pub(crate) fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
     let mut units = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| {
             if little_endian {
                 u16::from_le_bytes([chunk[0], chunk[1]])
@@ -361,7 +363,7 @@ pub(crate) fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
     let mut text = char::decode_utf16(units.drain(..))
         .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
         .collect::<String>();
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         text.push(char::REPLACEMENT_CHARACTER);
     }
     text
@@ -369,7 +371,9 @@ pub(crate) fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
 
 fn decode_utf32(bytes: &[u8], little_endian: bool) -> String {
     let mut text = bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|chunk| {
             let unit = if little_endian {
                 u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
@@ -379,7 +383,7 @@ fn decode_utf32(bytes: &[u8], little_endian: bool) -> String {
             char::from_u32(unit).unwrap_or(char::REPLACEMENT_CHARACTER)
         })
         .collect::<String>();
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         text.push(char::REPLACEMENT_CHARACTER);
     }
     text
@@ -467,10 +471,10 @@ fn extract_envelope(s: &str) -> Result<String, ParseError> {
         }
         pos += line.len();
     }
-    if let Some(b) = start {
-        if b < text.len() {
-            blocks.push(&text[b..])
-        }
+    if let Some(b) = start
+        && b < text.len()
+    {
+        blocks.push(&text[b..])
     }
     for b in blocks.into_iter().rev() {
         let candidate = trim_bom(b);

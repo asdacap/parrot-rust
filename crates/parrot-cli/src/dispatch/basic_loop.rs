@@ -1176,9 +1176,8 @@ fn check(c: &dyn Cancellation) -> Result<(), Status> {
 }
 fn is_cancelled(error: &BasicFailure) -> bool {
     match error {
-        BasicFailure::Rpc(status) | BasicFailure::Slash(SlashFailure::Rpc(status)) => {
-            status.code() == Code::Cancelled
-        }
+        BasicFailure::Rpc(status) => status.code() == Code::Cancelled,
+        BasicFailure::Slash(SlashFailure::Rpc(status)) => status.code() == Code::Cancelled,
         BasicFailure::Io(error) => error.kind() == io::ErrorKind::Interrupted,
         BasicFailure::Attachment(AttachmentError::Cancelled) => true,
         _ => false,

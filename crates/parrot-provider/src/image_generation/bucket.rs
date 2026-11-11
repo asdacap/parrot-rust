@@ -109,12 +109,7 @@ impl<T: Clone + Send + Sync + 'static> Work<T> {
     fn start(mut future: BoxFuture<'static, Result<T, Error>>) -> Arc<Self> {
         // Source async methods run synchronously until their first pending await.
         // Preserve the completed-task fast path before observing caller cancellation.
-        struct Noop;
-        impl std::task::Wake for Noop {
-            fn wake(self: Arc<Self>) {}
-        }
-        let waker = std::task::Waker::from(Arc::new(Noop));
-        let mut context = std::task::Context::from_waker(&waker);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         let immediate = match future.as_mut().poll(&mut context) {
             std::task::Poll::Ready(result) => Some(result),
             std::task::Poll::Pending => None,

@@ -101,6 +101,7 @@ impl WebSessionRouter {
             .is_some_and(|activity| activity.root_turn.is_busy())
     }
 
+    #[allow(clippy::result_large_err)] // returns the vendored tonic Status, which is unboxably large
     pub async fn open_default(
         &self,
         cancellation: &dyn Cancellation,
@@ -112,6 +113,7 @@ impl WebSessionRouter {
         Ok(opened.session)
     }
 
+    #[allow(clippy::result_large_err)] // returns the vendored tonic Status, which is unboxably large
     pub async fn attach_remote(
         &self,
         request: wire::AttachSessionRequest,
@@ -148,6 +150,7 @@ impl WebSessionRouter {
             .remove(user_session_id);
     }
 
+    #[allow(clippy::result_large_err)] // returns the vendored tonic Status, which is unboxably large
     fn adopt(&self, user_session_id: &str, mut owner: GrpcTransportClient) -> Result<(), Status> {
         let client = owner
             .client()
@@ -166,7 +169,7 @@ impl WebSessionRouter {
 
 fn attach_status(error: AttachError) -> Status {
     match error {
-        AttachError::Rpc(status) => status,
+        AttachError::Rpc(status) => *status,
         AttachError::Cancelled => Status::cancelled("operation cancelled"),
         AttachError::Timeout => Status::deadline_exceeded(error.to_string()),
         AttachError::DifferentSession | AttachError::Disposed => {

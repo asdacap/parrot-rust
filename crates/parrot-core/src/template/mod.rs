@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 
 pub(crate) enum Engine {
     Scalar(ScalarPromptTemplateEngine),
-    MiniJinja(MiniJinjaPromptTemplateEngine),
+    MiniJinja(Box<MiniJinjaPromptTemplateEngine>),
 }
 
 impl PromptTemplate {
@@ -29,7 +29,9 @@ impl PromptTemplate {
         let allowed: BTreeSet<_> = allowed.iter().cloned().collect();
         let engine = match engine {
             "scalar" => Engine::Scalar(ScalarPromptTemplateEngine::compile(path, text, &allowed)?),
-            "minijinja" => Engine::MiniJinja(MiniJinjaPromptTemplateEngine::compile(path, text)?),
+            "minijinja" => Engine::MiniJinja(Box::new(MiniJinjaPromptTemplateEngine::compile(
+                path, text,
+            )?)),
             _ => {
                 return Err(Error::template(format!(
                     "{path}.engine must be scalar or minijinja"

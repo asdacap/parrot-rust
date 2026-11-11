@@ -50,10 +50,10 @@ impl<S: AuthorizedReadService> ReadImageTool<S> {
         snapshot: &S::Security,
         cancellation: &dyn Cancellation,
     ) -> OperationResult<FileToolResult, FileToolError> {
-        if let Some(budget) = &invocation.image_budget {
-            if budget.budget.is_exceeded() {
-                return exceeded(budget);
-            }
+        if let Some(budget) = &invocation.image_budget
+            && budget.budget.is_exceeded()
+        {
+            return exceeded(budget);
         }
         let formatter = Formatter::new(invocation);
         let path = match input::image_path(&invocation.arguments_json) {
@@ -143,16 +143,15 @@ impl<S: AuthorizedReadService> ReadImageTool<S> {
                 )));
             }
         };
-        if let Some(budget) = &invocation.image_budget {
-            if !budget
+        if let Some(budget) = &invocation.image_budget
+            && !budget
                 .budget
                 .try_accept(artifact.byte_length)
                 .map_err(|error| {
                     OperationError::Failed(FileToolError::Artifact(error.to_string()))
                 })?
-            {
-                return exceeded(budget);
-            }
+        {
+            return exceeded(budget);
         }
         Ok(FileToolResult {
             text: "image read".into(),

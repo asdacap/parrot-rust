@@ -508,18 +508,13 @@ impl<'a> SessionCall<'a> {
                 && !completion.response_id.is_empty()
             {
                 let mut items = self.input_hashes.clone();
-                if let Some(content) = &completion.provider_content {
-                    if let Ok(mut replay) =
+                if let Some(content) = &completion.provider_content
+                    && let Ok(mut replay) =
                         serde_json::from_str::<HashMap<String, Box<RawValue>>>(content)
-                    {
-                        if let Some(output) = replay.remove("Output") {
-                            if let Ok(output) =
-                                serde_json::from_str::<Vec<Box<RawValue>>>(output.get())
-                            {
-                                items.extend(output.iter().map(|item| hash(item.get().as_bytes())));
-                            }
-                        }
-                    }
+                    && let Some(output) = replay.remove("Output")
+                    && let Ok(output) = serde_json::from_str::<Vec<Box<RawValue>>>(output.get())
+                {
+                    items.extend(output.iter().map(|item| hash(item.get().as_bytes())));
                 }
                 Some(CompletedResponse {
                     settings: self.settings,

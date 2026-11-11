@@ -368,10 +368,8 @@ impl CompactionGroupBlobStore {
                 let force_named = self.force_named_file;
                 #[cfg(not(test))]
                 let force_named = false;
-                if !force_named {
-                    if let Some(file) = native::try_open_temporary_file(&directory)? {
-                        return self.persist_file(&directory, file, None, &contents, cancellation);
-                    }
+                if !force_named && let Some(file) = native::try_open_temporary_file(&directory)? {
+                    return self.persist_file(&directory, file, None, &contents, cancellation);
                 }
             }
             let (staging_name, file) = loop {

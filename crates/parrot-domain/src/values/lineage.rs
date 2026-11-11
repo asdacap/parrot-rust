@@ -46,7 +46,7 @@ impl AgentDirectoryLineage {
                 lineage
                     .paths
                     .get(&record.parent_session_id)
-                    .map(|parent| [parent.as_slice(), &[record.name.clone()]].concat())
+                    .map(|parent| [parent.as_slice(), std::slice::from_ref(&record.name)].concat())
             };
             if let Some(path) = path {
                 lineage.add(&record.session_id, path);

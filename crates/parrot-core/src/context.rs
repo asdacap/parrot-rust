@@ -80,14 +80,15 @@ impl ContextSnapshot {
             (trigger, _) => trigger,
         };
         let mut trigger_percent = configuration.trigger_percent;
-        if configuration.context_limit.is_some() && context_limit > 0 {
-            if let Some(trigger) = trigger_tokens {
-                trigger_percent = if trigger >= i64::from(context_limit) {
-                    100
-                } else {
-                    ((i128::from(trigger) * 100 / i128::from(context_limit)).clamp(0, 100)) as i32
-                };
-            }
+        if configuration.context_limit.is_some()
+            && context_limit > 0
+            && let Some(trigger) = trigger_tokens
+        {
+            trigger_percent = if trigger >= i64::from(context_limit) {
+                100
+            } else {
+                ((i128::from(trigger) * 100 / i128::from(context_limit)).clamp(0, 100)) as i32
+            };
         }
         Self {
             estimated_tokens,

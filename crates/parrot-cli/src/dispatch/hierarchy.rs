@@ -183,10 +183,10 @@ impl AgentSessionHierarchy {
             .map(|id| (id.as_str(), Vec::new()))
             .collect();
         for id in &relevant {
-            if let Some(node) = self.sessions.get(id) {
-                if let Some(siblings) = children.get_mut(node.parent.as_str()) {
-                    siblings.push(id);
-                }
+            if let Some(node) = self.sessions.get(id)
+                && let Some(siblings) = children.get_mut(node.parent.as_str())
+            {
+                siblings.push(id);
             }
         }
         for siblings in children.values_mut() {
@@ -202,11 +202,11 @@ impl AgentSessionHierarchy {
             })
             .collect();
         roots.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
-        if let Some(root) = self.root_session_id.as_deref() {
-            if let Some(index) = roots.iter().position(|id| *id == root) {
-                roots.remove(index);
-                roots.push(root);
-            }
+        if let Some(root) = self.root_session_id.as_deref()
+            && let Some(index) = roots.iter().position(|id| *id == root)
+        {
+            roots.remove(index);
+            roots.push(root);
         }
         let mut ordered = Vec::new();
         let mut seen = HashSet::new();

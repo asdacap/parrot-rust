@@ -404,7 +404,9 @@ impl ProcessOutput {
                     let count = remaining.min(4096) as usize;
                     file.read_exact(&mut buffer[..count * 2])?;
                     let units: Vec<_> = buffer[..count * 2]
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|b| u16::from_le_bytes([b[0], b[1]]))
                         .collect();
                     encoder.append(writer, &units)?;
@@ -433,10 +435,10 @@ impl ProcessOutput {
         encoder.complete(writer)
     }
     pub fn delete_temporary_file(&self) -> io::Result<()> {
-        if self.owns_file {
-            if let Some(path) = &self.path {
-                fs::remove_file(path)?;
-            }
+        if self.owns_file
+            && let Some(path) = &self.path
+        {
+            fs::remove_file(path)?;
         }
         Ok(())
     }
