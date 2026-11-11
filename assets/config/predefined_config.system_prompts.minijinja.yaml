@@ -60,7 +60,7 @@ prompt_templates:
     required_arguments: [profile, model, parent_session_id, parent_session_name, has_parent, has_parent_name]
   status.generated-time:
     template: |-
-      Generated at: {time}
+      The time is: {time}
       Session duration: {duration}
     allowed_arguments: [time, duration]
     required_arguments: [time, duration]

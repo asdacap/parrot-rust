@@ -106,9 +106,7 @@ The generated `predefined_config.yaml` retains the references and is regenerated
 put overrides in `config.yaml` rather than editing it. Editing installed Markdown
 does not change the built binary, and source Markdown changes require a rebuild.
 Neither is hot-reloaded. Dynamic `prompt_templates`, model-specific
-`system_prompt` values, and model alias augmentation remain in configuration;
-the historical `predefined_config.system_prompts.yaml` remains a reference
-resource.
+`system_prompt` values, and model alias augmentation remain in configuration.
 
 ## Profile prompt overrides
 

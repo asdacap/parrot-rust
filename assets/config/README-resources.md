@@ -3,7 +3,7 @@
 The following resources were retained and subsequently adapted from the .NET source at commit
 `5f27a8a92625ee31d8bec094e5c3e09550193781`:
 
-- `predefined_config.system_prompts.yaml`
+- `predefined_config.system_prompts.minijinja.yaml`
 - `predefined_config.agent_tasks.yaml`
 - `predefined_config.profiles.yaml`
 - `predefined_config.runtime.yaml`
@@ -14,8 +14,6 @@ explicitly migrated descriptors and two consolidated message templates.
 `predefined_config.agent_tasks.yaml` adds one consolidated MiniJinja template;
 the remaining descriptors use the scalar engine. There is no general
 Scriban-to-Jinja translator or automatic rewriting of user configuration.
-The historical `predefined_config.system_prompts.yaml` remains a reference
-resource, not the active production resource.
 
 ## Built-in system prompts
 
