@@ -1,8 +1,8 @@
 use parrot_core::{
     BoxFuture, CancellationToken, ConfigKey, ConfigValue, Content, ConversationAddition,
     ConversationPersistence, ConversationReceipt, Error, Message, PromptTemplate, Role, States,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolExecutionRequest, ToolRecovery, ToolRecoveryBatch,
-    ToolResult, ToolSettlement, ToolStatus, Tools, budget::TurnFlags, execute_tools,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolExecutionRequest, ToolRecovery, ToolResult,
+    ToolSettlement, ToolStatus, Tools, budget::TurnFlags, execute_tools,
 };
 use std::{
     future::Future,
@@ -24,8 +24,7 @@ fn finish<F: Future>(future: F) -> F::Output {
 struct State {
     messages: Arc<Mutex<Vec<Message>>>,
     additions: Vec<ConversationAddition>,
-    recovery: ToolRecovery,
-    watermark: i64,
+    recovery: Option<ToolRecovery>,
 }
 impl States for State {
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
@@ -64,17 +63,8 @@ impl States for State {
             })
         })
     }
-    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<ToolRecovery, Error>> {
+    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<Option<ToolRecovery>, Error>> {
         Box::pin(async move { Ok(self.recovery.clone()) })
-    }
-    fn advance_tool_settlement_watermark(
-        &mut self,
-        through: i64,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.watermark = self.watermark.max(through);
-            Ok(())
-        })
     }
 }
 
@@ -209,11 +199,10 @@ fn subsequent_chunks_observe_committed_results_and_receive_remaining_calls_and_c
     );
     assert!(!observations[1].starts_batch);
     assert!(observations[1].cancel_remaining);
-    assert_eq!(state.watermark, 17);
 }
 
 #[test]
-fn later_chunk_failure_preserves_the_completed_prefix_without_advancing_the_watermark() {
+fn later_chunk_failure_preserves_the_completed_prefix() {
     let mut state = State::default();
     let tools = PrefixTools {
         messages: state.messages.clone(),
@@ -237,7 +226,6 @@ fn later_chunk_failure_preserves_the_completed_prefix_without_advancing_the_wate
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].tool_call_id, "first");
     assert_eq!(messages[0].contents, [Content::Text("result first".into())]);
-    assert_eq!(state.watermark, 0);
 }
 
 #[test]
@@ -249,14 +237,11 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
         ..ToolResult::default()
     };
     let mut state = State {
-        recovery: ToolRecovery {
-            through: 23,
-            batches: vec![ToolRecoveryBatch {
-                sequence: 17,
-                calls: calls(),
-                results: vec![existing.clone()],
-            }],
-        },
+        recovery: Some(ToolRecovery {
+            sequence: 17,
+            calls: calls(),
+            results: vec![existing.clone()],
+        }),
         ..State::default()
     };
     finish(ToolSettlement::default().restore_results(&mut state)).unwrap();
@@ -284,7 +269,6 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
         state.messages.lock().unwrap()[1].contents,
         [Content::Text("configured error configured crash".into())]
     );
-    assert_eq!(state.watermark, 23);
 }
 
 #[test]
@@ -328,14 +312,11 @@ fn recovery_adds_successful_images_in_call_order_as_one_user_message() {
         },
     ];
     let mut state = State {
-        recovery: ToolRecovery {
-            through: 23,
-            batches: vec![ToolRecoveryBatch {
-                sequence: 17,
-                calls,
-                results,
-            }],
-        },
+        recovery: Some(ToolRecovery {
+            sequence: 17,
+            calls,
+            results,
+        }),
         ..State::default()
     };
     finish(ToolSettlement::default().restore_results(&mut state)).unwrap();

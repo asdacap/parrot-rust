@@ -78,20 +78,9 @@ pub trait States: Send + Sync {
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async { Err(Error::unsupported("States.capture_system_prompt")) })
     }
-    /// Reads tool calls and durable terminals after the settled watermark.
-    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<crate::ToolRecovery, Error>> {
+    /// Reads the latest request's tool calls and saved results when settlement is incomplete.
+    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<Option<crate::ToolRecovery>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_tool_recovery")) })
-    }
-    /// Advances the session-local tool settlement watermark after successful settlement.
-    fn advance_tool_settlement_watermark(
-        &mut self,
-        _through: i64,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async {
-            Err(Error::unsupported(
-                "States.advance_tool_settlement_watermark",
-            ))
-        })
     }
     /// Reads the latest visible logical turn, including retained completion candidates.
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {

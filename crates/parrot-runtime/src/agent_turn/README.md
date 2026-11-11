@@ -42,11 +42,14 @@ is already reflected in the conversation adds neither a message nor a publicatio
 
 ## Tool results after interruption or process death
 
+Recovery checks only the latest recorded provider response's tool calls. If that
+response has no tool calls, recovery does nothing. Older requests are not repaired.
 Historical tool calls are never scheduled for execution again. Saved tool results
-are restored unchanged. A historical call without a saved result receives the
-configured crash error, whose default text is `The process crashed before the tool
-completed.` The error is saved before publication. Repeating recovery does not
-replace completed results or republish their terminal notices.
+are preserved unchanged. A call in the latest request without a saved result receives
+the configured crash error, whose default text is `The process crashed before the tool
+completed.` The error is saved before publication. Recovery also restores a missing
+image follow-up from successful results. Repeating recovery does not duplicate
+results or image follow-ups, or republish terminal notices.
 
 Interrupted or failed batches can therefore leave crash errors when conversation
 processing resumes. External effects may already have happened before the missing
