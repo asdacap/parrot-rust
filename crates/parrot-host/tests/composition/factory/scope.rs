@@ -2077,7 +2077,7 @@ async fn actual_hosted_status_uses_live_context_then_full_status_then_later_stat
     assert!(fixture.clock.on_utc.lock().unwrap().is_none());
     assert!(rendered.contains(&profile));
     assert!(rendered.contains("Active profile: build\nModel: live"));
-    assert!(rendered.contains("Generated at: "));
+    assert!(rendered.contains("The time is: "));
     assert!(rendered.contains(" / 128k tokens); auto-compact: >64000 tokens."));
     let after = session.backend().usage().capture();
     assert_eq!(after, statistics.capture());

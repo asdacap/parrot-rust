@@ -589,7 +589,7 @@ async fn generated_time_steers_per_five_minute_bucket_with_local_time_and_durati
         };
         assert_eq!(
             observation.text,
-            format!("Generated at: {expected_time}\nSession duration: {expected_duration}")
+            format!("The time is: {expected_time}\nSession duration: {expected_duration}")
         );
         assert!(observation.is_auto_update);
         assert_eq!(observation.hash, format!("generated-time:{bucket}"));
@@ -985,7 +985,7 @@ async fn runtime_status_preserves_additional_context_order_exclusions_and_per_ca
         .to_string();
     assert!(
         full.starts_with(
-            format!("profile prompt\n\nContext: 12% used (123 estimated tokens / 1k limit); reminders every 10%; automatic compaction at 90%.\n\nGenerated at: {expected_time}\nSession duration: 24h 00m")
+            format!("profile prompt\n\nContext: 12% used (123 estimated tokens / 1k limit); reminders every 10%; automatic compaction at 90%.\n\nThe time is: {expected_time}\nSession duration: 24h 00m")
                 .as_str()
         )
     );
@@ -1013,7 +1013,7 @@ async fn runtime_status_preserves_additional_context_order_exclusions_and_per_ca
             "profile prompt",
             "Active profile:",
             "Model:",
-            "Generated at:",
+            "The time is:",
             "notification band",
         ] {
             assert!(!text.contains(excluded));
@@ -1079,7 +1079,7 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
         )
         .await
         .unwrap();
-    assert!(first.starts_with("profile prompt\n\nContext: 10% used (100 estimated tokens / 1k limit); reminders every 10%; automatic compaction at 90%.\n\nGenerated at: "));
+    assert!(first.starts_with("profile prompt\n\nContext: 10% used (100 estimated tokens / 1k limit); reminders every 10%; automatic compaction at 90%.\n\nThe time is: "));
     assert!(
         first.contains("Runtime:\n- agent: main\n\nActive profile: build\nModel: provider/model")
     );
@@ -1105,7 +1105,7 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
         .unwrap();
     for excluded in [
         "profile prompt",
-        "Generated at:",
+        "The time is:",
         "Active profile:",
         "Model:",
     ] {
