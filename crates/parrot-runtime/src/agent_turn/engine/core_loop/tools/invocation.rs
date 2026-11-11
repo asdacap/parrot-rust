@@ -5,6 +5,7 @@ use parrot_domain::{
 };
 use parrot_storage::{
     artifacts::output_blobs::is_tool_output_oversized,
+    conversation::ConversationOrigin,
     diagnostics::{DiagnosticFailure, DiagnosticSeverity, FailureKind},
 };
 use std::time::Instant;
@@ -38,7 +39,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 ..ToolStarted::new()
             });
             history
-                .append(started.clone(), None, None)
+                .append_message(started.clone(), None, ConversationOrigin::Model)
                 .await
                 .map_err(TurnError::Storage)?;
             self.publish(started).await?;

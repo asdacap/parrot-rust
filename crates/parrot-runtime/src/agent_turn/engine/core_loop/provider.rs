@@ -7,6 +7,7 @@ use parrot_provider::{
     routing::aliases::ResolvedModelSelection,
     sessions::{Completion, EventStream, Request, Session},
 };
+use parrot_storage::conversation::ConversationOrigin;
 
 pub(super) struct RuntimeProvider<'a> {
     pub(super) model: ResolvedModelSelection,
@@ -362,7 +363,7 @@ impl RuntimeProvider<'_> {
         }
         effects
             .history
-            .append(published.clone(), None, None)
+            .append_message(published.clone(), None, ConversationOrigin::Model)
             .await
             .map_err(ProviderCallError::Storage)?;
         effects

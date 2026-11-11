@@ -19,6 +19,7 @@ use parrot_provider::{
     sessions::{Content, Error, EventStream, Provider, Request, Session},
 };
 use parrot_runtime::prompt_context::{AgentIdentityDescription, SkillDiscoveryContext};
+use parrot_storage::conversation::{ConversationMessage, ConversationOrigin, MessageRole};
 use std::{
     collections::BTreeMap,
     future::Future,
@@ -685,7 +686,11 @@ async fn record_history_occupant(
     message.agent_session_id = id.into();
     histories
         .repository
-        .append(message, Some("user".into()), Some(text.into()))
+        .append_message(
+            message,
+            Some(ConversationMessage::text(MessageRole::User, text)),
+            ConversationOrigin::UserInput,
+        )
         .await
         .unwrap();
     identity
@@ -735,10 +740,13 @@ async fn refresh_all_histories_preserves_occupant_order_and_source_failure_bound
     orphan.agent_session_id = "agent-without-lineage".into();
     histories
         .repository
-        .append(
+        .append_message(
             orphan,
-            Some("user".into()),
-            Some("unresolved-history".into()),
+            Some(ConversationMessage::text(
+                MessageRole::User,
+                "unresolved-history",
+            )),
+            ConversationOrigin::UserInput,
         )
         .await
         .unwrap();

@@ -32,9 +32,9 @@ use parrot_runtime::{
 use parrot_storage::{
     artifacts::compaction::CompactionGroupBlobStore,
     conversation::{
-        AgentConversation, AgentHistoryView, ConversationMessage, ConversationRepository,
-        HistoryForkBoundary, HistoryForkSelection, MessageRole, ModelContent, ModelMessage,
-        ProviderContent, ToolCall,
+        AgentConversation, AgentHistoryView, ConversationMessage, ConversationOrigin,
+        ConversationRepository, HistoryForkBoundary, HistoryForkSelection, MessageRole,
+        ModelContent, ModelMessage, ProviderContent, ToolCall,
     },
     database::SessionDatabase,
     events::{EventRepository, NeverCancelled},
@@ -475,7 +475,9 @@ impl ContextEvents for Events {
             if event.has_compaction_finished() && self.fail_finished.load(Ordering::Relaxed) {
                 return Err(ContextError::Operation("finish publication failed".into()));
             }
-            self.history.append(event.clone(), None, None).await?;
+            self.history
+                .append_message(event.clone(), None, ConversationOrigin::Model)
+                .await?;
             self.publish_committed(
                 parrot_domain::contracts::storage::Committed::after_commit(event),
                 cancellation,

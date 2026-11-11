@@ -53,7 +53,7 @@ use parrot_domain::{
 use parrot_storage::{
     artifacts::output_blobs::is_tool_output_oversized,
     conversation::{HistoryForkBoundary, HistoryForkSelection},
-    events::{ConversationPart, NeverCancelled},
+    events::{ConversationOrigin, ConversationPart, NeverCancelled},
 };
 use protobuf::Message;
 use std::{
@@ -1839,7 +1839,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         });
         self.config
             .history
-            .append(event.clone(), None, None)
+            .append_message(event.clone(), None, ConversationOrigin::Model)
             .await?;
         self.config
             .publisher

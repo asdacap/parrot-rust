@@ -11,7 +11,10 @@ use parrot_domain::{
     protocol::messages::parrot::{self as protocol, Event},
 };
 use parrot_provider::sessions::{self, Completion, Request};
-use parrot_storage::{conversation::AgentHistoryView, events::EventError};
+use parrot_storage::{
+    conversation::AgentHistoryView,
+    events::{ConversationOrigin, EventError},
+};
 use tokio::time::Instant;
 
 use crate::event_broker::BrokerError;
@@ -94,7 +97,7 @@ async fn persist_and_publish(
     cancellation: &dyn Cancellation,
 ) -> Result<(), ProviderCallError> {
     history
-        .append(published.clone(), None, None)
+        .append_message(published.clone(), None, ConversationOrigin::Model)
         .await
         .map_err(ProviderCallError::Storage)?;
     publisher

@@ -4,36 +4,6 @@ use parrot_core::StatusStanding;
 use parrot_domain::protocol::messages::parrot::{Delivery, Event, RequestUsageRecorded};
 
 impl ConversationRepository {
-    pub async fn append(
-        &self,
-        event: Event,
-        role: Option<String>,
-        content: Option<String>,
-    ) -> Result<(), EventError> {
-        let origin = match role.as_deref() {
-            Some("system") => ConversationOrigin::System,
-            Some("user") => ConversationOrigin::UserInput,
-            Some("tool") => ConversationOrigin::Tool,
-            _ => ConversationOrigin::Model,
-        };
-        let message = match (role, content) {
-            (Some(role), Some(content)) => {
-                let parsed = match role.as_str() {
-                    "system" => MessageRole::System,
-                    "user" => MessageRole::User,
-                    "assistant" => MessageRole::Assistant,
-                    _ => {
-                        return Err(EventError::Invalid(format!(
-                            "the message table holds an unknown role {role}"
-                        )));
-                    }
-                };
-                Some(ConversationMessage::text(parsed, content))
-            }
-            _ => None,
-        };
-        self.append_message(event, message, origin).await
-    }
     pub async fn append_message(
         &self,
         event: Event,
@@ -93,14 +63,6 @@ impl AgentHistoryView {
     }
     pub fn agent_session_id(&self) -> &str {
         &self.agent
-    }
-    pub async fn append(
-        &self,
-        event: Event,
-        role: Option<String>,
-        content: Option<String>,
-    ) -> Result<(), EventError> {
-        self.repository.append(event, role, content).await
     }
     pub async fn append_message(
         &self,
