@@ -47,7 +47,7 @@ impl States for State {
             )))
         })
     }
-    fn apply_conversation_addition(
+    fn add_conversation_messages(
         &mut self,
         addition: ConversationAddition,
     ) -> BoxFuture<'_, Result<ConversationReceipt, Error>> {

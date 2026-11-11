@@ -97,7 +97,7 @@ async fn execute_turn(
         let inputs = states.promote_pending_inputs(admission).await?;
         for input in &inputs {
             states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![input.message.clone()],
                     persistence: ConversationPersistence::Committed(input.publication.clone()),
                 })
@@ -106,7 +106,7 @@ async fn execute_turn(
         let context = skills.prepare(states, &inputs, cancellation).await?;
         if !context.content.is_empty() {
             states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::text(Role::User, context.content)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::System,
@@ -163,7 +163,7 @@ async fn execute_turn(
                 rendering::render_template(states, ConfigKey::TruncatedToolCallTemplate, &[])
                     .await?;
             states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::text(Role::System, &content)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::System,
@@ -184,7 +184,7 @@ async fn execute_turn(
             let content =
                 rendering::render_template(states, ConfigKey::InvalidToolCallTemplate, &[]).await?;
             states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::text(Role::System, &content)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::System,
@@ -199,7 +199,7 @@ async fn execute_turn(
         }
         if !response.tool_calls.is_empty() {
             let recorded = states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::Model,
@@ -235,7 +235,7 @@ async fn execute_turn(
         let messages = states.collect_completion_blockers().await?;
         if messages.is_empty() {
             states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
                         finish_reason: response.finish_reason.clone(),
@@ -251,7 +251,7 @@ async fn execute_turn(
                 .map(|message| Message::text(Role::System, message)),
         );
         states
-            .apply_conversation_addition(ConversationAddition {
+            .add_conversation_messages(ConversationAddition {
                 messages: additions,
                 persistence: ConversationPersistence::CompletionBlockerFeedback(
                     CompletionBlockerFeedback {
@@ -269,7 +269,7 @@ async fn execute_turn(
 pub async fn interrupt_turn(states: &mut dyn States) -> Result<Option<String>, Error> {
     let content = rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
     let receipt = states
-        .apply_conversation_addition(ConversationAddition {
+        .add_conversation_messages(ConversationAddition {
             messages: vec![Message::text(Role::Assistant, &content)],
             persistence: ConversationPersistence::CloseTurn {
                 finish_reason: FinishReason::Interrupted,

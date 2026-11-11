@@ -30,7 +30,7 @@ impl<S> CoreStates for RuntimeStates<'_, S>
 where
     S: AccessSnapshot + 'static,
 {
-    fn apply_conversation_addition(
+    fn add_conversation_messages(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, CoreError>> {
@@ -68,7 +68,7 @@ where
                 }
                 persistence @ (ConversationPersistence::Phase { .. }
                 | ConversationPersistence::StatusSteering { .. }) => {
-                    return crate::compaction::apply_conversation_addition(
+                    return crate::compaction::add_conversation_messages(
                         self.history,
                         &mut state.conversation,
                         ConversationAddition {
@@ -85,7 +85,7 @@ where
                 | ConversationPersistence::ToolImages { .. }) => {
                     return state
                         .tool_conversation
-                        .apply_conversation_addition(
+                        .add_conversation_messages(
                             &mut state.conversation,
                             ConversationAddition {
                                 messages: addition.messages,

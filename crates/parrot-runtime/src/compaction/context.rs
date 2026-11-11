@@ -725,12 +725,12 @@ impl parrot_core::States for ContextAdditionStates<'_> {
         Box::pin(async { Err(parrot_core::Error::unsupported("States.get_config")) })
     }
 
-    fn apply_conversation_addition(
+    fn add_conversation_messages(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
         Box::pin(async move {
-            super::apply_conversation_addition(
+            super::add_conversation_messages(
                 self.history,
                 self.conversation,
                 addition,
@@ -807,7 +807,7 @@ impl EpochStates<'_> {
 }
 
 impl parrot_core::States for EpochStates<'_> {
-    fn apply_conversation_addition(
+    fn add_conversation_messages(
         &mut self,
         addition: parrot_core::ConversationAddition,
     ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
@@ -815,7 +815,7 @@ impl parrot_core::States for EpochStates<'_> {
             let result = {
                 let controller = self.controller.lock().await;
                 let history = controller.history.clone();
-                super::apply_conversation_addition(
+                super::add_conversation_messages(
                     &history,
                     self.conversation,
                     addition,

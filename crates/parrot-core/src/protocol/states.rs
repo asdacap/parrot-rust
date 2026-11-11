@@ -13,11 +13,11 @@ use super::{BoxFuture, CancellationToken, Error};
 pub trait States: Send + Sync {
     /// Commits the supplied messages, updates the live conversation on insertion, then publishes.
     /// Storage metadata selects the atomic write. Core supplies every message and its timing.
-    fn apply_conversation_addition(
+    fn add_conversation_messages(
         &mut self,
         _addition: crate::ConversationAddition,
     ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.apply_conversation_addition")) })
+        Box::pin(async { Err(Error::unsupported("States.add_conversation_messages")) })
     }
     /// Reads the status slots offered to the core, each with a source-computed
     /// hash. Defaults to no statuses, which steers nothing.

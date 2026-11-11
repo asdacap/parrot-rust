@@ -117,7 +117,7 @@ pub async fn steer_status(
     }
     let notice = format!("Status prompt injected\n{content}");
     states
-        .apply_conversation_addition(ConversationAddition {
+        .add_conversation_messages(ConversationAddition {
             messages: vec![Message::text(Role::System, content)],
             persistence: ConversationPersistence::StatusSteering {
                 standing,

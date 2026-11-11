@@ -13,7 +13,7 @@ use parrot_storage::{
     events::{MessageRole, ProviderContent, ToolCall},
 };
 
-pub async fn apply_conversation_addition(
+pub async fn add_conversation_messages(
     history: &AgentHistoryView,
     conversation: &mut AgentConversation,
     addition: ConversationAddition,

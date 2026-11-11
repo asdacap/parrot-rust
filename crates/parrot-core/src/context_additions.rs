@@ -20,7 +20,7 @@ pub async fn add_phase_prompt(
         )
     };
     states
-        .apply_conversation_addition(ConversationAddition {
+        .add_conversation_messages(ConversationAddition {
             messages: vec![Message::text(Role::System, content)],
             persistence: ConversationPersistence::Phase {
                 final_phase,

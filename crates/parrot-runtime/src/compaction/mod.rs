@@ -9,7 +9,7 @@ pub use context::{
     ContextCompactionResult, ContextController, ContextError, ContextEvents, ContextResult,
     ContextStatus, EpochInput, EpochResult, provider_message,
 };
-pub use conversation::apply_conversation_addition;
+pub use conversation::add_conversation_messages;
 pub(crate) use conversation::materialize_message;
 pub use parrot_core::{StatusKey, StatusOffer, StatusOffering, StatusStanding};
 mod planning;

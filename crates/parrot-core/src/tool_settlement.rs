@@ -173,7 +173,7 @@ impl ToolSettlement {
                 .extend(result.images.iter().cloned().map(Content::Artifact));
             message.tool_call_id = result.call_id.clone();
             states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![message],
                     persistence: ConversationPersistence::ToolResult {
                         assistant_sequence: sequence,
@@ -197,7 +197,7 @@ impl ToolSettlement {
             .collect::<Vec<_>>();
         if !contents.is_empty() {
             states
-                .apply_conversation_addition(ConversationAddition {
+                .add_conversation_messages(ConversationAddition {
                     messages: vec![Message {
                         role: Role::User,
                         contents,

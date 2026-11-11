@@ -93,7 +93,7 @@ async fn status_steering_appends_records_and_publishes_the_newest_standing() {
         },
     };
 
-    parrot_runtime::compaction::apply_conversation_addition(
+    parrot_runtime::compaction::add_conversation_messages(
         &history,
         &mut conversation,
         addition("fitted status", "h1"),
@@ -109,7 +109,7 @@ async fn status_steering_appends_records_and_publishes_the_newest_standing() {
         standing("h1")
     );
 
-    parrot_runtime::compaction::apply_conversation_addition(
+    parrot_runtime::compaction::add_conversation_messages(
         &history,
         &mut conversation,
         addition("next status", "h2"),
