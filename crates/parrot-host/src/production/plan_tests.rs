@@ -17,6 +17,16 @@ fn current_status(request: &Request) -> &str {
         .expect("the production request must include its runtime status")
         .content()
 }
+fn profile_prompt<'a>(request: &'a Request, profile: &str) -> &'a str {
+    let marker = format!("{}-PROFILE-MARKER", profile.to_ascii_uppercase());
+    request
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == Role::System && message.content().contains(&marker))
+        .expect("the production request must include its active profile prompt")
+        .content()
+}
 fn artifact_path(status: &str, label: &str) -> PathBuf {
     PathBuf::from(
         status
@@ -61,8 +71,9 @@ impl PlanCaptureProvider {
             "root"
         };
         let artifacts = if status.contains("Active profile: plan\n") {
-            let plan = artifact_path(status, PLAN_LABEL);
-            let tasks = artifact_path(status, TASK_LABEL);
+            let prompt = profile_prompt(&request, "plan");
+            let plan = artifact_path(prompt, PLAN_LABEL);
+            let tasks = artifact_path(prompt, TASK_LABEL);
             for path in [&plan, &tasks] {
                 assert!(path.starts_with(&self.root));
                 assert!(
@@ -161,7 +172,7 @@ fn agent_directory(fixture: &Fixture, host: &ProductionHost, id: &str) -> PathBu
         .join(&summary.root_agent_name)
 }
 fn assert_plan_contract(request: &Request, directory: &std::path::Path) -> (PathBuf, PathBuf) {
-    let status = current_status(request);
+    let status = profile_prompt(request, "plan");
     assert!(status.contains("PLAN-PROFILE-MARKER"));
     assert!(status.contains("schema_version equal to 1 and a nonempty tasks array"));
     assert!(status.contains("Finish only after writing both canonical files."));
@@ -285,9 +296,9 @@ async fn production_plan_requests_use_prepared_workflow_and_follow_live_mode_swi
             if mode == "plan" {
                 assert_plan_contract(request, &directory);
             } else {
-                assert!(status.contains(&format!("{}-PROFILE-MARKER", mode.to_ascii_uppercase())));
-                assert!(!status.contains(PLAN_LABEL));
-                assert!(!status.contains("PLAN-PROFILE-MARKER"));
+                let prompt = profile_prompt(request, mode);
+                assert!(!prompt.contains(PLAN_LABEL));
+                assert!(!prompt.contains("PLAN-PROFILE-MARKER"));
             }
         }
     }
@@ -305,7 +316,7 @@ async fn production_plan_requests_use_prepared_workflow_and_follow_live_mode_swi
         let requests = capture.requests.lock().unwrap();
         let paths: BTreeSet<_> = requests
             .iter()
-            .filter(|request| current_status(request).contains(PLAN_LABEL))
+            .filter(|request| current_status(request).contains("Active profile: plan\n"))
             .map(|request| assert_plan_contract(request, &directory))
             .collect();
         assert_eq!(
