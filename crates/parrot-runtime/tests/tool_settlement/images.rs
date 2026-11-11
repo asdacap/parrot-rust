@@ -94,6 +94,114 @@ async fn image_budget_latches_remaining_batch_resets_next_batch_and_synthetic_us
 }
 
 #[tokio::test]
+async fn reopening_restores_missing_images_when_all_latest_results_already_exist() {
+    let fixture = Fixture::new();
+    let first = image(&fixture).await;
+    let mut second = first.clone();
+    second.display_name = "second.png".into();
+    let sequence = fixture
+        .batch(vec![call("first", "image"), call("second", "image")])
+        .await;
+    let mut saved = Vec::new();
+    for (call_id, image) in [("second", second.clone()), ("first", first.clone())] {
+        let terminal = ToolExecutionTerminal {
+            tool_call_id: call_id.into(),
+            tool_name: "image".into(),
+            status: ToolExecutionStatus::Finished,
+            result_parts: vec![
+                ConversationPart::text(call_id),
+                ConversationPart::image(image),
+            ],
+        };
+        fixture
+            .history
+            .append_tool_settlement(
+                Event {
+                    id: id(),
+                    agent_session_id: "agent".into(),
+                    ..Default::default()
+                },
+                sequence,
+                terminal.clone(),
+            )
+            .await
+            .unwrap();
+        saved.push(terminal);
+    }
+    assert!(!fixture.history.has_tool_synthetic(sequence).await.unwrap());
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+    let repository = Fixture::open(&fixture.path);
+    let restarted = Fixture {
+        path: fixture.path.clone(),
+        history: Fixture::history_for(&fixture.path, &repository),
+        repository,
+        fresh_batches: Mutex::new(VecDeque::new()),
+    };
+    let mut harness = Harness::new(&restarted, vec![]).await;
+    assert!(harness.state.read_recovery().await.unwrap().is_some());
+    harness.restore(&restarted).await.unwrap();
+    harness.restore(&restarted).await.unwrap();
+    assert!(harness.state.read_recovery().await.unwrap().is_none());
+    let history = restarted.history.conversation().await.unwrap();
+    let users = history
+        .iter()
+        .filter(|item| item.message.role == MessageRole::User)
+        .collect::<Vec<_>>();
+    assert_eq!(users.len(), 1);
+    assert_eq!(
+        users[0].message.parts,
+        [
+            ConversationPart::image(first),
+            ConversationPart::image(second)
+        ]
+    );
+    assert_eq!(
+        restarted
+            .history
+            .tool_terminals_of_calls(vec!["second".into(), "first".into()])
+            .await
+            .unwrap(),
+        saved
+    );
+    assert!(
+        !restarted
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_tool_started()
+                || event.has_tool_finished()
+                || event.has_tool_error())
+    );
+    drop(harness);
+    restarted
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+    let reopened = Fixture::open(&restarted.path);
+    let history = Fixture::history_for(&restarted.path, &reopened);
+    let mut state = parrot_runtime::agent_turn::tool_conversation::ToolConversation::new(
+        history.clone(),
+        Arc::new(Publisher::new(history.clone())),
+        Arc::new(id),
+        templates().as_ref(),
+    )
+    .unwrap();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    state.restore_results(&mut conversation).await.unwrap();
+    assert_eq!(history.conversation().await.unwrap().len(), 4);
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn restored_images_are_preserved_and_unfinished_calls_get_crash_errors() {
     for overflow in [false, true] {
         let fixture = Fixture::new();
@@ -268,7 +376,6 @@ async fn restored_missing_image_metadata_is_visible_error_and_does_not_advance_w
         .unwrap();
     assert_eq!(pending[0].status, ToolExecutionStatus::Error);
     assert!(pending[0].content().contains(CRASH_MESSAGE));
-    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert!(tool.calls.lock().unwrap().is_empty());
 }
 

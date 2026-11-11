@@ -813,6 +813,9 @@ impl States for MemoryState {
                 ConversationPersistence::ToolResult { result, .. } => {
                     self.step("record_results")?;
                     self.applied_results.push(result.clone());
+                    if let Some(steer) = self.steers_after_results.pop_front() {
+                        self.enqueue_message(Delivery::Steer, &steer);
+                    }
                     if let Some(next) = self.next_status_offering.take() {
                         self.status_offering = next;
                     }
@@ -1018,17 +1021,6 @@ impl States for MemoryState {
                 request.rendered_instructions.push(instructions.clone());
             }
             Ok(instructions)
-        })
-    }
-    fn advance_tool_settlement_watermark(
-        &mut self,
-        _through: i64,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            if let Some(steer) = self.steers_after_results.pop_front() {
-                self.enqueue_message(Delivery::Steer, &steer);
-            }
-            Ok(())
         })
     }
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {

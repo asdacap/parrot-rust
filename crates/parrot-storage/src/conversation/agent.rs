@@ -117,6 +117,11 @@ impl AgentHistoryView {
     ) -> Result<ConversationItem, EventError> {
         self.repository.append_conversation(event, message).await
     }
+    pub async fn read_latest_assistant(&self) -> Result<Option<ConversationItem>, EventError> {
+        self.repository
+            .read_latest_assistant(self.agent.clone())
+            .await
+    }
     pub async fn has_tool_synthetic(&self, assistant: i64) -> Result<bool, EventError> {
         self.repository
             .events

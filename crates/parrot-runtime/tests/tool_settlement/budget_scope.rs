@@ -138,7 +138,6 @@ async fn retry_after_recording_failure_closes_unfinished_calls_without_spending_
     .await;
     harness.publisher.fail_terminal.store(1, Ordering::SeqCst);
     assert!(harness.run(&fixture, &NeverCancelled).await.is_err());
-    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert_eq!(*accepted.lock().unwrap(), [("consume".into(), true)]);
     harness.run(&fixture, &NeverCancelled).await.unwrap();
     assert_eq!(*accepted.lock().unwrap(), [("consume".into(), true)]);
@@ -170,7 +169,6 @@ async fn retry_after_recording_failure_closes_unfinished_calls_without_spending_
             .count(),
         1
     );
-    assert!(harness.state.settled_conversation_sequence() > 0);
     assert_eq!(
         harness
             .publisher

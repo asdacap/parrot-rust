@@ -469,7 +469,9 @@ where
         })
     }
 
-    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<parrot_core::ToolRecovery, CoreError>> {
+    fn read_tool_recovery(
+        &self,
+    ) -> BoxFuture<'_, Result<Option<parrot_core::ToolRecovery>, CoreError>> {
         adapt_operation(async move {
             self.state
                 .lock()
@@ -477,19 +479,6 @@ where
                 .tool_conversation
                 .read_recovery()
                 .await
-        })
-    }
-    fn advance_tool_settlement_watermark(
-        &mut self,
-        through: i64,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.state
-                .lock()
-                .await
-                .tool_conversation
-                .advance_watermark(through);
-            Ok(())
         })
     }
     fn get_last_turn(

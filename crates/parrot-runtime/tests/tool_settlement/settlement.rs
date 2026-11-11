@@ -326,7 +326,6 @@ async fn durable_terminal_survives_publisher_failure_retry_without_reinvoke_or_r
     let mut harness = Harness::new(&fixture, vec![tool.clone().handle()]).await;
     harness.publisher.fail_terminal.store(1, Ordering::SeqCst);
     assert!(harness.run(&fixture, &NeverCancelled).await.is_err());
-    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert_eq!(terminals(&fixture, &["once"]).await.len(), 1);
     harness.run(&fixture, &NeverCancelled).await.unwrap();
     harness.run(&fixture, &NeverCancelled).await.unwrap();
@@ -336,7 +335,6 @@ async fn durable_terminal_survives_publisher_failure_retry_without_reinvoke_or_r
         terminal_ids(&harness.publisher.events.lock().unwrap()),
         vec!["once"]
     );
-    assert!(harness.state.settled_conversation_sequence() > 0);
     assert_eq!(
         fixture
             .history
@@ -375,7 +373,6 @@ async fn failed_started_publication_is_outside_tool_catch_but_joins_all_admitted
     assert!(a.calls.lock().unwrap().is_empty());
     assert_eq!(peer.calls.lock().unwrap().len(), 1);
     assert!(terminal_ids(&fixture.events().await).is_empty());
-    assert_eq!(harness.state.settled_conversation_sequence(), 0);
     assert!(harness.activity.capture().current_tool.is_none());
     harness.run(&fixture, &NeverCancelled).await.unwrap();
     assert!(a.calls.lock().unwrap().is_empty());

@@ -14,14 +14,8 @@ pub struct ToolExecutionRequest {
     pub cancel_remaining: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolRecovery {
-    pub through: i64,
-    pub batches: Vec<ToolRecoveryBatch>,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolRecoveryBatch {
+pub struct ToolRecovery {
     pub sequence: i64,
     pub calls: Vec<ToolCall>,
     pub results: Vec<ToolResult>,
@@ -63,56 +57,53 @@ impl ToolSettlement {
                 "cannot restore results during tool execution",
             ));
         }
-        let recovery = states.read_tool_recovery().await?;
-        for batch in recovery.batches {
-            let mut results = batch
-                .results
-                .into_iter()
-                .map(|result| (result.call_id.clone(), result))
-                .collect::<HashMap<_, _>>();
-            let mut settled = HashMap::new();
-            for call in &batch.calls {
-                let (result, recovered) = if let Some(result) = results.remove(&call.id) {
-                    (result, true)
-                } else {
-                    let error_message =
-                        render_template(states, ConfigKey::CrashedToolTemplate, &[]).await?;
-                    let text = render_template(
-                        states,
-                        ConfigKey::ToolErrorTemplate,
-                        &[("message".into(), error_message.clone().into())],
-                    )
-                    .await?;
-                    (
-                        ToolResult {
-                            call_id: call.id.clone(),
-                            tool_name: call.name.clone(),
-                            status: ToolStatus::Error,
-                            text,
-                            error_message,
-                            images: Vec::new(),
-                            metadata: None,
-                        },
-                        false,
-                    )
-                };
-                Self::record_result(states, batch.sequence, &result, recovered).await?;
-                settled.insert(call.id.clone(), result);
-            }
-            Self::finish_batch(
-                states,
-                &ToolBatch {
-                    sequence: batch.sequence,
-                    calls: batch.calls,
-                    results: settled,
-                    index: 0,
-                },
-            )
-            .await?;
+        let Some(batch) = states.read_tool_recovery().await? else {
+            return Ok(());
+        };
+        let mut results = batch
+            .results
+            .into_iter()
+            .map(|result| (result.call_id.clone(), result))
+            .collect::<HashMap<_, _>>();
+        let mut settled = HashMap::new();
+        for call in &batch.calls {
+            let (result, recovered) = if let Some(result) = results.remove(&call.id) {
+                (result, true)
+            } else {
+                let error_message =
+                    render_template(states, ConfigKey::CrashedToolTemplate, &[]).await?;
+                let text = render_template(
+                    states,
+                    ConfigKey::ToolErrorTemplate,
+                    &[("message".into(), error_message.clone().into())],
+                )
+                .await?;
+                (
+                    ToolResult {
+                        call_id: call.id.clone(),
+                        tool_name: call.name.clone(),
+                        status: ToolStatus::Error,
+                        text,
+                        error_message,
+                        images: Vec::new(),
+                        metadata: None,
+                    },
+                    false,
+                )
+            };
+            Self::record_result(states, batch.sequence, &result, recovered).await?;
+            settled.insert(call.id.clone(), result);
         }
-        states
-            .advance_tool_settlement_watermark(recovery.through)
-            .await?;
+        Self::finish_batch(
+            states,
+            &ToolBatch {
+                sequence: batch.sequence,
+                calls: batch.calls,
+                results: settled,
+                index: 0,
+            },
+        )
+        .await?;
         Ok(())
     }
 
@@ -166,11 +157,7 @@ impl ToolSettlement {
                 "tool execution did not complete the recorded batch",
             ));
         }
-        Self::finish_batch(states, &batch).await?;
-        states
-            .advance_tool_settlement_watermark(batch.sequence)
-            .await?;
-        Ok(())
+        Self::finish_batch(states, &batch).await
     }
 
     fn record_result<'a>(

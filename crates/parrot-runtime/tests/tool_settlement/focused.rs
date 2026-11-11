@@ -1,5 +1,120 @@
 use super::*;
 
+#[tokio::test]
+async fn latest_request_recovery_leaves_older_unfinished_calls_untouched() {
+    let fixture = Fixture::new();
+    fixture.batch(vec![call("old", "read")]).await;
+    let latest = fixture.batch(vec![call("latest", "read")]).await;
+    for role in [MessageRole::User, MessageRole::System] {
+        fixture
+            .history
+            .append_conversation(
+                Event {
+                    id: id(),
+                    agent_session_id: "agent".into(),
+                    ..Default::default()
+                },
+                ConversationMessage::text(role, "trailing input or status"),
+            )
+            .await
+            .unwrap();
+    }
+    fixture
+        .repository
+        .save_compaction(
+            "agent".into(),
+            parrot_storage::conversation::CompactionSnapshot {
+                summary: "compacted history".into(),
+                watermark: latest,
+            },
+        )
+        .await
+        .unwrap();
+    let mut other = ConversationMessage::text(MessageRole::Assistant, "other agent request");
+    other.tool_calls.push(parrot_storage::events::ToolCall {
+        id: "other".into(),
+        name: "read".into(),
+        arguments_json: "{}".into(),
+    });
+    fixture
+        .repository
+        .events()
+        .append(
+            Event {
+                id: id(),
+                agent_session_id: "other-agent".into(),
+                ..Default::default()
+            },
+            Some(other),
+        )
+        .await
+        .unwrap();
+    let mut harness = Harness::new(&fixture, vec![]).await;
+    harness.restore(&fixture).await.unwrap();
+    harness.restore(&fixture).await.unwrap();
+    let results = fixture
+        .history
+        .tool_terminals_of_calls(vec!["old".into(), "latest".into()])
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .repository
+            .events()
+            .tool_terminals_of_calls("other-agent".into(), vec!["other".into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].tool_call_id, "latest");
+    assert_eq!(results[0].status, ToolExecutionStatus::Error);
+    assert!(results[0].content().contains(CRASH_MESSAGE));
+    assert!(
+        !fixture
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_tool_started())
+    );
+}
+
+#[tokio::test]
+async fn latest_request_recovery_does_not_search_past_a_no_tool_response() {
+    let fixture = Fixture::new();
+    fixture.batch(vec![call("old", "read")]).await;
+    fixture
+        .history
+        .append_conversation(
+            Event {
+                id: id(),
+                agent_session_id: "agent".into(),
+                ..Default::default()
+            },
+            ConversationMessage::text(MessageRole::Assistant, "done"),
+        )
+        .await
+        .unwrap();
+    let mut harness = Harness::new(&fixture, vec![]).await;
+    harness.restore(&fixture).await.unwrap();
+    assert!(
+        fixture
+            .history
+            .tool_terminals_of_calls(vec!["old".into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(harness.publisher.events.lock().unwrap().is_empty());
+    assert!(
+        !fixture
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_tool_started())
+    );
+}
+
 struct DynamicTool {
     inner: RecordingTool,
     checks: Mutex<Vec<(String, String, i64)>>,
@@ -251,7 +366,6 @@ async fn restored_cancelled_terminal_is_preserved_and_unfinished_tail_gets_crash
             .count(),
         2
     );
-    assert!(harness.state.settled_conversation_sequence() >= sequence);
 }
 
 #[tokio::test]

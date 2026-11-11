@@ -173,6 +173,25 @@ fn read_durable_tail(
 }
 
 impl ConversationRepository {
+    /// Reads the latest model-origin assistant response, whether or not it contains tool calls.
+    pub async fn read_latest_assistant(
+        &self,
+        agent: String,
+    ) -> Result<Option<ConversationItem>, EventError> {
+        self.events
+            .transaction(move |tx| {
+                let sequence = tx
+                    .query_row(
+                        "SELECT sequence FROM conversation_item WHERE agent_session = ?1 AND origin = 'model' AND role = 'assistant' AND kind <> 'compaction' ORDER BY sequence DESC LIMIT 1;",
+                        [agent],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?;
+                sequence.map(|sequence| read_conversation_item(tx, sequence)).transpose()
+            })
+            .await
+    }
+
     /// Reads a flat durable tail with stored ownership and status metadata.
     pub async fn read_conversation_tail(
         &self,

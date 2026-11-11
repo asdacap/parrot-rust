@@ -99,6 +99,102 @@ fn entry_label(entry: &AgentHistoryEntry) -> String {
 }
 
 #[tokio::test]
+async fn latest_assistant_is_session_scoped_and_ignores_trailing_non_model_messages() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    assert_eq!(
+        repo.read_latest_assistant("agent".into()).await.unwrap(),
+        None
+    );
+    let mut batch = message(MessageRole::Assistant, "tools");
+    batch.tool_calls.push(ToolCall {
+        id: "old-call".into(),
+        name: "read".into(),
+        arguments_json: "{}".into(),
+    });
+    let old = append(&repo, "old", "agent", batch).await;
+    assert_eq!(
+        repo.read_latest_assistant("agent".into()).await.unwrap(),
+        Some(old)
+    );
+    let latest = append(
+        &repo,
+        "latest",
+        "agent",
+        message(MessageRole::Assistant, "done"),
+    )
+    .await;
+    let other = append(
+        &repo,
+        "other",
+        "other",
+        message(MessageRole::Assistant, "other"),
+    )
+    .await;
+    for (id, role) in [
+        ("input", MessageRole::User),
+        ("result", MessageRole::Tool),
+        ("status", MessageRole::System),
+    ] {
+        append(&repo, id, "agent", message(role, id)).await;
+    }
+    let mut non_model = message(MessageRole::Assistant, "not a provider response");
+    non_model.origin = ConversationOrigin::System;
+    append(&repo, "non-model", "agent", non_model).await;
+    repo.save_compaction(
+        "agent".into(),
+        CompactionSnapshot {
+            summary: "summary".into(),
+            watermark: latest.sequence,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.read_latest_assistant("agent".into()).await.unwrap(),
+        Some(latest.clone())
+    );
+    assert_eq!(
+        repo.read_latest_assistant("other".into()).await.unwrap(),
+        Some(other)
+    );
+    assert_eq!(
+        repo.read_latest_assistant("empty".into()).await.unwrap(),
+        None
+    );
+    repo.events()
+        .transaction(|tx| {
+            tx.execute_batch("DROP INDEX conversation_latest_assistant;")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    repo.events().database().close().await.unwrap();
+    let reopened = fixture.repository();
+    assert_eq!(
+        reopened
+            .read_latest_assistant("agent".into())
+            .await
+            .unwrap(),
+        Some(latest)
+    );
+    let plan = reopened.events().transaction(|tx| {
+        let mut statement = tx.prepare("EXPLAIN QUERY PLAN SELECT sequence FROM conversation_item WHERE agent_session = ?1 AND origin = 'model' AND role = 'assistant' AND kind <> 'compaction' ORDER BY sequence DESC LIMIT 1;")?;
+        Ok(statement.query_map(["agent"], |row| row.get::<_, String>(3))?.collect::<Result<Vec<_>, _>>()?)
+    }).await.unwrap();
+    println!("latest assistant query plan: {plan:?}");
+    assert!(plan.iter().any(|detail| {
+        detail.contains("SEARCH conversation_item USING INDEX conversation_latest_assistant")
+    }));
+    assert!(
+        !plan
+            .iter()
+            .any(|detail| detail.contains("SCAN") || detail.contains("TEMP B-TREE"))
+    );
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn structured_conversation_reopens_in_order_and_respects_watermark() {
     let fixture = Fixture::new();
     let repo = fixture.repository();

@@ -80,6 +80,7 @@ pub(super) fn open(path: &Path) -> Result<Connection, DatabaseError> {
         current_schema_crash::wait_before_commit(&transaction);
         transaction.commit()?;
     }
+    connection.execute_batch(include_str!("conversation_indexes.sql"))?;
     Ok(connection)
 }
 

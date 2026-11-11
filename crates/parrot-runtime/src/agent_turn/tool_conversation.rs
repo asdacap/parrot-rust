@@ -2,7 +2,7 @@ use super::{engine::Publisher, services::TurnError};
 use parrot_core::{
     BoxFuture, ConfigKey, ConfigValue, Content, ConversationAddition, ConversationPersistence,
     ConversationReceipt, Error, PromptTemplate, States, ToolCall, ToolImage, ToolRecovery,
-    ToolRecoveryBatch, ToolResult, ToolSettlement, ToolStatus,
+    ToolResult, ToolSettlement, ToolStatus,
 };
 use parrot_domain::{
     contracts::storage::Committed,
@@ -15,7 +15,7 @@ use parrot_storage::{
     artifacts::ImageArtifactMetadata,
     conversation::{AgentConversation, AgentHistoryView},
     events::{
-        ConversationItem, ConversationPart, MessageRole, NeverCancelled, ToolExecutionStatus,
+        ConversationItem, ConversationPart, NeverCancelled, ToolExecutionStatus,
         ToolExecutionTerminal,
     },
 };
@@ -32,7 +32,6 @@ struct ToolBacking {
     event_id: Arc<dyn Fn() -> String + Send + Sync>,
     crash_template: Arc<PromptTemplate>,
     error_template: Arc<PromptTemplate>,
-    watermark: i64,
 }
 
 struct ToolState<'a> {
@@ -64,17 +63,8 @@ impl ToolConversation {
                 error_template: templates
                     .get_template("tool-result.error")
                     .map_err(|error| TurnError::Service(error.to_string()))?,
-                watermark: 0,
             },
         })
-    }
-
-    pub fn settled_conversation_sequence(&self) -> i64 {
-        self.backing.watermark
-    }
-
-    pub fn advance_watermark(&mut self, through: i64) {
-        self.backing.watermark = self.backing.watermark.max(through);
     }
 
     pub fn reset_pending(&mut self) {
@@ -138,7 +128,7 @@ impl ToolConversation {
             .map_err(TurnError::Core)
     }
 
-    pub async fn read_recovery(&self) -> Result<ToolRecovery, TurnError> {
+    pub async fn read_recovery(&self) -> Result<Option<ToolRecovery>, TurnError> {
         self.backing.read_recovery().await
     }
 
@@ -169,18 +159,8 @@ impl States for ToolState<'_> {
         })
     }
 
-    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<ToolRecovery, Error>> {
+    fn read_tool_recovery(&self) -> BoxFuture<'_, Result<Option<ToolRecovery>, Error>> {
         Box::pin(async move { self.backing.read_recovery().await.map_err(Into::into) })
-    }
-
-    fn advance_tool_settlement_watermark(
-        &mut self,
-        through: i64,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.backing.watermark = self.backing.watermark.max(through);
-            Ok(())
-        })
     }
 
     fn apply_conversation_addition(
@@ -220,94 +200,90 @@ impl States for ToolState<'_> {
 }
 
 impl ToolBacking {
-    async fn read_recovery(&self) -> Result<ToolRecovery, TurnError> {
-        let messages = self.history.conversation_after(self.watermark).await?;
-        let through = messages.last().map_or(self.watermark, |item| item.sequence);
-        let assistants = messages
-            .into_iter()
-            .filter(|item| {
-                item.message.role == MessageRole::Assistant && !item.message.tool_calls.is_empty()
-            })
-            .collect::<Vec<_>>();
+    async fn read_recovery(&self) -> Result<Option<ToolRecovery>, TurnError> {
+        let Some(assistant) = self.history.read_latest_assistant().await? else {
+            return Ok(None);
+        };
+        if assistant.message.tool_calls.is_empty() {
+            return Ok(None);
+        }
         let terminals = self
             .history
             .tool_terminals_of_calls(
-                assistants
+                assistant
+                    .message
+                    .tool_calls
                     .iter()
-                    .flat_map(|assistant| {
-                        assistant
-                            .message
-                            .tool_calls
-                            .iter()
-                            .map(|call| call.id.clone())
-                    })
+                    .map(|call| call.id.clone())
                     .collect(),
             )
             .await?
             .into_iter()
             .map(|terminal| (terminal.tool_call_id.clone(), terminal))
             .collect::<HashMap<_, _>>();
-        let mut batches = Vec::new();
-        for assistant in assistants {
-            let results = assistant
+        let results: Vec<ToolResult> = assistant
+            .message
+            .tool_calls
+            .iter()
+            .filter_map(|call| terminals.get(&call.id).cloned())
+            .map(|terminal| {
+                let text = parrot_storage::events::content(&terminal.result_parts);
+                ToolResult {
+                    call_id: terminal.tool_call_id,
+                    tool_name: terminal.tool_name,
+                    status: match terminal.status {
+                        ToolExecutionStatus::Finished => ToolStatus::Finished,
+                        ToolExecutionStatus::Cancelled => ToolStatus::Cancelled,
+                        ToolExecutionStatus::Error => ToolStatus::Error,
+                        ToolExecutionStatus::ImageBudgetExceeded => ToolStatus::ImageBudgetExceeded,
+                    },
+                    text,
+                    error_message: String::new(),
+                    metadata: None,
+                    images: terminal
+                        .result_parts
+                        .into_iter()
+                        .filter_map(|part| match part {
+                            ConversationPart::ImageArtifact { metadata } => Some(ToolImage {
+                                artifact_id: metadata.artifact_id,
+                                sha256: metadata.sha256,
+                                media_type: metadata.media_type,
+                                byte_length: metadata.byte_length,
+                                width: metadata.width,
+                                height: metadata.height,
+                                frame_count: metadata.frame_count,
+                                aggregate_pixels: metadata.aggregate_pixels,
+                                display_name: metadata.display_name,
+                                origin: metadata.origin,
+                            }),
+                            ConversationPart::Text(_) => None,
+                        })
+                        .collect(),
+                }
+            })
+            .collect();
+        let needs_images = results
+            .iter()
+            .any(|result| result.status == ToolStatus::Finished && !result.images.is_empty());
+        if results.len() == assistant.message.tool_calls.len()
+            && (!needs_images || self.history.has_tool_synthetic(assistant.sequence).await?)
+        {
+            return Ok(None);
+        }
+        Ok(Some(ToolRecovery {
+            sequence: assistant.sequence,
+            calls: assistant
                 .message
                 .tool_calls
-                .iter()
-                .filter_map(|call| terminals.get(&call.id).cloned())
-                .map(|terminal| {
-                    let text = parrot_storage::events::content(&terminal.result_parts);
-                    ToolResult {
-                        call_id: terminal.tool_call_id,
-                        tool_name: terminal.tool_name,
-                        status: match terminal.status {
-                            ToolExecutionStatus::Finished => ToolStatus::Finished,
-                            ToolExecutionStatus::Cancelled => ToolStatus::Cancelled,
-                            ToolExecutionStatus::Error => ToolStatus::Error,
-                            ToolExecutionStatus::ImageBudgetExceeded => {
-                                ToolStatus::ImageBudgetExceeded
-                            }
-                        },
-                        text,
-                        error_message: String::new(),
-                        metadata: None,
-                        images: terminal
-                            .result_parts
-                            .into_iter()
-                            .filter_map(|part| match part {
-                                ConversationPart::ImageArtifact { metadata } => Some(ToolImage {
-                                    artifact_id: metadata.artifact_id,
-                                    sha256: metadata.sha256,
-                                    media_type: metadata.media_type,
-                                    byte_length: metadata.byte_length,
-                                    width: metadata.width,
-                                    height: metadata.height,
-                                    frame_count: metadata.frame_count,
-                                    aggregate_pixels: metadata.aggregate_pixels,
-                                    display_name: metadata.display_name,
-                                    origin: metadata.origin,
-                                }),
-                                ConversationPart::Text(_) => None,
-                            })
-                            .collect(),
-                    }
+                .into_iter()
+                .map(|call| ToolCall {
+                    id: call.id,
+                    name: call.name,
+                    arguments_json: call.arguments_json,
                 })
-                .collect();
-            batches.push(ToolRecoveryBatch {
-                sequence: assistant.sequence,
-                calls: assistant
-                    .message
-                    .tool_calls
-                    .into_iter()
-                    .map(|call| ToolCall {
-                        id: call.id,
-                        name: call.name,
-                        arguments_json: call.arguments_json,
-                    })
-                    .collect(),
-                results,
-            });
-        }
-        Ok(ToolRecovery { through, batches })
+                .collect(),
+            results,
+        }))
     }
 
     async fn commit_addition(
