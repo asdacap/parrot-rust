@@ -194,9 +194,12 @@ impl Fixture {
         arguments: serde_json::Value,
     ) -> Result<catalog::Output, parrot_domain::contracts::async_ops::OperationError<catalog::Error>>
     {
-        let mut invocation = Invocation::new("catalog-call", arguments.to_string());
+        let mut invocation = Invocation::new(
+            "catalog-call",
+            arguments.to_string(),
+            self.templates.clone(),
+        );
         invocation.assistant_sequence = 9_007_199_254_740_993;
-        invocation.prompt_templates = Some(self.templates.clone());
         let snapshot = self.catalog.snapshot().unwrap();
         let tool = snapshot.find(name).unwrap().create();
         tool.invoke(

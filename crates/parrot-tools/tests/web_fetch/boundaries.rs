@@ -77,7 +77,7 @@ async fn decoder_failure_propagates_as_io_not_a_web_tool_error() {
         .invoke(
             Invocation {
                 arguments_json: r#"{"url":"http://127.0.0.1/"}"#.to_owned(),
-                prompt_templates: None,
+                prompt_templates: templates(),
             },
             InvocationContext::new(NoFilesystemAccess, (), &NeverCancel),
         )
@@ -161,7 +161,7 @@ async fn configured_error_template_is_used_but_success_text_is_not_reformatted()
         .invoke(
             Invocation {
                 arguments_json: "[]".to_owned(),
-                prompt_templates: Some(templates.clone()),
+                prompt_templates: templates.clone(),
             },
             InvocationContext::new(NoFilesystemAccess, (), &NeverCancel),
         )
@@ -172,7 +172,7 @@ async fn configured_error_template_is_used_but_success_text_is_not_reformatted()
         .invoke(
             Invocation {
                 arguments_json: r#"{"url":"http://127.0.0.1/"}"#.to_owned(),
-                prompt_templates: Some(templates),
+                prompt_templates: templates,
             },
             InvocationContext::new(NoFilesystemAccess, (), &NeverCancel),
         )

@@ -34,12 +34,7 @@ async fn status_observes_runtime_then_statistics_and_joins_only_nonblank_section
         assert_eq!(
             text(
                 fixture
-                    .invoke_with(
-                        Kind::Status,
-                        "{}",
-                        Some(formatter_catalog()),
-                        &Cancel(false)
-                    )
+                    .invoke_with(Kind::Status, "{}", formatter_catalog(), &Cancel(false))
                     .await
             ),
             expected
@@ -65,12 +60,7 @@ async fn unavailable_status_uses_optional_formatter_but_nonempty_status_is_direc
     assert_eq!(
         text(
             fixture
-                .invoke_with(
-                    Kind::Status,
-                    "{}",
-                    Some(formatter_catalog()),
-                    &Cancel(false)
-                )
+                .invoke_with(Kind::Status, "{}", formatter_catalog(), &Cancel(false))
                 .await
         ),
         "TEXT<No runtime status is currently available.>"
@@ -92,12 +82,7 @@ async fn status_accepts_only_empty_object_and_never_observes_invalid_input() {
     for json in ["", "{", "null", "[]", "1", r#""text""#, r#"{"extra":true}"#] {
         let output = text(
             fixture
-                .invoke_with(
-                    Kind::Status,
-                    json,
-                    Some(formatter_catalog()),
-                    &Cancel(false),
-                )
+                .invoke_with(Kind::Status, json, formatter_catalog(), &Cancel(false))
                 .await,
         );
         assert!(output.starts_with("ERROR<"), "{json}: {output}");
@@ -118,12 +103,7 @@ async fn status_observation_failures_propagate_without_reformatting_and_short_ci
             }
             assert_eq!(
                 fixture
-                    .invoke_with(
-                        Kind::Status,
-                        "{}",
-                        Some(formatter_catalog()),
-                        &Cancel(false)
-                    )
+                    .invoke_with(Kind::Status, "{}", formatter_catalog(), &Cancel(false))
                     .await,
                 Err(OperationError::Failed(failure))
             );
@@ -141,7 +121,7 @@ async fn status_observation_failures_propagate_without_reformatting_and_short_ci
     fixture.services.0.lock().unwrap().calls.clear();
     assert_eq!(
         fixture
-            .invoke_with(Kind::Status, "{}", Some(formatter_catalog()), &Cancel(true))
+            .invoke_with(Kind::Status, "{}", formatter_catalog(), &Cancel(true))
             .await,
         Err(OperationError::Cancelled)
     );
@@ -155,7 +135,7 @@ async fn status_observation_failures_propagate_without_reformatting_and_short_ci
     let cancellation = CancelAtStatistics(AtomicUsize::new(0));
     assert_eq!(
         fixture
-            .invoke_with(Kind::Status, "{}", Some(formatter_catalog()), &cancellation)
+            .invoke_with(Kind::Status, "{}", formatter_catalog(), &cancellation)
             .await,
         Err(OperationError::Cancelled)
     );

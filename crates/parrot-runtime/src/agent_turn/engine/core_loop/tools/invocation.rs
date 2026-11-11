@@ -77,9 +77,12 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 // from the current capture, and each running call owns its Arc.
                 let mut invocation_selection = selection.clone();
                 invocation_selection.security = capture.capture().map_err(turn_failure)?.security;
-                let mut invocation =
-                    ToolInvocation::new(&call.id, &call.arguments_json, assistant_sequence);
-                invocation.prompt_templates = Some(self.config.templates.clone());
+                let mut invocation = ToolInvocation::new(
+                    &call.id,
+                    &call.arguments_json,
+                    assistant_sequence,
+                    self.config.templates.clone(),
+                );
                 invocation.image_budget = Some(image_budget);
                 let activity = ActiveTool::new(&self.config.activity, &tool.definition().name);
                 usage

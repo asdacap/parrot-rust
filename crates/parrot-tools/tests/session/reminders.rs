@@ -136,7 +136,7 @@ async fn whitespace_is_nonempty_and_optional_invocation_formatters_wrap_reminder
                 .invoke_with(
                     Kind::SetExitReminder,
                     &json,
-                    Some(formatter.clone()),
+                    formatter.clone(),
                     &Cancel(false)
                 )
                 .await
@@ -154,7 +154,7 @@ async fn whitespace_is_nonempty_and_optional_invocation_formatters_wrap_reminder
                 .invoke_with(
                     Kind::ClearExitReminder,
                     &json,
-                    Some(formatter.clone()),
+                    formatter.clone(),
                     &Cancel(false)
                 )
                 .await
@@ -164,12 +164,7 @@ async fn whitespace_is_nonempty_and_optional_invocation_formatters_wrap_reminder
     assert_eq!(
         text(
             fixture
-                .invoke_with(
-                    Kind::ClearExitReminder,
-                    &json,
-                    Some(formatter),
-                    &Cancel(false)
-                )
+                .invoke_with(Kind::ClearExitReminder, &json, formatter, &Cancel(false))
                 .await
         ),
         format!("ERROR<No exit reminder titled {title}. Active titles: >")
@@ -259,7 +254,7 @@ async fn reminder_cancellation_and_service_errors_never_fabricate_success_or_mut
         fixture.services.0.lock().unwrap().calls.clear();
         assert_eq!(
             fixture
-                .invoke_with(kind, json, Some(formatter_catalog()), &Cancel(true))
+                .invoke_with(kind, json, formatter_catalog(), &Cancel(true))
                 .await,
             Err(OperationError::Cancelled)
         );
@@ -272,7 +267,7 @@ async fn reminder_cancellation_and_service_errors_never_fabricate_success_or_mut
             let failure = Failure::new(failure_kind, "reminder failed");
             fixture.services.0.lock().unwrap().failure = Some((stage, failure.clone()));
             let result = fixture
-                .invoke_with(kind, json, Some(formatter_catalog()), &Cancel(false))
+                .invoke_with(kind, json, formatter_catalog(), &Cancel(false))
                 .await;
             if failure_kind == FailureKind::Io {
                 assert_eq!(result, Err(OperationError::Failed(failure)));

@@ -384,7 +384,7 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
     harness.selection = selection(&provider);
     let definitions = harness.snapshot.definitions().to_vec();
     let output = bounded(adapter.invoke(
-        ToolInvocation::new("fixedpoint", "{}", sequence),
+        ToolInvocation::new("fixedpoint", "{}", sequence, templates()),
         BorrowedToolContext {
             selection: &harness.selection,
             definitions: &definitions,
@@ -757,7 +757,7 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
     let definitions = harness.snapshot.definitions().to_vec();
     for index in 0..2 {
         let output = bounded(adapter.invoke(
-            ToolInvocation::new("direct-status", "{}", index),
+            ToolInvocation::new("direct-status", "{}", index, templates()),
             BorrowedToolContext {
                 selection: &harness.selection,
                 definitions: &definitions,
@@ -826,7 +826,7 @@ async fn retained_status_precancel_does_not_estimate_and_external_selection_has_
     cancelled.cancel();
     let result = adapter
         .invoke(
-            ToolInvocation::new("cancel-status", "{}", 0),
+            ToolInvocation::new("cancel-status", "{}", 0, templates()),
             BorrowedToolContext {
                 selection: &harness.selection,
                 definitions: &definitions,
@@ -904,7 +904,7 @@ async fn retained_compact_preserves_live_prompt_cancellation_after_successful_co
         cancelled_builds: cancelled_builds.clone(),
     }));
     let result = bounded(adapter.invoke(
-        ToolInvocation::new("cancel-build", "{}", sequence),
+        ToolInvocation::new("cancel-build", "{}", sequence, templates()),
         BorrowedToolContext {
             selection: &harness.selection,
             definitions: &definitions,

@@ -133,7 +133,7 @@ where
             if request.cancel_remaining || cancellation.is_cancelled() {
                 return Ok(request.calls.iter().map(|call| self.cancel(call)).collect());
             }
-            if !Self::parallel_safe(snapshot, assistant_sequence, first) {
+            if !Self::parallel_safe(snapshot, assistant_sequence, first, &self.config.templates) {
                 let invocation = InvocationResources {
                     history: resources.history,
                     usage: resources.usage,
@@ -153,7 +153,13 @@ where
             let mut admitted = 0;
             for (index, call) in request.calls.iter().enumerate() {
                 if cancellation.is_cancelled()
-                    || (index > 0 && !Self::parallel_safe(snapshot, assistant_sequence, call))
+                    || (index > 0
+                        && !Self::parallel_safe(
+                            snapshot,
+                            assistant_sequence,
+                            call,
+                            &self.config.templates,
+                        ))
                 {
                     break;
                 }
@@ -215,13 +221,19 @@ where
             .await
             .map_err(TurnError::Publication)
     }
-    fn parallel_safe(snapshot: &ToolSnapshot<S>, sequence: i64, call: &ToolCall) -> bool {
+    fn parallel_safe(
+        snapshot: &ToolSnapshot<S>,
+        sequence: i64,
+        call: &ToolCall,
+        templates: &Arc<PromptTemplateCatalog>,
+    ) -> bool {
         match snapshot.find(&call.name) {
             Some(ToolHandle::Ordinary(tool)) => {
                 tool.parallel_safety(&ToolInvocation::new(
                     &call.id,
                     &call.arguments_json,
                     sequence,
+                    templates.clone(),
                 )) == ParallelSafety::ParallelSafe
             }
             Some(ToolHandle::Borrowed(_)) | None => false,

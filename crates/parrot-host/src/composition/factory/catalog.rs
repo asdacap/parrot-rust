@@ -59,7 +59,6 @@ impl<S: AccessSnapshot + 'static> CatalogAdapter<S> {
                                 .collect(),
                         },
                         tool: factory.create(),
-                        templates: templates.clone(),
                     })))
                 }
             })
@@ -94,7 +93,6 @@ impl<S: AccessSnapshot + 'static> ToolFactory<S> for CatalogAdapter<S> {
 struct CatalogTool<S: AccessSnapshot + 'static> {
     metadata: ToolMetadata,
     tool: Arc<RetainedTool<S>>,
-    templates: Arc<PromptTemplateCatalog>,
 }
 impl<S: AccessSnapshot + 'static> Tool for CatalogTool<S> {
     type Definition = ToolMetadata;
@@ -109,7 +107,7 @@ impl<S: AccessSnapshot + 'static> Tool for CatalogTool<S> {
     }
     fn parallel_safety(&self, invocation: &ToolInvocation) -> ParallelSafety {
         self.tool
-            .parallel_safety(&invocation_to_catalog(invocation.clone(), &self.templates))
+            .parallel_safety(&invocation_to_catalog(invocation.clone()))
     }
     fn enabled_after_interruption(&self) -> bool {
         self.tool.enabled_after_interruption()
@@ -134,7 +132,7 @@ impl<S: AccessSnapshot + 'static> Tool for CatalogTool<S> {
             selection,
             context.cancellation(),
         );
-        let invocation = invocation_to_catalog(invocation, &self.templates);
+        let invocation = invocation_to_catalog(invocation);
         Box::pin(async move {
             self.tool
                 .invoke(invocation, retained_context)
@@ -150,23 +148,16 @@ impl<S: AccessSnapshot + 'static> Tool for CatalogTool<S> {
     }
 }
 
-fn invocation_to_catalog(
-    invocation: ToolInvocation,
-    templates: &Arc<PromptTemplateCatalog>,
-) -> catalog::Invocation {
-    let image_templates = invocation
-        .prompt_templates
-        .as_ref()
-        .unwrap_or(templates)
-        .clone();
+fn invocation_to_catalog(invocation: ToolInvocation) -> catalog::Invocation {
+    let prompt_templates = invocation.prompt_templates;
     catalog::Invocation {
         call_id: invocation.call_id,
         assistant_sequence: invocation.assistant_sequence,
         arguments_json: invocation.arguments_json,
-        prompt_templates: invocation.prompt_templates,
         image_budget: invocation
             .image_budget
-            .map(|budget| Arc::new(files::ImageBudget::new(budget, image_templates))),
+            .map(|budget| Arc::new(files::ImageBudget::new(budget, prompt_templates.clone()))),
+        prompt_templates,
     }
 }
 fn output_to_runtime(output: catalog::Output) -> ToolOutput {

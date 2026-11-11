@@ -101,7 +101,7 @@ fn budget_invocation(
     budget: &Arc<ToolCycleImageBudget>,
     templates: &Arc<PromptTemplateCatalog>,
 ) -> FileToolInvocation {
-    let mut invocation = FileToolInvocation::new(call_id, arguments);
+    let mut invocation = FileToolInvocation::new(call_id, arguments, templates.clone());
     invocation.image_budget = Some(Arc::new(ImageBudget::new(
         budget.clone(),
         templates.clone(),
@@ -118,7 +118,7 @@ async fn image_references_preserve_each_bound_actual_filename_and_share_original
     let tool = fixture.tool(service.clone(), PNG.len() as i32);
     let original = tool
         .invoke(
-            FileToolInvocation::new("original-call", r#"{"path":"alias.dat"}"#),
+            FileToolInvocation::new("original-call", r#"{"path":"alias.dat"}"#, templates()),
             InvocationContext::new(Snapshot(71), (), &NoCancel),
         )
         .await
@@ -142,7 +142,7 @@ async fn image_references_preserve_each_bound_actual_filename_and_share_original
     );
     let renamed = tool
         .invoke(
-            FileToolInvocation::new("renamed-call", r#"{"path":"renamed.png"}"#),
+            FileToolInvocation::new("renamed-call", r#"{"path":"renamed.png"}"#, templates()),
             InvocationContext::new(Snapshot(72), (), &NoCancel),
         )
         .await
@@ -278,7 +278,7 @@ async fn image_invalid_arguments_and_non_regular_entries_never_read_or_persist()
     ] {
         let result = tool
             .execute(
-                &FileToolInvocation::new("invalid", arguments),
+                &FileToolInvocation::new("invalid", arguments, templates()),
                 &Snapshot(1),
                 &NoCancel,
             )
@@ -531,8 +531,7 @@ async fn image_preexceeded_budget_short_circuits_invalid_json_and_all_service_ca
         .await
         .unwrap();
     assert_eq!(cancelled, result);
-    let mut malformed = FileToolInvocation::new("malformed-cancelled", "null");
-    malformed.prompt_templates = Some(templates.clone());
+    let malformed = FileToolInvocation::new("malformed-cancelled", "null", templates.clone());
     let invalid = tool
         .execute(&malformed, &Snapshot(1), &AlreadyCancelled)
         .await

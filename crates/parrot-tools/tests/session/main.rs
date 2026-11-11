@@ -18,7 +18,7 @@ fn injected_definitions_are_unchanged_and_all_session_tools_default_to_sequentia
     let invocation = Invocation {
         call_id: "definition-probe".into(),
         arguments_json: "{}".into(),
-        prompt_templates: None,
+        prompt_templates: fixture.templates.clone(),
     };
     for kind in [
         Kind::SetCheckpoint,

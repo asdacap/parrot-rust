@@ -28,7 +28,7 @@ pub use workspace::WorkspacePaths;
 pub struct FileToolInvocation {
     pub call_id: String,
     pub arguments_json: String,
-    pub prompt_templates: Option<Arc<PromptTemplateCatalog>>,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
     pub image_budget: Option<Arc<ImageBudget>>,
 }
 
@@ -62,11 +62,15 @@ impl ImageBudget {
 }
 
 impl FileToolInvocation {
-    pub fn new(call_id: impl Into<String>, arguments_json: impl Into<String>) -> Self {
+    pub fn new(
+        call_id: impl Into<String>,
+        arguments_json: impl Into<String>,
+        templates: Arc<PromptTemplateCatalog>,
+    ) -> Self {
         Self {
             call_id: call_id.into(),
             arguments_json: arguments_json.into(),
-            prompt_templates: None,
+            prompt_templates: templates,
             image_budget: None,
         }
     }
@@ -137,62 +141,37 @@ impl<'a> Formatter<'a> {
         Self { invocation }
     }
 
-    fn render(
-        &self,
-        id: &str,
-        key: &str,
-        value: &str,
-        fallback: String,
-    ) -> OperationResult<String, FileToolError> {
-        match &self.invocation.prompt_templates {
-            Some(templates) => templates
-                .render(
-                    id,
-                    &[(key.into(), Value::String(value.into()))],
-                    &SynchronousFormatting,
-                )
-                .map_err(|error| match error {
-                    OperationError::Cancelled => OperationError::Cancelled,
-                    OperationError::Failed(error) => {
-                        OperationError::Failed(FileToolError::Template(error.to_string()))
-                    }
-                }),
-            None => Ok(fallback),
-        }
+    fn render(&self, id: &str, key: &str, value: &str) -> OperationResult<String, FileToolError> {
+        self.invocation
+            .prompt_templates
+            .render(
+                id,
+                &[(key.into(), Value::String(value.into()))],
+                &SynchronousFormatting,
+            )
+            .map_err(|error| match error {
+                OperationError::Cancelled => OperationError::Cancelled,
+                OperationError::Failed(error) => {
+                    OperationError::Failed(FileToolError::Template(error.to_string()))
+                }
+            })
     }
 
     fn text(&self, text: &str) -> OperationResult<String, FileToolError> {
-        self.render("tool-result.text", "value", text, text.into())
+        self.render("tool-result.text", "value", text)
     }
 
     fn error(&self, message: &str) -> OperationResult<FileToolResult, FileToolError> {
-        self.render(
-            "tool-result.error",
-            "message",
-            message,
-            format!("error: {message}"),
-        )
-        .map(FileToolResult::text)
+        self.render("tool-result.error", "message", message)
+            .map(FileToolResult::text)
     }
 
     fn outline(&self, outline: &str) -> OperationResult<String, FileToolError> {
-        self.render(
-            "tool-result.markdown-outline",
-            "outline",
-            outline,
-            format!("markdown outline (line: heading):\n{outline}\n"),
-        )
+        self.render("tool-result.markdown-outline", "outline", outline)
     }
 
     fn note(&self, short: &str) -> OperationResult<String, FileToolError> {
-        self.render(
-            "tool-result.path-variable-note",
-            "short",
-            short,
-            format!(
-                "tip: the same path can be written as {short}. Use it in path arguments to shorten later tool calls."
-            ),
-        )
+        self.render("tool-result.path-variable-note", "short", short)
     }
 }
 

@@ -31,7 +31,7 @@ async fn optional_target_parsing_calls_compact_once_and_stable_estimate_once() {
                     .invoke_with(
                         Kind::CompactContext,
                         json,
-                        Some(formatter_catalog()),
+                        formatter_catalog(),
                         &Cancel(false)
                     )
                     .await
@@ -71,7 +71,7 @@ async fn invalid_compaction_input_never_compacts_or_estimates() {
                 .invoke_with(
                     Kind::CompactContext,
                     json,
-                    Some(formatter_catalog()),
+                    formatter_catalog(),
                     &Cancel(false),
                 )
                 .await,
@@ -163,7 +163,7 @@ async fn predefined_compaction_templates_cover_reduced_noop_unavailable_and_limi
             state.compaction = Compaction { reduced, context };
             state.calls.clear();
         }
-        assert_eq!(text(fixture.invoke_with(Kind::CompactContext, "{}", Some(formatter_catalog()), &Cancel(false)).await), expected);
+        assert_eq!(text(fixture.invoke_with(Kind::CompactContext, "{}", formatter_catalog(), &Cancel(false)).await), expected);
         assert_eq!(fixture.calls(), [Call::Compact(SELECTION.into(), None), Call::Estimate(SELECTION.into(), CALL_ID.into(), expected)]);
     }
 }
@@ -190,7 +190,7 @@ async fn injected_compaction_template_is_used_directly_with_all_source_arguments
                 .invoke_with(
                     Kind::CompactContext,
                     "{}",
-                    Some(formatter_catalog()),
+                    formatter_catalog(),
                     &Cancel(false)
                 )
                 .await
@@ -221,7 +221,7 @@ async fn compact_and_estimation_failures_and_cancellation_propagate_without_succ
                 .invoke_with(
                     Kind::CompactContext,
                     "{}",
-                    Some(formatter_catalog()),
+                    formatter_catalog(),
                     &Cancel(false)
                 )
                 .await,
@@ -239,7 +239,7 @@ async fn compact_and_estimation_failures_and_cancellation_propagate_without_succ
             .invoke_with(
                 Kind::CompactContext,
                 "{}",
-                Some(formatter_catalog()),
+                formatter_catalog(),
                 &Cancel(true)
             )
             .await,
@@ -257,7 +257,7 @@ async fn compact_and_estimation_failures_and_cancellation_propagate_without_succ
             .invoke_with(
                 Kind::CompactContext,
                 "{}",
-                Some(formatter_catalog()),
+                formatter_catalog(),
                 &Cancel(false)
             )
             .await,

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub struct Invocation {
     pub arguments_json: String,
-    pub prompt_templates: Option<Arc<PromptTemplateCatalog>>,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,21 +74,19 @@ impl<Security: AccessSnapshot + 'static, Selection: Send + 'static> Tool
             match result {
                 Err(OperationError::Failed(error)) if error.is_tool_error() => {
                     let message = error.to_string();
-                    let text = match invocation.prompt_templates {
-                        Some(templates) => templates
-                            .render(
-                                "tool-result.error",
-                                &[("message".to_owned(), serde_json::Value::String(message))],
-                                context.cancellation(),
-                            )
-                            .map_err(|error| match error {
-                                OperationError::Cancelled => OperationError::Cancelled,
-                                OperationError::Failed(error) => {
-                                    OperationError::Failed(FetchError::Template(error.to_string()))
-                                }
-                            })?,
-                        None => format!("error: {message}"),
-                    };
+                    let text = invocation
+                        .prompt_templates
+                        .render(
+                            "tool-result.error",
+                            &[("message".to_owned(), serde_json::Value::String(message))],
+                            context.cancellation(),
+                        )
+                        .map_err(|error| match error {
+                            OperationError::Cancelled => OperationError::Cancelled,
+                            OperationError::Failed(error) => {
+                                OperationError::Failed(FetchError::Template(error.to_string()))
+                            }
+                        })?;
                     Ok(Output { text })
                 }
                 result => result,

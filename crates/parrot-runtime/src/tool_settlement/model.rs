@@ -47,7 +47,7 @@ pub struct ToolInvocation {
     pub call_id: String,
     pub arguments_json: String,
     pub assistant_sequence: i64,
-    pub prompt_templates: Option<Arc<PromptTemplateCatalog>>,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
     pub image_budget: Option<Arc<ToolCycleImageBudget>>,
 }
 impl ToolInvocation {
@@ -55,12 +55,13 @@ impl ToolInvocation {
         call_id: impl Into<String>,
         arguments_json: impl Into<String>,
         assistant_sequence: i64,
+        templates: Arc<PromptTemplateCatalog>,
     ) -> Self {
         Self {
             call_id: call_id.into(),
             arguments_json: arguments_json.into(),
             assistant_sequence,
-            prompt_templates: None,
+            prompt_templates: templates,
             image_budget: None,
         }
     }
