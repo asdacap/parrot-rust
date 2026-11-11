@@ -80,10 +80,10 @@ impl SseDecoder {
         if self.done {
             return output;
         }
-        if !self.line.is_empty() {
-            if let Some(result) = self.complete_line(true) {
-                output.push(result);
-            }
+        if !self.line.is_empty()
+            && let Some(result) = self.complete_line(true)
+        {
+            output.push(result);
         }
         if !self.done && self.has_fields {
             output.push(Ok(self.take_event()));

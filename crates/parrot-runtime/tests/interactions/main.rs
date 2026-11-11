@@ -6,7 +6,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant, SystemTime};
 
 use parrot_domain::contracts::async_ops::{
@@ -107,14 +107,10 @@ impl InteractionDiagnostics for Diagnostics {
         self.0.lock().unwrap().push(event);
     }
 }
-struct NoWake;
-impl Wake for NoWake {
-    fn wake(self: Arc<Self>) {}
-}
 fn assert_pending<F: Future + ?Sized>(future: Pin<&mut F>) {
     assert!(
         future
-            .poll(&mut Context::from_waker(&Waker::from(Arc::new(NoWake))))
+            .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
 }

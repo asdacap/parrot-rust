@@ -105,13 +105,13 @@ async fn exercise(seed: u64, index: usize, cancelled_observer: bool, hidden: boo
                     .iter()
                     .any(|message| message.content().contains(&old_marker))
             });
-            if requested && detail.task.state == ExecutionStatus::Running {
-                if let Some(child) = detail
+            if requested
+                && detail.task.state == ExecutionStatus::Running
+                && let Some(child) = detail
                     .agent_name
                     .and_then(|name| root.children().find(&name))
-                {
-                    break child;
-                }
+            {
+                break child;
             }
             tokio::task::yield_now().await;
         }
@@ -149,13 +149,13 @@ async fn exercise(seed: u64, index: usize, cancelled_observer: bool, hidden: boo
                     .iter()
                     .any(|message| message.content().contains(&new_marker))
             });
-            if requested && detail.task.state == ExecutionStatus::Running {
-                if let Some(child) = detail
+            if requested
+                && detail.task.state == ExecutionStatus::Running
+                && let Some(child) = detail
                     .agent_name
                     .and_then(|name| root.children().find(&name))
-                {
-                    break child;
-                }
+            {
+                break child;
             }
             tokio::task::yield_now().await;
         }

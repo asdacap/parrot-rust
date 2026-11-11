@@ -655,10 +655,10 @@ async fn faulted_blob_capture_retains_context_but_settlement_does_not_rethrow_wo
         let mut source: &(dyn std::error::Error + 'static) = error;
         let mut errno = None;
         loop {
-            if let Some(error) = source.downcast_ref::<io::Error>() {
-                if error.raw_os_error().is_some() {
-                    errno = error.raw_os_error();
-                }
+            if let Some(error) = source.downcast_ref::<io::Error>()
+                && error.raw_os_error().is_some()
+            {
+                errno = error.raw_os_error();
             }
             let Some(next) = source.source() else {
                 break;

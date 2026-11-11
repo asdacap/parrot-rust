@@ -728,7 +728,10 @@ async fn missing_graph_worker_binding_adopts_retained_scope_without_construction
     let restored = second.reopen_root(identity).await;
     let scheduler = restored.get_service::<Scheduler>().unwrap();
     scheduler.resolve_workers().await.unwrap();
-    assert_eq!(scheduler.claimed_worker_ids().await, [worker_id.clone()]);
+    assert_eq!(
+        scheduler.claimed_worker_ids().await,
+        std::slice::from_ref(&worker_id)
+    );
     assert_eq!(
         restored
             .agent_state()

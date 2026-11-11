@@ -823,15 +823,12 @@ async fn actual_scoped_notifier_spills_exact_bytes_and_wakes_only_its_owning_ses
     ));
     use std::{
         future::Future,
-        task::{Context, Poll, Wake, Waker},
+        task::{Context, Poll, Waker},
     };
-    struct NoWake;
-    impl Wake for NoWake {
-        fn wake(self: Arc<Self>) {}
-    }
-    let waker = Waker::from(Arc::new(NoWake));
     assert!(matches!(
-        waiting.as_mut().poll(&mut Context::from_waker(&waker)),
+        waiting
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop())),
         Poll::Pending
     ));
     invoke(

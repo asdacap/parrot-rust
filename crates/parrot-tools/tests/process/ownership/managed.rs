@@ -162,7 +162,7 @@ impl CompletionSink for Sink {
                 .map_err(|_| io::Error::from(io::ErrorKind::Interrupted))?;
             if self
                 .failures
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
                     remaining.checked_sub(1)
                 })
                 .is_ok()

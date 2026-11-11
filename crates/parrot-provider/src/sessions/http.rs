@@ -229,11 +229,11 @@ impl HttpDriver {
             Some(Reader::Responses(reader)) => reader.http.turn_state(),
             None => None,
         };
-        if !self.turn_state_captured {
-            if let Some(state) = state {
-                self.turn_state = Some(state.to_owned());
-                self.turn_state_captured = true;
-            }
+        if !self.turn_state_captured
+            && let Some(state) = state
+        {
+            self.turn_state = Some(state.to_owned());
+            self.turn_state_captured = true;
         }
     }
     fn finish(&mut self, outcome: TraceOutcome) {

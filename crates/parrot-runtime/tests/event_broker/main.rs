@@ -2,9 +2,8 @@ mod replay;
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Poll, Waker};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
 use parrot_domain::contracts::events::{EventPublisher, EventSubscription, SubscriptionLimits};
@@ -46,14 +45,8 @@ impl Cancellation for Token {
     }
 }
 
-struct NoWake;
-impl Wake for NoWake {
-    fn wake(self: Arc<Self>) {}
-}
-
 fn poll_once<F: Future + ?Sized>(future: Pin<&mut F>) -> Poll<F::Output> {
-    let waker = Waker::from(Arc::new(NoWake));
-    future.poll(&mut Context::from_waker(&waker))
+    future.poll(&mut Context::from_waker(Waker::noop()))
 }
 
 fn event(id: impl Into<String>) -> Event {

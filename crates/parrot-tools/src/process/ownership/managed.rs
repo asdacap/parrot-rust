@@ -120,15 +120,15 @@ impl ShellWaitResult {
         if let Some(result) = &self.result {
             return result.format();
         }
-        if let Some(yielded) = &self.yielded_process {
-            if let (Some(stdout), Some(stderr)) = (&yielded.stdout_path, &yielded.stderr_path) {
-                return format!(
-                    "{}\nProcess output is streaming.\nstdout: {}\nstderr: {}",
-                    self.name,
-                    stdout.display(),
-                    stderr.display()
-                );
-            }
+        if let Some(yielded) = &self.yielded_process
+            && let (Some(stdout), Some(stderr)) = (&yielded.stdout_path, &yielded.stderr_path)
+        {
+            return format!(
+                "{}\nProcess output is streaming.\nstdout: {}\nstderr: {}",
+                self.name,
+                stdout.display(),
+                stderr.display()
+            );
         }
         let text = String::from_utf16_lossy(&self.output);
         if text.is_empty() {
@@ -545,12 +545,11 @@ impl ManagedShellProcess {
         }
         .await;
         if let Err(error) = &delivery {
-            if let Some((start, _, result)) = speculative {
-                if start > 0 {
-                    if let Some(path) = result.blob_path {
-                        let _ = std::fs::remove_file(path);
-                    }
-                }
+            if let Some((start, _, result)) = speculative
+                && start > 0
+                && let Some(path) = result.blob_path
+            {
+                let _ = std::fs::remove_file(path);
             }
             if error.kind() == io::ErrorKind::Interrupted && self.lifetime.is_cancelled() {
                 self.release_claim();
@@ -593,12 +592,12 @@ impl ManagedShellProcess {
             settlement.tasks.pop();
         }
         let execution = self.execution.lock().expect("process execution").clone();
-        if let Some(execution) = execution {
-            if let Err(error) = execution.settle().await {
-                settlement
-                    .failure
-                    .get_or_insert_with(|| Failure::capture(&error));
-            }
+        if let Some(execution) = execution
+            && let Err(error) = execution.settle().await
+        {
+            settlement
+                .failure
+                .get_or_insert_with(|| Failure::capture(&error));
         }
         let result = settlement
             .failure

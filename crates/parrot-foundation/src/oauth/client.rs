@@ -589,15 +589,16 @@ fn unescape_component(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            if let (Some(high), Some(low)) = (
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(high), Some(low)) = (
                 (bytes[index + 1] as char).to_digit(16),
                 (bytes[index + 2] as char).to_digit(16),
-            ) {
-                result.push((high * 16 + low) as u8);
-                index += 3;
-                continue;
-            }
+            )
+        {
+            result.push((high * 16 + low) as u8);
+            index += 3;
+            continue;
         }
         result.push(bytes[index]);
         index += 1;

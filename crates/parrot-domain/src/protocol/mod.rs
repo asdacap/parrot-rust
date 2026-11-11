@@ -13,11 +13,15 @@ pub mod messages {
 /// Descriptor-driven Tonic service/client bindings for all source RPC methods.
 pub mod bindings {
     /// `parrot.v1.Parrot` service bindings.
+    // Generated servers return the concrete tonic request and response types,
+    // whose combined size trips clippy::result_large_err on toolchain 1.99.
+    #[allow(clippy::result_large_err)]
     pub mod parrot {
         include!(concat!(env!("OUT_DIR"), "/bindings/parrot.v1.Parrot.rs"));
     }
 
     /// `parrot.web.v1.ParrotWeb` service bindings.
+    #[allow(clippy::result_large_err)]
     pub mod web {
         include!(concat!(
             env!("OUT_DIR"),

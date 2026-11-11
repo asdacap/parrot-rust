@@ -547,9 +547,11 @@ async fn profile_reports_only_a_nonblank_prompt() {
             StatusObservation {
                 available,
                 text: expected.into(),
-                hash: available
-                    .then(|| format!("profile-prompt:{expected}"))
-                    .unwrap_or_default(),
+                hash: if available {
+                    format!("profile-prompt:{expected}")
+                } else {
+                    Default::default()
+                },
                 is_auto_update: available,
             }
         );

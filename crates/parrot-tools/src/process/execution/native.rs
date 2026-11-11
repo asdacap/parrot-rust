@@ -320,10 +320,10 @@ impl NativeProcess {
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         if self.status.is_none() {
             self.status = self.child.try_wait()?;
-            if self.status.is_some() {
-                if let Some(mut launcher) = self.launcher.take() {
-                    launcher.join();
-                }
+            if self.status.is_some()
+                && let Some(mut launcher) = self.launcher.take()
+            {
+                launcher.join();
             }
         }
         Ok(self.status)
@@ -382,10 +382,11 @@ impl NativeProcess {
     }
 
     fn record_cleanup(&mut self, result: io::Result<()>) {
-        if let Err(error) = result {
-            if error.raw_os_error() != Some(libc::ESRCH) && self.cleanup_failure.is_none() {
-                self.cleanup_failure = Some((error.kind(), error.to_string()));
-            }
+        if let Err(error) = result
+            && error.raw_os_error() != Some(libc::ESRCH)
+            && self.cleanup_failure.is_none()
+        {
+            self.cleanup_failure = Some((error.kind(), error.to_string()));
         }
     }
 }

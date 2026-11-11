@@ -45,12 +45,12 @@ impl<B: DrainBackend> AgentSession<B> {
                 .backend
                 .find_execution_input(message_id.to_owned())
                 .await?;
-            if let Some(input) = &existing {
-                if input.parts != parts || input.delivery != Delivery::DELIVERY_STEER {
-                    return Err(LifecycleError::Failed(format!(
-                        "message {message_id} was already admitted with different content"
-                    )));
-                }
+            if let Some(input) = &existing
+                && (input.parts != parts || input.delivery != Delivery::DELIVERY_STEER)
+            {
+                return Err(LifecycleError::Failed(format!(
+                    "message {message_id} was already admitted with different content"
+                )));
             }
             if let Some(saved) = &checkpoint {
                 if saved.initial_message_id == message_id {
@@ -122,26 +122,25 @@ impl<B: DrainBackend> AgentSession<B> {
             if previous.terminal.is_none() {
                 return Err(LifecycleError::Failed("previous execution is unfinished; recover it before admitting another execution".into()));
             }
-            if let Some(terminal) = &previous.terminal {
-                if previous
+            if let Some(terminal) = &previous.terminal
+                && previous
                     .parent_notification
                     .as_ref()
                     .is_some_and(|notification| !notification.admitted)
-                {
-                    let outcome = bounded(self.inner.backend.restore_execution(terminal).await?);
-                    self.inner
-                        .backend
-                        .execution_finished_correlated(&outcome, terminal, &previous.execution_id)
-                        .await?;
-                    if let Some(notification) = &mut previous.parent_notification {
-                        notification.admitted = true;
-                        notification.delivery_error = None;
-                    }
-                    store
-                        .update(AgentStateUpdate::Execution(Some(previous)))
-                        .await
-                        .map_err(storage_error)?;
+            {
+                let outcome = bounded(self.inner.backend.restore_execution(terminal).await?);
+                self.inner
+                    .backend
+                    .execution_finished_correlated(&outcome, terminal, &previous.execution_id)
+                    .await?;
+                if let Some(notification) = &mut previous.parent_notification {
+                    notification.admitted = true;
+                    notification.delivery_error = None;
                 }
+                store
+                    .update(AgentStateUpdate::Execution(Some(previous)))
+                    .await
+                    .map_err(storage_error)?;
             }
         }
         let execution_id =
@@ -230,14 +229,14 @@ impl<B: DrainBackend> AgentSession<B> {
             return Ok(());
         };
         let _gate = self.inner.checkpoint_gate.lock().await;
-        if let Some(mut checkpoint) = self.execution_checkpoint().await? {
-            if checkpoint.terminal.is_none() {
-                checkpoint.phase = ExecutionPhase::Canceled;
-                store
-                    .update(AgentStateUpdate::Execution(Some(checkpoint)))
-                    .await
-                    .map_err(storage_error)?;
-            }
+        if let Some(mut checkpoint) = self.execution_checkpoint().await?
+            && checkpoint.terminal.is_none()
+        {
+            checkpoint.phase = ExecutionPhase::Canceled;
+            store
+                .update(AgentStateUpdate::Execution(Some(checkpoint)))
+                .await
+                .map_err(storage_error)?;
         }
         Ok(())
     }
@@ -247,14 +246,15 @@ impl<B: DrainBackend> AgentSession<B> {
             return Ok(());
         };
         let _gate = self.inner.checkpoint_gate.lock().await;
-        if let Some(mut checkpoint) = self.execution_checkpoint().await? {
-            if checkpoint.terminal.is_none() && checkpoint.phase != ExecutionPhase::Canceled {
-                checkpoint.phase = ExecutionPhase::Suspended;
-                store
-                    .update(AgentStateUpdate::Execution(Some(checkpoint)))
-                    .await
-                    .map_err(storage_error)?;
-            }
+        if let Some(mut checkpoint) = self.execution_checkpoint().await?
+            && checkpoint.terminal.is_none()
+            && checkpoint.phase != ExecutionPhase::Canceled
+        {
+            checkpoint.phase = ExecutionPhase::Suspended;
+            store
+                .update(AgentStateUpdate::Execution(Some(checkpoint)))
+                .await
+                .map_err(storage_error)?;
         }
         Ok(())
     }

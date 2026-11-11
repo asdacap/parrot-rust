@@ -394,10 +394,10 @@ impl EnhancedCli {
                 ticks_result.unwrap(),
                 interrupt_result.unwrap(),
             ] {
-                if let Err(error) = result {
-                    if !is_cancelled(&error) {
-                        return Err(error);
-                    }
+                if let Err(error) = result
+                    && !is_cancelled(&error)
+                {
+                    return Err(error);
                 }
             }
             if cancellation.is_cancelled() {
@@ -631,10 +631,10 @@ impl EnhancedInput {
                 draw_prompt(&shared, &mut slash, &mut skills, &editor, &commands)?;
                 continue;
             }
-            if exit_on_completion {
-                if let Some(completed) = *shared.completion.lock().expect("completion poisoned") {
-                    return Ok(if completed { 0 } else { 1 });
-                }
+            if exit_on_completion
+                && let Some(completed) = *shared.completion.lock().expect("completion poisoned")
+            {
+                return Ok(if completed { 0 } else { 1 });
             }
             let deadline = async {
                 match submit_at {
@@ -992,10 +992,10 @@ impl LiveBufferItem for CachedLiveValue {
             .rendered
             .lock()
             .map_err(|_| io::Error::other("terminal live render cache lock poisoned"))?;
-        if let Some((previous, rendered)) = &*cached {
-            if *previous == context {
-                return Ok(rendered.clone());
-            }
+        if let Some((previous, rendered)) = &*cached
+            && *previous == context
+        {
+            return Ok(rendered.clone());
         }
         let rendered = self.item.render(context)?;
         *cached = Some((context, rendered.clone()));
@@ -1576,7 +1576,7 @@ fn presenter_error(error: impl fmt::Display) -> EnhancedFailure {
 }
 fn as_slash(error: EnhancedFailure) -> SlashFailure {
     match error {
-        EnhancedFailure::Rpc(status) => SlashFailure::Rpc(status),
+        EnhancedFailure::Rpc(status) => SlashFailure::Rpc(Box::new(status)),
         EnhancedFailure::Slash(error) => error,
         error => SlashFailure::Command(error.to_string()),
     }

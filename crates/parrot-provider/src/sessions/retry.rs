@@ -115,17 +115,17 @@ impl RetryPolicy {
         if self.output_emitted || cancelled || matches!(failure, Failure::Cancelled) {
             return Err(failure.clone());
         }
-        if !self.context_adjusted {
-            if let Some(reduced) = try_reduce_context_budget(failure, self.maximum_tokens) {
-                self.context_adjusted = true;
-                self.maximum_tokens = reduced;
-                return Ok(self.action(
-                    1,
-                    Duration::ZERO,
-                    "Context limit exceeded. Retrying with a reduced output token budget.".into(),
-                    false,
-                ));
-            }
+        if !self.context_adjusted
+            && let Some(reduced) = try_reduce_context_budget(failure, self.maximum_tokens)
+        {
+            self.context_adjusted = true;
+            self.maximum_tokens = reduced;
+            return Ok(self.action(
+                1,
+                Duration::ZERO,
+                "Context limit exceeded. Retrying with a reduced output token budget.".into(),
+                false,
+            ));
         }
 
         match failure {

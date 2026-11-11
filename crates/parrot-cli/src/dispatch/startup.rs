@@ -572,7 +572,7 @@ fn check(cancellation: &dyn Cancellation) -> Result<(), Status> {
 }
 fn attach_status(error: AttachError) -> Status {
     match error {
-        AttachError::Rpc(status) => status,
+        AttachError::Rpc(status) => *status,
         AttachError::Cancelled => cancelled(),
         AttachError::Timeout => Status::deadline_exceeded(error.to_string()),
         AttachError::DifferentSession | AttachError::Disposed => {

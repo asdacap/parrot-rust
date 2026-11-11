@@ -527,7 +527,7 @@ mod tests {
 
         let trace = trace.lock().unwrap().clone();
         assert_eq!(trace.len(), 10);
-        for transaction in trace.chunks_exact(5) {
+        for transaction in trace.as_chunks::<5>().0 {
             assert!(transaction[0].starts_with("append:fact-"));
             assert!(transaction[1].starts_with("apply:"));
             assert_eq!(

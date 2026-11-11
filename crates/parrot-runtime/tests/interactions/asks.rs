@@ -520,10 +520,7 @@ fn concurrent_opposing_admissions_never_both_succeed() {
                             let token = Token::default();
                             let mut ask = Box::pin(asker.ask(recipient, "race".into(), &token));
                             barrier.wait();
-                            match ask
-                                .as_mut()
-                                .poll(&mut Context::from_waker(&Waker::from(Arc::new(NoWake))))
-                            {
+                            match ask.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
                                 Poll::Pending => {
                                     winners.fetch_add(1, Ordering::SeqCst);
                                 }

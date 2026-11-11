@@ -60,12 +60,11 @@ fn count(input: &str) -> usize {
     if let Some(number) = input
         .strip_prefix("<redacted: ")
         .and_then(|value| value.strip_suffix(" chars>"))
+        && !number.is_empty()
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+        && let Ok(number) = number.parse::<i32>()
     {
-        if !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()) {
-            if let Ok(number) = number.parse::<i32>() {
-                return number as usize;
-            }
-        }
+        return number as usize;
     }
     input.chars().count()
 }

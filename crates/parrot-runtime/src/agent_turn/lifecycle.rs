@@ -509,12 +509,12 @@ fn reap_tasks<B: DrainBackend>(state: &mut State<B>) {
             std::task::Poll::Pending => true,
             std::task::Poll::Ready(result) => {
                 *slot = None;
-                if let Err(error) = result {
-                    if failure.is_none() {
-                        failure = Some(LifecycleError::Failed(format!(
-                            "owned agent operation failed: {error}"
-                        )));
-                    }
+                if let Err(error) = result
+                    && failure.is_none()
+                {
+                    failure = Some(LifecycleError::Failed(format!(
+                        "owned agent operation failed: {error}"
+                    )));
                 }
                 false
             }
@@ -692,10 +692,10 @@ impl<B: DrainBackend> AgentSession<B> {
         if state.disposing {
             return (false, state.last_drain.clone());
         }
-        if let Some(activity) = activity {
-            if let Some(wait) = &state.incoming {
-                wait.completion.finish(activity);
-            }
+        if let Some(activity) = activity
+            && let Some(wait) = &state.incoming
+        {
+            wait.completion.finish(activity);
         }
         if let Some(drain) = &state.drain {
             state.wake = true;
@@ -1554,10 +1554,9 @@ impl<B: DrainBackend> AgentSession<B> {
                     .scheduled
                     .iter()
                     .position(|request| Arc::ptr_eq(&request.completion, &completion))
+                    && let Some(request) = state.scheduled.remove(index)
                 {
-                    if let Some(request) = state.scheduled.remove(index) {
-                        request.completion.finish(Err(error));
-                    }
+                    request.completion.finish(Err(error));
                 }
             }
         });
@@ -1731,22 +1730,22 @@ impl<B: DrainBackend> AgentSession<B> {
         let session = self.clone();
         let task = tokio::spawn(async move {
             let mut result = task_failure.map_or(Ok(()), Err);
-            if session.inner.suspending.load(Ordering::Acquire) {
-                if let Err(error) = session.persist_suspension().await {
-                    result = Err(error);
-                }
+            if session.inner.suspending.load(Ordering::Acquire)
+                && let Err(error) = session.persist_suspension().await
+            {
+                result = Err(error);
             }
             for task in tasks {
-                if let Err(error) = join_task(&task).await {
-                    if result.is_ok() {
-                        result = Err(error);
-                    }
-                }
-            }
-            if let Err(error) = backend.close().await {
-                if result.is_ok() {
+                if let Err(error) = join_task(&task).await
+                    && result.is_ok()
+                {
                     result = Err(error);
                 }
+            }
+            if let Err(error) = backend.close().await
+                && result.is_ok()
+            {
+                result = Err(error);
             }
             completion.finish(result);
         });
@@ -1921,35 +1920,33 @@ impl<B: DrainBackend> AgentSession<B> {
                 (Err(error), Some(_)) => Execution::failed(error.to_string()),
                 (Err(error), None) => return Err(error),
             };
-            if let Some(owned) = &owned {
-                if (!started
+            if let Some(owned) = &owned
+                && (!started
                     || owned.cancellation.is_cancelled()
                     || self.inner.interrupting.load(Ordering::Acquire))
-                    && !self.inner.suspending.load(Ordering::Acquire)
+                && !self.inner.suspending.load(Ordering::Acquire)
+            {
+                let input_id = owned
+                    .admission
+                    .lock()
+                    .expect("reservation poisoned")
+                    .as_ref()
+                    .map(|admission| admission.input.id.clone());
+                if let Some(input_id) = input_id
+                    && let Err(error) = self.inner.backend.cancel_pending_input(input_id).await
                 {
-                    let input_id = owned
-                        .admission
-                        .lock()
-                        .expect("reservation poisoned")
-                        .as_ref()
-                        .map(|admission| admission.input.id.clone());
-                    if let Some(input_id) = input_id {
-                        if let Err(error) = self.inner.backend.cancel_pending_input(input_id).await
-                        {
-                            pass = Execution::failed(error.to_string());
-                        }
-                    }
+                    pass = Execution::failed(error.to_string());
                 }
             }
             if pass.status != ExecutionStatus::Succeeded || !pass.output.is_empty() {
                 completed = pass.clone();
             }
             loop {
-                if let Err(error) = self.join_mutations().await {
-                    if pass.status == ExecutionStatus::Succeeded {
-                        pass = Execution::failed(error.to_string());
-                        completed = pass.clone();
-                    }
+                if let Err(error) = self.join_mutations().await
+                    && pass.status == ExecutionStatus::Succeeded
+                {
+                    pass = Execution::failed(error.to_string());
+                    completed = pass.clone();
                 }
                 // Recheck durable input after the mutation await. A send may
                 // have woken this drain while its terminal barrier was waiting.
@@ -2007,10 +2004,10 @@ impl<B: DrainBackend> DrainWork for AgentSession<B> {
         Box::pin(async move {
             let mut result = Ok(());
             for mutation in &snapshot {
-                if let Err(error) = mutation.join().await {
-                    if result.is_ok() {
-                        result = Err(error);
-                    }
+                if let Err(error) = mutation.join().await
+                    && result.is_ok()
+                {
+                    result = Err(error);
                 }
             }
             let mut state = self.inner.state.lock().expect("session poisoned");

@@ -115,14 +115,13 @@ impl WorkingDirectoryClaim {
             if file.path().is_dir() || !matches_name(&file.path(), "v") {
                 continue;
             }
-            if let Some(record) = read(&file.path())? {
-                if record
+            if let Some(record) = read(&file.path())?
+                && record
                     .version
                     .is_some_and(|version| version > newest_version)
-                {
-                    newest_version = record.version.unwrap();
-                    newest = Some(record);
-                }
+            {
+                newest_version = record.version.unwrap();
+                newest = Some(record);
             }
         }
         Ok(newest)
@@ -157,12 +156,11 @@ impl WorkingDirectoryClaim {
             {
                 metadata = None;
             }
-            if let Some(meta) = &metadata {
-                if meta.state == SessionCatalogState::Corrupt
-                    || Self::canonicalize(Path::new(&meta.working_directory))? != canonical
-                {
-                    return Ok(result(ClaimDisposition::Corrupt, None, None));
-                }
+            if let Some(meta) = &metadata
+                && (meta.state == SessionCatalogState::Corrupt
+                    || Self::canonicalize(Path::new(&meta.working_directory))? != canonical)
+            {
+                return Ok(result(ClaimDisposition::Corrupt, None, None));
             }
             let recency = metadata
                 .map(|meta| {
@@ -360,16 +358,15 @@ impl WorkingDirectoryClaim {
     }
     pub(crate) fn release(&self, lease: &SessionActivationLease) -> io::Result<()> {
         let directory = self.activation_directory(&lease.intent.session_id);
-        if let Some(mut head) = Self::current(&directory)? {
-            if head.generation == Some(lease.generation)
-                && head.runtime_instance_id.as_deref() == Some(&lease.runtime_instance_id)
-                && head.lease_id.as_deref() == Some(&lease.lease_id)
-                && is_state(&head, "Active")
-            {
-                head.version = Some(head.version.unwrap_or(0).wrapping_add(1));
-                head.state = Some("Inactive".into());
-                let _ = write_version(&directory, &head)?;
-            }
+        if let Some(mut head) = Self::current(&directory)?
+            && head.generation == Some(lease.generation)
+            && head.runtime_instance_id.as_deref() == Some(&lease.runtime_instance_id)
+            && head.lease_id.as_deref() == Some(&lease.lease_id)
+            && is_state(&head, "Active")
+        {
+            head.version = Some(head.version.unwrap_or(0).wrapping_add(1));
+            head.state = Some("Inactive".into());
+            let _ = write_version(&directory, &head)?;
         }
         Ok(())
     }
@@ -440,14 +437,14 @@ impl WorkingDirectoryClaim {
     ) -> io::Result<AdmissionResult> {
         let directory = self.activation_directory(&intent.session_id);
         for _ in 0..32 {
-            if let Some(guard) = &self.activation_guard {
-                if let Some(disposition) = guard(&intent, take_over)? {
-                    return Ok(result(
-                        disposition,
-                        Some(intent.session_id.clone()),
-                        Some(intent),
-                    ));
-                }
+            if let Some(guard) = &self.activation_guard
+                && let Some(disposition) = guard(&intent, take_over)?
+            {
+                return Ok(result(
+                    disposition,
+                    Some(intent.session_id.clone()),
+                    Some(intent),
+                ));
             }
             let head = Self::current(&directory)?;
             let status = if head.is_some() {
@@ -691,20 +688,19 @@ fn decode_owner_text(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
                 .map(|body| (body, false))
         });
     if let Some((body, little_endian)) = utf32 {
-        let mut chunks = body.chunks_exact(4);
+        let (chunks, remainder) = body.as_chunks::<4>();
         let mut text: String = chunks
-            .by_ref()
+            .iter()
             .map(|chunk| {
-                let bytes = [chunk[0], chunk[1], chunk[2], chunk[3]];
                 let code = if little_endian {
-                    u32::from_le_bytes(bytes)
+                    u32::from_le_bytes(*chunk)
                 } else {
-                    u32::from_be_bytes(bytes)
+                    u32::from_be_bytes(*chunk)
                 };
                 char::from_u32(code).unwrap_or(char::REPLACEMENT_CHARACTER)
             })
             .collect();
-        if !chunks.remainder().is_empty() {
+        if !remainder.is_empty() {
             text.push(char::REPLACEMENT_CHARACTER);
         }
         return text.into();
@@ -714,19 +710,19 @@ fn decode_owner_text(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
         .map(|body| (body, true))
         .or_else(|| bytes.strip_prefix(b"\xfe\xff").map(|body| (body, false)));
     if let Some((body, little_endian)) = utf16 {
-        let mut chunks = body.chunks_exact(2);
+        let (chunks, remainder) = body.as_chunks::<2>();
         let units: Vec<_> = chunks
-            .by_ref()
+            .iter()
             .map(|chunk| {
                 if little_endian {
-                    u16::from_le_bytes([chunk[0], chunk[1]])
+                    u16::from_le_bytes(*chunk)
                 } else {
-                    u16::from_be_bytes([chunk[0], chunk[1]])
+                    u16::from_be_bytes(*chunk)
                 }
             })
             .collect();
         let mut text = String::from_utf16_lossy(&units);
-        if !chunks.remainder().is_empty() {
+        if !remainder.is_empty() {
             text.push(char::REPLACEMENT_CHARACTER);
         }
         return text.into();

@@ -884,11 +884,10 @@ fn read_models(provider: &Node, key: &str) -> Result<BTreeMap<String, ModelConfi
         let mut variants = BTreeMap::new();
         if let Some(entries) = item.get("variants").and_then(Node::as_mapping) {
             for (key, value) in entries {
-                if let Some(name) = key.as_str() {
-                    if value.as_mapping().is_some() {
-                        variants
-                            .insert(name.to_owned(), scalar_or_empty(value, "reasoning_effort"));
-                    }
+                if let Some(name) = key.as_str()
+                    && value.as_mapping().is_some()
+                {
+                    variants.insert(name.to_owned(), scalar_or_empty(value, "reasoning_effort"));
                 }
             }
         }

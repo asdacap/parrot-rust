@@ -362,7 +362,7 @@ fn denied_corrupt_canceled_and_other_primary_read_errors_do_not_fall_back() {
             Err::<(), _>(io::Error::new(kind, "controlled primary failure"))
         });
         assert_eq!(result.unwrap_err().kind(), kind);
-        assert_eq!(called, [current.clone()]);
+        assert_eq!(called, std::slice::from_ref(&current));
     }
 }
 

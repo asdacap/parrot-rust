@@ -226,17 +226,17 @@ impl AnthropicParser {
                 }
             }
             "message_delta" => {
-                if let Some(delta) = child_object(&root, "delta")? {
-                    if let Some(reason) = read_string(&delta, "stop_reason")? {
-                        self.finish_reason = match reason.as_str() {
-                            "end_turn" | "stop_sequence" => "stop",
-                            "tool_use" => "tool_calls",
-                            "max_tokens" | "model_context_window_exceeded" => "length",
-                            "refusal" => "content_filter",
-                            _ => "incomplete",
-                        }
-                        .to_owned();
+                if let Some(delta) = child_object(&root, "delta")?
+                    && let Some(reason) = read_string(&delta, "stop_reason")?
+                {
+                    self.finish_reason = match reason.as_str() {
+                        "end_turn" | "stop_sequence" => "stop",
+                        "tool_use" => "tool_calls",
+                        "max_tokens" | "model_context_window_exceeded" => "length",
+                        "refusal" => "content_filter",
+                        _ => "incomplete",
                     }
+                    .to_owned();
                 }
                 self.read_usage(&root)?;
             }

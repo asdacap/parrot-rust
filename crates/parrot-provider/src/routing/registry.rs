@@ -117,11 +117,11 @@ impl ProviderRegistry {
             let mut completed: Vec<_> = (0..pending.len()).map(|_| None).collect();
             poll_fn(|context| {
                 for (future, result) in pending.iter_mut().zip(&mut completed) {
-                    if let Some(active) = future {
-                        if let Poll::Ready(value) = active.as_mut().poll(context) {
-                            *result = Some(value);
-                            *future = None;
-                        }
+                    if let Some(active) = future
+                        && let Poll::Ready(value) = active.as_mut().poll(context)
+                    {
+                        *result = Some(value);
+                        *future = None;
                     }
                 }
                 if pending.iter().all(Option::is_none) {
@@ -201,23 +201,23 @@ impl ProviderRegistry {
             }
             return Ok(selected(model.clone(), Some(variant.clone())));
         }
-        if let Some((model_id, variant_name)) = model_selector.rsplit_once('/') {
-            if !model_id.is_empty() {
-                let mut variants = Vec::new();
-                for variant in models.iter().flat_map(|model| &model.capabilities.variants) {
-                    if variant.name == variant_name && !variants.contains(variant) {
-                        variants.push(variant.clone());
-                        if variants.len() == 2 {
-                            break;
-                        }
+        if let Some((model_id, variant_name)) = model_selector.rsplit_once('/')
+            && !model_id.is_empty()
+        {
+            let mut variants = Vec::new();
+            for variant in models.iter().flat_map(|model| &model.capabilities.variants) {
+                if variant.name == variant_name && !variants.contains(variant) {
+                    variants.push(variant.clone());
+                    if variants.len() == 2 {
+                        break;
                     }
                 }
-                if variants.len() == 1 {
-                    return Ok(selected(
-                        Model::new(model_id, provider.id()),
-                        variants.pop(),
-                    ));
-                }
+            }
+            if variants.len() == 1 {
+                return Ok(selected(
+                    Model::new(model_id, provider.id()),
+                    variants.pop(),
+                ));
             }
         }
         Ok(selected(Model::new(model_selector, provider.id()), None))

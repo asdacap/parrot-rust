@@ -678,7 +678,7 @@ impl TerminalSessionNavigation for SuppliedNavigation {
     ) -> BoxFuture<'a, Result<wire::ListSessionsResponse, NavigationFailure>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| {
-                NavigationFailure::Rpc(Status::cancelled("supplied navigation cancelled"))
+                NavigationFailure::Rpc(Box::new(Status::cancelled("supplied navigation cancelled")))
             })?;
             Ok(wire::ListSessionsResponse {
                 sessions: vec![wire::SessionSummary {
@@ -699,7 +699,7 @@ impl TerminalSessionNavigation for SuppliedNavigation {
     ) -> BoxFuture<'a, Result<TerminalSessionTarget, NavigationFailure>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| {
-                NavigationFailure::Rpc(Status::cancelled("supplied navigation cancelled"))
+                NavigationFailure::Rpc(Box::new(Status::cancelled("supplied navigation cancelled")))
             })?;
             assert_eq!(id, self.selected.id);
             Ok(TerminalSessionTarget::new(

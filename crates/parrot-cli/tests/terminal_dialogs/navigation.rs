@@ -284,7 +284,7 @@ impl TerminalSessionNavigation for QueueNavigation {
     ) -> BoxFuture<'a, Result<wire::ListSessionsResponse, NavigationFailure>> {
         Box::pin(async move {
             c.check()
-                .map_err(|_| NavigationFailure::Rpc(Status::cancelled("stopped")))?;
+                .map_err(|_| NavigationFailure::Rpc(Box::new(Status::cancelled("stopped"))))?;
             self.listed.lock().unwrap().push(current.id.clone());
             self.listed_workspaces
                 .lock()
@@ -301,13 +301,13 @@ impl TerminalSessionNavigation for QueueNavigation {
     ) -> BoxFuture<'a, Result<TerminalSessionTarget, NavigationFailure>> {
         Box::pin(async move {
             c.check()
-                .map_err(|_| NavigationFailure::Rpc(Status::cancelled("stopped")))?;
+                .map_err(|_| NavigationFailure::Rpc(Box::new(Status::cancelled("stopped"))))?;
             self.opened.lock().unwrap().push(id.into());
             self.targets
                 .lock()
                 .unwrap()
                 .pop_front()
-                .ok_or_else(|| NavigationFailure::Rpc(Status::not_found("missing")))
+                .ok_or_else(|| NavigationFailure::Rpc(Box::new(Status::not_found("missing"))))
         })
     }
 }
@@ -343,7 +343,9 @@ impl SessionReplacement for Replacement {
                 }
                 "wait" => {
                     c.cancelled().await;
-                    Err(NavigationFailure::Rpc(Status::cancelled("stopped")))
+                    Err(NavigationFailure::Rpc(Box::new(Status::cancelled(
+                        "stopped",
+                    ))))
                 }
                 _ => Ok(()),
             }

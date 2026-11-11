@@ -532,7 +532,7 @@ fn discovered_skill_reads_show_names_and_actual_returned_ranges() {
         let expected = format!("✓ read skill grill-with-docs ({suffix})");
         assert_eq!(
             rendered_with(&presenter, &call, &terminal, false),
-            [expected.clone()]
+            std::slice::from_ref(&expected)
         );
         assert_eq!(
             rendered_with(&presenter, &call, &terminal, true),

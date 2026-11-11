@@ -148,14 +148,13 @@ impl DiagnosticStream {
     }
 
     async fn finish(&mut self, outcome: TraceOutcome, failure: Option<Error>) -> Result<(), Error> {
-        if let Some(trace) = &self.trace {
-            if self
+        if let Some(trace) = &self.trace
+            && self
                 .cancellation
                 .as_ref()
                 .is_some_and(|token| token.is_cancelled())
-            {
-                trace.cancel();
-            }
+        {
+            trace.cancel();
         }
         // Source finally semantics: disposal failure replaces an earlier read
         // failure, but cannot replace a terminal already recorded by cancellation.
@@ -267,17 +266,16 @@ impl Drop for DiagnosticStream {
                 .cancellation
                 .as_ref()
                 .is_some_and(|token| token.is_cancelled())
+            && let Some(trace) = &self.trace
         {
-            if let Some(trace) = &self.trace {
-                trace.cancel();
-            }
+            trace.cancel();
         }
         // Releasing the inner stream first preserves request-before-call order.
         self.inner = None;
-        if !self.done {
-            if let Some(trace) = &self.trace {
-                trace.finish(TraceOutcome::Disposed);
-            }
+        if !self.done
+            && let Some(trace) = &self.trace
+        {
+            trace.finish(TraceOutcome::Disposed);
         }
     }
 }
@@ -376,10 +374,10 @@ impl EventStream for RequestTraceStream {
 impl Drop for RequestTraceStream {
     fn drop(&mut self) {
         self.inner = None;
-        if !self.done {
-            if let Some(trace) = &self.trace {
-                trace.finish(TraceOutcome::Disposed);
-            }
+        if !self.done
+            && let Some(trace) = &self.trace
+        {
+            trace.finish(TraceOutcome::Disposed);
         }
     }
 }

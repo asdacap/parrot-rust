@@ -152,19 +152,19 @@ fn html_decode(input: &str) -> String {
         rest = &rest[amp + 1..];
         // Another ampersand terminates the search, so an invalid entity cannot
         // swallow a subsequent valid one. Decoded output is never rescanned.
-        if let Some(end) = rest.find([';', '&']) {
-            if rest.as_bytes()[end] == b';' {
-                let entity = &rest[..end];
-                let decoded = if let Some(number) = entity.strip_prefix('#') {
-                    decode_number(number)
-                } else {
-                    named_entity(entity)
-                };
-                if let Some(ch) = decoded {
-                    output.push(ch);
-                    rest = &rest[end + 1..];
-                    continue;
-                }
+        if let Some(end) = rest.find([';', '&'])
+            && rest.as_bytes()[end] == b';'
+        {
+            let entity = &rest[..end];
+            let decoded = if let Some(number) = entity.strip_prefix('#') {
+                decode_number(number)
+            } else {
+                named_entity(entity)
+            };
+            if let Some(ch) = decoded {
+                output.push(ch);
+                rest = &rest[end + 1..];
+                continue;
             }
         }
         output.push('&');

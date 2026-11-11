@@ -404,7 +404,7 @@ async fn cleanup_collects_unbound_corrupt_hash_files_but_preserves_unrelated_ent
             )
             .await
             .unwrap(),
-        [orphan.clone()],
+        std::slice::from_ref(&orphan),
     );
     assert!(!directory.join(orphan).exists());
     assert_eq!(std::fs::read(directory.join(fresh_hash)).unwrap(), INVALID);
@@ -480,7 +480,7 @@ async fn each_part_owner_retains_images_until_its_reference_is_deleted() {
                 .remove_stale_unreferenced_before(before, &NeverCancelled)
                 .await
                 .unwrap(),
-            [image.artifact_id.clone()]
+            std::slice::from_ref(&image.artifact_id)
         );
         assert!(
             repository

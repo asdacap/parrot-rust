@@ -405,7 +405,7 @@ impl TaskSession for RecordingSession {
         Box::pin(async move {
             if self
                 .ack_failures
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                     left.checked_sub(1)
                 })
                 .is_ok()
@@ -432,7 +432,7 @@ impl TaskSession for RecordingSession {
             }
             if self
                 .ack_failures
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                     left.checked_sub(1)
                 })
                 .is_ok()
@@ -497,7 +497,7 @@ impl TaskSession for RecordingSession {
             self.capture("send", &id, &parts);
             if self
                 .send_failures
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                     left.checked_sub(1)
                 })
                 .is_ok()

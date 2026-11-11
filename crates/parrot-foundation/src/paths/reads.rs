@@ -80,13 +80,11 @@ impl ApplicationRoots {
                 }
                 break;
             }
-            if eligible {
-                if let Ok(relative) = absolute.strip_prefix(&legacy) {
-                    result.primary = current.join(relative);
-                    result.fallback = Some(absolute.clone());
-                    result.origin = ReadOrigin::Primary;
-                    break;
-                }
+            if eligible && let Ok(relative) = absolute.strip_prefix(&legacy) {
+                result.primary = current.join(relative);
+                result.fallback = Some(absolute.clone());
+                result.origin = ReadOrigin::Primary;
+                break;
             }
         }
         Ok(result)

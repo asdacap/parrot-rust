@@ -3,19 +3,12 @@ use parrot_core::{
 };
 use std::{
     future::Future,
-    sync::Arc,
-    task::{Context, Poll, Wake, Waker},
+    task::{Context, Poll, Waker},
 };
 
-struct ImmediateWake;
-
-impl Wake for ImmediateWake {
-    fn wake(self: Arc<Self>) {}
-}
-
 fn finish<F: Future>(future: F) -> F::Output {
-    let waker = Waker::from(Arc::new(ImmediateWake));
-    let mut context = Context::from_waker(&waker);
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
     let mut future = std::pin::pin!(future);
     match future.as_mut().poll(&mut context) {
         Poll::Ready(result) => result,

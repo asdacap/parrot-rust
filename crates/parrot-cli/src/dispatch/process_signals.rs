@@ -44,12 +44,12 @@ mod platform {
         pub fn register() -> io::Result<Self> {
             // SAFETY: receive has the C signal-handler ABI, only touches a
             // lock-free native atomics, and remains present for the process lifetime.
-            let interrupt = unsafe { signal(SIGINT, receive as usize) };
+            let interrupt = unsafe { signal(SIGINT, receive as *const () as usize) };
             if interrupt == SIG_ERR {
                 return Err(io::Error::last_os_error());
             }
             // SAFETY: same handler lifetime and ABI as the registration above.
-            let terminate = unsafe { signal(SIGTERM, receive as usize) };
+            let terminate = unsafe { signal(SIGTERM, receive as *const () as usize) };
             if terminate == SIG_ERR {
                 let error = io::Error::last_os_error();
                 // SAFETY: restore the exact handler returned by libc.

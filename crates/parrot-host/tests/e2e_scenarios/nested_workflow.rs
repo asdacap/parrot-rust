@@ -68,19 +68,17 @@ async fn catalog_task_worker_nested_child_wait_and_durable_progress_join_togethe
                 .capture_detail("queue-workflow")
                 .await
                 .and_then(|task| task.agent_name)
+                && let Some(worker) = root.children().find(&name)
+                && let Some(nested) = worker.children().find("receipt-child")
             {
-                if let Some(worker) = root.children().find(&name) {
-                    if let Some(nested) = worker.children().find("receipt-child") {
-                        let history = worker.history().conversation().await.unwrap();
-                        if history.iter().any(|item| {
-                            item.message
-                                .tool_calls
-                                .iter()
-                                .any(|call| call.id == "t76-worker-wait")
-                        }) {
-                            break (worker, nested);
-                        }
-                    }
+                let history = worker.history().conversation().await.unwrap();
+                if history.iter().any(|item| {
+                    item.message
+                        .tool_calls
+                        .iter()
+                        .any(|call| call.id == "t76-worker-wait")
+                }) {
+                    break (worker, nested);
                 }
             }
             tokio::task::yield_now().await;

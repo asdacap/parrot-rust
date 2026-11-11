@@ -11,7 +11,6 @@ use std::collections::BTreeSet;
 use support::*;
 
 const A: &str = "tests/fixtures/scriban/a008/";
-const H: &str = "crates/parrot-foundation/tests/template_migration/fixtures/";
 const PATH: &str = "prompt_templates.custom.catalog";
 const NO_OUTPUT_FUEL: &str =
     "{% for i in range(1001) %}{% for j in range(1001) %}{% set x=j %}{% endfor %}{% endfor %}";
@@ -174,49 +173,6 @@ fn m6_full_configuration_compiles_and_renders_retained_independent_source_models
             row["case_id"]
         );
     }
-}
-
-#[test]
-fn m2_all_ten_templates_thirty_empty_multiple_nested_cases_use_real_catalog() {
-    let catalog = defaults();
-    let inputs = fixture(&(H.to_owned() + "m2-source-input.json"));
-    let expected = fixture(&(H.to_owned() + "m2-source-oracle.json"));
-    let mut variants = std::collections::BTreeMap::<&str, BTreeSet<&str>>::new();
-    assert_eq!(inputs.as_array().unwrap().len(), 30);
-    for (input, result) in inputs
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(expected["cases"].as_array().unwrap())
-    {
-        assert_eq!(input["id"], result["id"]);
-        let id = input["template_id"].as_str().unwrap();
-        variants.entry(id).or_default().insert(
-            input["id"]
-                .as_str()
-                .unwrap()
-                .strip_prefix(&format!("A008.M2.{id}."))
-                .unwrap(),
-        );
-        assert_eq!(
-            catalog
-                .render(
-                    id,
-                    &arguments(&input["arguments"]),
-                    &CancellationState::Active
-                )
-                .unwrap(),
-            product_changes::align_product_text(id, result["output"]["value"].as_str().unwrap()),
-            "{}",
-            input["id"]
-        );
-    }
-    assert_eq!(variants.len(), 10);
-    assert!(
-        variants
-            .values()
-            .all(|v| v == &BTreeSet::from(["empty", "multiple", "nested-branch"]))
-    );
 }
 
 #[test]

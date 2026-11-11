@@ -276,8 +276,7 @@ mod tests {
     use crate::contracts::async_ops::OperationError;
     use crate::contracts::paths::ResolvedRead;
     use std::future::Future;
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::task::{Context, Poll};
 
     // Signature fixture only: it has no filesystem implementation and cannot
     // produce a successful observation. This is not read-security evidence.
@@ -360,14 +359,11 @@ mod tests {
         }
     }
 
-    struct NoopWake;
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
-
     fn ready<T>(mut future: BoxFuture<'_, T>) -> T {
-        let waker = Waker::from(Arc::new(NoopWake));
-        match Future::poll(future.as_mut(), &mut Context::from_waker(&waker)) {
+        match Future::poll(
+            future.as_mut(),
+            &mut Context::from_waker(std::task::Waker::noop()),
+        ) {
             Poll::Ready(value) => value,
             Poll::Pending => panic!("signature fixture must be immediately ready"),
         }

@@ -641,10 +641,9 @@ impl<R: AuthorizedReadService + ?Sized> SkillCatalog<R> {
         let (configuration, generation) = (self.configuration)();
         if state.captured_generation == Some(state.generation)
             && state.configuration_generation == Some(generation)
+            && let Some(snapshot) = &state.snapshot
         {
-            if let Some(snapshot) = &state.snapshot {
-                return Ok(snapshot.clone());
-            }
+            return Ok(snapshot.clone());
         }
         let snapshot = Arc::new(
             discover_skills(

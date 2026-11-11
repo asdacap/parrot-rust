@@ -263,7 +263,7 @@ async fn reminder_cancellation_and_service_errors_never_fabricate_success_or_mut
                 .await,
             Err(OperationError::Cancelled)
         );
-        assert_eq!(fixture.calls(), [call.clone()]);
+        assert_eq!(fixture.calls(), std::slice::from_ref(&call));
         for failure_kind in [
             FailureKind::Argument,
             FailureKind::InputConflict,

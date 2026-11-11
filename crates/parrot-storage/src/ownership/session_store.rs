@@ -460,15 +460,14 @@ async fn close_resources(
         Some(database) => database.close().await.map_err(SessionStoreError::failure),
         None => Ok(()),
     };
-    if result.is_ok() {
-        if let Some(log) = diagnostics.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            if database.is_some() && result.is_ok() {
-                let mut event =
-                    DiagnosticEvent::new("session", "closed", DiagnosticSeverity::Information);
-                event.outcome = Some("success".into());
-                log.write(&event);
-            }
-        }
+    if result.is_ok()
+        && let Some(log) = diagnostics.lock().unwrap_or_else(|e| e.into_inner()).take()
+        && database.is_some()
+        && result.is_ok()
+    {
+        let mut event = DiagnosticEvent::new("session", "closed", DiagnosticSeverity::Information);
+        event.outcome = Some("success".into());
+        log.write(&event);
     }
     result
 }

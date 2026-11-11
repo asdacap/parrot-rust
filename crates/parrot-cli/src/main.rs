@@ -952,7 +952,7 @@ async fn override_variant(
 
 fn slash_failure(failure: parrot_cli::slash_sessions::SlashFailure) -> DispatchError {
     match failure {
-        parrot_cli::slash_sessions::SlashFailure::Rpc(failure) => DispatchError::Rpc(failure),
+        parrot_cli::slash_sessions::SlashFailure::Rpc(failure) => DispatchError::Rpc(*failure),
         other => command_failure(other),
     }
 }
@@ -987,7 +987,7 @@ fn attachment_failure(failure: AttachmentError) -> DispatchError {
 fn navigation_failure(failure: parrot_cli::slash_sessions::NavigationFailure) -> DispatchError {
     use parrot_cli::slash_sessions::NavigationFailure;
     match failure {
-        NavigationFailure::Rpc(status) => DispatchError::Rpc(status),
+        NavigationFailure::Rpc(status) => DispatchError::Rpc(*status),
         NavigationFailure::Recoverable(message) | NavigationFailure::Other(message) => {
             DispatchError::Command(message)
         }

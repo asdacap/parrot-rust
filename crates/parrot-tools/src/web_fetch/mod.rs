@@ -273,17 +273,17 @@ impl WebFetcher {
         for redirect in 0.. {
             let addresses = self.pin(&request.address, &mut pins).await?;
             let response = session.send(&request, &addresses, &self.options).await?;
-            if matches!(response.status_code, 301 | 302 | 303 | 307 | 308) {
-                if let Some(location) = &response.location {
-                    let next = redirect_address(&request.address, location)?;
-                    if redirect >= self.options.max_redirects {
-                        return Err(FetchError::rejected(
-                            "web fetch followed too many redirects",
-                        ));
-                    }
-                    request.address = next;
-                    continue;
+            if matches!(response.status_code, 301 | 302 | 303 | 307 | 308)
+                && let Some(location) = &response.location
+            {
+                let next = redirect_address(&request.address, location)?;
+                if redirect >= self.options.max_redirects {
+                    return Err(FetchError::rejected(
+                        "web fetch followed too many redirects",
+                    ));
                 }
+                request.address = next;
+                continue;
             }
             let content_type = accepted_content_type(response.content_type.as_deref())?;
             let mut body = match response.content_encodings.as_slice() {

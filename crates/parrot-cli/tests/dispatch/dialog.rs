@@ -3,7 +3,7 @@ use std::future::Future;
 use std::io::{self, BufRead, Cursor, Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Poll, Waker};
 
 use parrot_cli::dispatch::dialog::{
     BasicSlashDialog, DialogOption, SecretKey, SecretKeyInput, SlashDialog, load,
@@ -34,18 +34,12 @@ impl Cancellation for Token {
     }
 }
 
-struct NoWake;
-impl Wake for NoWake {
-    fn wake(self: Arc<Self>) {}
-}
-
 // Supplied-memory operations finish on the first poll. This deliberately does
 // not pretend to be the application's asynchronous runtime or blocking-I/O join.
 fn complete<T>(future: impl Future<Output = T>) -> T {
-    let waker = Waker::from(Arc::new(NoWake));
     match std::pin::pin!(future)
         .as_mut()
-        .poll(&mut Context::from_waker(&waker))
+        .poll(&mut Context::from_waker(Waker::noop()))
     {
         Poll::Ready(value) => value,
         Poll::Pending => panic!("supplied-stream dialog unexpectedly yielded"),

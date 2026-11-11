@@ -169,7 +169,7 @@ fn code_backticks_hash_comments_numbers_and_all_aliases_are_highlighted() {
     ] {
         assert_eq!(
             code(language, "`hi` 42.0_f # public"),
-            [expected.clone()],
+            std::slice::from_ref(&expected),
             "{language}"
         );
     }

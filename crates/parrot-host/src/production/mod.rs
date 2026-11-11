@@ -355,6 +355,8 @@ impl ProductionHost {
     pub fn service(&self) -> &Arc<ParrotService> {
         &self.service
     }
+    // Returns the generated wire Status, which the vendored tonic keeps unboxed.
+    #[allow(clippy::result_large_err)]
     pub async fn open_local_client(
         &self,
         cancellation: &dyn Cancellation,

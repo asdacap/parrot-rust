@@ -47,10 +47,10 @@ impl CredentialPresets {
                         .is_file()
                     {
                         let path = entry.path();
-                        if path.extension().is_some_and(|value| value == "json") {
-                            if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
-                                names.push(stem.to_owned());
-                            }
+                        if path.extension().is_some_and(|value| value == "json")
+                            && let Some(stem) = path.file_stem().and_then(|value| value.to_str())
+                        {
+                            names.push(stem.to_owned());
                         }
                     }
                 }

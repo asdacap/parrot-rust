@@ -22,7 +22,7 @@
         overlays = [rust-overlay.overlays.default];
       };
     toolchainFor = pkgs:
-      pkgs.rust-bin.stable."1.85.0".default.override {
+      pkgs.rust-bin.stable."1.99.1".default.override {
         extensions = ["clippy" "rustfmt"];
         targets = ["aarch64-apple-darwin" "x86_64-unknown-linux-musl"];
       };

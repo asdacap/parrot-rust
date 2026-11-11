@@ -58,10 +58,10 @@ impl SkillPreparation {
                     .collect::<Vec<_>>();
                 let records = states.resolve_skill_references(&references).await?;
                 for (record, (_, position)) in records.into_iter().zip(mentions) {
-                    if let Some(skill) = record {
-                        if self.selected_ids.insert(skill.id.clone()) {
-                            selected.push((skill, position));
-                        }
+                    if let Some(skill) = record
+                        && self.selected_ids.insert(skill.id.clone())
+                    {
+                        selected.push((skill, position));
                     }
                 }
             }

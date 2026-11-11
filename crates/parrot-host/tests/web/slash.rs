@@ -490,11 +490,11 @@ impl WebSlashRegistry for Registry {
                     return Err(WebSlashFailure::Command("fixture command failure".into()));
                 }
                 "rpc-error" => {
-                    return Err(WebSlashFailure::Rpc(Status::with_details(
+                    return Err(WebSlashFailure::Rpc(Box::new(Status::with_details(
                         tonic::Code::PermissionDenied,
                         "fixture denied",
                         bytes::Bytes::from_static(b"fixture-details"),
-                    )));
+                    ))));
                 }
                 "unchanged" => {}
                 _ => {

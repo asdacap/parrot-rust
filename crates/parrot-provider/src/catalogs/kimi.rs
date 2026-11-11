@@ -54,15 +54,15 @@ fn decode_model(id: &str, provider_id: &str, item: &Value) -> Model {
         fields.insert(ModelMetadataFields::REASONING);
     }
     let mut variants = Vec::new();
-    if let Some(efforts) = item.get("think_efforts").filter(|value| value.is_object()) {
-        if let Some(valid) = json_read::strings(efforts, "valid_efforts") {
-            fields.insert(ModelMetadataFields::VARIANTS);
-            if json_read::bool_value(efforts, "support").unwrap_or(false) {
-                variants = from_efforts(
-                    &valid,
-                    json_read::string(efforts, "default_effort").unwrap_or_default(),
-                );
-            }
+    if let Some(efforts) = item.get("think_efforts").filter(|value| value.is_object())
+        && let Some(valid) = json_read::strings(efforts, "valid_efforts")
+    {
+        fields.insert(ModelMetadataFields::VARIANTS);
+        if json_read::bool_value(efforts, "support").unwrap_or(false) {
+            variants = from_efforts(
+                &valid,
+                json_read::string(efforts, "default_effort").unwrap_or_default(),
+            );
         }
     }
     model.capabilities = ModelCapabilities {

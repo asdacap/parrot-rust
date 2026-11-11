@@ -200,12 +200,10 @@ impl StreamedFragmentBuffer {
         if self.held.is_none() {
             self.held = Some(published.clone());
             self.held_since = Some(Instant::now());
-        } else if published.has_reasoning_chunk() {
-            self.held
-                .as_mut()
-                .expect("held fragment")
-                .mut_reasoning_chunk()
-                .completed = published.reasoning_chunk().completed;
+        } else if published.has_reasoning_chunk()
+            && let Some(held) = &mut self.held
+        {
+            held.mut_reasoning_chunk().completed = published.reasoning_chunk().completed;
         }
         self.fragment.push_str(if published.has_text_chunk() {
             &published.text_chunk().fragment

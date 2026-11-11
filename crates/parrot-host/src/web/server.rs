@@ -296,6 +296,7 @@ struct TextRequestBody {
 }
 
 impl TextRequestBody {
+    #[allow(clippy::result_large_err)] // returns the vendored tonic Status, which is unboxably large
     fn decode(&mut self, bytes: &[u8]) -> Result<Bytes, Status> {
         let mut input = std::mem::take(&mut self.carry);
         input.extend_from_slice(bytes);

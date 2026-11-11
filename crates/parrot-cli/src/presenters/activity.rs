@@ -687,10 +687,8 @@ impl InventoryState {
         {
             return None;
         }
-        if replaced {
-            if let Some(previous) = &self.instance_id {
-                self.retired_instances.insert(previous.clone());
-            }
+        if replaced && let Some(previous) = &self.instance_id {
+            self.retired_instances.insert(previous.clone());
         }
         self.instance_id = Some(instance.to_owned());
         self.revision = revision;
@@ -1165,22 +1163,23 @@ impl RawActivityView {
                 self.state(owner).agent_progress.observe(owner, inventory)?;
             }
             Some(Payload::ToolSnapshot(_)) => {
-                if let Some(progress) = AgentTaskProgressFormatter::try_read(published)? {
-                    if !self.shutdown && self.state(owner).offer_agent_task_progress(&progress) {
-                        let flushed = self
-                            .pending_progress
-                            .get(owner)
-                            .map_or(0, |previous| previous.flushed_revision);
-                        self.pending_progress.insert(
-                            owner.clone(),
-                            PendingProgress {
-                                snapshot: progress,
-                                flushed_revision: flushed,
-                                due: self.elapsed + Duration::from_secs(1),
-                            },
-                        );
-                        self.retired_task_trees.remove(owner);
-                    }
+                if let Some(progress) = AgentTaskProgressFormatter::try_read(published)?
+                    && !self.shutdown
+                    && self.state(owner).offer_agent_task_progress(&progress)
+                {
+                    let flushed = self
+                        .pending_progress
+                        .get(owner)
+                        .map_or(0, |previous| previous.flushed_revision);
+                    self.pending_progress.insert(
+                        owner.clone(),
+                        PendingProgress {
+                            snapshot: progress,
+                            flushed_revision: flushed,
+                            due: self.elapsed + Duration::from_secs(1),
+                        },
+                    );
+                    self.retired_task_trees.remove(owner);
                 }
             }
             Some(Payload::ReasoningChunk(chunk)) => {
@@ -1906,12 +1905,11 @@ impl RawActivityView {
         if let Some(row) = self.reasoning_row.as_ref().filter(|row| !row.is_empty()) {
             items.push(Arc::new(ActivityValue::ReasoningRow(row.clone())));
         }
-        if let Some(root) = self.hierarchy.root_session_id() {
-            if let Some(state) = self.agents.get(root) {
-                if state.has_reasoning() {
-                    items.push(Arc::new(state.reasoning_item(self.frame)));
-                }
-            }
+        if let Some(root) = self.hierarchy.root_session_id()
+            && let Some(state) = self.agents.get(root)
+            && state.has_reasoning()
+        {
+            items.push(Arc::new(state.reasoning_item(self.frame)));
         }
         let activities: Vec<_> = self
             .activities
