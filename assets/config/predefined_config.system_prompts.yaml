@@ -516,6 +516,7 @@ prompt_templates:
       {{ end }}{{ entry.name }} = {{ entry.path }}{{ end }}
       WORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_DIR contains this agent's history.jsonl.
       Every agent's output is always available at "$AGENT_DIR/output.txt", including while it runs. A direct subagent's output is at "$AGENT_DIR/<subagent-name>/output.txt"; agent_spawn and agent_status report its exact path.
+      TMPDIR is the sandbox-mapped /tmp inside commands; PARROT_HOST_TMPDIR is the full host temp directory outside the sandbox.
       exec_command supports normal shell expansion, for example "$SCRATCH_DIR/somefile.txt" or "${AGENT_SCRATCH_DIR}/somefile.txt". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand "$NAME" and "${NAME}" references to these defaults only; other tools' path arguments do not expand environment variables.
     allowed_arguments: [entries]
     required_arguments: [entries]

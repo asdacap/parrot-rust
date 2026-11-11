@@ -71,7 +71,9 @@ pub fn align_product_text(id: &str, text: &str) -> String {
                     "Every agent's output is always available at \"$AGENT_DIR/output.txt\", ",
                     "including while it runs. A direct subagent's output is at ",
                     "\"$AGENT_DIR/<subagent-name>/output.txt\"; agent_spawn and agent_status ",
-                    "report its exact path."
+                    "report its exact path.\n",
+                    "TMPDIR is the sandbox-mapped /tmp inside commands; ",
+                    "PARROT_HOST_TMPDIR is the full host temp directory outside the sandbox."
                 ),
             );
         }

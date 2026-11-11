@@ -22,7 +22,7 @@ fn mention_syntax_preserves_boundaries_code_environment_exclusions_and_utf16_off
         ("email$x", ""),
         ("$PATH and $skill", "skill"),
         (
-            "$HOME $PATH $USER $SHELL $PWD $TMP $TMPDIR $TEMP $LANG $TERM $XDG_CONFIG_HOME",
+            "$HOME $PATH $USER $SHELL $PWD $TMP $TMPDIR $PARROT_HOST_TMPDIR $TEMP $LANG $TERM $XDG_CONFIG_HOME",
             "",
         ),
         ("$home $PATHS", "home,PATHS"),

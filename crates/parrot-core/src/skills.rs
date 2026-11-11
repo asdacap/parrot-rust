@@ -322,6 +322,7 @@ pub fn parse_skill_mentions(text: &str) -> Vec<SkillMention> {
         "PWD",
         "TMP",
         "TMPDIR",
+        "PARROT_HOST_TMPDIR",
         "TEMP",
         "LANG",
         "TERM",

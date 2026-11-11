@@ -307,6 +307,7 @@ const ENVIRONMENT_NAMES: &[&str] = &[
     "PWD",
     "TMP",
     "TMPDIR",
+    "PARROT_HOST_TMPDIR",
     "TEMP",
     "LANG",
     "TERM",

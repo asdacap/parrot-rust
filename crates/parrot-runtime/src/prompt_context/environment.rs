@@ -31,6 +31,8 @@ impl AgentPathEnvironment {
                 ("SCRATCH_DIR".into(), text(&resources.scratch_directory())?),
                 ("AGENT_SCRATCH_DIR".into(), text(&scratch.scratch_path())?),
                 ("AGENT_DIR".into(), text(scratch.root())?),
+                ("TMPDIR".into(), "/tmp".to_owned()),
+                ("PARROT_HOST_TMPDIR".into(), text(&std::env::temp_dir())?),
             ]),
         })
     }
