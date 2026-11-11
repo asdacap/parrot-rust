@@ -19,9 +19,6 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
         Box::pin(async { Err(Error::unsupported("States.apply_conversation_addition")) })
     }
-    fn read_final_phase_marker(&self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_final_phase_marker")) })
-    }
     /// Reads the status slots offered to the core, each with a source-computed
     /// hash. Defaults to no statuses, which steers nothing.
     fn read_status_offering(&self) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
