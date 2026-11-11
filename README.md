@@ -155,6 +155,7 @@ Additional native-platform and package-smoke gates are listed in
 
 - [Installation and platform requirements](docs/operator/installation.md)
 - [Configuration, legacy selection, backups and rollback](docs/operator/state-and-rollback.md)
+- [Benchmarking with headless runs](docs/operator/benchmarking.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ### ChatGPT fast mode

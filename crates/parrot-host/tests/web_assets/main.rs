@@ -87,6 +87,7 @@ fn embeds_all_files_in_sorted_relative_paths_with_content_types_and_original_byt
     }
 }
 
+#[cfg(feature = "web")]
 #[test]
 fn registered_host_exposes_the_generated_vite_assets() {
     let assets = parrot_host::web_assets::EMBEDDED_WEB_ASSETS;

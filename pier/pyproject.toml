@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pier-parrot-agent"
+version = "0.1.0"
+description = "Pier agent wrapper that drives the Parrot coding agent (parrotrust) in sandboxed benchmark trials"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# Runtime imports (pier, pydantic, yaml) come from the Pier installation itself;
+# this wrapper adds no dependencies of its own so it always shares Pier's env.
+dependencies = []
+
+[tool.setuptools]
+packages = ["parrot_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -7,6 +7,8 @@ use std::{
     },
 };
 
+#[cfg(feature = "web")]
+use parrot_cli::slash_sessions::WebCommandFactory;
 use parrot_cli::{
     attachments::uploader::{AttachmentError, PromptAttachmentUploader},
     dispatch::{
@@ -17,7 +19,6 @@ use parrot_cli::{
         interrupts::Interrupts,
         startup::{LocalChatStartup, OpenLocalClient, RestoreProgress},
     },
-    slash_sessions::WebCommandFactory,
     slash_settings::{AuthServices, ModelSelection, model_alias},
     terminal_dialogs::{
         EnhancedChatRequest, EnhancedCli, EnhancedTerminal, LocalTerminalSessionNavigation,
@@ -36,6 +37,10 @@ use parrot_foundation::{
     paths::{ApplicationRoots, StatePaths},
     template_catalog::PromptTemplateCatalog,
 };
+#[cfg(feature = "web")]
+use parrot_host::web::{
+    proxy::WebParrotProxy, router::WebSessionRouter, server::WebServer, slash::WebSlashService,
+};
 use parrot_host::{
     composition::factory::user::ordinary_workspace_resolver,
     grpc::{
@@ -45,12 +50,7 @@ use parrot_host::{
         transport::{GrpcServer, GrpcTransportClient},
     },
     production::{ProductionHost, ProductionHostConfig, ProductionReadContext},
-    web::{
-        proxy::WebParrotProxy,
-        router::{WebClient, WebSessionRouter},
-        server::WebServer,
-        slash::WebSlashService,
-    },
+    web::router::WebClient,
 };
 use parrot_provider::routing::builder::ProviderRegistryBuilder;
 use parrot_runtime::agent_turn::lifecycle::Signal;
@@ -249,7 +249,17 @@ impl CommandBackend for Application {
                 }
                 RuntimeCommand::Chat(options) => self.chat(options, cancellation).await,
                 RuntimeCommand::Serve(options) => self.serve(options, cancellation).await,
+                #[cfg(feature = "web")]
                 RuntimeCommand::Web { port } => self.web(port, cancellation).await,
+                #[cfg(not(feature = "web"))]
+                RuntimeCommand::Web { port: _ } => {
+                    writeln!(
+                        io::stderr(),
+                        "parrot: the web UI is not built; compile with the web feature"
+                    )
+                    .map_err(command_failure)?;
+                    Ok(dispatch::EXIT_USAGE)
+                }
             }
         })
     }
@@ -392,6 +402,7 @@ impl Application {
         combine(result, local.close().await)
     }
 
+    #[cfg(feature = "web")]
     async fn web(&self, port: u16, cancellation: &dyn Cancellation) -> Result<i32, DispatchError> {
         let (configuration, templates) = self.configuration_and_templates()?;
         let auth = self.auth_services(&configuration)?;
@@ -769,6 +780,7 @@ impl Application {
                 Box::new(io::stderr()),
                 VERSION.into(),
                 prepare,
+                options.jsonl_log,
             )
             .run(cancellation)
             .await

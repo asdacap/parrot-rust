@@ -82,6 +82,7 @@ pub struct ChatOptions {
     pub basic: bool,
     pub take_over: bool,
     pub prompt: String,
+    pub jsonl_log: String,
 }
 impl Default for ChatOptions {
     fn default() -> Self {
@@ -96,6 +97,7 @@ impl Default for ChatOptions {
             basic: false,
             take_over: false,
             prompt: String::new(),
+            jsonl_log: String::new(),
         }
     }
 }
@@ -224,6 +226,13 @@ fn parse_chat(arguments: &[String]) -> Result<ChatOptions, UsageError> {
             ("--new-session", _) => options.session_start = ChatSessionStart::Fresh,
             ("--basic", _) => options.basic = true,
             ("--take-over", _) => options.take_over = true,
+            ("--jsonl", Some(value)) => {
+                options.jsonl_log = value.clone();
+                index += 1;
+            }
+            ("--jsonl", _) => {
+                return Err(UsageError::usage("usage: parrot chat --jsonl <file>"));
+            }
             _ => words.push(argument.clone()),
         }
         index += 1;
