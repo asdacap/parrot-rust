@@ -5,10 +5,22 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parrot_domain::values::identifiers::Identifier;
 use tokio::sync::Notify;
+
+/// Completed records stop being tracked once every current subscriber's pending
+/// snapshot already carries them and committed captures have had time to
+/// persist them; later snapshots omit them and reconnecting listeners recover
+/// completions from replay. tokio's clock keeps this prunable from paused
+/// tests.
+const COMPLETED_RETENTION: Duration = Duration::from_secs(60);
+
+struct CompletedEntry {
+    state: CompletedShellProcessState,
+    completed_at: tokio::time::Instant,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActivityKind {
@@ -101,7 +113,7 @@ struct InventoryState {
     revision: u64,
     disposed: bool,
     processes: HashMap<String, ActiveShellProcessState>,
-    completed: HashMap<String, CompletedShellProcessState>,
+    completed: HashMap<String, CompletedEntry>,
     subscribers: HashMap<u64, Weak<Subscriber>>,
     next_subscriber: u64,
 }
@@ -109,7 +121,11 @@ struct InventoryState {
 impl InventoryState {
     fn capture(&self) -> ShellProcessInventorySnapshot {
         let mut processes: Vec<_> = self.processes.values().cloned().collect();
-        let mut completed_processes: Vec<_> = self.completed.values().cloned().collect();
+        let mut completed_processes: Vec<_> = self
+            .completed
+            .values()
+            .map(|entry| entry.state.clone())
+            .collect();
         processes.sort_by(|a, b| a.process_id.encode_utf16().cmp(b.process_id.encode_utf16()));
         completed_processes
             .sort_by(|a, b| a.process_id.encode_utf16().cmp(b.process_id.encode_utf16()));
@@ -121,6 +137,13 @@ impl InventoryState {
             processes,
             completed_processes,
         }
+    }
+
+    fn prune_completed(&mut self) {
+        let now = tokio::time::Instant::now();
+        self.completed.retain(|_, entry| {
+            now.saturating_duration_since(entry.completed_at) < COMPLETED_RETENTION
+        });
     }
 
     fn publish(&mut self, close: bool) {
@@ -186,6 +209,7 @@ impl ShellProcessInventory {
         {
             return Err(InventoryError::AlreadyVisible(process.process_id));
         }
+        state.prune_completed();
         state.revision = state.revision.wrapping_add(1);
         let yielded = YieldedShellProcess {
             process_id: process.process_id.clone(),
@@ -206,11 +230,15 @@ impl ShellProcessInventory {
         if state.disposed || state.processes.remove(process_id).is_none() {
             return;
         }
+        state.prune_completed();
         state.completed.insert(
             process_id.into(),
-            CompletedShellProcessState {
-                process_id: process_id.into(),
-                elapsed_milliseconds,
+            CompletedEntry {
+                state: CompletedShellProcessState {
+                    process_id: process_id.into(),
+                    elapsed_milliseconds,
+                },
+                completed_at: tokio::time::Instant::now(),
             },
         );
         state.revision = state.revision.wrapping_add(1);
@@ -436,6 +464,19 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["\u{10000}", "\u{e000}"]
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn completed_entries_stop_costing_snapshot_work_after_retention() {
+        let inventory = ShellProcessInventory::with_instance_id("agent-id", "inventory");
+        inventory.publish(active("a")).unwrap();
+        inventory.complete("a", Some(123));
+        assert_eq!(inventory.capture().completed_processes.len(), 1);
+        tokio::time::advance(Duration::from_secs(61)).await;
+        inventory.publish(active("b")).unwrap();
+        assert!(inventory.capture().completed_processes.is_empty());
+        inventory.complete("b", Some(456));
+        assert_eq!(inventory.capture().completed_processes.len(), 1);
     }
 
     #[tokio::test]

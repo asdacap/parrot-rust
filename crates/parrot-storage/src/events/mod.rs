@@ -101,6 +101,17 @@ impl EventRepository {
             .map(|row| row.event)
             .collect())
     }
+    /// Events after the first stored occurrence of the cursor id, or every
+    /// stored event when the cursor id was never recorded.
+    pub async fn replay_after(&self, cursor: &str) -> Result<Vec<Event>, EventError> {
+        let cursor = cursor.to_string();
+        Ok(self
+            .transaction(move |tx| read_events_after(tx, &cursor))
+            .await?
+            .into_iter()
+            .map(|row| row.event)
+            .collect())
+    }
     pub async fn notices(
         &self,
         agent: String,
@@ -154,6 +165,34 @@ pub fn read_events(
 ) -> Result<Vec<StoredEvent>, EventError> {
     let mut read=tx.prepare("SELECT sequence, payload FROM event WHERE ?1 IS NULL OR agent_session = ?1 ORDER BY sequence")?;
     let rows = read.query_map([agent], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+    })?;
+    rows.map(|row| {
+        let (sequence, raw) = row?;
+        Ok(StoredEvent {
+            sequence,
+            event: Event::parse_from_bytes(&raw)?,
+            raw,
+        })
+    })
+    .collect()
+}
+
+pub fn read_events_after(
+    tx: &Transaction<'_>,
+    cursor: &str,
+) -> Result<Vec<StoredEvent>, EventError> {
+    let start: Option<i64> = tx.query_row(
+        "SELECT MIN(sequence) FROM event WHERE id = ?1",
+        [cursor],
+        |row| row.get(0),
+    )?;
+    let Some(start) = start else {
+        return read_events(tx, None);
+    };
+    let mut read =
+        tx.prepare("SELECT sequence, payload FROM event WHERE sequence > ?1 ORDER BY sequence")?;
+    let rows = read.query_map([start], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
     })?;
     rows.map(|row| {
