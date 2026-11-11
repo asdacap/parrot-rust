@@ -96,7 +96,7 @@ impl TurnStatus<Security> for RealReminderStatus {
                 profile: selection.profile.id.clone(),
                 requested_model: "scripted/model".into(),
             },
-            String::new(),
+            "Standing profile instructions".into(),
         )
     }
 }
@@ -939,10 +939,16 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         .unwrap()
         .unwrap_or_default();
     assert!(standing.contains_key(&parrot_core::StatusKey::new("runtime:context")));
+    assert!(standing.contains_key(&parrot_core::StatusKey::new("profile:original")));
     let reminder = {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
+        assert!(requests[0].messages.iter().any(|message| {
+            message.role == sessions::Role::System
+                && message.content().contains("Standing profile instructions")
+        }));
         let message = requests[1].messages.last().unwrap();
+        assert!(!message.content().contains("Standing profile instructions"));
         assert_eq!(message.role, sessions::Role::System);
         assert!(
             message

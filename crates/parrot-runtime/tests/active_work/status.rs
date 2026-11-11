@@ -841,6 +841,47 @@ async fn runtime_tree_nests_retained_agents_processes_and_preserves_source_sorti
     assert!(text.find("root/zulu").unwrap() < text.find("root/alpha").unwrap());
 }
 #[tokio::test]
+async fn runtime_tree_changes_do_not_trigger_status_steering() {
+    let source = Arc::new(TreeSource(Mutex::new(RuntimeTreeSnapshot {
+        agents: vec![identity("root", "", "main").session.clone()],
+        activity: vec![("root".into(), DrainState::Idle)],
+        ..RuntimeTreeSnapshot::default()
+    })));
+    let runtime = Arc::new(
+        RuntimeStatus::new(
+            catalog(""),
+            clock(),
+            SystemTime::UNIX_EPOCH,
+            vec![Arc::new(RuntimeTreeStatusProvider {
+                source: source.clone(),
+                templates: catalog(""),
+            })],
+        )
+        .unwrap(),
+    );
+    let mut query = query();
+    query.session_id = "root".into();
+    let bound = runtime.bind_context(query, "profile prompt".into());
+    let snapshot = ContextSnapshot::new(100, 1000, Some(10), 90);
+    let initial = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    assert!(parrot_core::status_steering_needed(
+        &initial,
+        &BTreeMap::new()
+    ));
+    let standing = initial
+        .iter()
+        .map(|(key, offer)| (key.clone(), offer.hash.clone()))
+        .collect();
+
+    source.0.lock().unwrap().activity[0].1 = DrainState::Running;
+    let updated = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    let tree_key = parrot_core::StatusKey::new("runtime:queues");
+    assert_eq!(initial[&tree_key].text, "Runtime:\n- agent: main");
+    assert_eq!(updated[&tree_key].text, "Runtime:\n- agent: main (running)");
+    assert!(!parrot_core::status_steering_needed(&updated, &standing));
+}
+
+#[tokio::test]
 async fn runtime_tree_keeps_idle_ancestors_of_active_descendants() {
     let root = identity("root", "", "main");
     let parent = identity("parent", "root", "idle-parent");
