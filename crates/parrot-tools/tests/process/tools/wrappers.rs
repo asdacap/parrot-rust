@@ -315,6 +315,7 @@ struct Fixture {
     definitions: ToolDefinitionCatalog,
     services: Arc<ProcessToolServices<PassThroughLauncher>>,
     security: CapturedSecurity,
+    templates: Arc<PromptTemplateCatalog>,
 }
 impl Fixture {
     fn new() -> Self {
@@ -344,6 +345,7 @@ impl Fixture {
                 .collect(),
         );
         let templates = Arc::new(templates);
+        let fixture_templates = Arc::clone(&templates);
         let sink = Arc::new(RecordingSink {
             templates: Arc::clone(&templates),
             rows: Mutex::new(Vec::new()),
@@ -434,6 +436,7 @@ impl Fixture {
             definitions,
             services,
             security: CapturedSecurity(Arc::new(73)),
+            templates: fixture_templates,
         }
     }
 
@@ -451,7 +454,7 @@ impl Fixture {
         tokio::time::timeout(
             LIMIT,
             self.tool(kind).invoke(
-                ProcessInvocation::new("wrapper-call", arguments),
+                ProcessInvocation::new("wrapper-call", arguments, self.templates.clone()),
                 InvocationContext::new(self.security.clone(), (), &NeverCancelled),
             ),
         )
@@ -810,11 +813,11 @@ async fn exec_stderr_summary_uses_invocation_templates_after_yielding() {
         } else {
             "printf answer; printf 'warning one\\nwarning two\\n' >&2"
         };
-        let mut invocation = ProcessInvocation::new(
+        let invocation = ProcessInvocation::new(
             "summary-override",
             json!({"command":command,"name":"custom-summary","run_async":yielded}).to_string(),
+            Arc::new(templates),
         );
-        invocation.prompt_templates = Some(Arc::new(templates));
         let result = fixture
             .tool(ProcessToolKind::ExecCommand)
             .invoke(
@@ -1478,6 +1481,7 @@ async fn cancellation_releases_observation_but_keeps_the_real_process_owned() {
             ProcessInvocation::new(
                 "cancelled-call",
                 r#"{"name":"cancel-observation","input":""}"#,
+                fixture.templates.clone(),
             ),
             InvocationContext::new(fixture.security.clone(), (), &cancellation),
         )
@@ -1506,26 +1510,33 @@ async fn parallel_safety_uses_configured_read_only_prefixes_not_names_or_environ
     assert_eq!(
         tool.parallel_safety(&ProcessInvocation::new(
             "parallel",
-            r#"{"command":"git status","env":{"VALUE":"x"}}"#
+            r#"{"command":"git status","env":{"VALUE":"x"}}"#,
+            fixture.templates.clone(),
         )),
         ParallelSafety::ParallelSafe
     );
     assert_eq!(
         tool.parallel_safety(&ProcessInvocation::new(
             "parallel",
-            r#"{"command":"printf mutation > file"}"#
+            r#"{"command":"printf mutation > file"}"#,
+            fixture.templates.clone(),
         )),
         ParallelSafety::Sequential
     );
     assert_eq!(
         tool.parallel_safety(&ProcessInvocation::new(
             "parallel",
-            r#"{"command":"git status","name":" "}"#
+            r#"{"command":"git status","name":" "}"#,
+            fixture.templates.clone(),
         )),
         ParallelSafety::Sequential
     );
     assert_eq!(
-        tool.parallel_safety(&ProcessInvocation::new("parallel", "[]")),
+        tool.parallel_safety(&ProcessInvocation::new(
+            "parallel",
+            "[]",
+            fixture.templates.clone()
+        )),
         ParallelSafety::Sequential
     );
     for kind in [
@@ -1534,9 +1545,11 @@ async fn parallel_safety_uses_configured_read_only_prefixes_not_names_or_environ
         ProcessToolKind::Monitor,
     ] {
         assert_eq!(
-            fixture
-                .tool(kind)
-                .parallel_safety(&ProcessInvocation::new("parallel", "{}")),
+            fixture.tool(kind).parallel_safety(&ProcessInvocation::new(
+                "parallel",
+                "{}",
+                fixture.templates.clone(),
+            )),
             ParallelSafety::Sequential
         );
     }
@@ -1822,7 +1835,7 @@ async fn cancelling_an_active_exec_wait_releases_claim_without_detaching_ownersh
     let cancellation = ProcessLifetime::default();
     let tool = fixture.tool(ProcessToolKind::ExecCommand);
     let wait = tool.invoke(
-        ProcessInvocation::new("cancel-active", json!({"command":"while [ ! -f \"$WORKDIR/release-active\" ]; do sleep 0.01; done; printf survived","name":"active-wait"}).to_string()),
+        ProcessInvocation::new("cancel-active", json!({"command":"while [ ! -f \"$WORKDIR/release-active\" ]; do sleep 0.01; done; printf survived","name":"active-wait"}).to_string(), fixture.templates.clone()),
         InvocationContext::new(fixture.security.clone(), (), &cancellation),
     );
     let cancel = async {
@@ -1854,7 +1867,7 @@ async fn precancelled_exec_keeps_the_started_process_owned_until_observed() {
     let cancellation = ProcessLifetime::default();
     cancellation.cancel();
     let result = fixture.tool(ProcessToolKind::ExecCommand).invoke(
-        ProcessInvocation::new("precancelled", json!({"command":"while [ ! -f \"$WORKDIR/release-pre\" ]; do sleep 0.01; done; printf complete","name":"precancelled"}).to_string()),
+        ProcessInvocation::new("precancelled", json!({"command":"while [ ! -f \"$WORKDIR/release-pre\" ]; do sleep 0.01; done; printf complete","name":"precancelled"}).to_string(), fixture.templates.clone()),
         InvocationContext::new(fixture.security.clone(), (), &cancellation),
     ).await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
@@ -1878,7 +1891,11 @@ async fn precancelled_interrupt_does_not_signal_or_consume_the_owner() {
     let result = fixture
         .tool(ProcessToolKind::InterruptProcess)
         .invoke(
-            ProcessInvocation::new("cancel-signal", r#"{"name":"no-signal","signal":9}"#),
+            ProcessInvocation::new(
+                "cancel-signal",
+                r#"{"name":"no-signal","signal":9}"#,
+                fixture.templates.clone(),
+            ),
             InvocationContext::new(fixture.security.clone(), (), &cancellation),
         )
         .await;
@@ -1896,7 +1913,7 @@ async fn monitor_ignores_the_invocation_token_and_owns_a_separate_report() {
     let cancellation = ProcessLifetime::default();
     cancellation.cancel();
     let result = fixture.tool(ProcessToolKind::Monitor).invoke(
-        ProcessInvocation::new("cancel-monitor", r#"{"command":"printf 'token-independent\\n'","description":"own lifetime","name":"token-watch"}"#),
+        ProcessInvocation::new("cancel-monitor", r#"{"command":"printf 'token-independent\\n'","description":"own lifetime","name":"token-watch"}"#, fixture.templates.clone()),
         InvocationContext::new(fixture.security.clone(), (), &cancellation),
     ).await.unwrap();
     assert_eq!(
@@ -1926,8 +1943,7 @@ async fn invocation_error_templates_format_parser_errors() {
         )]),
     )
     .unwrap();
-    let mut invocation = ProcessInvocation::new("custom-error", "{}");
-    invocation.prompt_templates = Some(Arc::new(templates));
+    let invocation = ProcessInvocation::new("custom-error", "{}", Arc::new(templates));
     let result = fixture
         .tool(ProcessToolKind::ExecCommand)
         .invoke(

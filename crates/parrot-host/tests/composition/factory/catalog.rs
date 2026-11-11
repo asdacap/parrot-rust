@@ -1343,7 +1343,12 @@ async fn real_retained_read_receives_captured_security_and_budget_identity() {
     let adapter = CatalogAdapter::new(catalog, planner(), templates.clone()).unwrap();
     let snapshot = ToolSnapshot::document(adapter.materialize().unwrap()).unwrap();
     let selection = selected(89);
-    let call = ToolInvocation::new("real-read", r#"{"path":"file.txt"}"#, 9_007_199_254_740_993);
+    let call = ToolInvocation::new(
+        "real-read",
+        r#"{"path":"file.txt"}"#,
+        9_007_199_254_740_993,
+        templates.clone(),
+    );
     let ToolHandle::Ordinary(read) = snapshot.find("read").unwrap() else {
         panic!("read must be ordinary")
     };
@@ -1373,9 +1378,8 @@ async fn real_retained_read_receives_captured_security_and_budget_identity() {
         panic!("image must be ordinary")
     };
     let budget = Arc::new(ToolCycleImageBudget::new(0));
-    let mut call = ToolInvocation::new("image", r#"{"path":"pixel.png"}"#, 9);
+    let mut call = ToolInvocation::new("image", r#"{"path":"pixel.png"}"#, 9, templates.clone());
     call.image_budget = Some(budget.clone());
-    call.prompt_templates = Some(templates);
     let output = image
         .invoke(
             call,
@@ -1405,7 +1409,7 @@ async fn retained_session_uses_immutable_turn_selection_and_boundary_sequence() 
         owner,
         ..
     } = fixture;
-    let adapter = CatalogAdapter::new(catalog, planner(), templates).unwrap();
+    let adapter = CatalogAdapter::new(catalog, planner(), templates.clone()).unwrap();
     let snapshot = ToolSnapshot::document(adapter.materialize().unwrap()).unwrap();
     let selection = selected(89);
     let invoke = |name: &str, arguments: &str| {
@@ -1413,7 +1417,12 @@ async fn retained_session_uses_immutable_turn_selection_and_boundary_sequence() 
             panic!("ordinary session tool")
         };
         tool.invoke(
-            ToolInvocation::new("captured", arguments, 9_007_199_254_740_993),
+            ToolInvocation::new(
+                "captured",
+                arguments,
+                9_007_199_254_740_993,
+                templates.clone(),
+            ),
             InvocationContext::new(
                 SharedSecurity(selection.security.clone()),
                 selection.clone(),
@@ -1505,18 +1514,15 @@ fn output_conversion_preserves_artifacts_opaque_ids_optional_paths_and_activity(
 #[tokio::test]
 async fn invocation_conversion_preserves_templates_call_boundary_and_shared_image_budget() {
     let fixture = Fixture::new("", true, 0);
-    let mut call = ToolInvocation::new("call", "raw arguments", i64::MAX);
+    let mut call =
+        ToolInvocation::new("call", "raw arguments", i64::MAX, fixture.templates.clone());
     let budget = Arc::new(ToolCycleImageBudget::new(10));
     call.image_budget = Some(budget.clone());
-    call.prompt_templates = Some(fixture.templates.clone());
-    let converted = invocation_to_catalog(call, &fixture.templates);
+    let converted = invocation_to_catalog(call);
     assert_eq!(converted.call_id, "call");
     assert_eq!(converted.arguments_json, "raw arguments");
     assert_eq!(converted.assistant_sequence, i64::MAX);
-    assert!(Arc::ptr_eq(
-        converted.prompt_templates.as_ref().unwrap(),
-        &fixture.templates
-    ));
+    assert!(Arc::ptr_eq(&converted.prompt_templates, &fixture.templates));
     assert!(Arc::ptr_eq(
         &converted.image_budget.as_ref().unwrap().budget,
         &budget
@@ -1588,7 +1594,7 @@ async fn retained_operation_cancellation_is_not_rendered_as_success() {
         owner,
         ..
     } = Fixture::new("", true, 0);
-    let adapter = CatalogAdapter::new(catalog, planner(), templates).unwrap();
+    let adapter = CatalogAdapter::new(catalog, planner(), templates.clone()).unwrap();
     let snapshot = ToolSnapshot::document(adapter.materialize().unwrap()).unwrap();
     let ToolHandle::Ordinary(read) = snapshot.find("read").unwrap() else {
         panic!("read must be ordinary")
@@ -1596,7 +1602,7 @@ async fn retained_operation_cancellation_is_not_rendered_as_success() {
     let selection = selected(89);
     let result = read
         .invoke(
-            ToolInvocation::new("cancel", r#"{"path":"file.txt"}"#, 9),
+            ToolInvocation::new("cancel", r#"{"path":"file.txt"}"#, 9, templates.clone()),
             InvocationContext::new(
                 SharedSecurity(selection.security.clone()),
                 selection,

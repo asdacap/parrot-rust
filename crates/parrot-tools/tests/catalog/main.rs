@@ -218,11 +218,19 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
     }
     let exec = snapshot.find("exec_command").unwrap().create();
     assert_eq!(
-        exec.parallel_safety(&Invocation::new("call", r#"{"command":"printf hello"}"#)),
+        exec.parallel_safety(&Invocation::new(
+            "call",
+            r#"{"command":"printf hello"}"#,
+            fixture.templates.clone()
+        )),
         ParallelSafety::ParallelSafe
     );
     assert_eq!(
-        exec.parallel_safety(&Invocation::new("call", r#"{"command":"rm file"}"#)),
+        exec.parallel_safety(&Invocation::new(
+            "call",
+            r#"{"command":"rm file"}"#,
+            fixture.templates.clone()
+        )),
         ParallelSafety::Sequential
     );
     for name in ["read", "read_image", "glob", "web_fetch"] {
@@ -231,7 +239,7 @@ async fn source_support_send_definition_and_interruption_flags_are_bound_without
                 .find(name)
                 .unwrap()
                 .create()
-                .parallel_safety(&Invocation::new("call", "{}")),
+                .parallel_safety(&Invocation::new("call", "{}", fixture.templates.clone())),
             ParallelSafety::ParallelSafe
         );
     }
@@ -441,7 +449,7 @@ async fn retained_identity_budget_templates_and_cancellation_survive_binding() {
     let read = snapshot.find("read_image").unwrap().create();
     let budget = Arc::new(parrot_domain::values::tools::ToolCycleImageBudget::new(1));
     assert!(!budget.try_accept(2).unwrap());
-    let mut invocation = Invocation::new("image-budget", "not json");
+    let mut invocation = Invocation::new("image-budget", "not json", fixture.templates.clone());
     invocation.image_budget = Some(Arc::new(ImageBudget::new(
         budget,
         fixture.templates.clone(),
@@ -475,7 +483,11 @@ async fn retained_identity_budget_templates_and_cancellation_survive_binding() {
     let write = snapshot.find("write").unwrap().create();
     let result = write
         .invoke(
-            Invocation::new("cancel", r#"{"path":"old.txt","content":"new"}"#),
+            Invocation::new(
+                "cancel",
+                r#"{"path":"old.txt","content":"new"}"#,
+                fixture.templates.clone(),
+            ),
             parrot_domain::contracts::security::InvocationContext::new(
                 support::Snapshot { id: 3 },
                 catalog::Selection {

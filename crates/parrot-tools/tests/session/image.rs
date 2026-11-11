@@ -508,8 +508,23 @@ fn invocation(arguments: &str) -> Invocation {
     Invocation {
         call_id: "generate".into(),
         arguments_json: arguments.into(),
-        prompt_templates: None,
+        prompt_templates: templates(),
     }
+}
+
+fn templates() -> Arc<parrot_foundation::template_catalog::PromptTemplateCatalog> {
+    let environment = std::collections::BTreeMap::from([
+        ("HOME".to_owned(), "/tmp/t60/home".to_owned()),
+        ("XDG_CONFIG_HOME".to_owned(), "/tmp/t60/config".to_owned()),
+        ("XDG_STATE_HOME".to_owned(), "/tmp/t60/state".to_owned()),
+        ("XDG_DATA_HOME".to_owned(), "/tmp/t60/data".to_owned()),
+        ("WORKDIR".to_owned(), "/tmp/t60/workspace".to_owned()),
+    ]);
+    Arc::new(
+        parrot_foundation::template_catalog::PromptTemplateCatalog::from_content("", &environment)
+            .unwrap()
+            .1,
+    )
 }
 fn arguments(prompt: &str, output: &str, references: &[&str]) -> String {
     serde_json::json!({"prompt": prompt, "output_path": output, "referenced_image_paths": references}).to_string()

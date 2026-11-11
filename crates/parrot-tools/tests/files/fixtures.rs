@@ -145,8 +145,26 @@ pub fn definition() -> ConfiguredToolDefinition {
     ConfiguredToolDefinition::new("fixture", "{}")
 }
 
+pub fn templates() -> Arc<parrot_foundation::template_catalog::PromptTemplateCatalog> {
+    let environment = [
+        ("HOME", "/tmp/t55/home"),
+        ("XDG_CONFIG_HOME", "/tmp/t55/config"),
+        ("XDG_STATE_HOME", "/tmp/t55/state"),
+        ("XDG_DATA_HOME", "/tmp/t55/data"),
+        ("WORKDIR", "/tmp/t55/workspace"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.into(), value.into()))
+    .collect::<std::collections::BTreeMap<_, _>>();
+    Arc::new(
+        parrot_foundation::template_catalog::PromptTemplateCatalog::from_content("", &environment)
+            .unwrap()
+            .1,
+    )
+}
+
 pub fn invocation(arguments: serde_json::Value) -> FileToolInvocation {
-    FileToolInvocation::new("test-call", arguments.to_string())
+    FileToolInvocation::new("test-call", arguments.to_string(), templates())
 }
 
 pub fn assert_shared_snapshot(calls: &[Call], id: u64) {

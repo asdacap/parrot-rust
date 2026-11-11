@@ -271,7 +271,7 @@ async fn strict_invalid_arguments_never_dispatch_to_services() {
     for arguments in read_arguments {
         assert!(
             read.execute(
-                &FileToolInvocation::new("invalid", arguments),
+                &FileToolInvocation::new("invalid", arguments, templates()),
                 &Snapshot(1),
                 &NoCancel
             )
@@ -286,7 +286,7 @@ async fn strict_invalid_arguments_never_dispatch_to_services() {
         assert!(
             write
                 .execute(
-                    &FileToolInvocation::new("invalid", arguments),
+                    &FileToolInvocation::new("invalid", arguments, templates()),
                     &Snapshot(1),
                     &NoCancel
                 )
@@ -300,7 +300,7 @@ async fn strict_invalid_arguments_never_dispatch_to_services() {
     for arguments in edit_arguments {
         assert!(
             edit.execute(
-                &FileToolInvocation::new("invalid", arguments),
+                &FileToolInvocation::new("invalid", arguments, templates()),
                 &Snapshot(1),
                 &NoCancel
             )
@@ -314,7 +314,7 @@ async fn strict_invalid_arguments_never_dispatch_to_services() {
     for arguments in glob_arguments {
         assert!(
             glob.execute(
-                &FileToolInvocation::new("invalid", arguments),
+                &FileToolInvocation::new("invalid", arguments, templates()),
                 &Snapshot(1),
                 &NoCancel
             )
@@ -1209,7 +1209,7 @@ async fn read_renders_the_path_variable_note_through_the_configured_template() {
     );
     let tool = ReadTool::new(service, short_paths(), definition());
     let mut full = invocation(json!({"path":"/scratch/notes.txt"}));
-    full.prompt_templates = Some(templates.clone());
+    full.prompt_templates = templates.clone();
     let result = tool.execute(&full, &Snapshot(1), &NoCancel).await.unwrap();
     assert!(
         result.text.ends_with("\nSHORT<$SCRATCH/notes.txt>"),
@@ -1217,7 +1217,7 @@ async fn read_renders_the_path_variable_note_through_the_configured_template() {
         result.text
     );
     let mut shorthand = invocation(json!({"path":"$SCRATCH/notes.txt"}));
-    shorthand.prompt_templates = Some(templates.clone());
+    shorthand.prompt_templates = templates.clone();
     let result = tool
         .execute(&shorthand, &Snapshot(1), &NoCancel)
         .await

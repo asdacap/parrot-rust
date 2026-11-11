@@ -12,7 +12,7 @@ async fn checkpoint_returns_verbatim_title_without_service_mutation_or_text_form
                 .invoke_with(
                     Kind::SetCheckpoint,
                     &json,
-                    Some(formatter_catalog()),
+                    formatter_catalog(),
                     &Cancel(false)
                 )
                 .await
@@ -31,7 +31,7 @@ async fn checkpoint_argument_failures_use_the_configured_error_formatter() {
                 .invoke_with(
                     Kind::SetCheckpoint,
                     r#"{}"#,
-                    Some(formatter_catalog()),
+                    formatter_catalog(),
                     &Cancel(false),
                 )
                 .await

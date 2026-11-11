@@ -1156,6 +1156,25 @@ mod tests {
     };
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    fn templates() -> Arc<parrot_foundation::template_catalog::PromptTemplateCatalog> {
+        let environment = std::collections::BTreeMap::from([
+            ("HOME".to_owned(), "/tmp/t55/home".to_owned()),
+            ("XDG_CONFIG_HOME".to_owned(), "/tmp/t55/config".to_owned()),
+            ("XDG_STATE_HOME".to_owned(), "/tmp/t55/state".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/tmp/t55/data".to_owned()),
+            ("WORKDIR".to_owned(), "/tmp/t55/workspace".to_owned()),
+        ]);
+        Arc::new(
+            parrot_foundation::template_catalog::PromptTemplateCatalog::from_content(
+                "",
+                &environment,
+            )
+            .unwrap()
+            .1,
+        )
+    }
+
     struct Fixture {
         root: PathBuf,
         workspace: ProjectWorkspace,
@@ -1463,6 +1482,7 @@ mod tests {
         let invocation = parrot_tools::files::FileToolInvocation::new(
             "read-test",
             serde_json::json!({"path": path}).to_string(),
+            templates(),
         );
         let result = tool
             .execute(&invocation, &security.0, &NeverCancelled)
@@ -1491,6 +1511,7 @@ mod tests {
         let invocation = parrot_tools::files::FileToolInvocation::new(
             "read-test",
             serde_json::json!({"path": path, "limit": 1}).to_string(),
+            templates(),
         );
         let result = tool
             .execute(&invocation, &security, &NeverCancelled)

@@ -101,15 +101,19 @@ impl ProcessToolKind {
 pub struct ProcessInvocation {
     pub call_id: String,
     pub arguments_json: String,
-    pub prompt_templates: Option<Arc<PromptTemplateCatalog>>,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
 }
 
 impl ProcessInvocation {
-    pub fn new(call_id: impl Into<String>, arguments_json: impl Into<String>) -> Self {
+    pub fn new(
+        call_id: impl Into<String>,
+        arguments_json: impl Into<String>,
+        templates: Arc<PromptTemplateCatalog>,
+    ) -> Self {
         Self {
             call_id: call_id.into(),
             arguments_json: arguments_json.into(),
-            prompt_templates: None,
+            prompt_templates: templates,
         }
     }
 }
@@ -187,10 +191,11 @@ where
         invocation: &ProcessInvocation,
         message: &str,
     ) -> io::Result<ProcessToolResult> {
-        let text = match &invocation.prompt_templates {
-            Some(templates) => render(templates, "tool-result.error", &[("message", message)])?,
-            None => format!("error: {message}"),
-        };
+        let text = render(
+            &invocation.prompt_templates,
+            "tool-result.error",
+            &[("message", message)],
+        )?;
         Ok(ProcessToolResult::text(text))
     }
 
@@ -268,12 +273,7 @@ where
                             .as_deref()
                             .is_none_or(|value| value.trim().is_empty()));
                 let report: Arc<dyn ProcessReport> = Arc::new(ExecCommandReport {
-                    templates: Arc::clone(
-                        invocation
-                            .prompt_templates
-                            .as_ref()
-                            .unwrap_or(&self.services.templates),
-                    ),
+                    templates: Arc::clone(&invocation.prompt_templates),
                 });
                 let process = self
                     .start(

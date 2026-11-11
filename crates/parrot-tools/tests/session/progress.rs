@@ -154,7 +154,7 @@ async fn progress_preserves_u64_counts_and_uses_configurable_results_and_formatt
                 .invoke_with(
                     Kind::Progress,
                     r#"{"steps":18446744073709551614,"total_steps":18446744073709551615}"#,
-                    Some(formatter_catalog()),
+                    formatter_catalog(),
                     &Cancel(false)
                 )
                 .await
@@ -192,7 +192,7 @@ async fn progress_preserves_service_errors_and_cancellation_without_changing_sta
             .invoke_with(
                 Kind::Progress,
                 r#"{"steps":0,"total_steps":2}"#,
-                None,
+                fixture.templates.clone(),
                 &Cancel(true)
             )
             .await,
@@ -206,7 +206,7 @@ async fn progress_preserves_service_errors_and_cancellation_without_changing_sta
             .invoke_with(
                 Kind::Progress,
                 r#"{"steps":1,"total_steps":2}"#,
-                Some(formatter_catalog()),
+                formatter_catalog(),
                 &Cancel(false),
             )
             .await;

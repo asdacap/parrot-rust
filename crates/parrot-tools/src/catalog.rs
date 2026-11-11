@@ -97,17 +97,21 @@ pub struct Invocation {
     pub call_id: String,
     pub assistant_sequence: i64,
     pub arguments_json: String,
-    pub prompt_templates: Option<Arc<PromptTemplateCatalog>>,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
     pub image_budget: Option<Arc<files::ImageBudget>>,
 }
 
 impl Invocation {
-    pub fn new(call_id: impl Into<String>, arguments_json: impl Into<String>) -> Self {
+    pub fn new(
+        call_id: impl Into<String>,
+        arguments_json: impl Into<String>,
+        templates: Arc<PromptTemplateCatalog>,
+    ) -> Self {
         Self {
             call_id: call_id.into(),
             assistant_sequence: 0,
             arguments_json: arguments_json.into(),
-            prompt_templates: None,
+            prompt_templates: templates,
             image_budget: None,
         }
     }

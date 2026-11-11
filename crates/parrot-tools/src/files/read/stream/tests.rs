@@ -1,9 +1,25 @@
 use super::*;
 use crate::files::FileToolInvocation;
+use std::sync::Arc;
 
 fn finish(renderer: FileRenderer) -> String {
-    let invocation = FileToolInvocation::new("stream-test", "{}");
+    let invocation = FileToolInvocation::new("stream-test", "{}", templates());
     renderer.finish(&Formatter::new(&invocation)).unwrap()
+}
+
+fn templates() -> Arc<parrot_foundation::template_catalog::PromptTemplateCatalog> {
+    let environment = std::collections::BTreeMap::from([
+        ("HOME".to_owned(), "/tmp/t55/home".to_owned()),
+        ("XDG_CONFIG_HOME".to_owned(), "/tmp/t55/config".to_owned()),
+        ("XDG_STATE_HOME".to_owned(), "/tmp/t55/state".to_owned()),
+        ("XDG_DATA_HOME".to_owned(), "/tmp/t55/data".to_owned()),
+        ("WORKDIR".to_owned(), "/tmp/t55/workspace".to_owned()),
+    ]);
+    Arc::new(
+        parrot_foundation::template_catalog::PromptTemplateCatalog::from_content("", &environment)
+            .unwrap()
+            .1,
+    )
 }
 
 #[test]

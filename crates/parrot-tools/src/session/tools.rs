@@ -20,7 +20,7 @@ use std::sync::Arc;
 pub struct Invocation {
     pub call_id: String,
     pub arguments_json: String,
-    pub prompt_templates: Option<Arc<PromptTemplateCatalog>>,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
 }
 
 /// This family returns text only: no yielded process or attached image artifacts.
@@ -400,25 +400,22 @@ fn render(
 }
 
 pub(super) fn text_output(invocation: &Invocation, text: &str) -> OperationResult<Output, Failure> {
-    match invocation.prompt_templates.as_deref() {
-        Some(templates) => {
-            render(templates, "tool-result.text", &[("value", text.to_owned())]).map(Into::into)
-        }
-        None => Ok(text.to_owned().into()),
-    }
+    render(
+        &invocation.prompt_templates,
+        "tool-result.text",
+        &[("value", text.to_owned())],
+    )
+    .map(Into::into)
 }
 
 pub(super) fn error_output(
     invocation: &Invocation,
     message: &str,
 ) -> OperationResult<Output, Failure> {
-    match invocation.prompt_templates.as_deref() {
-        Some(templates) => render(
-            templates,
-            "tool-result.error",
-            &[("message", message.to_owned())],
-        )
-        .map(Into::into),
-        None => Ok(format!("error: {message}").into()),
-    }
+    render(
+        &invocation.prompt_templates,
+        "tool-result.error",
+        &[("message", message.to_owned())],
+    )
+    .map(Into::into)
 }

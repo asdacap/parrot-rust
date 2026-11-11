@@ -308,13 +308,14 @@ impl Fixture {
         )
     }
     pub async fn invoke(&self, kind: Kind, json: &str) -> OperationResult<Output, Failure> {
-        self.invoke_with(kind, json, None, &Cancel(false)).await
+        self.invoke_with(kind, json, self.templates.clone(), &Cancel(false))
+            .await
     }
     pub async fn invoke_with(
         &self,
         kind: Kind,
         json: &str,
-        formatter: Option<Arc<PromptTemplateCatalog>>,
+        formatter: Arc<PromptTemplateCatalog>,
         cancellation: &dyn Cancellation,
     ) -> OperationResult<Output, Failure> {
         let invocation = Invocation {

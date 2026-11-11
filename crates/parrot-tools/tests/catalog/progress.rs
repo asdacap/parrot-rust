@@ -15,9 +15,11 @@ async fn retained_progress_catalog_handle_replaces_closes_and_reopens_one_report
         &snapshot.find("progress").unwrap().create()
     ));
     assert_eq!(
-        progress
-            .create()
-            .parallel_safety(&Invocation::new("progress-call", "{}")),
+        progress.create().parallel_safety(&Invocation::new(
+            "progress-call",
+            "{}",
+            fixture.templates.clone(),
+        )),
         ParallelSafety::Sequential
     );
     assert!(!progress.create().enabled_after_interruption());
