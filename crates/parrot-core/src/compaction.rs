@@ -1,12 +1,7 @@
-pub use crate::CompactionFailure;
 use crate::{
-    BoxFuture, CancellationToken, Content, Error, ErrorCode, ErrorDetail, EventPublisher, Message,
-    Provider, ProviderRequest, Role, States,
-};
-pub use crate::{
-    CompactionGroup, CompactionHistoryGroup, CompactionInput, CompactionPlan, CompactionProgress,
-    CompactionResult, ConversationHistoryItem, ConversationState, ConversationSummary,
-    FittedCompaction, SummaryResponse,
+    BoxFuture, CancellationToken, CompactionFailure, CompactionGroup, CompactionPlan,
+    CompactionProgress, CompactionResult, Content, Error, ErrorCode, ErrorDetail, EventPublisher,
+    Message, Provider, ProviderRequest, Role, States, SummaryResponse,
 };
 use std::fmt;
 
@@ -15,9 +10,7 @@ mod planning;
 mod preparation;
 mod scratch;
 pub use fitting::{compact_conversation, fit_compaction, fit_status};
-pub use planning::{
-    CompactionConfiguration, CompactionPolicy, PlanningError, group_messages, is_complete,
-};
+pub use planning::{CompactionPolicy, group_messages, is_complete};
 pub use preparation::prepare_compaction;
 
 impl CompactionGroup {

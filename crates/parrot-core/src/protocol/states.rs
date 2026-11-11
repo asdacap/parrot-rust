@@ -139,7 +139,7 @@ pub trait States: Send + Sync {
         &'a mut self,
         _instructions: &'a str,
         _definitions: &'a [ToolDefinition],
-        _result: Result<Option<crate::compaction::FittedCompaction>, Error>,
+        _result: Result<Option<crate::FittedCompaction>, Error>,
     ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async { Err(Error::unsupported("States.finalize_compaction")) })
     }

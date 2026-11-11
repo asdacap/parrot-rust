@@ -1,9 +1,8 @@
 use super::{CompactionPlanner, CompactionSettings, ContextSize, PlanningError, PlanningInput};
 use parrot_core::{
-    CancellationToken, ProviderRequest,
-    compaction::{
-        self as core, CompactionFailure, CompactionPlan, CompactionProgress, SummaryResponse,
-    },
+    CancellationToken, CompactionFailure, CompactionPlan, CompactionProgress, ProviderRequest,
+    SummaryResponse,
+    compaction::{self as core},
 };
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
@@ -218,8 +217,8 @@ impl Compactor {
     }
 }
 
-impl From<core::CompactionResult> for CompactionResult {
-    fn from(result: core::CompactionResult) -> Self {
+impl From<parrot_core::CompactionResult> for CompactionResult {
+    fn from(result: parrot_core::CompactionResult) -> Self {
         Self {
             history: result.history.into_iter().map(Into::into).collect(),
             summary: result.summary.into(),

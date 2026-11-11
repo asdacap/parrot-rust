@@ -1,10 +1,7 @@
-use super::{
-    CompactionConfiguration, CompactionHistoryGroup, CompactionInput, ConversationHistoryItem,
-    ConversationState,
-};
 use crate::{
-    Content, ContextSnapshot, Error, EventPublisher, HistoryGroupMember, Message, Provider, Role,
-    States, ToolDefinition, assemble_history_groups, join_status_offering,
+    CompactionConfiguration, CompactionHistoryGroup, CompactionInput, Content, ContextSnapshot,
+    ConversationHistoryItem, ConversationState, Error, EventPublisher, HistoryGroupMember, Message,
+    Provider, Role, States, ToolDefinition, assemble_history_groups, join_status_offering,
 };
 use std::collections::{BTreeMap, BTreeSet};
 

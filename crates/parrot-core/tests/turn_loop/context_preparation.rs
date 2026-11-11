@@ -101,7 +101,7 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
         compacted_state.calibration.reset();
         state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
         state.summary_provider =
-            compaction_support::Provider::new([parrot_core::compaction::SummaryResponse::Summary(
+            compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
                 "automatic summary".into(),
             )]);
         state.compactions.push_back(CompactedContext {

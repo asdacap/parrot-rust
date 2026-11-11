@@ -1,10 +1,8 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, ConfigKey, ConfigValue, Content, Error, ErrorCode, ErrorDetail,
-    ErrorKind, EventPublisher, Message, Provider, ProviderRequest, Role, States,
-    compaction::{
-        CompactionFailure, CompactionGroup, CompactionPlan, CompactionProgress, CompactionResult,
-        PlanningError, SummaryResponse, compact,
-    },
+    BoxFuture, CancellationToken, CompactionFailure, CompactionGroup, CompactionPlan,
+    CompactionProgress, CompactionResult, ConfigKey, ConfigValue, Content, Error, ErrorCode,
+    ErrorDetail, ErrorKind, EventPublisher, Message, PlanningError, Provider, ProviderRequest,
+    Role, States, SummaryResponse, compaction::compact,
 };
 use std::{
     collections::VecDeque,

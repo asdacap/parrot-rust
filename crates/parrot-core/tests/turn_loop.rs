@@ -1,14 +1,13 @@
 use parrot_core::{
-    BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConfigValue, Content,
-    ContextCompaction, ContextConfiguration, ContextModel, ContextSnapshot, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
-    ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher,
-    FinishReason, InputAdmission, Message, Outcome, PendingMessage, PromotedInput, PromptTemplate,
-    Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
-    SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
-    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
-    ToolImage, ToolResult, ToolStatus, Tools, TurnOptions,
-    budget::{AgentState, TurnFlags},
+    AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConfigValue,
+    Content, ContextCompaction, ContextConfiguration, ContextModel, ContextSnapshot,
+    ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
+    ConversationReceipt, ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind,
+    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PendingMessage, PromotedInput,
+    PromptTemplate, Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill,
+    SkillContent, SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering,
+    StatusStanding, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition,
+    ToolExecutionRequest, ToolImage, ToolResult, ToolStatus, Tools, TurnFlags, TurnOptions,
     parse_skill_mentions,
 };
 use std::{
@@ -451,9 +450,9 @@ struct MemoryState {
     unlimited: bool,
     maximum: i32,
     reduced: bool,
-    compaction_plan: Option<parrot_core::compaction::CompactionPlan>,
+    compaction_plan: Option<parrot_core::CompactionPlan>,
     summary_provider: compaction_support::Provider,
-    recorded_compactions: Vec<Result<Option<parrot_core::compaction::CompactionResult>, Error>>,
+    recorded_compactions: Vec<Result<Option<parrot_core::CompactionResult>, Error>>,
     fitted_statuses: Vec<String>,
     status_offering: StatusOffering,
     next_status_offering: Option<StatusOffering>,
@@ -1159,7 +1158,7 @@ impl States for MemoryState {
                     for call in &message.tool_calls {
                         owners.insert(call.id.clone(), sequence);
                     }
-                    parrot_core::compaction::ConversationHistoryItem {
+                    parrot_core::ConversationHistoryItem {
                         sequence,
                         tool_owner_sequence,
                         is_compaction_status: false,
@@ -1175,7 +1174,7 @@ impl States for MemoryState {
         &'a mut self,
         instructions: &'a str,
         definitions: &'a [ToolDefinition],
-        result: Result<Option<parrot_core::compaction::FittedCompaction>, Error>,
+        result: Result<Option<parrot_core::FittedCompaction>, Error>,
     ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
         Box::pin(async move {
             self.compacting.store(false, Ordering::SeqCst);
@@ -2095,7 +2094,7 @@ fn oversized_recovery_invokes_core_summary_requests_and_records_the_result_befor
         "retained tail",
     ]));
     state.summary_provider.replies.lock().unwrap().push_back(Ok(
-        parrot_core::compaction::SummaryResponse::Summary("core summary".into()),
+        parrot_core::SummaryResponse::Summary("core summary".into()),
     ));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     let requests = state.summary_provider.requests.lock().unwrap();

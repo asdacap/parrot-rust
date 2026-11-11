@@ -1,7 +1,8 @@
 use super::{ContextSize, ContextSnapshot, PlanningError, TokenEstimator};
 use parrot_core::{
-    ContextConfiguration, ContextModel,
-    compaction::{self as core, CompactionConfiguration},
+    CompactionConfiguration, CompactionHistoryGroup, CompactionInput, ContextConfiguration,
+    ContextModel,
+    compaction::{self as core},
 };
 use parrot_domain::values::config::ModelProfiles;
 use parrot_provider::{
@@ -43,12 +44,12 @@ pub struct PlanningInput<'a> {
 }
 
 impl PlanningInput<'_> {
-    pub(crate) fn capture_input(&self) -> core::CompactionInput {
-        core::CompactionInput {
+    pub(crate) fn capture_input(&self) -> CompactionInput {
+        CompactionInput {
             groups: self
                 .groups
                 .iter()
-                .map(|group| core::CompactionHistoryGroup {
+                .map(|group| CompactionHistoryGroup {
                     messages: group.messages.iter().cloned().map(Into::into).collect(),
                     end_watermark: group.end_watermark,
                     has_checkpoint_before: group.has_checkpoint_before,

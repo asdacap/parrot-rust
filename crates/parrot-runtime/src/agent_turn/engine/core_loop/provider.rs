@@ -52,7 +52,7 @@ impl parrot_core::Provider for RuntimeProvider<'_> {
         &'a self,
         request: ProviderRequest,
         cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<parrot_core::compaction::SummaryResponse, CoreError>>
+    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, CoreError>>
     where
         'c: 'a,
     {

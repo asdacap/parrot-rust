@@ -84,11 +84,11 @@ impl From<PromptError> for ContextError {
         Self::Prompt(error)
     }
 }
-impl From<parrot_core::compaction::CompactionFailure> for ContextError {
-    fn from(failure: parrot_core::compaction::CompactionFailure) -> Self {
+impl From<parrot_core::CompactionFailure> for ContextError {
+    fn from(failure: parrot_core::CompactionFailure) -> Self {
         match failure {
-            parrot_core::compaction::CompactionFailure::NoSafeBoundary
-            | parrot_core::compaction::CompactionFailure::FittedInputLimitExceeded => {
+            parrot_core::CompactionFailure::NoSafeBoundary
+            | parrot_core::CompactionFailure::FittedInputLimitExceeded => {
                 Self::InvalidOperation(failure.to_string())
             }
             failure => Self::Compaction(failure.into()),
@@ -326,7 +326,7 @@ impl ContextController {
         &mut self,
         input: &mut EpochInput<'_>,
         instructions: String,
-        result: ContextResult<Option<parrot_core::compaction::FittedCompaction>>,
+        result: ContextResult<Option<parrot_core::FittedCompaction>>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
         let outcome: ContextResult<EpochResult> = async {
@@ -417,7 +417,7 @@ impl ContextController {
         &mut self,
         input: &mut EpochInput<'_>,
         instructions: String,
-        compacted: Option<parrot_core::compaction::FittedCompaction>,
+        compacted: Option<parrot_core::FittedCompaction>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
         let mut reduced = false;
