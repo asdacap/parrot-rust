@@ -71,6 +71,54 @@ async fn first_assembly_stands_and_duplicate_appends_stay_visible() {
 }
 
 #[tokio::test]
+async fn partial_status_text_preserves_unchanged_identities_after_reopen() {
+    let fixture = Fixture::new();
+    let repository = fixture.repository();
+    repository
+        .append_status_assembly(
+            event(),
+            standing(&[("profile", "p1"), ("tasks", ""), ("time", "t1")]),
+            "profile\n\ntasks\n\ntime one".into(),
+        )
+        .await
+        .unwrap();
+    let updated = standing(&[("profile", "p1"), ("tasks", ""), ("time", "t2")]);
+    repository
+        .append_status_assembly(event(), updated.clone(), "time two".into())
+        .await
+        .unwrap();
+    repository.events().database().close().await.unwrap();
+
+    let reopened = fixture.repository();
+    let restored = reopened
+        .standing_statuses("agent".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored, updated);
+    let messages = reopened.conversation("agent".into()).await.unwrap();
+    assert_eq!(
+        messages.last().unwrap().message.parts,
+        [ConversationPart::text("time two")]
+    );
+    let offering = restored
+        .iter()
+        .map(|(key, hash)| {
+            (
+                key.clone(),
+                parrot_core::StatusOffer {
+                    hash: hash.clone(),
+                    text: key.to_string(),
+                    is_auto_update: true,
+                },
+            )
+        })
+        .collect();
+    assert!(!parrot_core::status_steering_needed(&offering, &restored));
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn standing_follows_the_latest_record() {
     let fixture = Fixture::new();
     let repository = fixture.repository();

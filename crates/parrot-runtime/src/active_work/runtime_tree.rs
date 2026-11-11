@@ -113,12 +113,12 @@ impl StatusProvider for RuntimeTreeStatusProvider {
                     .clone(),
                 cancellation,
             )
-            .map(|observation| observation.with_identity(hash, true))
+            .map(|observation| observation.with_identity(hash, false))
         })
     }
 }
 /// Stable identity of the tree snapshot. Every agent, active marker, running
-/// process, and drain state affects a steer; rendered node text does not.
+/// process, and drain state affects the identity; rendered node text does not.
 fn tree_snapshot_hash(snapshot: &RuntimeTreeSnapshot) -> String {
     let mut hash = format!("tree:{}", snapshot.agents.len());
     for agent in &snapshot.agents {

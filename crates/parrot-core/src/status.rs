@@ -39,8 +39,8 @@ pub struct StatusOffer {
 /// The status slots offered to the core for one assembly, in fixed slot order.
 pub type StatusOffering = BTreeMap<StatusKey, StatusOffer>;
 
-/// The per-slot hashes recorded by the status assembly currently standing in the
-/// conversation, read from the latest persisted status message.
+/// Cumulative identities of the status slots delivered to the conversation,
+/// read from the latest persisted status message.
 pub type StatusStanding = BTreeMap<StatusKey, String>;
 
 /// Returns whether the core should steer a new status assembly at a safe point.
@@ -59,12 +59,11 @@ pub fn status_steering_needed(offering: &StatusOffering, standing: &StatusStandi
             .any(|(key, offer)| standing.get(key) != Some(&offer.hash))
 }
 
-/// Steers one status assembly at a safe point. Reads the offered slots and the
-/// standing hashes, and when steering is required commits a fully assembled,
-/// usage-fitted system message whose persistence records every offered slot's
-/// hash. Safe points are the core turn loop's iterations between provider
-/// requests, so the steered assembly reaches the provider request assembled
-/// right after this call.
+/// Injects full fitted status without a standing baseline. Later auto-update
+/// changes inject only slots with changed identities, including non-auto slots
+/// that changed alongside the trigger. Each message atomically records cumulative
+/// standing identities so unchanged slots stay known across updates and restarts.
+/// Safe points occur between provider requests.
 pub async fn steer_status(
     states: &mut dyn States,
     provider: &dyn Provider,
@@ -75,35 +74,44 @@ pub async fn steer_status(
         return Err(Error::cancelled());
     }
     let offering = states.read_status_offering().await?;
-    let standing = states.read_standing_statuses().await?;
+    let mut standing = states.read_standing_statuses().await?;
     if !status_steering_needed(&offering, &standing) {
         return Ok(());
     }
-    let instructions = states.capture_system_prompt().await?;
-    // Steering sits after this iteration's input promotion, so the provider
-    // messages already include everything the upcoming request admits.
-    let messages = states.read_provider_messages().await?;
-    let configuration = states
-        .get_config(ConfigKey::Context)
-        .await?
-        .into_context()?;
-    let content = fit_status(
-        &ProviderRequest {
-            instructions,
-            messages,
-            tools: definitions.to_vec(),
-            ..ProviderRequest::default()
-        },
-        &configuration,
-        states,
-        provider,
-        cancellation,
-    )
-    .await?;
-    let standing = offering
+    let updates = offering
         .iter()
-        .map(|(key, offer)| (key.clone(), offer.hash.clone()))
-        .collect();
+        .filter(|(key, offer)| standing.is_empty() || standing.get(key) != Some(&offer.hash))
+        .collect::<Vec<_>>();
+    let content = if standing.is_empty() {
+        let instructions = states.capture_system_prompt().await?;
+        let messages = states.read_provider_messages().await?;
+        let configuration = states
+            .get_config(ConfigKey::Context)
+            .await?
+            .into_context()?;
+        fit_status(
+            &ProviderRequest {
+                instructions,
+                messages,
+                tools: definitions.to_vec(),
+                ..ProviderRequest::default()
+            },
+            &configuration,
+            states,
+            provider,
+            cancellation,
+        )
+        .await?
+    } else {
+        updates
+            .iter()
+            .map(|(_, offer)| offer.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+    for (key, offer) in updates {
+        standing.insert(key.clone(), offer.hash.clone());
+    }
     let notice = format!("Status prompt injected\n{content}");
     states
         .apply_conversation_addition(ConversationAddition {

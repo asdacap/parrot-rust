@@ -36,6 +36,8 @@ mod provider_cancellation;
 mod request_assembly;
 #[path = "turn_loop/skills.rs"]
 mod skills;
+#[path = "turn_loop/status_updates.rs"]
+mod status_updates;
 #[path = "turn_loop/tool_execution.rs"]
 mod tool_execution;
 #[path = "turn_loop/turn_state.rs"]
@@ -2266,10 +2268,7 @@ fn changed_auto_hash_steers_again_at_the_next_safe_point() {
                 "fitted status".into(),
                 status_standing(&[("selection", "h1")])
             ),
-            (
-                "fitted status".into(),
-                status_standing(&[("selection", "h2")])
-            ),
+            ("selection".into(), status_standing(&[("selection", "h2")])),
         ]
     );
     assert_eq!(
@@ -2296,10 +2295,7 @@ fn changed_auto_hash_steers_at_a_retry_continuation() {
                 "fitted status".into(),
                 status_standing(&[("selection", "h1")])
             ),
-            (
-                "fitted status".into(),
-                status_standing(&[("selection", "h2")])
-            ),
+            ("selection".into(), status_standing(&[("selection", "h2")])),
         ]
     );
     assert_eq!(
