@@ -39,7 +39,7 @@ impl DynamicEmptyMap {
         self.value_type.clone()
     }
 
-    pub(crate) fn reflect_iter(&self) -> ReflectMapIter {
+    pub(crate) fn reflect_iter(&self) -> ReflectMapIter<'_> {
         ReflectMapIter::new(DynamicEmptyMapIter {
             _key_type: self.key_type.clone(),
             _value_type: self.value_type.clone(),

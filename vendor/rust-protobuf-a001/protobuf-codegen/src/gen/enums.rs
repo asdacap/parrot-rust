@@ -102,7 +102,7 @@ impl<'a> EnumGen<'a> {
             .allow_alias()
     }
 
-    fn values_all(&self) -> Vec<EnumValueGen> {
+    fn values_all(&self) -> Vec<EnumValueGen<'_>> {
         let mut r = Vec::new();
         for p in self.enum_with_scope.values() {
             r.push(EnumValueGen::parse(p, &self.type_name));
@@ -110,7 +110,7 @@ impl<'a> EnumGen<'a> {
         r
     }
 
-    fn values_unique(&self) -> Vec<EnumValueGen> {
+    fn values_unique(&self) -> Vec<EnumValueGen<'_>> {
         let mut used = HashSet::new();
         let mut r = Vec::new();
         for p in self.enum_with_scope.values() {

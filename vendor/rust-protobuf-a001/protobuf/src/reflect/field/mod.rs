@@ -273,7 +273,7 @@ impl FieldDescriptor {
         }
     }
 
-    fn get_impl(&self) -> FieldDescriptorImplRef {
+    fn get_impl(&self) -> FieldDescriptorImplRef<'_> {
         let (descriptor, index) = self.regular();
         match descriptor.get_impl() {
             MessageDescriptorImplRef::Generated(g) => {
@@ -311,7 +311,7 @@ impl FieldDescriptor {
 
     // accessors
 
-    fn singular(&self) -> SingularFieldAccessorRef {
+    fn singular(&self) -> SingularFieldAccessorRef<'_> {
         match self.get_impl() {
             FieldDescriptorImplRef::Generated(GeneratedFieldAccessor::V2(
                 AccessorV2::Singular(ref a),
@@ -323,7 +323,7 @@ impl FieldDescriptor {
         }
     }
 
-    fn repeated(&self) -> RepeatedFieldAccessorRef {
+    fn repeated(&self) -> RepeatedFieldAccessorRef<'_> {
         match self.get_impl() {
             FieldDescriptorImplRef::Generated(GeneratedFieldAccessor::V2(
                 AccessorV2::Repeated(ref a),
@@ -335,7 +335,7 @@ impl FieldDescriptor {
         }
     }
 
-    fn map(&self) -> MapFieldAccessorRef {
+    fn map(&self) -> MapFieldAccessorRef<'_> {
         match self.get_impl() {
             FieldDescriptorImplRef::Generated(GeneratedFieldAccessor::V2(AccessorV2::Map(
                 ref a,
@@ -385,7 +385,7 @@ impl FieldDescriptor {
     /// # Panics
     ///
     /// If field is not singular.
-    pub fn singular_default_value(&self) -> ReflectValueRef {
+    pub fn singular_default_value(&self) -> ReflectValueRef<'_> {
         self.index().default_value(self)
     }
 

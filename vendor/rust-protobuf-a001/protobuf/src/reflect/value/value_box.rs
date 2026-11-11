@@ -120,7 +120,7 @@ impl ReflectValueBox {
     }
 
     /// As ref
-    pub fn as_value_ref(&self) -> ReflectValueRef {
+    pub fn as_value_ref(&self) -> ReflectValueRef<'_> {
         match self {
             ReflectValueBox::U32(v) => ReflectValueRef::U32(*v),
             ReflectValueBox::U64(v) => ReflectValueRef::U64(*v),
@@ -136,7 +136,7 @@ impl ReflectValueBox {
         }
     }
 
-    pub(crate) fn as_value_mut(&mut self) -> ReflectValueMut {
+    pub(crate) fn as_value_mut(&mut self) -> ReflectValueMut<'_> {
         match self {
             ReflectValueBox::Message(m) => ReflectValueMut::Message(&mut **m),
             _ => panic!(

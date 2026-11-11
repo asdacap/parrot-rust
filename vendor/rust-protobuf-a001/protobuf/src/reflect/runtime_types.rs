@@ -83,9 +83,9 @@ pub trait RuntimeTypeTrait: fmt::Debug + Send + Sync + Sized + 'static {
     }
 
     /// Pointer to a dynamic reference.
-    fn as_ref(value: &Self::Value) -> ReflectValueRef;
+    fn as_ref(value: &Self::Value) -> ReflectValueRef<'_>;
     /// Mutable pointer to a dynamic mutable reference.
-    fn as_mut(value: &mut Self::Value) -> ReflectValueMut;
+    fn as_mut(value: &mut Self::Value) -> ReflectValueMut<'_>;
 
     /// Value is non-default?
     fn is_non_zero(value: &Self::Value) -> bool;
@@ -116,7 +116,7 @@ pub trait RuntimeTypeWithDeref: RuntimeTypeTrait {
 
     /// Deref.
     // TODO: rename to `deref`
-    fn deref_as_ref(value: &Self::DerefTarget) -> ReflectValueRef;
+    fn deref_as_ref(value: &Self::DerefTarget) -> ReflectValueRef<'_>;
 }
 
 /// Types which can be map keys.
@@ -203,11 +203,11 @@ impl RuntimeTypeTrait for RuntimeTypeF32 {
     fn into_static_value_ref(value: f32) -> ReflectValueRef<'static> {
         ReflectValueRef::F32(value)
     }
-    fn as_ref(value: &f32) -> ReflectValueRef {
+    fn as_ref(value: &f32) -> ReflectValueRef<'_> {
         ReflectValueRef::F32(*value)
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -250,7 +250,7 @@ impl RuntimeTypeTrait for RuntimeTypeF64 {
         ReflectValueRef::F64(value)
     }
 
-    fn as_ref(value: &f64) -> ReflectValueRef {
+    fn as_ref(value: &f64) -> ReflectValueRef<'_> {
         ReflectValueRef::F64(*value)
     }
 
@@ -258,7 +258,7 @@ impl RuntimeTypeTrait for RuntimeTypeF64 {
         *value != 0.0
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -297,7 +297,7 @@ impl RuntimeTypeTrait for RuntimeTypeI32 {
         ReflectValueRef::I32(value)
     }
 
-    fn as_ref(value: &i32) -> ReflectValueRef {
+    fn as_ref(value: &i32) -> ReflectValueRef<'_> {
         ReflectValueRef::I32(*value)
     }
 
@@ -305,7 +305,7 @@ impl RuntimeTypeTrait for RuntimeTypeI32 {
         *value != 0
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -366,7 +366,7 @@ impl RuntimeTypeTrait for RuntimeTypeI64 {
         ReflectValueRef::I64(value)
     }
 
-    fn as_ref(value: &i64) -> ReflectValueRef {
+    fn as_ref(value: &i64) -> ReflectValueRef<'_> {
         ReflectValueRef::I64(*value)
     }
 
@@ -374,7 +374,7 @@ impl RuntimeTypeTrait for RuntimeTypeI64 {
         *value != 0
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -438,11 +438,11 @@ impl RuntimeTypeTrait for RuntimeTypeU32 {
         ReflectValueRef::U32(value)
     }
 
-    fn as_ref(value: &u32) -> ReflectValueRef {
+    fn as_ref(value: &u32) -> ReflectValueRef<'_> {
         ReflectValueRef::U32(*value)
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -503,7 +503,7 @@ impl RuntimeTypeTrait for RuntimeTypeU64 {
         ReflectValueRef::U64(value)
     }
 
-    fn as_ref(value: &u64) -> ReflectValueRef {
+    fn as_ref(value: &u64) -> ReflectValueRef<'_> {
         ReflectValueRef::U64(*value)
     }
 
@@ -511,7 +511,7 @@ impl RuntimeTypeTrait for RuntimeTypeU64 {
         *value != 0
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -568,7 +568,7 @@ impl RuntimeTypeTrait for RuntimeTypeBool {
         ReflectValueRef::Bool(value)
     }
 
-    fn as_ref(value: &bool) -> ReflectValueRef {
+    fn as_ref(value: &bool) -> ReflectValueRef<'_> {
         ReflectValueRef::Bool(*value)
     }
 
@@ -576,7 +576,7 @@ impl RuntimeTypeTrait for RuntimeTypeBool {
         *value
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -629,11 +629,11 @@ impl RuntimeTypeTrait for RuntimeTypeString {
         ReflectValueBox::String(value)
     }
 
-    fn as_ref(value: &String) -> ReflectValueRef {
+    fn as_ref(value: &String) -> ReflectValueRef<'_> {
         ReflectValueRef::String(&*value)
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -649,7 +649,7 @@ impl RuntimeTypeTrait for RuntimeTypeString {
 impl RuntimeTypeWithDeref for RuntimeTypeString {
     type DerefTarget = str;
 
-    fn deref_as_ref(value: &str) -> ReflectValueRef {
+    fn deref_as_ref(value: &str) -> ReflectValueRef<'_> {
         ReflectValueRef::String(value)
     }
 }
@@ -701,11 +701,11 @@ impl RuntimeTypeTrait for RuntimeTypeVecU8 {
         ReflectValueBox::Bytes(value)
     }
 
-    fn as_ref(value: &Vec<u8>) -> ReflectValueRef {
+    fn as_ref(value: &Vec<u8>) -> ReflectValueRef<'_> {
         ReflectValueRef::Bytes(value.as_slice())
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -721,7 +721,7 @@ impl RuntimeTypeTrait for RuntimeTypeVecU8 {
 impl RuntimeTypeWithDeref for RuntimeTypeVecU8 {
     type DerefTarget = [u8];
 
-    fn deref_as_ref(value: &[u8]) -> ReflectValueRef {
+    fn deref_as_ref(value: &[u8]) -> ReflectValueRef<'_> {
         ReflectValueRef::Bytes(value)
     }
 }
@@ -880,11 +880,11 @@ where
         ReflectValueRef::Enum(E::enum_descriptor(), value.value())
     }
 
-    fn as_ref(value: &EnumOrUnknown<E>) -> ReflectValueRef {
+    fn as_ref(value: &EnumOrUnknown<E>) -> ReflectValueRef<'_> {
         ReflectValueRef::Enum(E::enum_descriptor(), value.value())
     }
 
-    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut {
+    fn as_mut(_value: &mut Self::Value) -> ReflectValueMut<'_> {
         unimplemented!()
     }
 
@@ -932,11 +932,11 @@ where
     fn into_value_box(value: M) -> ReflectValueBox {
         ReflectValueBox::Message(Box::new(value))
     }
-    fn as_ref(value: &M) -> ReflectValueRef {
+    fn as_ref(value: &M) -> ReflectValueRef<'_> {
         ReflectValueRef::Message(MessageRef::new(value))
     }
 
-    fn as_mut(value: &mut M) -> ReflectValueMut {
+    fn as_mut(value: &mut M) -> ReflectValueMut<'_> {
         ReflectValueMut::Message(value)
     }
 

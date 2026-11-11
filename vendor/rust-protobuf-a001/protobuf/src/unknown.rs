@@ -171,7 +171,7 @@ impl UnknownValues {
         }
     }
 
-    pub(crate) fn any(&self) -> Option<UnknownValueRef> {
+    pub(crate) fn any(&self) -> Option<UnknownValueRef<'_>> {
         if let Some(last) = self.fixed32.last() {
             Some(UnknownValueRef::Fixed32(*last))
         } else if let Some(last) = self.fixed64.last() {
@@ -352,7 +352,7 @@ impl UnknownFields {
     }
 
     /// Get any value for unknown fields.
-    pub fn get(&self, field_number: u32) -> Option<UnknownValueRef> {
+    pub fn get(&self, field_number: u32) -> Option<UnknownValueRef<'_>> {
         match &self.fields {
             Some(map) => map.get(&field_number).and_then(|v| v.any()),
             None => None,

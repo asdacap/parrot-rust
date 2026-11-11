@@ -14,7 +14,7 @@ mod generated;
 
 /// Implemented for `HashMap`, `BTreeMap` with appropriate keys and values
 pub(crate) trait ReflectMap: Debug + Send + Sync + 'static {
-    fn reflect_iter(&self) -> ReflectMapIter;
+    fn reflect_iter(&self) -> ReflectMapIter<'_>;
 
     fn len(&self) -> usize;
 
@@ -132,7 +132,7 @@ impl<'a> ReflectMapRef<'a> {
     }
 
     /// Find a value by given key.
-    pub fn get(&self, key: ReflectValueRef) -> Option<ReflectValueRef> {
+    pub fn get(&self, key: ReflectValueRef) -> Option<ReflectValueRef<'_>> {
         match &self.imp {
             ReflectMapRefImpl::Generated(map) => map.get(key),
             ReflectMapRefImpl::DynamicEmpty(map) => map.get(key),
@@ -222,7 +222,7 @@ impl<'a> ReflectMapMut<'a> {
     }
 
     /// Find a value for given key
-    pub fn get(&self, key: ReflectValueRef) -> Option<ReflectValueRef> {
+    pub fn get(&self, key: ReflectValueRef) -> Option<ReflectValueRef<'_>> {
         self.map.get(key)
     }
 

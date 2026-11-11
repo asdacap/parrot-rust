@@ -14,7 +14,7 @@ impl DynamicOptional {
         DynamicOptional { elem, value: None }
     }
 
-    pub(crate) fn mut_or_default(&mut self) -> ReflectValueMut {
+    pub(crate) fn mut_or_default(&mut self) -> ReflectValueMut<'_> {
         if let None = self.value {
             self.value = Some(self.elem.default_value_ref().to_box());
         }
@@ -30,7 +30,7 @@ impl DynamicOptional {
         self.value = Some(value);
     }
 
-    pub(crate) fn reflect_singlar_ref(&self) -> ReflectOptionalRef {
+    pub(crate) fn reflect_singlar_ref(&self) -> ReflectOptionalRef<'_> {
         match &self.value {
             Some(value) => ReflectOptionalRef::some(value.as_value_ref()),
             None => ReflectOptionalRef::none(self.elem.clone()),

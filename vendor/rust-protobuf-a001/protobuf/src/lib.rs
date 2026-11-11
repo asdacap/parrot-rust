@@ -99,10 +99,10 @@ mod misc;
 mod doctest_pb;
 
 /// This symbol is in generated `version.rs`, include here for IDE
-#[cfg(never)]
+#[cfg(any())]
 pub const VERSION: &str = "";
 /// This symbol is in generated `version.rs`, include here for IDE
-#[cfg(never)]
+#[cfg(any())]
 #[doc(hidden)]
 pub const VERSION_IDENT: &str = "";
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
