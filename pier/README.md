@@ -48,6 +48,38 @@ catalog from it at startup, needed for unknown models), and the `binary_url`
 host. The `--model` value must be a fully qualified `provider/model`; the
 config's `model_aliases` are not reachable in a fresh sandbox.
 
+## Benchmark results
+
+Full [DeepSWE](https://deepswe.datacurve.ai/run) suite (113 tasks), 2026-11-11,
+run through this wrapper with a musl release build of the worktree at commit
+`9325d0c8` (branch `parrot-benchmark-glm`, merged with `master` up to
+`e913a5b`). Parrot ran its default `general` profile, one attempt per task,
+offline behind Pier's egress allowlist, with `opencode-go/glm-5.3-flash/high`
+at `high` reasoning effort.
+
+| Metric | Value |
+|---|---|
+| Full pass (all fail-to-pass tests fixed) | 65 / 113 (57.5%) |
+| Fail-to-pass (F2P) test fraction | 0.878 |
+| Pass-to-pass (P2P) test fraction | 0.992 (17 regressions across 2,047 tests) |
+| Partial score | 0.954 |
+| Mean reward | 0.575 |
+
+Token usage recorded by the one-shot event log: 1.42B provider input tokens
+(97% served from cache) and 8.6M output tokens across 113 tasks. The gateway
+did not return a cost figure for this run; priced at the blended rate measured
+on complete reference runs of the same provider, that is roughly **$51 total,
+about $0.45 per task**. Two mid-run infrastructure incidents (host disk
+exhaustion and docker network-pool exhaustion) forced one rerun of each
+affected task and added roughly $6-8 of wasted spend; every task received one
+clean scored attempt.
+
+For comparison, the [Harness
+Leaderboard](https://huggingface.co/spaces/joelniklaus/harness-leaderboard)
+reports per-attempt DeepSWE resolve rates of 61-66% for other harnesses on the
+same model and effort (3 attempts per task, HF Sandbox infrastructure); a
+single-attempt result carries roughly ±10 points of run-to-run noise.
+
 ## Files produced per trial
 
 Inside the sandbox at `/logs/agent/` (Pier downloads them into the trial's
