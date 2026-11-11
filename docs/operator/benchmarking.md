@@ -136,6 +136,56 @@ container can reach; the wrapper adds the `binary_url` host to the network
 allowlist. A local URL only works with `--env docker`; for `--env modal` push
 the tarball to a URL the sandbox can reach.
 
+### Running Terminal-Bench
+
+[Terminal-Bench](https://www.tbench.ai/run) currently recommends version 4.1.0.
+The separate job configuration in `pier/terminal-bench.yaml` uses the existing
+Parrot wrapper, Modal sandboxes, and five attempts per task. It does not change
+DeepSWE or FrontierSWE runs. Some tasks require GPUs, so use a GPU-capable
+sandbox account for the full suite.
+
+Pier reads local tasks but does not download Harbor registry datasets. Install
+both runners, then download the pinned dataset with Harbor. Run these commands
+from the repository root:
+
+```sh
+uv tool install 'harbor==0.25.0'
+uv tool install 'datacurve-pier==0.3.1' --with-editable ./pier
+harbor download 'terminal-bench/terminal-bench@4.1.0' \
+    -o pier/datasets/terminal-bench-4.1.0
+```
+
+Authenticate Modal, then export the API key for your selected model and start
+the job:
+
+```sh
+uv tool run --from 'datacurve-pier==0.3.1' modal setup
+export OPENCODE_GO_API_KEY=...
+pier run --config pier/terminal-bench.yaml
+```
+
+The configuration uses `opencode-go/glm-5.3-flash/high`, matching the previous
+DeepSWE run. To use another model, edit `agents[].model_name` and its
+`kwargs.provider_config` in the YAML, then export the matching API key. Use a
+fully qualified `provider/model`. Pier does not apply `--model` alone to agents loaded
+from a configuration file. The wrapper uses the latest published Parrot musl
+binary unless you pass `--ak binary_url=<url>`.
+
+For an initial single-task, single-attempt run:
+
+```sh
+pier run --config pier/terminal-bench.yaml \
+    --path pier/datasets/terminal-bench-4.1.0/terminal-bench \
+    --n-tasks 1 --n-attempts 1
+```
+
+The configuration allows four concurrent trials and preserves the tasks'
+resource requirements. Dataset downloads under `pier/datasets/` are ignored by
+Git. Results use Pier's default `jobs/` directory and can be inspected with
+`pier view`. This runs Terminal-Bench through Pier, not the official Harbor
+agent runner. Check the benchmark's submission requirements before comparing
+or submitting results.
+
 ### Running FrontierSWE v2
 
 [FrontierSWE v2](https://github.com/Proximal-Labs/frontier-swe-v2) ships

@@ -1,0 +1,17 @@
+n_attempts: 5
+n_concurrent_trials: 4
+environment:
+  type: modal
+agents:
+  - import_path: parrot_agent:ParrotAgent
+    model_name: opencode-go/glm-5.3-flash/high
+    kwargs:
+      mode: general
+      provider_config:
+        opencode-go:
+          type: openai-compatible
+          protocol: chat-completions
+          base_url: https://opencode.ai/zen/go/v1
+          api_key_env: OPENCODE_GO_API_KEY
+datasets:
+  - path: pier/datasets/terminal-bench-4.1.0/terminal-bench

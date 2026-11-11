@@ -48,6 +48,19 @@ catalog from it at startup, needed for unknown models), and the `binary_url`
 host. The `--model` value must be a fully qualified `provider/model`; the
 config's `model_aliases` are not reachable in a fresh sandbox.
 
+## Terminal-Bench
+
+`terminal-bench.yaml` adds a separate Terminal-Bench 4.1.0 job using Modal and
+five attempts per task. Download the dataset with Harbor before running Pier.
+See the [Terminal-Bench setup instructions](../docs/operator/benchmarking.md#running-terminal-bench)
+for installation, GPU requirements, and a single-task smoke run.
+
+From the repository root, after setup:
+
+```sh
+pier run --config pier/terminal-bench.yaml
+```
+
 ## Benchmark results
 
 Full [DeepSWE](https://deepswe.datacurve.ai/run) suite (113 tasks), 2026-11-11,

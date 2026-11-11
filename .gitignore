@@ -1,4 +1,5 @@
 .worktrees
+/pier/datasets/
 .tmp
 /web/dist/
 /web/node_modules/
