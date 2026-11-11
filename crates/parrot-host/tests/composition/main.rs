@@ -1,3 +1,5 @@
+#[path = "../../../parrot-runtime/tests/agent_state_support.rs"]
+mod agent_state_support;
 mod agents;
 mod context;
 mod factory;

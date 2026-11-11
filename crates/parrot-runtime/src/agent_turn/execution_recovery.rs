@@ -11,17 +11,16 @@ impl<B: DrainBackend> AgentSession<B> {
     pub(super) async fn execution_checkpoint(
         &self,
     ) -> Result<Option<ExecutionCheckpoint>, LifecycleError> {
-        match &self.inner.recovery {
-            Some(store) => Ok(store
-                .load()
-                .await
-                .map_err(storage_error)?
-                .ok_or_else(|| {
-                    LifecycleError::Failed("agent recovery snapshot is not initialized".into())
-                })?
-                .execution),
-            None => Ok(None),
-        }
+        Ok(self
+            .inner
+            .recovery
+            .load()
+            .await
+            .map_err(storage_error)?
+            .ok_or_else(|| {
+                LifecycleError::Failed("agent recovery snapshot is not initialized".into())
+            })?
+            .execution)
     }
 
     pub(super) async fn prepare_execution(
@@ -30,74 +29,72 @@ impl<B: DrainBackend> AgentSession<B> {
         message_id: &str,
     ) -> Result<ExecutionPreparation, LifecycleError> {
         let _gate = self.inner.checkpoint_gate.lock().await;
-        if self.inner.recovery.is_some() {
-            let checkpoint = self.execution_checkpoint().await?;
-            if checkpoint
-                .as_ref()
-                .is_some_and(|saved| saved.result_claim.is_some())
-            {
-                return Err(LifecycleError::Failed(
-                    "previous task result is still claimed".into(),
-                ));
-            }
-            let existing = self
-                .inner
-                .backend
-                .find_execution_input(message_id.to_owned())
-                .await?;
-            if let Some(input) = &existing
-                && (input.parts != parts || input.delivery != Delivery::DELIVERY_STEER)
-            {
-                return Err(LifecycleError::Failed(format!(
-                    "message {message_id} was already admitted with different content"
-                )));
-            }
-            if let Some(saved) = &checkpoint {
-                if saved.initial_message_id == message_id {
-                    let original_parts: Vec<_> = saved
-                        .initial_parts
-                        .iter()
-                        .map(|part| match part {
-                            ExecutionInputPart::Text { text } => ConversationPart::text(text),
-                            ExecutionInputPart::ImageArtifact { metadata } => {
-                                ConversationPart::image(metadata.clone())
-                            }
-                        })
-                        .collect();
-                    if original_parts != parts {
-                        return Err(LifecycleError::Failed(format!(
-                            "message {message_id} was already admitted with different content"
-                        )));
-                    }
-                    if let Some(terminal) = &saved.terminal {
-                        if let Some(input) = existing {
-                            let outcome =
-                                bounded(self.inner.backend.restore_execution(terminal).await?);
-                            return Ok(ExecutionPreparation::Duplicate(
-                                Box::new(Admission {
-                                    input,
-                                    published: None,
-                                }),
-                                Some(outcome),
-                            ));
+        let checkpoint = self.execution_checkpoint().await?;
+        if checkpoint
+            .as_ref()
+            .is_some_and(|saved| saved.result_claim.is_some())
+        {
+            return Err(LifecycleError::Failed(
+                "previous task result is still claimed".into(),
+            ));
+        }
+        let existing = self
+            .inner
+            .backend
+            .find_execution_input(message_id.to_owned())
+            .await?;
+        if let Some(input) = &existing
+            && (input.parts != parts || input.delivery != Delivery::DELIVERY_STEER)
+        {
+            return Err(LifecycleError::Failed(format!(
+                "message {message_id} was already admitted with different content"
+            )));
+        }
+        if let Some(saved) = &checkpoint {
+            if saved.initial_message_id == message_id {
+                let original_parts: Vec<_> = saved
+                    .initial_parts
+                    .iter()
+                    .map(|part| match part {
+                        ExecutionInputPart::Text { text } => ConversationPart::text(text),
+                        ExecutionInputPart::ImageArtifact { metadata } => {
+                            ConversationPart::image(metadata.clone())
                         }
-                    } else {
-                        return Ok(ExecutionPreparation::Resume);
+                    })
+                    .collect();
+                if original_parts != parts {
+                    return Err(LifecycleError::Failed(format!(
+                        "message {message_id} was already admitted with different content"
+                    )));
+                }
+                if let Some(terminal) = &saved.terminal {
+                    if let Some(input) = existing {
+                        let outcome =
+                            bounded(self.inner.backend.restore_execution(terminal).await?);
+                        return Ok(ExecutionPreparation::Duplicate(
+                            Box::new(Admission {
+                                input,
+                                published: None,
+                            }),
+                            Some(outcome),
+                        ));
                     }
-                }
-                if saved.terminal.is_none() {
-                    return Err(LifecycleError::Failed("previous execution is unfinished; recover it before admitting another execution".into()));
+                } else {
+                    return Ok(ExecutionPreparation::Resume);
                 }
             }
-            if let Some(input) = existing {
-                return Ok(ExecutionPreparation::Duplicate(
-                    Box::new(Admission {
-                        input,
-                        published: None,
-                    }),
-                    None,
-                ));
+            if saved.terminal.is_none() {
+                return Err(LifecycleError::Failed("previous execution is unfinished; recover it before admitting another execution".into()));
             }
+        }
+        if let Some(input) = existing {
+            return Ok(ExecutionPreparation::Duplicate(
+                Box::new(Admission {
+                    input,
+                    published: None,
+                }),
+                None,
+            ));
         }
         self.begin_execution_locked(parts, message_id, ExecutionOwnership::Unclaimed)
             .await?;
@@ -110,9 +107,7 @@ impl<B: DrainBackend> AgentSession<B> {
         message_id: &str,
         ownership: ExecutionOwnership,
     ) -> Result<(), LifecycleError> {
-        let Some(store) = &self.inner.recovery else {
-            return Ok(());
-        };
+        let store = &self.inner.recovery;
         if let Some(mut previous) = self.execution_checkpoint().await? {
             if previous.result_claim.is_some() {
                 return Err(LifecycleError::Failed(
@@ -207,8 +202,6 @@ impl<B: DrainBackend> AgentSession<B> {
             };
             self.inner
                 .recovery
-                .as_ref()
-                .expect("recovery store")
                 .update(AgentStateUpdate::Execution(Some(current.clone())))
                 .await
                 .map_err(storage_error)?;
@@ -225,9 +218,7 @@ impl<B: DrainBackend> AgentSession<B> {
     }
 
     pub(super) async fn persist_cancellation(&self) -> Result<(), LifecycleError> {
-        let Some(store) = &self.inner.recovery else {
-            return Ok(());
-        };
+        let store = &self.inner.recovery;
         let _gate = self.inner.checkpoint_gate.lock().await;
         if let Some(mut checkpoint) = self.execution_checkpoint().await?
             && checkpoint.terminal.is_none()
@@ -242,9 +233,7 @@ impl<B: DrainBackend> AgentSession<B> {
     }
 
     pub(super) async fn persist_suspension(&self) -> Result<(), LifecycleError> {
-        let Some(store) = &self.inner.recovery else {
-            return Ok(());
-        };
+        let store = &self.inner.recovery;
         let _gate = self.inner.checkpoint_gate.lock().await;
         if let Some(mut checkpoint) = self.execution_checkpoint().await?
             && checkpoint.terminal.is_none()
@@ -265,9 +254,7 @@ impl<B: DrainBackend> AgentSession<B> {
         reference: ExecutionResultReference,
         recovery_watermark: i64,
     ) -> Result<bool, LifecycleError> {
-        let Some(store) = &self.inner.recovery else {
-            return Ok(false);
-        };
+        let store = &self.inner.recovery;
         let _gate = self.inner.checkpoint_gate.lock().await;
         let Some(mut checkpoint) = self.execution_checkpoint().await? else {
             return Ok(false);
@@ -356,11 +343,6 @@ impl<B: DrainBackend> AgentSession<B> {
         &self,
         request: RecoveryRequest,
     ) -> Result<ClaimedExecutionHandle, LifecycleError> {
-        if self.inner.recovery.is_none() {
-            return Err(LifecycleError::Failed(
-                "owned recovery requires an agent state store".into(),
-            ));
-        }
         let mut state = self.inner.state.lock().expect("session poisoned");
         self.start_owned_recovery_locked(&mut state, request)
     }
@@ -473,8 +455,6 @@ impl<B: DrainBackend> AgentSession<B> {
         checkpoint.phase = ExecutionPhase::Canceled;
         self.inner
             .recovery
-            .as_ref()
-            .expect("recovery store")
             .update(AgentStateUpdate::Execution(Some(checkpoint)))
             .await
             .map_err(storage_error)?;
@@ -539,8 +519,6 @@ impl<B: DrainBackend> AgentSession<B> {
                 }
                 self.inner
                     .recovery
-                    .as_ref()
-                    .expect("recovery store")
                     .update(AgentStateUpdate::Execution(Some(current)))
                     .await
                     .map_err(storage_error)?;

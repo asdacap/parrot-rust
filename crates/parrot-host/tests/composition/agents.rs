@@ -694,7 +694,16 @@ mod fixture {
             })
             .await
             .unwrap();
-            let session = Arc::new(AgentSession::new(backend, prepared.lifetime));
+            let store = crate::agent_state_support::test_agent_state_store(
+                &self
+                    .histories
+                    .path
+                    .join("agent-state")
+                    .join(prepared.identity.session.name.clone()),
+                &prepared.identity.session.name,
+            )
+            .await;
+            let session = Arc::new(AgentSession::with_state(backend, prepared.lifetime, store));
             let bound = Arc::new(AgentSessionServices {
                 session: session.clone(),
                 activity: activity.clone(),

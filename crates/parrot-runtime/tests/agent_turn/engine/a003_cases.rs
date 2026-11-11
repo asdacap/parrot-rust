@@ -337,7 +337,12 @@ async fn usage_runtime(
     })
     .await
     .unwrap();
-    AgentSession::new(backend, Arc::new(Signal::new()))
+    let store = crate::agent_state_support::test_agent_state_store(
+        &fixture.path.join("agent-state"),
+        "agent",
+    )
+    .await;
+    AgentSession::with_state(backend, Arc::new(Signal::new()), store)
 }
 
 async fn send_usage(session: &AgentSession<RuntimeBackend<Security>>, text: &str) {

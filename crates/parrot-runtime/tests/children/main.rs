@@ -2,6 +2,8 @@
 mod active_shutdown;
 mod admission_boundaries;
 mod admission_publisher;
+#[path = "../agent_state_support.rs"]
+mod agent_state_support;
 mod child_gate;
 mod completion;
 mod completion_bound;

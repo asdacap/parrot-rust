@@ -19,9 +19,7 @@ impl<B: DrainBackend> AgentSession<B> {
         activity: Option<IncomingActivity>,
     ) -> (bool, ExecutionHandle) {
         let mut state = self.inner.state.lock().expect("session poisoned");
-        if self.inner.activation.is_active()
-            && (self.inner.recovery.is_none() || state.drain.is_some())
-        {
+        if self.inner.activation.is_active() && state.drain.is_some() {
             return self.wake_locked(&mut state, activity, None);
         }
         let completion = Completion::new();
@@ -67,11 +65,6 @@ impl<B: DrainBackend> AgentSession<B> {
         caller: Arc<dyn Cancellation>,
     ) -> Result<ClaimedExecutionHandle, LifecycleError> {
         check_message(&parts)?;
-        if self.inner.recovery.is_none() {
-            return Err(LifecycleError::Failed(
-                "claimed execution requires an agent state store".into(),
-            ));
-        }
         if claim.claim_id != message_id {
             return Err(LifecycleError::Failed(
                 "task claim must match its prompt identity".into(),
@@ -260,10 +253,6 @@ impl<B: DrainBackend> AgentSession<B> {
             let snapshot = self
                 .inner
                 .recovery
-                .as_ref()
-                .ok_or_else(|| {
-                    LifecycleError::Failed("claimed execution requires an agent state store".into())
-                })?
                 .load()
                 .await
                 .map_err(recovery::storage_error)?
@@ -333,8 +322,6 @@ impl<B: DrainBackend> AgentSession<B> {
                 current.parent_notification = None;
                 self.inner
                     .recovery
-                    .as_ref()
-                    .expect("retired execution store")
                     .update(AgentStateUpdate::Execution(Some(current)))
                     .await
                     .map_err(recovery::storage_error)?;
@@ -348,9 +335,7 @@ impl<B: DrainBackend> AgentSession<B> {
         claim: &TaskResultClaim,
     ) -> Result<bool, LifecycleError> {
         let _gate = self.inner.checkpoint_gate.lock().await;
-        let store = self.inner.recovery.as_ref().ok_or_else(|| {
-            LifecycleError::Failed("claimed execution requires an agent state store".into())
-        })?;
+        let store = &self.inner.recovery;
         let snapshot = store
             .load()
             .await
@@ -411,9 +396,7 @@ impl<B: DrainBackend> AgentSession<B> {
         reference: &'a TaskResponseReference,
     ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
         Box::pin(async move {
-            let store = self.inner.recovery.as_ref().ok_or_else(|| {
-                LifecycleError::Failed("saved response requires an agent state store".into())
-            })?;
+            let store = &self.inner.recovery;
             let snapshot = store
                 .load()
                 .await

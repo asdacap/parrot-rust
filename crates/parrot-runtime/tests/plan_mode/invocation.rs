@@ -21,6 +21,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+/// Unique scratch root for plan-mode sessions without a session fixture.
+fn plan_store_root(tag: &str) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "agent-session-{}-{}-{tag}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
 struct Consumer {
     selected: Mutex<Option<TurnSelection<Policy>>>,
     pending: Mutex<bool>,
@@ -281,7 +293,12 @@ async fn awaited_plan_completion_observes_joined_real_t52_reminder_mutation_afte
         pass_entered: tokio::sync::Notify::new(),
     });
     let lifetime = Arc::new(Signal::new());
-    let session = AgentSession::new(backend.clone(), lifetime.clone());
+    let store = crate::agent_state_support::test_agent_state_store(
+        &plan_store_root("plan-mode").join("agent-state"),
+        "agent",
+    )
+    .await;
+    let session = AgentSession::with_state(backend.clone(), lifetime.clone(), store);
     let observer = Arc::new(Signal::new());
     let owned_reminders = reminders.clone();
     let publication = observer.clone();
@@ -421,7 +438,12 @@ async fn captured_materialized_selection_reaches_actual_session_consumer_before_
             pass_entered: tokio::sync::Notify::new(),
         });
         let lifetime = Arc::new(Signal::new());
-        let session = AgentSession::new(backend, lifetime.clone());
+        let store = crate::agent_state_support::test_agent_state_store(
+            &plan_store_root("plan-mode-child").join("agent-state"),
+            "agent",
+        )
+        .await;
+        let session = AgentSession::with_state(backend, lifetime.clone(), store);
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             session.send_and_wait(

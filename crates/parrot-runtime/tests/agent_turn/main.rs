@@ -1,3 +1,5 @@
+#[path = "../agent_state_support.rs"]
+mod agent_state_support;
 mod engine;
 mod lifecycle;
 #[path = "../tool_execution_support.rs"]

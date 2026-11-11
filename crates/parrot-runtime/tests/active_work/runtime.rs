@@ -460,7 +460,16 @@ impl ScopeFactory<Security> for Factory {
             })
             .await
             .map_err(|error| ChildError::failure("runtime", error.to_string()))?;
-            let session = AgentSession::new(backend, prepared.lifetime);
+            let store = crate::agent_state_support::test_agent_state_store(
+                &self
+                    .histories
+                    .path
+                    .join("agent-state")
+                    .join(identity.session.name.clone()),
+                &identity.session.name,
+            )
+            .await;
+            let session = AgentSession::with_state(backend, prepared.lifetime, store);
             let provider = self
                 .providers
                 .lock()

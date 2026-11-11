@@ -712,7 +712,12 @@ impl Harness {
         })
         .await
         .unwrap();
-        let session = AgentSession::new(backend, Arc::new(Signal::new()));
+        let store = crate::agent_state_support::test_agent_state_store(
+            &directory.join("agent-state"),
+            "agent",
+        )
+        .await;
+        let session = AgentSession::with_state(backend, Arc::new(Signal::new()), store);
         *bridge.service.lock().unwrap() = Some(WaitService {
             session: session.clone(),
             active_work: Arc::new(ActiveWorkReminder {

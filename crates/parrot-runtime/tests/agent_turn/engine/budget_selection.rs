@@ -269,7 +269,14 @@ impl BudgetRuntime {
         .await
         .unwrap();
         Self {
-            session: AgentSession::new(backend, Arc::new(Signal::new())),
+            session: {
+                let store = crate::agent_state_support::test_agent_state_store(
+                    &fixture.path.join("agent-state"),
+                    "agent",
+                )
+                .await;
+                AgentSession::with_state(backend, Arc::new(Signal::new()), store)
+            },
             selection,
             activity,
         }

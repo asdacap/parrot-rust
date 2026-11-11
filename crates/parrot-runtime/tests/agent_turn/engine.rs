@@ -330,7 +330,14 @@ impl Fixture {
                 }
                 None => AgentSession::with_state(backend, lifetime, store),
             },
-            None => AgentSession::new(backend, lifetime),
+            None => {
+                let store = crate::agent_state_support::test_agent_state_store(
+                    &self.path.join("agent-state"),
+                    "agent",
+                )
+                .await;
+                AgentSession::with_state(backend, lifetime, store)
+            }
         };
         Runtime {
             session,

@@ -10,6 +10,44 @@ use parrot_runtime::{
 };
 use std::io;
 
+/// Opens a file-backed recovery store under `directory`, initializing it when absent.
+pub(super) async fn test_agent_state_store(
+    directory: &std::path::Path,
+    owner: &str,
+) -> std::sync::Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore> {
+    use parrot_domain::contracts::agent_state::AgentStateStore;
+    use parrot_domain::values::agent_state::{
+        AgentDescriptor, AgentStateSnapshot, CompletionDeliverySnapshot, SelectionSnapshot,
+    };
+    use parrot_foundation::paths::AgentScratchDirectory;
+    std::fs::create_dir_all(directory).unwrap();
+    AgentScratchDirectory::new(directory, directory).unwrap();
+    let store = std::sync::Arc::new(
+        parrot_storage::agent_state::FileAgentStateStore::open(directory, owner.into())
+            .await
+            .unwrap(),
+    );
+    if store.load().await.unwrap().is_none() {
+        store
+            .initialize(AgentStateSnapshot::new(
+                owner.into(),
+                AgentDescriptor {
+                    parent_session_id: None,
+                    name: "test".into(),
+                    selection: SelectionSnapshot {
+                        profile_id: "mode".into(),
+                        model_selector: "scripted/model".into(),
+                    },
+                    local_scope: String::new(),
+                    completion_delivery: CompletionDeliverySnapshot::Automatic,
+                },
+            ))
+            .await
+            .unwrap();
+    }
+    store
+}
+
 struct Skills;
 impl TurnSkills for Skills {
     fn begin_turn<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, PromptResult<()>> {
@@ -157,7 +195,11 @@ pub(super) async fn runtime_with_publisher(
     })
     .await
     .unwrap();
-    (AgentSession::new(backend, Arc::new(Signal::new())), factory)
+    let store = test_agent_state_store(&fixture.path.join("agent-state"), "agent").await;
+    (
+        AgentSession::with_state(backend, Arc::new(Signal::new()), store),
+        factory,
+    )
 }
 pub(super) async fn send(
     session: &AgentSession<RuntimeBackend<Security>>,

@@ -470,7 +470,7 @@ struct Inner<B: DrainBackend> {
     closing: Arc<Signal>,
     state: Mutex<State<B>>,
     close_join: tokio::sync::Mutex<Option<JoinHandle<()>>>,
-    recovery: Option<Arc<dyn AgentStateStore>>,
+    recovery: Arc<dyn AgentStateStore>,
     checkpoint_gate: tokio::sync::Mutex<()>,
     activation: Arc<StartupActivation>,
     suspending: AtomicBool,
@@ -570,14 +570,6 @@ fn check_message(parts: &[ConversationPart]) -> Result<(), LifecycleError> {
 }
 
 impl<B: DrainBackend> AgentSession<B> {
-    pub fn new(backend: Arc<B>, lifetime: Arc<dyn Cancellation>) -> Self {
-        Self::construct(
-            backend,
-            lifetime,
-            None,
-            Arc::new(StartupActivation::opened()),
-        )
-    }
     /// Binds the same agent-local store shared by the scope's other services.
     pub fn with_state(
         backend: Arc<B>,
@@ -587,7 +579,7 @@ impl<B: DrainBackend> AgentSession<B> {
         Self::construct(
             backend,
             lifetime,
-            Some(store),
+            store,
             Arc::new(StartupActivation::opened()),
         )
     }
@@ -598,12 +590,12 @@ impl<B: DrainBackend> AgentSession<B> {
         store: Arc<dyn AgentStateStore>,
         activation: Arc<StartupActivation>,
     ) -> Self {
-        Self::construct(backend, lifetime, Some(store), activation)
+        Self::construct(backend, lifetime, store, activation)
     }
     fn construct(
         backend: Arc<B>,
         lifetime: Arc<dyn Cancellation>,
-        recovery: Option<Arc<dyn AgentStateStore>>,
+        recovery: Arc<dyn AgentStateStore>,
         activation: Arc<StartupActivation>,
     ) -> Self {
         let initial = OperationHandle {
@@ -701,7 +693,7 @@ impl<B: DrainBackend> AgentSession<B> {
             state.wake = true;
             return (false, drain.execution.clone());
         }
-        let owned = if owned.is_none() && self.inner.recovery.is_some() && state.started {
+        let owned = if owned.is_none() && state.started {
             let predecessor = state.execution.clone();
             let reservation = Arc::new(OwnedReservation {
                 admission: Mutex::new(None),
@@ -935,17 +927,15 @@ impl<B: DrainBackend> AgentSession<B> {
             };
             state.execution_claim = Completion::ready(Ok(None));
             state.execution_stop = None;
-            let reservation = self.inner.recovery.as_ref().map(|_| {
-                let owned = Arc::new(OwnedReservation {
-                    admission: Mutex::new(None),
-                    cancellation: Arc::new(Signal::new()),
-                    startup: Completion::new(),
-                    result_reference: Mutex::new(ExecutionResultReference::Missing),
-                    recovery_watermark: Mutex::new(0),
-                });
-                let selected = self.wake_locked(&mut state, None, Some(owned.clone())).1;
-                (owned, selected)
+            let owned = Arc::new(OwnedReservation {
+                admission: Mutex::new(None),
+                cancellation: Arc::new(Signal::new()),
+                startup: Completion::new(),
+                result_reference: Mutex::new(ExecutionResultReference::Missing),
+                recovery_watermark: Mutex::new(0),
             });
+            let selected = self.wake_locked(&mut state, None, Some(owned.clone())).1;
+            let reservation = (owned, selected);
             let session = self.clone();
             spawn_tracked(&mut state, async move {
                 tokio::task::yield_now().await;
@@ -962,22 +952,11 @@ impl<B: DrainBackend> AgentSession<B> {
                                 follow_up,
                                 execution,
                             }));
-                            if let Some((owned, selected)) = &reservation {
-                                owned.startup.finish(Ok(restored.is_none()));
-                                let drained = selected.join().await?;
-                                return Ok(restored.unwrap_or(drained));
-                            }
-                            return match restored {
-                                Some(execution) => Ok(execution),
-                                None => session.wake(None).1.join().await,
-                            };
+                            reservation.0.startup.finish(Ok(restored.is_none()));
+                            let drained = reservation.1.join().await?;
+                            return Ok(restored.unwrap_or(drained));
                         }
                         ExecutionPreparation::Resume => {
-                            let (owned, selected) = reservation.as_ref().ok_or_else(|| {
-                                LifecycleError::Failed(
-                                    "saved execution has no recovery reservation".into(),
-                                )
-                            })?;
                             let admission = session
                                 .inner
                                 .backend
@@ -992,8 +971,8 @@ impl<B: DrainBackend> AgentSession<B> {
                             }));
                             return session
                                 .resume_checkpoint(
-                                    owned.clone(),
-                                    selected.clone(),
+                                    reservation.0.clone(),
+                                    reservation.1.clone(),
                                     Completion::new(),
                                 )
                                 .await;
@@ -1004,11 +983,7 @@ impl<B: DrainBackend> AgentSession<B> {
                         session.inner.backend.execution_started().await?;
                     }
                     let uncanceled = Signal::new();
-                    let publication: &dyn Cancellation = if follow_up && reservation.is_none() {
-                        caller.as_ref()
-                    } else {
-                        &uncanceled
-                    };
+                    let publication: &dyn Cancellation = &uncanceled;
                     let mut sent = session
                         .admit_and_wake(
                             parts,
@@ -1021,11 +996,11 @@ impl<B: DrainBackend> AgentSession<B> {
                             publication,
                         )
                         .await?;
-                    if let (Some(checkpoint), Some((owned, _))) = (&checkpoint, &reservation) {
+                    if let Some(checkpoint) = &checkpoint {
                         let active = session
-                            .activate_execution(checkpoint, owned, &sent.admission)
+                            .activate_execution(checkpoint, &reservation.0, &sent.admission)
                             .await?;
-                        owned.startup.finish(Ok(active));
+                        reservation.0.startup.finish(Ok(active));
                     }
                     sent.follow_up = follow_up;
                     let drain = sent.execution.clone();
@@ -1038,19 +1013,11 @@ impl<B: DrainBackend> AgentSession<B> {
                     drain.join().await
                 }
                 .await;
-                if let Some((owned, selected)) = &reservation {
-                    owned.startup.finish(Ok(false));
-                    let _ = selected.join().await;
-                }
+                reservation.0.startup.finish(Ok(false));
+                let _ = reservation.1.join().await;
                 let execution = if owns_intent {
-                    let reference = reservation
-                        .as_ref()
-                        .map_or(ExecutionResultReference::Missing, |(owned, _)| {
-                            owned.capture_result_reference()
-                        });
-                    let watermark = reservation
-                        .as_ref()
-                        .map_or(0, |(owned, _)| owned.capture_recovery_watermark());
+                    let reference = reservation.0.capture_result_reference();
+                    let watermark = reservation.0.capture_recovery_watermark();
                     session
                         .finish_execution(execution, reference, watermark)
                         .await
@@ -1662,7 +1629,7 @@ impl<B: DrainBackend> AgentSession<B> {
     /// Suspends unfinished durable work before cancellation joins resources.
     /// Integration must call this before canceling the user-session lifetime.
     pub fn suspend_handle(&self) -> OperationHandle<()> {
-        if self.inner.recovery.is_some() && !self.inner.interrupting.load(Ordering::Acquire) {
+        if !self.inner.interrupting.load(Ordering::Acquire) {
             self.inner.suspending.store(true, Ordering::Release);
             self.inner.backend.suspend_execution();
         }
@@ -1874,9 +1841,7 @@ impl<B: DrainBackend> AgentSession<B> {
                             .as_ref()
                             .map(|admission| admission.input.message_id.clone())
                     });
-                    let recovery_watermark = if self.inner.recovery.is_some()
-                        && !self.inner.suspending.load(Ordering::Acquire)
-                    {
+                    let recovery_watermark = if !self.inner.suspending.load(Ordering::Acquire) {
                         match input {
                             Some(message_id) => {
                                 self.inner
@@ -2040,6 +2005,24 @@ impl<B: DrainBackend> Drop for IncomingRegistration<B> {
 #[cfg(test)]
 mod task_reaper_tests {
     use super::*;
+    use parrot_storage::agent_state::FileAgentStateStore;
+
+    async fn test_store(name: &str) -> Arc<dyn AgentStateStore> {
+        let root =
+            std::env::temp_dir().join(format!("agent-session-{}-{name}", std::process::id()));
+        let directory = root.join("agent-state");
+        std::fs::create_dir_all(&directory).unwrap();
+        let directory = {
+            use parrot_foundation::paths::AgentScratchDirectory;
+            AgentScratchDirectory::new(&directory, &root).unwrap();
+            directory
+        };
+        Arc::new(
+            FileAgentStateStore::open(&directory, "test".into())
+                .await
+                .unwrap(),
+        )
+    }
 
     #[derive(Default)]
     struct Backend {
@@ -2173,7 +2156,11 @@ mod task_reaper_tests {
 
     #[tokio::test]
     async fn completed_operations_are_joined_and_reaped_on_next_admission() {
-        let session = AgentSession::new(Arc::new(Backend::default()), Arc::new(Signal::new()));
+        let session = AgentSession::with_state(
+            Arc::new(Backend::default()),
+            Arc::new(Signal::new()),
+            test_store("reaped").await,
+        );
         for _ in 0..128 {
             let (done, completion) = tokio::sync::oneshot::channel();
             {
@@ -2197,7 +2184,11 @@ mod task_reaper_tests {
     #[tokio::test]
     async fn reaped_task_failure_is_retained_until_close_and_backend_still_closes() {
         let backend = Arc::new(Backend::default());
-        let session = AgentSession::new(backend.clone(), Arc::new(Signal::new()));
+        let session = AgentSession::with_state(
+            backend.clone(),
+            Arc::new(Signal::new()),
+            test_store("task-failure").await,
+        );
         let task = {
             let mut state = session.inner.state.lock().unwrap();
             spawn_tracked(&mut state, async { panic!("tracked test panic") })

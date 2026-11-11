@@ -1,3 +1,5 @@
+#[path = "../../../parrot-runtime/tests/agent_state_support.rs"]
+mod agent_state_support;
 mod input;
 mod questions;
 mod retained_wait;

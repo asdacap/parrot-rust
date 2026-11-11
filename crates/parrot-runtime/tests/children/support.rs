@@ -561,9 +561,16 @@ impl Factory {
         .await
         .unwrap();
         let adapter = Arc::new(SessionAdapter::new(
-            prepared.identity,
+            prepared.identity.clone(),
             prepared.selection.clone(),
-            AgentSession::new(backend, prepared.lifetime),
+            {
+                let store = crate::agent_state_support::test_agent_state_store(
+                    &histories.path.join("agent-state").join(name.clone()),
+                    &name,
+                )
+                .await;
+                AgentSession::with_state(backend, prepared.lifetime, store)
+            },
         ));
         self.built.lock().unwrap().insert(
             name.clone(),

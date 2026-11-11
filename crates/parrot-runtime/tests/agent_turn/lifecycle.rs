@@ -7,8 +7,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use parrot_domain::contracts::agent_state::{
+    AgentStateError, AgentStateErrorKind, AgentStateStore,
+};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
+use parrot_domain::values::agent_state::{
+    AgentDescriptor, AgentStateSnapshot, AgentStateUpdate, CompletionDeliverySnapshot,
+    SelectionSnapshot,
+};
 use parrot_runtime::agent_turn::lifecycle::*;
 use parrot_storage::events::{Admission, AdmittedInput, ConversationPart};
 use tokio::sync::Notify;
@@ -189,7 +196,7 @@ impl DrainBackend for FakeBackend {
         &self,
         _: String,
     ) -> BoxFuture<'_, Result<Option<AdmittedInput>, LifecycleError>> {
-        panic!("fixture does not use durable owned execution")
+        Box::pin(async { Ok(None) })
     }
     fn publish_admission<'a>(
         &'a self,
@@ -332,41 +339,66 @@ impl DrainBackend for FakeBackend {
     }
 
     fn execution_started_correlated(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
-        Box::pin(async { panic!("not a persistent backend") })
+        Box::pin(async move {
+            self.starts.fetch_add(1, Ordering::SeqCst);
+            self.events.lock().unwrap().push("started");
+            Ok(())
+        })
     }
     fn execution_finished_correlated<'a>(
         &'a self,
-        _: &'a Execution,
+        execution: &'a Execution,
         _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
         _: &'a str,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
-        Box::pin(async { panic!("not a persistent backend") })
+        Box::pin(async move {
+            self.finish_entered.release();
+            let blocked = self.finish_gate.lock().unwrap().clone();
+            if let Some(gate) = blocked {
+                gate.wait().await;
+            }
+            self.finishes.lock().unwrap().push(execution.clone());
+            self.events.lock().unwrap().push("finished");
+            Ok(())
+        })
     }
     fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<i64, LifecycleError>> {
-        Box::pin(async { panic!("not a persistent backend") })
+        Box::pin(async { Ok(0) })
     }
     fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
-        Box::pin(async { panic!("not a persistent backend") })
+        Box::pin(async { Ok(0) })
     }
     fn restore_execution<'a>(
         &'a self,
         _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
     ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
-        Box::pin(async { panic!("not a persistent backend") })
+        Box::pin(async { Ok(Execution::succeeded("")) })
     }
     fn capture_execution<'a>(
         &'a self,
-        _: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
-        _: &'a mut Execution,
+        checkpoint: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
+        execution: &'a mut Execution,
         _: ExecutionResultReference,
-        _: i64,
+        recovery_watermark: i64,
     ) -> BoxFuture<'a, Result<parrot_domain::values::agent_state::ExecutionTerminal, LifecycleError>>
     {
-        Box::pin(async { panic!("not a persistent backend") })
+        use parrot_domain::values::agent_state::{ExecutionOutcome, ExecutionTerminal};
+        let outcome = match execution.status {
+            ExecutionStatus::Succeeded => ExecutionOutcome::Succeeded,
+            ExecutionStatus::Canceled => ExecutionOutcome::Canceled,
+            ExecutionStatus::Failed => ExecutionOutcome::Failed(execution.error.clone()),
+        };
+        Box::pin(async move {
+            Ok(ExecutionTerminal {
+                event_id: format!("{}.finished", checkpoint.execution_id),
+                elapsed_ms: None,
+                history_sequence: 0,
+                recovery_watermark,
+                outcome,
+            })
+        })
     }
-    fn suspend_execution(&self) {
-        panic!("not a persistent backend")
-    }
+    fn suspend_execution(&self) {}
     fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {
         Box::pin(async move {
             assert_eq!(self.active.load(Ordering::SeqCst), 0);
@@ -384,8 +416,79 @@ fn fixture() -> (
 ) {
     let backend = Arc::new(FakeBackend::default());
     let lifetime = Arc::new(TestCancellation::default());
-    let session = AgentSession::new(backend.clone(), lifetime.clone());
+    let session = AgentSession::with_state(
+        backend.clone(),
+        lifetime.clone(),
+        Arc::new(MemoryAgentStateStore::default()),
+    );
     (backend, session, lifetime)
+}
+
+/// In-memory agent state for tests that never reopen the session.
+/// Starts initialized with an empty snapshot, matching a session with a store.
+struct MemoryAgentStateStore(Mutex<Option<AgentStateSnapshot>>);
+impl Default for MemoryAgentStateStore {
+    fn default() -> Self {
+        Self(Mutex::new(Some(AgentStateSnapshot::new(
+            "test".into(),
+            AgentDescriptor {
+                parent_session_id: None,
+                name: "test".into(),
+                selection: SelectionSnapshot {
+                    profile_id: "mode".into(),
+                    model_selector: "scripted/model".into(),
+                },
+                local_scope: String::new(),
+                completion_delivery: CompletionDeliverySnapshot::Automatic,
+            },
+        ))))
+    }
+}
+impl AgentStateStore for MemoryAgentStateStore {
+    fn load(&self) -> BoxFuture<'_, Result<Option<AgentStateSnapshot>, AgentStateError>> {
+        Box::pin(async { Ok(self.0.lock().unwrap().clone()) })
+    }
+    fn initialize(
+        &self,
+        snapshot: AgentStateSnapshot,
+    ) -> BoxFuture<'_, Result<(), AgentStateError>> {
+        Box::pin(async {
+            let mut slot = self.0.lock().unwrap();
+            if slot.is_some() {
+                return Err(AgentStateError::new(
+                    AgentStateErrorKind::AlreadyExists,
+                    "snapshot already initialized",
+                ));
+            }
+            *slot = Some(snapshot);
+            Ok(())
+        })
+    }
+    fn update(
+        &self,
+        update: AgentStateUpdate,
+    ) -> BoxFuture<'_, Result<AgentStateSnapshot, AgentStateError>> {
+        Box::pin(async {
+            let mut slot = self.0.lock().unwrap();
+            let snapshot = slot.as_mut().ok_or_else(|| {
+                AgentStateError::new(AgentStateErrorKind::NotFound, "no initialized snapshot")
+            })?;
+            match update {
+                AgentStateUpdate::Descriptor(descriptor) => snapshot.descriptor = descriptor,
+                AgentStateUpdate::Children(children) => snapshot.children = children,
+                AgentStateUpdate::Tasks(tasks) => snapshot.tasks = tasks,
+                AgentStateUpdate::Execution(execution) => snapshot.execution = execution,
+            }
+            snapshot.revision += 1;
+            Ok(snapshot.clone())
+        })
+    }
+    fn retire(&self) -> BoxFuture<'_, Result<(), AgentStateError>> {
+        Box::pin(async {
+            *self.0.lock().unwrap() = None;
+            Ok(())
+        })
+    }
 }
 
 fn parts(text: &str) -> Vec<ConversationPart> {
@@ -444,6 +547,9 @@ async fn unary_observer_cancellation_never_owns_the_selected_drain() {
     let (backend, session, _) = fixture();
     let pass = PassControl::blocked(true, Execution::succeeded("kept running"));
     backend.plan(pass.clone());
+    let last_look = PassControl::blocked(false, Execution::succeeded("kept running"));
+    backend.plan(last_look.clone());
+    last_look.release.release();
     let token = caller();
     let sent = bounded(
         session

@@ -290,7 +290,14 @@ async fn owned_recovery_preserves_settled_result_and_closes_unfinished_without_i
             delivery_error: None,
         }),
     });
-    store.initialize(snapshot).await.unwrap();
+    if store.load().await.unwrap().is_none() {
+        store.initialize(snapshot).await.unwrap();
+    } else {
+        store
+            .update(AgentStateUpdate::Execution(snapshot.execution))
+            .await
+            .unwrap();
+    }
     fixture
         .repository
         .events()

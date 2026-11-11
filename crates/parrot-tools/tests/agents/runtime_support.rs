@@ -370,9 +370,20 @@ impl ScopeFactory<Security> for Factory {
             .await
             .unwrap();
             let adapter = Arc::new(SessionAdapter::new(
-                prepared.identity,
+                prepared.identity.clone(),
                 prepared.selection,
-                AgentSession::new(backend, prepared.lifetime),
+                {
+                    let store = crate::agent_state_support::test_agent_state_store(
+                        &self
+                            .histories
+                            .path
+                            .join("agent-state")
+                            .join(prepared.identity.name_path.join("--")),
+                        &prepared.identity.session.name,
+                    )
+                    .await;
+                    AgentSession::with_state(backend, prepared.lifetime, store)
+                },
             ));
             let services = Arc::new(SessionServices {
                 adapter: adapter.clone(),
