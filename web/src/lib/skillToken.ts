@@ -1,6 +1,6 @@
 // The `$name` token under the caret, with the terminal CLI's rules (SkillCompletion.cs): the `$` must not follow a
 // name character, and common environment variables are not skills.
-const environmentNames = new Set(["HOME", "PATH", "USER", "SHELL", "PWD", "TMP", "TMPDIR", "TEMP", "LANG", "TERM", "XDG_CONFIG_HOME"])
+const environmentNames = new Set(["HOME", "PATH", "USER", "SHELL", "PWD", "TMP", "TMPDIR", "PARROT_HOST_TMPDIR", "TEMP", "LANG", "TERM", "XDG_CONFIG_HOME"])
 const isName = (character: string | undefined) => character !== undefined && /[A-Za-z0-9_-]/.test(character)
 const isBoundaryName = (character: string | undefined) => character !== undefined && /[A-Za-z0-9_]/.test(character)
 

@@ -26,7 +26,7 @@ fn actual_selected_resources_render_compressed_environment_and_literal_overrides
         let scratch = resources.agent_scratch(&[agent]).unwrap();
         let environment = AgentPathEnvironment::from_resources(&resources, &scratch).unwrap();
         let values = environment.materialize();
-        assert_eq!(values.len(), 4);
+        assert_eq!(values.len(), 6);
         assert_eq!(values["WORKDIR"], work.to_str().unwrap());
         assert_eq!(
             values["SCRATCH_DIR"],
@@ -37,6 +37,9 @@ fn actual_selected_resources_render_compressed_environment_and_literal_overrides
             scratch.scratch_path().to_str().unwrap()
         );
         assert_eq!(values["AGENT_DIR"], scratch.root().to_str().unwrap());
+        assert_eq!(values["TMPDIR"], "/tmp");
+        let host_temporary = std::env::temp_dir().to_str().unwrap().to_owned();
+        assert_eq!(values["PARROT_HOST_TMPDIR"], host_temporary);
         let provider = environment.prompt_provider(templates(""));
         let (_, router) = route(Vec::new());
         let selection = router.resolve("unused/vendor/model").unwrap();
@@ -46,20 +49,31 @@ fn actual_selected_resources_render_compressed_environment_and_literal_overrides
             .build(&selection)
             .unwrap();
         let lines: Vec<_> = rendered.lines().collect();
-        assert_eq!(lines.len(), 8);
+        assert_eq!(lines.len(), 11);
+        assert!(rendered.contains("TMPDIR is the sandbox-mapped /tmp inside commands; PARROT_HOST_TMPDIR is the full host temp directory outside the sandbox."));
         assert_eq!(lines[1], format!("WORKDIR = {}", work.display()));
-        assert_eq!(
-            lines[2],
-            format!("SCRATCH_DIR = $WORKDIR/state/sessions/{session}/scratch")
-        );
+        assert_eq!(lines[2], "TMPDIR = /tmp");
         assert_eq!(
             lines[3],
+            format!("SCRATCH_DIR = $WORKDIR/state/sessions/{session}/scratch")
+        );
+        let host_temporary_line = if host_temporary.starts_with("/tmp") {
+            format!("$TMPDIR{}", host_temporary.strip_prefix("/tmp").unwrap())
+        } else {
+            host_temporary.clone()
+        };
+        assert_eq!(
+            lines[4],
+            format!("PARROT_HOST_TMPDIR = {host_temporary_line}")
+        );
+        assert_eq!(
+            lines[5],
             format!(
                 "AGENT_SCRATCH_DIR = $WORKDIR/state/sessions/{session}/root-agents/{agent}/scratch"
             )
         );
         assert_eq!(
-            lines[4],
+            lines[6],
             format!("AGENT_DIR = $WORKDIR/state/sessions/{session}/root-agents/{agent}")
         );
         let overrides = BTreeMap::from([

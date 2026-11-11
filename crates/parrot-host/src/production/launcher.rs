@@ -18,7 +18,11 @@ use parrot_tools::process::{
     },
     tools::CommandRequest,
 };
-use std::{io, path::PathBuf, sync::Arc};
+use std::{
+    io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// The user-session constructor supplies these resources once. In particular,
 /// command environment overrides cannot select another agent's scratch or queue.
@@ -100,8 +104,14 @@ impl CapturedProcessLauncher for ProductionLauncher {
                 ))
                 .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error))?;
             let resources = ProcessResources::new(self.launch_directory.clone(), scratch.clone());
+            let rules = if self.runner.sandbox_gate().enabled() {
+                Some(process_rules(policy)?)
+            } else {
+                None
+            };
             let mut start = ProcessStartRequest::new(request.command, resources);
-            start.environment = request.environment;
+            start.environment =
+                with_tmp_environment_defaults(rules.as_deref(), request.environment);
             start.terminal_mode = request.terminal_mode;
             start.cancellation = Some(lifetime);
 
@@ -109,10 +119,13 @@ impl CapturedProcessLauncher for ProductionLauncher {
             // policy. A failed sandbox start is never retried outside the sandbox.
             let execution = self
                 .runner
-                .start_with_policy(&start, || {
+                .start_with_policy(&start, move || {
+                    #[cfg(any(target_os = "linux", target_os = "macos"))]
+                    let rules = rules
+                        .expect("sandboxed starts materialize rules before the policy factory");
                     #[cfg(target_os = "linux")]
                     let sandbox_policy = parrot_tools::sandbox::linux::LinuxSandboxPolicy {
-                        rules: process_rules(policy)?
+                        rules: rules
                             .into_iter()
                             .map(|rule| parrot_tools::sandbox::linux::LinuxAccessRule {
                                 path: rule.path,
@@ -126,7 +139,7 @@ impl CapturedProcessLauncher for ProductionLauncher {
                     #[cfg(target_os = "macos")]
                     let sandbox_policy =
                         parrot_tools::sandbox::macos::SeatbeltPolicy::compile_rules(
-                            process_rules(policy)?.into_iter().map(|rule| {
+                            rules.into_iter().map(|rule| {
                                 (
                                     rule.path.to_string_lossy().into_owned(),
                                     parrot_tools::sandbox::macos::SeatbeltAccess {
@@ -193,6 +206,41 @@ fn process_rules(policy: &ProductionPolicy) -> io::Result<Vec<ProductionAccessRu
         left.path == right.path && left.read == right.read && left.write == right.write
     });
     Ok(rules)
+}
+
+/// Shell tool children address tmp through the sandbox-mapped /tmp instead of
+/// an inherited parent TMPDIR, whose length is capped by sockaddr_un. The host
+/// path stays reachable through PARROT_HOST_TMPDIR. Rules are absent when the
+/// sandbox is off, and then /tmp is the unmapped host directory. Overrides win
+/// over defaults.
+fn with_tmp_environment_defaults(
+    rules: Option<&[ProductionAccessRule]>,
+    overrides: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    if !cfg!(target_os = "linux") {
+        return overrides;
+    }
+    let mut defaults = vec![(
+        "PARROT_HOST_TMPDIR".to_owned(),
+        std::env::temp_dir().to_string_lossy().into_owned(),
+    )];
+    if rules.is_none_or(|rules| {
+        rules
+            .iter()
+            .any(|rule| rule.path.as_path() == Path::new("/tmp") && rule.write)
+    }) {
+        defaults.push(("TMPDIR".to_owned(), "/tmp".to_owned()));
+    }
+    let mut environment: Vec<(String, String)> = defaults
+        .into_iter()
+        .filter(|(key, _)| {
+            !overrides
+                .iter()
+                .any(|(override_key, _)| override_key == key)
+        })
+        .collect();
+    environment.extend(overrides);
+    environment
 }
 
 #[cfg(test)]
@@ -355,6 +403,117 @@ mod tests {
         assert!(fixture.scratch.blob_directory().is_dir());
         assert!(fixture.scratch.queue_directory().is_dir());
         assert!(!fixture.session.join("queues").exists());
+        assert!(execution.is_completed());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn shell_children_receive_tmp_environment_defaults() {
+        let fixture = Fixture::new();
+        let execution = fixture
+            .launcher(false)
+            .launch(
+                command("printf '%s|%s' \"${TMPDIR-}\" \"${PARROT_HOST_TMPDIR-}\""),
+                SharedSecurity(fixture.policy(&[])),
+                Arc::new(ProcessLifetime::default()),
+            )
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), execution.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        execution.settle().await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.stdout,
+            format!("/tmp|{}", std::env::temp_dir().display())
+        );
+        assert!(execution.is_completed());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn explicit_tmpdir_override_wins_over_the_default() {
+        let fixture = Fixture::new();
+        let mut request = command("printf '%s|%s' \"${TMPDIR-}\" \"${PARROT_HOST_TMPDIR-}\"");
+        request.environment = vec![("TMPDIR".into(), "/custom-tmp".into())];
+        let execution = fixture
+            .launcher(false)
+            .launch(
+                request,
+                SharedSecurity(fixture.policy(&[])),
+                Arc::new(ProcessLifetime::default()),
+            )
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), execution.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        execution.settle().await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.stdout,
+            format!("/custom-tmp|{}", std::env::temp_dir().display())
+        );
+        assert!(execution.is_completed());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn sandboxed_children_receive_tmp_default_from_a_writable_tmp_rule() {
+        let fixture = Fixture::new();
+        let policy = fixture.policy(&[SandboxRule {
+            path: "/tmp".to_owned(),
+            action: SandboxRuleAction::AllowWrite,
+        }]);
+        let execution = fixture
+            .launcher(true)
+            .launch(
+                command("printf '%s|%s' \"${TMPDIR-}\" \"${PARROT_HOST_TMPDIR-}\""),
+                SharedSecurity(policy),
+                Arc::new(ProcessLifetime::default()),
+            )
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), execution.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        execution.settle().await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.stdout,
+            format!("/tmp|{}", std::env::temp_dir().display())
+        );
+        assert!(execution.is_completed());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn sandboxed_children_without_a_tmp_rule_inherit_the_source_tmpdir() {
+        let fixture = Fixture::new();
+        let expected = std::env::var("TMPDIR").unwrap_or_default();
+        let execution = fixture
+            .launcher(true)
+            .launch(
+                command("printf '%s|%s' \"${TMPDIR-}\" \"${PARROT_HOST_TMPDIR-}\""),
+                SharedSecurity(fixture.policy(&[])),
+                Arc::new(ProcessLifetime::default()),
+            )
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), execution.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        execution.settle().await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.stdout,
+            format!("{}|{}", expected, std::env::temp_dir().display())
+        );
         assert!(execution.is_completed());
     }
 
