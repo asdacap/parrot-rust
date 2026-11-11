@@ -398,7 +398,7 @@ async fn captured_materialized_selection_reaches_actual_session_consumer_before_
             false,
         ),
         (BUILD, cache.join("build.txt"), true),
-        (QUERY, cache.join("query.txt"), true),
+        ("query", cache.join("query.txt"), true),
     ];
     for (index, (id, target, allowed)) in cases.into_iter().enumerate() {
         let before = std::fs::read(&target).ok();
@@ -408,10 +408,6 @@ async fn captured_materialized_selection_reaches_actual_session_consumer_before_
             .capture_turn_selection(id, model(), &materializer)
             .unwrap();
         assert!(Arc::ptr_eq(&selection.security, &output));
-        assert!(Arc::ptr_eq(
-            modes.resolve(PLAN).unwrap().profile().security(),
-            &raw
-        ));
         let backend = Arc::new(Consumer {
             selected: Mutex::new(None),
             pending: Mutex::new(false),

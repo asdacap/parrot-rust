@@ -1,7 +1,7 @@
-use super::{ContextCompactionPolicy, ContextSize, ContextSnapshot, PlanningError, TokenEstimator};
+use super::{ContextSize, ContextSnapshot, PlanningError, TokenEstimator};
 use parrot_core::{
     ContextConfiguration, ContextModel,
-    compaction::{self as core, CompactionConfiguration, CompactionPlan},
+    compaction::{self as core, CompactionConfiguration},
 };
 use parrot_domain::values::config::ModelProfiles;
 use parrot_provider::{
@@ -16,18 +16,6 @@ pub struct CompactionGroup<'a> {
     pub end_watermark: i64,
     pub has_checkpoint_before: bool,
     pub is_complete: bool,
-}
-
-pub fn is_complete(messages: &[Message]) -> bool {
-    core::is_complete(&messages.iter().cloned().map(Into::into).collect::<Vec<_>>())
-}
-
-pub fn is_eligible_for_spill(group: &CompactionGroup<'_>) -> bool {
-    core::CompactionGroup {
-        messages: group.messages.iter().cloned().map(Into::into).collect(),
-        is_complete: group.is_complete,
-    }
-    .can_spill()
 }
 
 /// As in source Groups: an assistant call owns only the immediately following tool messages.
@@ -99,18 +87,6 @@ impl PlanningInput<'_> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RetentionPlan {
-    /// Groups before this cut may be summarized; the suffix remains verbatim.
-    pub keep_group_from: usize,
-    pub watermark: i64,
-    pub input_budget: i64,
-    pub summary_output_tokens: i32,
-    /// Original group indices requiring blob substitution before a summary request.
-    /// No blob is written, no path/notice is fabricated, and no replacement fit is claimed.
-    pub spill_groups: Vec<usize>,
-}
-
 fn add(left: i64, right: i64) -> Result<i64, PlanningError> {
     left.checked_add(right).ok_or(PlanningError::TokenOverflow)
 }
@@ -179,45 +155,6 @@ impl CompactionPlanner {
             tokens = add(tokens, 12)?;
         }
         add(add(tokens, Self::estimate_tokens(selected, messages)?)?, 4)
-    }
-
-    pub fn estimate_context(
-        &self,
-        selected: &ProviderModel,
-        instructions: &str,
-        tools: &[Tool],
-        history: &[Message],
-    ) -> Result<ContextSnapshot, PlanningError> {
-        Self::estimate_configuration(
-            selected,
-            instructions,
-            tools,
-            history,
-            &ContextConfiguration {
-                model: ContextModel {
-                    canonical_model: selected.selector(),
-                    context_window: selected.model.context_window,
-                    maximum_input_tokens: selected.model.max_input_tokens,
-                    maximum_output_tokens: selected.model.max_output_tokens,
-                },
-                trigger_percent: self.settings.trigger_percent,
-                context_limit: None,
-            },
-        )
-    }
-
-    pub fn resolve_policy(
-        &self,
-        selected: &ResolvedModelSelection,
-        target: Option<&ContextSize>,
-    ) -> ContextCompactionPolicy {
-        let policy = self
-            .capture_compaction_configuration(selected, target)
-            .resolve_policy();
-        ContextCompactionPolicy {
-            trigger_tokens: policy.trigger_tokens,
-            target_tokens: policy.target_tokens,
-        }
     }
 
     pub fn estimate_selected_context(
@@ -299,53 +236,6 @@ impl CompactionPlanner {
         let estimated = Self::estimate_input_tokens(selected, instructions, tools, history)?;
         Ok(ContextSnapshot::estimate(estimated, configuration))
     }
-
-    pub fn plan_selected(
-        &self,
-        selected: &ResolvedModelSelection,
-        target: Option<&ContextSize>,
-        input: &PlanningInput<'_>,
-    ) -> Result<Option<RetentionPlan>, PlanningError> {
-        self.plan(
-            &selected.canonical_model,
-            self.resolve_policy(selected, target).target_tokens,
-            input,
-        )
-    }
-
-    /// Plan the source CompactCore prefix/suffix and first-pass spill decisions only.
-    /// Summary-dependent chunking and substitution checks must use actual summary/notice text later.
-    pub fn plan(
-        &self,
-        selected: &ProviderModel,
-        target_budget: Option<i64>,
-        input: &PlanningInput<'_>,
-    ) -> Result<Option<RetentionPlan>, PlanningError> {
-        let configuration = self.capture_model_configuration(selected);
-        let definitions: Vec<_> = input.tools.to_vec();
-        let provider = PlanningProvider::new(selected);
-        let Some(plan) = CompactionPlan::select_for_target(
-            &input.capture_input(),
-            &definitions,
-            &configuration,
-            target_budget,
-            &provider,
-        )
-        .map_err(recover_planning_error)?
-        else {
-            return Ok(None);
-        };
-        let spill_groups = plan
-            .select_spill_groups(&provider)
-            .map_err(recover_planning_error)?;
-        Ok(Some(RetentionPlan {
-            keep_group_from: plan.keep_group_from,
-            watermark: plan.watermark,
-            input_budget: plan.input_budget,
-            summary_output_tokens: plan.summary_output_tokens,
-            spill_groups,
-        }))
-    }
 }
 
 pub(crate) struct PlanningProvider<'a> {
@@ -372,12 +262,5 @@ impl parrot_core::Provider for PlanningProvider<'_> {
             &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
         )
         .map_err(Into::into)
-    }
-}
-
-fn recover_planning_error(error: parrot_core::Error) -> PlanningError {
-    match error.detail {
-        Some(parrot_core::ErrorDetail::Planning(error)) => error,
-        _ => panic!("pure compaction planning returned a non-planning error"),
     }
 }

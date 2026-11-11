@@ -4,10 +4,9 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use parrot_cli::terminal_frames::{
-    CancellationToken, ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender,
-    LiveBufferRenderContext, LiveBufferRetention, ScrollbackItem, ScrollbackLayout,
-    ScrollbackRenderContext, TerminalCellStyleSpan, TerminalFrameRenderer, TerminalLine,
-    TerminalStyle,
+    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
+    LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext,
+    TerminalCellStyleSpan, TerminalFrameRenderer, TerminalLine, TerminalStyle,
 };
 use serde_json::Value;
 
@@ -227,7 +226,6 @@ fn run_fixtures() -> Vec<ScenarioRun> {
             number(scenario, "max_input_rows", 12),
             flag(scenario, "inline_diff", true),
         );
-        let cancel = CancellationToken::new();
         let mut identities = BTreeMap::new();
         let mut run = ScenarioRun {
             name: name.to_owned(),
@@ -240,7 +238,7 @@ fn run_fixtures() -> Vec<ScenarioRun> {
             rows = number(operation, "rows", rows);
             let boundary = output.0.lock().unwrap().len();
             let result = if text(operation, "op") == "clear" {
-                renderer.clear(&cancel)
+                renderer.clear()
             } else {
                 let items: Vec<Arc<dyn LiveBufferItem>> = operation["items"]
                     .as_array()
@@ -249,13 +247,12 @@ fn run_fixtures() -> Vec<ScenarioRun> {
                     .map(|value| Arc::new(FixtureLive(value.clone())) as Arc<dyn LiveBufferItem>)
                     .collect();
                 match text(operation, "op") {
-                    "draw" => renderer.draw(&items, columns, rows, &cancel),
+                    "draw" => renderer.draw(&items, columns, rows),
                     "commit" => renderer.commit(
                         Arc::new(FixtureScroll::new(&operation["scroll"], &mut identities)),
                         &items,
                         columns,
                         rows,
-                        &cancel,
                     ),
                     other => panic!("unexpected operation {other}"),
                 }

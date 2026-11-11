@@ -309,11 +309,11 @@ impl S3ImageBucket {
             _=tokio::time::sleep(timeout)=>return Err(failure(Error::Cancelled)),
         };
         match result {
-            Err(
-                cause @ (Error::Cancelled
-                | Error::Cancellation(_)
-                | Error::Http(HttpError::Cancelled)),
-            ) if !cancellation.is_cancelled() => Err(failure(cause)),
+            Err(cause @ (Error::Cancelled | Error::Http(HttpError::Cancelled)))
+                if !cancellation.is_cancelled() =>
+            {
+                Err(failure(cause))
+            }
             other => other,
         }
     }

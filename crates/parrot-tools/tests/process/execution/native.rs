@@ -45,11 +45,43 @@ fn drain(mut reader: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
     })
 }
 
+async fn wait_for_exit(process: &mut NativeProcess) -> io::Result<ExitStatus> {
+    loop {
+        if let Some(status) = process.try_wait()? {
+            return Ok(status);
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 async fn wait(process: &mut NativeProcess) -> ExitStatus {
-    tokio::time::timeout(Duration::from_secs(10), process.wait())
+    tokio::time::timeout(Duration::from_secs(10), wait_for_exit(process))
         .await
         .unwrap()
         .unwrap()
+}
+
+async fn cancel_and_wait(process: &mut NativeProcess) -> io::Result<ExitStatus> {
+    let cleanup = process.request_cancel();
+    let status = wait_for_exit(process).await;
+    cleanup?;
+    status
+}
+
+async fn write_stdin(process: &mut NativeProcess, bytes: &[u8]) -> io::Result<()> {
+    let mut remaining = bytes;
+    while !remaining.is_empty() {
+        match process.try_write_stdin(remaining) {
+            Ok(count) if count > 0 => remaining = &remaining[count..],
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Ok(_) => tokio::time::sleep(Duration::from_millis(5)).await,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(5)).await
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[test]
@@ -93,16 +125,15 @@ async fn pipe_captures_both_streams_and_caches_exit_status() {
     let stderr = drain(process.take_stderr().unwrap());
     let status = wait(&mut process).await;
     assert_eq!(status.code(), Some(7));
-    assert_eq!(process.wait().await.unwrap(), status);
+    assert_eq!(wait(&mut process).await, status);
     assert_eq!(stdout.join().unwrap(), b"stdout");
     assert_eq!(stderr.join().unwrap(), b"stderr");
     assert!(!process.is_pseudo_terminal());
     assert_eq!(
-        process.write_stdin(b"input").await.unwrap_err().kind(),
-        io::ErrorKind::Unsupported
-    );
-    assert_eq!(
-        process.resize(24, 80).unwrap_err().kind(),
+        write_stdin(&mut process, b"input")
+            .await
+            .unwrap_err()
+            .kind(),
         io::ErrorKind::Unsupported
     );
     assert_eq!(
@@ -168,7 +199,7 @@ async fn cancellation_settles_descendants_that_escape_the_owned_session() {
     let descendants = escaped_pids(&directory, root).await;
     let started = std::time::Instant::now();
     assert_eq!(
-        process.cancel_and_wait().await.unwrap().signal(),
+        cancel_and_wait(&mut process).await.unwrap().signal(),
         Some(libc::SIGKILL)
     );
     assert!(started.elapsed() < Duration::from_secs(5));
@@ -294,12 +325,12 @@ async fn cancel_kills_background_group_and_releases_inherited_pipe_handles() {
     assert_eq!(&ready, b"ready");
     let stdout = drain(stdout);
     let stderr = drain(process.take_stderr().unwrap());
-    let result = tokio::time::timeout(Duration::from_secs(5), process.cancel_and_wait())
+    let result = tokio::time::timeout(Duration::from_secs(5), cancel_and_wait(&mut process))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(result.signal(), Some(libc::SIGKILL));
-    assert_eq!(process.wait().await.unwrap(), result);
+    assert_eq!(wait(&mut process).await, result);
     assert!(stdout.join().unwrap().is_empty());
     assert!(stderr.join().unwrap().is_empty());
     assert_eq!(
@@ -321,7 +352,7 @@ async fn dropping_wait_observer_does_not_detach_process_and_drop_reaps() {
     let stdout = drain(stdout);
     let stderr = drain(process.take_stderr().unwrap());
     assert!(
-        tokio::time::timeout(Duration::from_millis(20), process.wait())
+        tokio::time::timeout(Duration::from_millis(20), wait_for_exit(&mut process))
             .await
             .is_err()
     );
@@ -377,9 +408,9 @@ fn helper() -> &'static Path {
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn retained_real_helper_provides_terminal_stdin_resize_and_eof() {
+async fn retained_real_helper_provides_terminal_size_stdin_and_eof() {
     let script = "test -t 0 && test -t 1 && test -t 2 || exit 91; stty -echo; printf ready; read value; stty size; printf '<%s>' \"$value\"; read rest; printf '<EOF>'";
-    let mut process = NativeProcess::start_pty(&shell(script), helper(), 24, 80)
+    let mut process = NativeProcess::start_pty(&shell(script), helper(), 40, 120)
         .await
         .unwrap();
     assert!(process.is_pseudo_terminal());
@@ -390,16 +421,20 @@ async fn retained_real_helper_provides_terminal_stdin_resize_and_eof() {
     assert_eq!(&ready, b"ready");
     let reader = drain(reader);
     let stderr = drain(process.take_stderr().unwrap());
-    process.resize(40, 120).unwrap();
-    process.write_stdin("hello 界\n".as_bytes()).await.unwrap();
+    write_stdin(&mut process, "hello 界\n".as_bytes())
+        .await
+        .unwrap();
     // EOT at an empty canonical line gives read(2) EOF without closing the drain.
-    process.close_stdin().await.unwrap();
+    write_stdin(&mut process, &[4]).await.unwrap();
     assert!(wait(&mut process).await.success());
     let output = String::from_utf8(reader.join().unwrap()).unwrap();
     assert_eq!(output, "40 120\r\n<hello 界><EOF>");
     assert!(stderr.join().unwrap().is_empty());
     assert_eq!(
-        process.write_stdin(b"later").await.unwrap_err().kind(),
+        write_stdin(&mut process, b"later")
+            .await
+            .unwrap_err()
+            .kind(),
         io::ErrorKind::BrokenPipe
     );
 }
@@ -418,7 +453,7 @@ async fn pty_cancellation_releases_terminal_drains_and_reaps_bridge() {
     assert_eq!(&ready, b"ready");
     let reader = drain(reader);
     let stderr = drain(process.take_stderr().unwrap());
-    let status = tokio::time::timeout(Duration::from_secs(5), process.cancel_and_wait())
+    let status = tokio::time::timeout(Duration::from_secs(5), cancel_and_wait(&mut process))
         .await
         .unwrap()
         .unwrap();
@@ -606,11 +641,11 @@ async fn blocked_nonblocking_pty_write_can_be_cancelled_then_process_settled() {
     let stderr = drain(process.take_stderr().unwrap());
     let bytes = vec![b'x'; 4 << 20];
     assert!(
-        tokio::time::timeout(Duration::from_millis(20), process.write_stdin(&bytes))
+        tokio::time::timeout(Duration::from_millis(20), write_stdin(&mut process, &bytes))
             .await
             .is_err()
     );
-    let status = tokio::time::timeout(Duration::from_secs(5), process.cancel_and_wait())
+    let status = tokio::time::timeout(Duration::from_secs(5), cancel_and_wait(&mut process))
         .await
         .unwrap()
         .unwrap();
@@ -657,7 +692,7 @@ async fn cancellation_targets_the_terminal_foreground_group_distinct_from_bridge
     let reader = drain(reader);
     let stderr = drain(process.take_stderr().unwrap());
     assert_eq!(
-        process.cancel_and_wait().await.unwrap().signal(),
+        cancel_and_wait(&mut process).await.unwrap().signal(),
         Some(libc::SIGKILL)
     );
     assert!(reader.join().unwrap().is_empty());

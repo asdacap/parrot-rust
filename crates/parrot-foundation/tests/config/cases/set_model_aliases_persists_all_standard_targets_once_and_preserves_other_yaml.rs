@@ -1,11 +1,14 @@
-use crate::support::Context;
+use crate::support::{Context, transact};
 
 #[test]
 fn source_assertions() {
     let context = Context::new();
     let mut configuration = context.configured("theme: dark\nmodel_aliases:\n  low_llm:\n    usage: Customized low usage\n    augment_system_prompt: Keep this metadata.\n  custom:\n    model_string: local/custom\n    usage: Custom work\n").unwrap();
     let defaults = configuration.models.provider_model_alias_defaults["chatgpt"].clone();
-    configuration.set_model_aliases(&defaults).unwrap();
+    transact(&mut configuration, |transaction| {
+        transaction.set_model_aliases(&defaults)
+    })
+    .unwrap();
     let reloaded = context.load().unwrap();
     let rewritten = context.saved();
     for (id, target) in defaults.targets() {

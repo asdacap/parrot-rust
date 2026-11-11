@@ -246,9 +246,6 @@ impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.0.stream(request)
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
     }
@@ -310,102 +307,83 @@ async fn collect(
     stream.close().await?;
     result
 }
-async fn consume(
-    provider: &dyn Provider,
-    session: bool,
-    request: Request,
-) -> Result<Vec<Event>, Error> {
-    let session_handle = provider.open_session().unwrap();
-    let stream = if session {
-        session_handle.call(request)
-    } else {
-        provider.call(request)
-    }?;
-    let result = collect(stream, &Token::new()).await;
-    session_handle.close().await?;
+async fn consume(provider: &dyn Provider, request: Request) -> Result<Vec<Event>, Error> {
+    let session = provider.open_session().unwrap();
+    let result = collect(session.call(request)?, &Token::new()).await;
+    session.close().await?;
     result
 }
 
 #[tokio::test]
-async fn images_are_linked_and_uploaded_once_across_calls_and_sessions_both_source_bools() {
-    for use_session in [false, true] {
-        let input = Input::new();
-        let inner = Inner::scripted(vec![vec![Ok(completed())]; 3]);
-        let bucket = Arc::new(Bucket::default());
-        let provider = provider(&inner, &bucket);
-        let text = Request {
-            model: "m".into(),
-            messages: vec![Message::user("hello")],
-            ..Request::default()
-        };
-        consume(&provider, use_session, input.request.clone())
-            .await
-            .unwrap();
-        consume(&provider, !use_session, input.request.clone())
-            .await
-            .unwrap();
-        let expected_text = text.clone();
-        let original_text_buffer = text.messages.as_ptr() as usize;
-        consume(&provider, use_session, text).await.unwrap();
-        let requests = inner.requests.lock().unwrap();
-        assert_eq!(
-            requests[0].messages[0].contents(),
-            vec![
-                Content::text("before"),
-                Content::image_link(&input.path, url(), "image/png", 2, 1),
-                Content::text("after")
-            ]
-        );
-        assert_eq!(requests[1].messages[0].contents()[1].image_url(), url());
-        assert_eq!(requests[2], expected_text);
-        assert_eq!(requests[2].messages.as_ptr() as usize, original_text_buffer);
-        assert_eq!(bucket.count("prepare"), 1);
-        assert_eq!(bucket.count("put"), 1);
-        assert_eq!(bucket.count("verify"), 0);
-        assert_eq!(inner.closes.load(Ordering::SeqCst), 3);
-    }
+async fn images_are_linked_and_uploaded_once_across_calls_and_sessions() {
+    let input = Input::new();
+    let inner = Inner::scripted(vec![vec![Ok(completed())]; 3]);
+    let bucket = Arc::new(Bucket::default());
+    let provider = provider(&inner, &bucket);
+    let text = Request {
+        model: "m".into(),
+        messages: vec![Message::user("hello")],
+        ..Request::default()
+    };
+    consume(&provider, input.request.clone()).await.unwrap();
+    consume(&provider, input.request.clone()).await.unwrap();
+    let expected_text = text.clone();
+    let original_text_buffer = text.messages.as_ptr() as usize;
+    consume(&provider, text).await.unwrap();
+    let requests = inner.requests.lock().unwrap();
+    assert_eq!(
+        requests[0].messages[0].contents(),
+        vec![
+            Content::text("before"),
+            Content::image_link(&input.path, url(), "image/png", 2, 1),
+            Content::text("after")
+        ]
+    );
+    assert_eq!(requests[1].messages[0].contents()[1].image_url(), url());
+    assert_eq!(requests[2], expected_text);
+    assert_eq!(requests[2].messages.as_ptr() as usize, original_text_buffer);
+    assert_eq!(bucket.count("prepare"), 1);
+    assert_eq!(bucket.count("put"), 1);
+    assert_eq!(bucket.count("verify"), 0);
+    assert_eq!(inner.closes.load(Ordering::SeqCst), 3);
 }
 #[tokio::test]
-async fn a_missing_object_is_reuploaded_and_the_call_retried_once_both_source_bools() {
-    for use_session in [false, true] {
-        let input = Input::new();
-        let inner = Inner::scripted(vec![
-            vec![Err(http(400, "could not download"))],
-            vec![Ok(completed())],
-        ]);
-        let bucket = Arc::new(Bucket::default());
-        bucket.missing.store(true, Ordering::Release);
-        let provider = provider(&inner, &bucket);
-        let events = consume(&provider, use_session, input.request.clone())
-            .await
-            .unwrap();
-        assert_eq!(
-            events,
-            vec![
-                Event::Retry {
-                    attempt: 1,
-                    retry_after: Duration::ZERO,
-                    reason: "Re-uploaded missing image objects. Retrying.".into()
-                },
-                completed()
-            ]
-        );
-        assert_eq!(
-            inner
-                .requests
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|r| r.messages[0].contents()[1].image_url().to_owned())
-                .collect::<Vec<_>>(),
-            vec![url(), url()]
-        );
-        assert_eq!(bucket.count("prepare"), 2);
-        assert_eq!(bucket.count("put"), 2);
-        assert_eq!(bucket.count("verify"), 1);
-        assert_eq!(bucket.count("forget"), 1);
-        assert_eq!(inner.closes.load(Ordering::SeqCst), 2);
-    }
+async fn a_missing_object_is_reuploaded_and_the_call_retried_once() {
+    let input = Input::new();
+    let inner = Inner::scripted(vec![
+        vec![Err(http(400, "could not download"))],
+        vec![Ok(completed())],
+    ]);
+    let bucket = Arc::new(Bucket::default());
+    bucket.missing.store(true, Ordering::Release);
+    let provider = provider(&inner, &bucket);
+    let events = consume(&provider, input.request.clone()).await.unwrap();
+    assert_eq!(
+        events,
+        vec![
+            Event::Retry {
+                attempt: 1,
+                retry_after: Duration::ZERO,
+                reason: "Re-uploaded missing image objects. Retrying.".into()
+            },
+            completed()
+        ]
+    );
+    assert_eq!(
+        inner
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r.messages[0].contents()[1].image_url().to_owned())
+            .collect::<Vec<_>>(),
+        vec![url(), url()]
+    );
+    assert_eq!(bucket.count("prepare"), 2);
+    assert_eq!(bucket.count("put"), 2);
+    assert_eq!(bucket.count("verify"), 1);
+    assert_eq!(bucket.count("forget"), 1);
+    assert_eq!(inner.closes.load(Ordering::SeqCst), 2);
 }
 #[tokio::test]
 async fn rejected_urls_fall_back_to_inline_bytes_only_for_the_rejected_session() {
@@ -432,9 +410,16 @@ async fn rejected_urls_fall_back_to_inline_bytes_only_for_the_rejected_session()
     collect(other.call(input.request.clone()).unwrap(), &token)
         .await
         .unwrap();
-    collect(provider.call(input.request.clone()).unwrap(), &token)
-        .await
-        .unwrap();
+    collect(
+        provider
+            .open_session()
+            .unwrap()
+            .call(input.request.clone())
+            .unwrap(),
+        &token,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         events,
         vec![
@@ -480,7 +465,7 @@ async fn other_failures_are_rethrown_after_at_most_a_verification_all_six_source
         ("unauthorized", 1),
     ] {
         let failure = match kind {
-            "timeout" => Error::HeaderTimeout("timed out".into()),
+            "timeout" => Error::Http(HttpError::HeaderTimeout(Duration::from_secs(1))),
             "permanent" => Error::Provider("no key".into()),
             "overload" => http(503, "busy"),
             "usage" => Error::ChatProvider(parrot_provider::chat_completions::ProviderFailure {
@@ -498,7 +483,8 @@ async fn other_failures_are_rethrown_after_at_most_a_verification_all_six_source
         }
         let expected = failure.clone();
         let error_buffer = |error: &Error| match error {
-            Error::HeaderTimeout(message) | Error::Provider(message) => message.as_ptr() as usize,
+            Error::Http(HttpError::HeaderTimeout(_)) => 0,
+            Error::Provider(message) => message.as_ptr() as usize,
             Error::Http(HttpError::Response(error)) => error.detail.as_ptr() as usize,
             Error::ChatProvider(error) => error.message.as_ptr() as usize,
             other => panic!("unexpected source failure {other:?}"),
@@ -509,9 +495,7 @@ async fn other_failures_are_rethrown_after_at_most_a_verification_all_six_source
         let bucket = Arc::new(Bucket::default());
         let provider = provider(&inner, &bucket);
         let input = Input::new();
-        let returned = consume(&provider, false, input.request.clone())
-            .await
-            .unwrap_err();
+        let returned = consume(&provider, input.request.clone()).await.unwrap_err();
         assert_eq!(returned, expected, "{kind}");
         assert_eq!(
             error_buffer(&returned),
@@ -541,7 +525,11 @@ async fn repair_is_one_shot_and_every_visible_event_blocks_replay() {
         let inner = Inner::scripted(vec![vec![Ok(event.clone()), Err(failure.clone())]]);
         let bucket = Arc::new(Bucket::default());
         let provider = provider(&inner, &bucket);
-        let mut stream = provider.call(input.request.clone()).unwrap();
+        let mut stream = provider
+            .open_session()
+            .unwrap()
+            .call(input.request.clone())
+            .unwrap();
         let token = Token::new();
         assert_eq!(stream.next(&token).await.unwrap(), Some(event));
         assert_eq!(stream.next(&token).await.unwrap_err(), failure);
@@ -554,9 +542,7 @@ async fn repair_is_one_shot_and_every_visible_event_blocks_replay() {
     let bucket = Arc::new(Bucket::default());
     let provider = provider(&inner, &bucket);
     assert_eq!(
-        consume(&provider, false, input.request.clone())
-            .await
-            .unwrap_err(),
+        consume(&provider, input.request.clone()).await.unwrap_err(),
         failure
     );
     assert_eq!(bucket.count("verify"), 1);
@@ -571,9 +557,7 @@ async fn duplicate_paths_keep_content_order_and_share_one_upload() {
     let inner = Inner::scripted(vec![vec![Ok(completed())]]);
     let bucket = Arc::new(Bucket::default());
     let provider = provider(&inner, &bucket);
-    consume(&provider, false, input.request.clone())
-        .await
-        .unwrap();
+    consume(&provider, input.request.clone()).await.unwrap();
     let requests = inner.requests.lock().unwrap();
     assert_eq!(
         requests[0].messages[0].contents()[3],
@@ -589,14 +573,10 @@ async fn failed_upload_is_forgotten_and_next_call_retries_it() {
     bucket.failures.store(1, Ordering::Release);
     let provider = provider(&inner, &bucket);
     assert_eq!(
-        consume(&provider, false, input.request.clone())
-            .await
-            .unwrap_err(),
+        consume(&provider, input.request.clone()).await.unwrap_err(),
         Error::Provider("upload failed".into())
     );
-    consume(&provider, false, input.request.clone())
-        .await
-        .unwrap();
+    consume(&provider, input.request.clone()).await.unwrap();
     assert_eq!(bucket.count("put"), 2);
     assert_eq!(inner.requests.lock().unwrap().len(), 1);
 }
@@ -608,7 +588,11 @@ async fn caller_cancellation_and_dropped_observer_do_not_cancel_shared_upload() 
     bucket.blocked.store(true, Ordering::Release);
     let provider = provider(&inner, &bucket);
     let token = Token::new();
-    let mut stream = provider.call(input.request.clone()).unwrap();
+    let mut stream = provider
+        .open_session()
+        .unwrap()
+        .call(input.request.clone())
+        .unwrap();
     let started = bucket.started.notified();
     tokio::pin!(started);
     started.as_mut().enable();
@@ -620,9 +604,7 @@ async fn caller_cancellation_and_dropped_observer_do_not_cancel_shared_upload() 
     stream.close().await.unwrap();
     bucket.blocked.store(false, Ordering::Release);
     bucket.gate.notify_waiters();
-    consume(&provider, true, input.request.clone())
-        .await
-        .unwrap();
+    consume(&provider, input.request.clone()).await.unwrap();
     assert_eq!(bucket.count("put"), 1);
     assert_eq!(inner.requests.lock().unwrap().len(), 1);
 }
@@ -669,7 +651,9 @@ async fn unchanged_and_inline_fallback_move_actual_original_request_buffers() {
         ..Request::default()
     };
     let text_buffer = text.messages.as_ptr() as usize;
-    collect(provider.call(text).unwrap(), &token).await.unwrap();
+    collect(provider.open_session().unwrap().call(text).unwrap(), &token)
+        .await
+        .unwrap();
     let original = input.request.clone();
     let original_buffer = original.messages.as_ptr() as usize;
     let session = provider.open_session().unwrap();
@@ -703,9 +687,7 @@ async fn rejection_rethrows_actual_owned_error_without_reconstructing_its_buffer
     let inner = Inner::scripted(vec![vec![Err(failure)]]);
     let bucket = Arc::new(Bucket::default());
     let provider = provider(&inner, &bucket);
-    let returned = consume(&provider, false, input.request.clone())
-        .await
-        .unwrap_err();
+    let returned = consume(&provider, input.request.clone()).await.unwrap_err();
     match returned {
         Error::Http(HttpError::Response(failure)) => {
             assert_eq!(failure.detail.as_ptr() as usize, original_detail);
@@ -726,7 +708,11 @@ async fn initially_cancelled_caller_starts_detached_preparation_and_upload_settl
     let provider = provider(&inner, &bucket);
     let token = Token::new();
     token.cancel();
-    let mut stream = provider.call(input.request.clone()).unwrap();
+    let mut stream = provider
+        .open_session()
+        .unwrap()
+        .call(input.request.clone())
+        .unwrap();
     assert_eq!(stream.next(&token).await.unwrap_err(), Error::Cancelled);
     assert_eq!(bucket.count("prepare"), 1);
     assert_eq!(bucket.count("put"), 0);
@@ -751,8 +737,16 @@ async fn concurrent_observers_share_upload_and_cancelling_one_leaves_other_alive
     let provider = provider(&inner, &bucket);
     let abandoned = Token::new();
     let live = Token::new();
-    let mut first = provider.call(input.request.clone()).unwrap();
-    let mut second = provider.call(input.request.clone()).unwrap();
+    let mut first = provider
+        .open_session()
+        .unwrap()
+        .call(input.request.clone())
+        .unwrap();
+    let mut second = provider
+        .open_session()
+        .unwrap()
+        .call(input.request.clone())
+        .unwrap();
     let mut observed_first = first.next(&abandoned);
     tokio::select! { biased; result = &mut observed_first => panic!("unexpected first completion {result:?}"), _ = tokio::task::yield_now() => {} }
     let mut observed_second = second.next(&live);
@@ -780,9 +774,6 @@ struct GenerationDelegate {
 impl Provider for GenerationDelegate {
     fn id(&self) -> &str {
         self.base.id()
-    }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.base.call(request)
     }
     fn has_credential<'a>(
         &'a self,

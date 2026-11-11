@@ -32,7 +32,7 @@ fn current_state_paths_never_read_legacy_config_credentials_or_presets() {
         assert_eq!(paths.config_file(), paths.config().join("config.yaml"));
         let current = CredentialStore::at_selected_path(paths.credentials_file());
         let presets = CredentialPresets::at_selected_config_directory(paths.config());
-        assert_eq!(presets.path(), paths.credential_preset_directory());
+        assert_eq!(presets.path(), paths.config().join("credential_presets"));
         assert!(run(current.list(&NEVER)).unwrap().is_empty());
         assert!(run(current.get("legacy", &NEVER)).unwrap().is_none());
         assert!(run(presets.list(&NEVER)).unwrap().is_empty());

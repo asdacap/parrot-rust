@@ -124,24 +124,6 @@ impl<S: RestrictableAccessSnapshot + 'static> ParentScope<S> {
             )))
         }
     }
-    pub fn validate_owner(&self, scope: &Arc<Scope<S>>) -> ChildResult<()> {
-        if self
-            .owner
-            .upgrade()
-            .is_some_and(|owner| Arc::ptr_eq(&owner, scope))
-            && self
-                .children
-                .upgrade()
-                .is_some_and(|children| Arc::ptr_eq(&children, scope.children()))
-        {
-            Ok(())
-        } else {
-            Err(ChildError::registry(format!(
-                "agent scope does not match child registry owner: {}",
-                self.identity.session.session_id,
-            )))
-        }
-    }
     async fn deliver_inner(
         &self,
         execution: &Execution,

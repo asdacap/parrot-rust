@@ -88,10 +88,6 @@ where
         })
     }
 
-    pub fn name(&self) -> &'static str {
-        self.kind.name()
-    }
-
     pub async fn execute(
         &self,
         invocation: ToolInvocation,

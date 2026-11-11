@@ -301,16 +301,6 @@ pub enum Presentation {
     },
 }
 
-impl Presentation {
-    pub fn animate(&self, frame: usize) -> Self {
-        let mut animated = self.clone();
-        if let Self::Tool(report) = &mut animated {
-            report.frame = frame;
-        }
-        animated
-    }
-}
-
 pub trait ToolPresenter: Send + Sync {
     fn tool_name(&self) -> &str;
     fn metadata(&self) -> ToolPresentationMetadata {

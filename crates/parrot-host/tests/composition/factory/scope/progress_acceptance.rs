@@ -55,12 +55,9 @@ async fn progress_blocks_partial_and_full_completion_until_explicit_close() {
                 None,
             );
             let session = root.get_service::<RuntimeSession<Security>>().unwrap();
-            let sent = bounded(session.send_text_message(
-                "progress-acceptance-marker".into(),
-                Arc::new(NeverCancelled),
-            ))
-            .await
-            .unwrap();
+            let sent = bounded(send_text(&session, "progress-acceptance-marker"))
+                .await
+                .unwrap();
             bounded(async {
                 loop {
                     if fixture.requests.lock().unwrap().len() >= 3 {

@@ -176,11 +176,12 @@ impl ws::Socket for Socket {
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ws::ReceivedFrame, ws::WebSocketError>> {
         Box::pin(async move {
-            let frame = self.frames.pop_front().ok_or_else(|| {
-                ws::WebSocketError::InvalidOperation("unexpected fixture receive".into())
-            })?;
+            let frame = self
+                .frames
+                .pop_front()
+                .ok_or_else(|| ws::WebSocketError::Wire("unexpected fixture receive".into()))?;
             if frame.len() > bytes.len() {
-                return Err(ws::WebSocketError::InvalidOperation(
+                return Err(ws::WebSocketError::Wire(
                     "fixture frame exceeds buffer".into(),
                 ));
             }
@@ -252,7 +253,7 @@ impl ws::Connector for Connector {
                     response_headers: Vec::new(),
                 }),
                 Some(Connection::Failure(error)) => Err(error),
-                None => Err(ws::WebSocketError::InvalidOperation(
+                None => Err(ws::WebSocketError::Wire(
                     "unexpected fixture connection".into(),
                 )),
             }
@@ -526,9 +527,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
             session.close().await?;
             let kind = match &outcome {
                 Ok(()) => "none",
-                Err(Error::Http(HttpError::HeaderTimeout(_)) | Error::HeaderTimeout(_)) => {
-                    "header_timeout"
-                }
+                Err(Error::Http(HttpError::HeaderTimeout(_))) => "header_timeout",
                 Err(error) => return Err(error.clone()),
             };
             Ok((

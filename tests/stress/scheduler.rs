@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
-use parrot_domain::contracts::events::{EventSubscription, SubscriptionLimits};
+use parrot_domain::contracts::events::EventSubscription;
 use parrot_domain::protocol::messages::parrot::{Delivery, Event, InputSource};
 use parrot_domain::values::agent_state::{ExecutionCheckpoint, ExecutionTerminal};
 use parrot_runtime::agent_turn::lifecycle::{
@@ -376,11 +376,7 @@ async fn seeded_subscribe_before_replay_preserves_duplicates_and_defers_snapshot
 }
 
 async fn exercise_replay(count: usize, duplicate: usize, context: &str) {
-    let broker = EventBroker::with_limits(SubscriptionLimits {
-        retained: 32,
-        transient: 32,
-    })
-    .unwrap();
+    let broker = EventBroker::new();
     let release = Arc::new(Semaphore::new(0));
     let captures = Arc::new(AtomicUsize::new(0));
     let mut persisted: Vec<_> = (0..count)
@@ -392,7 +388,7 @@ async fn exercise_replay(count: usize, duplicate: usize, context: &str) {
         {
             let release = release.clone();
             let persisted = persisted.clone();
-            move || async move {
+            move |_: String| async move {
                 release.acquire().await.unwrap().forget();
                 Ok::<_, ()>(persisted)
             }

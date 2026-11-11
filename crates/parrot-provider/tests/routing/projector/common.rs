@@ -1,7 +1,7 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::oauth::AuthError;
 use parrot_provider::{
-    catalogs::{Model, ModelVariant},
+    catalogs::{Model, ModelMetadataFields as F, ModelVariant},
     http_stream::HttpError,
     routing::{
         aliases::{ModelAliasDefinition, ModelRoutingSnapshot, ResolvedModelSelection},
@@ -49,7 +49,27 @@ pub fn model(value: &Model) -> Value {
         "input_price":value.input_price,"cached_input_price":value.cached_input_price,"output_price":value.output_price,
         "tools":value.capabilities.tools,"reasoning":value.capabilities.reasoning,"output":value.capabilities.output,
         "variants":value.capabilities.variants.iter().map(|v|json!({"name":v.name,"effort":v.reasoning_effort})).collect::<Vec<_>>(),
-        "fields":value.fields.bits()})
+        "fields":field_bits(value.fields)})
+}
+fn field_bits(fields: F) -> u16 {
+    [
+        F::NAME,
+        F::CONTEXT_WINDOW,
+        F::MAX_OUTPUT_TOKENS,
+        F::INPUT_PRICE,
+        F::CACHED_INPUT_PRICE,
+        F::OUTPUT_PRICE,
+        F::TOOLS,
+        F::REASONING,
+        F::OUTPUT,
+        F::VARIANTS,
+        F::MAX_INPUT_TOKENS,
+    ]
+    .into_iter()
+    .enumerate()
+    .filter(|(_, field)| fields.contains(*field))
+    .map(|(bit, _)| 1 << bit)
+    .sum()
 }
 pub fn seed_model(provider: &str, input: &Value) -> Model {
     let mut value = Model::new(text(input, "id"), provider);
@@ -86,7 +106,7 @@ pub fn snapshot(value: &ModelRoutingSnapshot) -> Value {
 }
 pub fn resolved(value: &ResolvedModelSelection) -> Value {
     json!({"requested":value.requested_selector.value,"alias":value.alias.as_ref().map(|alias| &alias.name),
-        "canonical":selection(&value.canonical_model),"canonical_base":value.canonical_base(),
+        "canonical":selection(&value.canonical_model),"canonical_base":format!("{}/{}", value.canonical_model.provider.id(), value.canonical_model.model.id),
         "context_limit":value.context_limit().map(ToString::to_string),"revision":value.routing_snapshot.revision})
 }
 
@@ -97,22 +117,15 @@ pub fn error(value: &Error) -> Value {
         Error::Provider(_)
         | Error::ProviderWithCause { .. }
         | Error::Http(HttpError::Provider(_)) => "Parrot.Llm.LLMProviderException",
-        Error::HeaderTimeout(_)
-        | Error::HeaderRetryLimit { .. }
-        | Error::Http(HttpError::HeaderTimeout(_)) => "Parrot.Llm.Wire.HeaderTimeoutException",
+        Error::HeaderRetryLimit { .. } | Error::Http(HttpError::HeaderTimeout(_)) => {
+            "Parrot.Llm.Wire.HeaderTimeoutException"
+        }
         Error::Http(HttpError::Response(_) | HttpError::ProviderHttp(_)) => {
             "Parrot.Llm.Wire.ProviderHttpException"
         }
-        Error::Http(HttpError::RequestCancelled(_)) => {
-            "System.Threading.Tasks.TaskCanceledException"
-        }
-        Error::Http(HttpError::Http(_) | HttpError::Transport(_)) => {
-            "System.Net.Http.HttpRequestException"
-        }
+        Error::Http(HttpError::Transport(_)) => "System.Net.Http.HttpRequestException",
         Error::Wire(_) | Error::Http(HttpError::Wire(_)) => "Parrot.Llm.Wire.WireProtocolException",
-        Error::Cancelled | Error::Cancellation(_) | Error::Http(HttpError::Cancelled) => {
-            "System.OperationCanceledException"
-        }
+        Error::Cancelled | Error::Http(HttpError::Cancelled) => "System.OperationCanceledException",
         Error::Io(_) => "System.IO.IOException",
         Error::InvalidOperation(_) => "System.InvalidOperationException",
         Error::Authentication(auth) => match auth {
@@ -192,24 +205,9 @@ mod tests {
     #[test]
     fn http_counterparts_follow_typed_origins_not_messages() {
         let message = "same untouched message";
-        for (native, expected) in [
-            (
-                HttpError::ProviderHttp(message.into()),
-                "Parrot.Llm.Wire.ProviderHttpException",
-            ),
-            (
-                HttpError::RequestCancelled(message.into()),
-                "System.Threading.Tasks.TaskCanceledException",
-            ),
-            (
-                HttpError::Http(message.into()),
-                "System.Net.Http.HttpRequestException",
-            ),
-        ] {
-            let observation = error(&Error::Http(native));
-            assert_eq!(observation["type"], expected);
-            assert_eq!(observation["message"], message);
-        }
+        let observation = error(&Error::Http(HttpError::ProviderHttp(message.into())));
+        assert_eq!(observation["type"], "Parrot.Llm.Wire.ProviderHttpException");
+        assert_eq!(observation["message"], message);
         assert_eq!(
             error(&Error::Http(HttpError::Cancelled))["type"],
             "System.OperationCanceledException"

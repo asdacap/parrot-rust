@@ -276,19 +276,6 @@ async fn real_sandbox_pty_attaches_inside_bwrap() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn direct_run_forces_pipe_and_settles_real_execution() {
-    let root = Fixture::new();
-    let request = root.request("printf run-result; exit 9", TerminalMode::PseudoTerminal);
-    let result = tokio::time::timeout(LIMIT, UnsandboxedProcessSandbox.run(&request, &()))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(result.exit_code, 9);
-    assert_eq!(result.stdout, "run-result");
-    assert_eq!(request.terminal_mode, TerminalMode::PseudoTerminal);
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn failed_sandbox_spawn_removes_output_artifacts_without_unconfined_fallback() {
     let root = Fixture::new();
     let executable = root.0.join("not-executable");

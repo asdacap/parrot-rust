@@ -1,9 +1,7 @@
 use super::json::{source_compact, source_quote};
-use crate::http_stream::{ByteStream, HttpError, SseDecoder};
-use parrot_domain::contracts::async_ops::Cancellation;
 use serde_json::value::RawValue;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt,
 };
 
@@ -91,111 +89,6 @@ impl fmt::Display for ResponsesError {
     }
 }
 impl std::error::Error for ResponsesError {}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ResponsesStreamError {
-    Transport(HttpError),
-    Protocol(ResponsesError),
-}
-
-/// Cancellable, owning Responses event stream over T25's bounded byte reader.
-/// It buffers only events produced from already-read SSE records; once the
-/// terminal response is reached it stops reading and ignores trailing records.
-pub struct ResponsesEventStream<'a> {
-    source: &'a mut dyn ByteStream,
-    sse: SseDecoder,
-    parser: ResponsesParser,
-    pending: VecDeque<ResponsesEvent>,
-    pending_error: Option<ResponsesStreamError>,
-    eof: bool,
-    terminal: bool,
-}
-impl<'a> ResponsesEventStream<'a> {
-    pub fn new(
-        source: &'a mut dyn ByteStream,
-        max_event_bytes: i32,
-        provider_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            source,
-            sse: SseDecoder::new(max_event_bytes),
-            parser: ResponsesParser::new(provider_id),
-            pending: VecDeque::new(),
-            pending_error: None,
-            eof: false,
-            terminal: false,
-        }
-    }
-
-    pub async fn next(
-        &mut self,
-        cancellation: &dyn Cancellation,
-    ) -> Result<Option<ResponsesEvent>, ResponsesStreamError> {
-        loop {
-            if let Some(event) = self.pending.pop_front() {
-                return Ok(Some(event));
-            }
-            if let Some(error) = self.pending_error.take() {
-                self.terminal = true;
-                return Err(error);
-            }
-            if self.terminal {
-                return Ok(None);
-            }
-            if self.eof {
-                let records = self.sse.finish();
-                self.accept_records(records);
-                if let Some(event) = self.pending.pop_front() {
-                    return Ok(Some(event));
-                }
-                if let Some(error) = self.pending_error.take() {
-                    self.terminal = true;
-                    return Err(error);
-                }
-                self.terminal = true;
-                self.parser
-                    .finish()
-                    .map_err(ResponsesStreamError::Protocol)?;
-                return Ok(None);
-            }
-            let mut bytes = [0_u8; 8192];
-            let read = self
-                .source
-                .read(&mut bytes, cancellation)
-                .await
-                .map_err(ResponsesStreamError::Transport)?;
-            if read == 0 {
-                self.eof = true;
-                continue;
-            }
-            let records = self.sse.feed(&bytes[..read]);
-            self.accept_records(records);
-        }
-    }
-
-    fn accept_records(&mut self, records: Vec<Result<crate::http_stream::SseEvent, HttpError>>) {
-        for record in records {
-            let record = match record {
-                Ok(record) => record,
-                Err(error) => {
-                    self.pending_error = Some(ResponsesStreamError::Transport(error));
-                    break;
-                }
-            };
-            match self.parser.push_data(&record.data) {
-                Ok(events) => self.pending.extend(events),
-                Err(error) => {
-                    self.pending_error = Some(ResponsesStreamError::Protocol(error));
-                    break;
-                }
-            }
-            if self.parser.done {
-                self.terminal = true;
-                break;
-            }
-        }
-    }
-}
 
 /// One Responses event-state machine. Call `push_data` for each complete SSE
 /// data payload; `finish` signals source EOF and requires a terminal response.

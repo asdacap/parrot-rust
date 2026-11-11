@@ -37,29 +37,6 @@ pub struct SecurityRuleDescription {
     pub path: String,
     pub action: RuleActionDescription,
 }
-/// Caller-provided descriptions are not a materialized profile or authorization snapshot.
-#[derive(Clone, Debug)]
-pub struct SecurityDescription {
-    pub rules: Vec<SecurityRuleDescription>,
-    pub sandbox_enabled: bool,
-}
-#[derive(Clone, Debug)]
-pub struct SubagentDescription {
-    pub id: String,
-    pub usage: String,
-}
-#[derive(Clone, Debug)]
-pub struct MaterializedContext {
-    pub platform: String,
-    pub working_directory: String,
-    pub scratch_path: String,
-    pub history_path: String,
-    pub expected_cli_utilities: Vec<String>,
-    pub optional_cli_utilities: Vec<String>,
-    pub subagents: Vec<SubagentDescription>,
-    pub security: SecurityDescription,
-}
-
 /// Captures literal template arguments without expanding the template.
 pub struct TemplateSystemPromptProvider {
     key: String,
@@ -189,90 +166,6 @@ impl SystemPrompt for SessionIdentityPrompt {
             &self.templates,
         )?])
     }
-}
-
-/// Produces the original static context sections over supplied values. It never probes the host.
-pub fn materialized_context_providers(
-    context: &MaterializedContext,
-    templates: Arc<PromptTemplateCatalog>,
-) -> Vec<Arc<dyn SystemPromptProvider>> {
-    let utility_list = |items: &[String]| {
-        if items.is_empty() {
-            "none".to_owned()
-        } else {
-            items.join(", ")
-        }
-    };
-    let subagents = context
-        .subagents
-        .iter()
-        .map(|entry| json!({"id": entry.id, "usage": entry.usage}))
-        .collect::<Vec<_>>();
-    let definitions = [
-        (
-            "05b-optional-cli-utilities",
-            "context.optional-cli-utilities",
-            vec![(
-                "utilities".into(),
-                utility_list(&context.optional_cli_utilities).into(),
-            )],
-        ),
-        (
-            "06-cli-utilities",
-            "context.expected-cli-utilities",
-            vec![(
-                "utilities".into(),
-                utility_list(&context.expected_cli_utilities).into(),
-            )],
-        ),
-        (
-            "07-platform",
-            "context.platform",
-            vec![("platform".into(), context.platform.clone().into())],
-        ),
-        (
-            "12-working-directory",
-            "system.working-directory",
-            vec![(
-                "working_directory".into(),
-                context.working_directory.clone().into(),
-            )],
-        ),
-        (
-            "15-subagents",
-            "context.subagents",
-            vec![("subagents".into(), subagents.into())],
-        ),
-        (
-            "92-agent-scratch",
-            "context.agent-scratch",
-            vec![("path".into(), context.scratch_path.clone().into())],
-        ),
-        (
-            "93-agent-history",
-            "context.agent-history",
-            vec![("path".into(), context.history_path.clone().into())],
-        ),
-    ];
-    let mut providers = definitions
-        .into_iter()
-        .map(|(key, id, args)| {
-            Arc::new(TemplateSystemPromptProvider::new(
-                format!("runtime:system-context:{key}"),
-                id,
-                args,
-                templates.clone(),
-            )) as Arc<dyn SystemPromptProvider>
-        })
-        .collect::<Vec<_>>();
-    let sandbox_enabled = context.security.sandbox_enabled;
-    providers.push(Arc::new(SecurityProfilePromptProvider::new(
-        context.security.rules.clone(),
-        Arc::new(move || sandbox_enabled),
-        templates.clone(),
-    )));
-    providers.push(Arc::new(SessionIdentityPromptProvider::new(templates)));
-    providers
 }
 
 fn escape_rule_path(value: &str) -> String {

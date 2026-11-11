@@ -2,7 +2,7 @@
 use crate::{anthropic, chat_completions, responses, responses_websocket};
 pub use parrot_core::ToolDefinition as Tool;
 pub use parrot_core::{Reasoning, Role, ToolCall};
-use std::{io, path::Path, time::Duration};
+use std::{io, time::Duration};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Request {
@@ -188,9 +188,6 @@ impl chat_completions::RequestView for Request {
     fn reasoning_effort(&self) -> Option<&str> {
         self.reasoning.as_ref().map(|r| r.effort.as_str())
     }
-    fn reasoning_summary(&self) -> Option<&str> {
-        self.reasoning.as_ref().map(|r| r.summary.as_str())
-    }
     fn provider_preferences(&self) -> &str {
         &self.provider_preferences
     }
@@ -228,9 +225,6 @@ impl responses::ResponsesRequestView for Request {
     fn provider_preferences(&self) -> &str {
         &self.provider_preferences
     }
-    fn include_router_metadata(&self) -> bool {
-        self.include_router_metadata
-    }
 }
 impl anthropic::RequestView for Request {
     type Message = Message;
@@ -252,15 +246,6 @@ impl anthropic::RequestView for Request {
     }
     fn reasoning_effort(&self) -> Option<&str> {
         self.reasoning.as_ref().map(|r| r.effort.as_str())
-    }
-    fn reasoning_summary(&self) -> Option<&str> {
-        self.reasoning.as_ref().map(|r| r.summary.as_str())
-    }
-    fn provider_preferences(&self) -> &str {
-        &self.provider_preferences
-    }
-    fn include_router_metadata(&self) -> bool {
-        self.include_router_metadata
     }
 }
 
@@ -381,9 +366,6 @@ impl responses::ResponsesContentView for Content {
     fn text(&self) -> &str {
         self.text_value()
     }
-    fn image_path(&self) -> &Path {
-        Path::new(self.image_path())
-    }
     fn image_url(&self) -> &str {
         self.image_url()
     }
@@ -405,20 +387,11 @@ impl anthropic::ContentView for Content {
     fn text(&self) -> &str {
         self.text_value()
     }
-    fn image_path(&self) -> &str {
-        self.image_path()
-    }
     fn image_url(&self) -> &str {
         self.image_url()
     }
     fn media_type(&self) -> &str {
         self.media_type()
-    }
-    fn image_width(&self) -> i32 {
-        self.image_width()
-    }
-    fn image_height(&self) -> i32 {
-        self.image_height()
     }
     fn read_image(&self) -> io::Result<Vec<u8>> {
         Content::read_image(self)

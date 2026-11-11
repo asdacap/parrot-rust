@@ -229,7 +229,10 @@ fn pipe_bom_detection_does_not_change_pty_utf8_transcripts() {
     let transcript = PtyTranscript::new(&directory.0);
     transcript.append(b"\xef\xbb\xbfA").unwrap();
     transcript.complete().unwrap();
-    assert_eq!(transcript.read_text(0).unwrap(), (2, "\u{feff}A".into()));
+    assert_eq!(
+        transcript.read(0).unwrap(),
+        (2, "\u{feff}A".encode_utf16().collect())
+    );
     transcript.dispose().unwrap();
 }
 
@@ -716,8 +719,8 @@ async fn pty_interaction_raw_cursors_incremental_results_and_cleanup() {
         &shell("stty -echo; printf 'A界😀'; read value; stty size; printf '%s' \"$value\""),
         helper(),
         &directory.0,
-        24,
-        80,
+        40,
+        120,
     )
     .await
     .unwrap();
@@ -725,7 +728,6 @@ async fn pty_interaction_raw_cursors_incremental_results_and_cleanup() {
     assert!(execution.stdout_path().is_none() && execution.stderr_path().is_none());
     until(|| execution.read_transcript(0).unwrap().0 == 4).await;
     assert_eq!(execution.read_transcript(3).unwrap(), (4, vec![0xde00]));
-    execution.resize(40, 120).unwrap();
     execution.write_stdin("hello\n").await.unwrap();
     let actual = result(&execution).await;
     assert_eq!(actual.stdout, "A界😀40 120\r\nhello");

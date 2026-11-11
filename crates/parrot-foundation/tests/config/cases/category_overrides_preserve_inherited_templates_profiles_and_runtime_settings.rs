@@ -7,7 +7,7 @@ fn source_assertions() {
     assert!(!baseline_context.path.exists());
     let context = Context::new();
     context.write("prompt_templates:\n  agent-task.stop-canceled:\n    template: Task canceled by owner.\n  agent-session.child-completion:\n    template: '{agent_name}: {result}'\nprofiles:\n  build:\n    usage: Custom foreground usage\nlive_buffer_rows: 37\nagent_tasks:\n  maximum_attempts: 7\n");
-    let mut known = baseline.prompt_templates.clone();
+    let mut known = crate::fixtures::fixture_templates("").unwrap();
     known.get_mut("agent-task.stop-canceled").unwrap().text = "Task canceled by owner.".into();
     known
         .get_mut("agent-session.child-completion")

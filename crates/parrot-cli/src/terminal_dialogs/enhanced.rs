@@ -42,8 +42,8 @@ use crate::{
     },
     slash_settings::AuthServices,
     terminal_frames::{
-        CancellationToken, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
-        SPINNER_INTERVAL, ScrollbackItem, TerminalFrameRenderer,
+        LiveBufferItem, LiveBufferRender, LiveBufferRenderContext, SPINNER_INTERVAL,
+        ScrollbackItem, TerminalFrameRenderer,
     },
     terminal_input::{IncrementalEditor, PromptState, TerminalKey, TerminalKeyKind},
 };
@@ -1020,21 +1020,14 @@ impl FrameView {
         let (columns, rows) = (self.dimensions)();
         let mut items = state.body.clone();
         items.extend(state.input.iter().cloned());
-        self.renderer
-            .draw(&items, columns, rows, &CancellationToken::new())
+        self.renderer.draw(&items, columns, rows)
     }
     fn flush_commits(&self, state: &mut FrameState) -> io::Result<()> {
         let (columns, rows) = (self.dimensions)();
         let mut items = state.body.clone();
         items.extend(state.input.iter().cloned());
         while let Some(item) = state.pending.front() {
-            self.renderer.commit(
-                item.clone(),
-                &items,
-                columns,
-                rows,
-                &CancellationToken::new(),
-            )?;
+            self.renderer.commit(item.clone(), &items, columns, rows)?;
             // Keep the exact immutable item until the actual sink succeeds.
             state.pending.pop_front();
         }
@@ -1074,7 +1067,7 @@ impl FrameView {
             .lock()
             .map_err(|_| io::Error::other("terminal frame lock poisoned"))?;
         let flushed = self.flush_commits(&mut state);
-        let cleared = self.renderer.clear(&CancellationToken::new());
+        let cleared = self.renderer.clear();
         flushed.and(cleared)
     }
 }

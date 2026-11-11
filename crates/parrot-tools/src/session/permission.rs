@@ -65,10 +65,6 @@ impl<P: PermissionServices> RequestWritePermissionTool<P> {
         }
     }
 
-    pub fn name(&self) -> &'static str {
-        "request_write_permission"
-    }
-
     async fn execute(
         &self,
         invocation: &Invocation,

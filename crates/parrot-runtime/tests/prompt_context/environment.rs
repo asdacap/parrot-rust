@@ -106,24 +106,3 @@ fn cli_discovery_calls_actual_injected_locator_sorted_and_macos_excludes_only_ex
     assert_eq!(value.available_optional, ["bwrap", "z"]);
     assert!(native_platform_identifier().contains('-'));
 }
-
-#[test]
-fn git_prompt_uses_real_workspace_repository_state_without_launching_git() {
-    let (_, router) = route(Vec::new());
-    let selection = router.resolve("unused/vendor/model").unwrap();
-    let no_git = ProjectWorkspace::from_resolved("/work".into(), "/physical".into(), None, None);
-    let git = ProjectWorkspace::from_resolved(
-        "/work".into(),
-        "/physical".into(),
-        Some("/repo".into()),
-        None,
-    );
-    for (workspace, expected) in [(&no_git, "false"), (&git, "true")] {
-        let catalog = templates(
-            "prompt_templates:\n  context.git-repository:\n    engine: scalar\n    template: '{is_repository}'\n",
-        );
-        let mut prompt: Box<dyn SystemPrompt> =
-            Box::new(git_repository_prompt(workspace, &catalog).unwrap());
-        assert_eq!(prompt.build(&selection).unwrap(), expected);
-    }
-}

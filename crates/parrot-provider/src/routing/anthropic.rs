@@ -93,9 +93,6 @@ impl Provider for AnthropicBridge {
     fn id(&self) -> &str {
         self.inner.id()
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(lazy(self.inner.clone(), request))
-    }
     fn has_credential<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,

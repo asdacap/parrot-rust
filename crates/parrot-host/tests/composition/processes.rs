@@ -22,8 +22,8 @@ use parrot_tools::process::ownership::{
     execution::{Execution, NeverCancelled, ProcessResult},
     inventory::{ActiveShellProcessState, ActivityKind},
     managed::{
-        ClaimedProcess, CompletionMessage, CompletionReport, CompletionSink, NoProcessDiagnostics,
-        ProcessReport,
+        ClaimedProcess, CompletionMessage, CompletionReport, CompletionSink, ProcessDiagnostic,
+        ProcessDiagnostics, ProcessReport,
     },
     owner::{ProcessAgent, ProcessStart, ShellProcessOwner},
 };
@@ -158,6 +158,11 @@ impl CompletionSink for Sink {
     }
 }
 
+struct NoProcessDiagnostics;
+impl ProcessDiagnostics for NoProcessDiagnostics {
+    fn write(&self, _: ProcessDiagnostic) {}
+}
+
 struct NonBlockingReport;
 impl ProcessReport for NonBlockingReport {
     fn blocks_turn(&self) -> bool {
@@ -223,7 +228,6 @@ async fn start(
 async fn real_owner_observer_preserves_blocking_retirement_order_and_scope() {
     let (owner, sink) = owner("scope/owner");
     let observer = Arc::new(ScopedProcessStatus::new(owner.clone()));
-    assert!(Arc::ptr_eq(observer.owner(), &owner));
     let mut claims = Vec::new();
     for name in ["\u{e000}", "😀", "a"] {
         claims.push(start(&owner, name, Arc::new(CompletionReport)).await);

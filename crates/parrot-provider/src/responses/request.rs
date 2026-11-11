@@ -10,7 +10,6 @@ use std::io;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedResponsesRequest {
     body: String,
-    include_router_metadata: bool,
 }
 impl PreparedResponsesRequest {
     pub fn encode_http(&self) -> Vec<u8> {
@@ -18,9 +17,6 @@ impl PreparedResponsesRequest {
     }
     pub fn body(&self) -> &str {
         &self.body
-    }
-    pub fn include_router_metadata(&self) -> bool {
-        self.include_router_metadata
     }
 }
 
@@ -124,10 +120,7 @@ pub fn prepare<R: ResponsesRequestView>(
     if request.max_output_tokens() > 0 {
         body.push(("max_output_tokens", request.max_output_tokens().to_string()));
     }
-    Ok(PreparedResponsesRequest {
-        body: object(body),
-        include_router_metadata: request.include_router_metadata(),
-    })
+    Ok(PreparedResponsesRequest { body: object(body) })
 }
 
 fn add_message<M: ResponsesMessageView>(

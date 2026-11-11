@@ -120,15 +120,8 @@ pub async fn load<T: Send, E: From<Status> + Send>(
     }
 }
 
-/// Key input must provide intercepted keys without echoing their contents.
-/// Installing a real console implementation (including echo restoration) is a
-/// FINAL-WIRING-DEFERRED platform edge, not provided by supplied streams.
-pub trait SecretKeyInput: Send {
-    fn read_key(&mut self) -> io::Result<SecretKey>;
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SecretKey {
+enum SecretKey {
     Enter,
     Escape,
     ControlC,
@@ -174,7 +167,6 @@ pub struct BasicSlashDialog<R: DialogInput, W: Write, E: Write> {
     input: R,
     output: W,
     error: E,
-    secret_keys: Option<Box<dyn SecretKeyInput>>,
     skip_lf: bool,
 }
 
@@ -184,14 +176,8 @@ impl<R: DialogInput, W: Write, E: Write> BasicSlashDialog<R, W, E> {
             input,
             output,
             error,
-            secret_keys: None,
             skip_lf: false,
         }
-    }
-
-    pub fn with_secret_input(mut self, keys: impl SecretKeyInput + 'static) -> Self {
-        self.secret_keys = Some(Box::new(keys));
-        self
     }
 
     pub fn into_parts(self) -> (R, W, E) {
@@ -241,26 +227,6 @@ impl<R: DialogInput, W: Write, E: Write> BasicSlashDialog<R, W, E> {
                         .map_err(|error| Status::internal(error.to_string()));
                 }
                 byte => line.push(byte),
-            }
-        }
-    }
-
-    fn read_secret_keys(
-        &mut self,
-        cancellation: &dyn Cancellation,
-    ) -> Result<Option<String>, Status> {
-        let mut typed = String::new();
-        loop {
-            check(cancellation)?;
-            let key = self
-                .secret_keys
-                .as_mut()
-                .expect("secret key input selected")
-                .read_key()
-                .map_err(io_status)?;
-            if let Some(accepted) = update_secret(&mut typed, key) {
-                write_line(&mut self.output, "", cancellation)?;
-                return Ok(accepted.then_some(typed));
             }
         }
     }
@@ -385,9 +351,7 @@ impl<R: DialogInput, W: Write + Send, E: Write + Send> SlashDialog for BasicSlas
         Box::pin(async move {
             check(cancellation)?;
             self.prompt(prompt, cancellation)?;
-            if self.secret_keys.is_some() {
-                self.read_secret_keys(cancellation)
-            } else if let Some(_lease) = self.input.secret_lease().map_err(io_status)? {
+            if let Some(_lease) = self.input.secret_lease().map_err(io_status)? {
                 self.read_native_secret(cancellation).await
             } else {
                 self.read_line(cancellation).await
@@ -519,6 +483,24 @@ mod async_input_tests {
         );
         let (_, output, _) = dialog.into_parts();
         assert_eq!(output, b"\n");
+    }
+
+    #[tokio::test]
+    async fn native_secret_filters_controls_and_dismisses_on_escape_or_control_c() {
+        for (keys, expected) in [
+            (b"\x7fab\x7f\tc\r".as_slice(), Some("ac")),
+            (b"s\x1b", None),
+            (b"s\x03", None),
+        ] {
+            let c = Signal::new();
+            let mut dialog = BasicSlashDialog::new(Cursor::new(keys), Vec::new(), Vec::new());
+            assert_eq!(
+                dialog.read_native_secret(&c).await.unwrap().as_deref(),
+                expected
+            );
+            let (_, output, _) = dialog.into_parts();
+            assert_eq!(output, b"\n");
+        }
     }
 
     struct Waiting;

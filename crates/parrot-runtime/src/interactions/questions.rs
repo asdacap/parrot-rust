@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError};
-use parrot_domain::contracts::interactions::QuestionBroker as QuestionBrokerContract;
+use parrot_domain::contracts::async_ops::{Cancellation, Clock, OperationError};
 use parrot_domain::values::identifiers::Identifier;
 
 use super::pending::Store;
@@ -177,33 +176,5 @@ impl QuestionBroker {
     pub fn close(&self) {
         self.pending
             .close(InteractionError::rejected("question session closed"));
-    }
-}
-
-impl QuestionBrokerContract for QuestionBroker {
-    type Request = Vec<QuestionDefinition>;
-    type Reply = QuestionReply;
-    type Pending = Vec<PendingQuestion>;
-    type RequestId = String;
-    type Error = InteractionError;
-
-    fn ask<'a>(
-        &'a self,
-        request: Self::Request,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::Reply, OperationError<Self::Error>>> {
-        Box::pin(self.ask(request, cancellation))
-    }
-    fn pending(&self) -> Result<Self::Pending, Self::Error> {
-        Ok(self.pending())
-    }
-    fn reply(&self, id: &String, reply: Self::Reply) -> Result<(), Self::Error> {
-        self.reply(id, reply)
-    }
-    fn reject(&self, id: &String) -> Result<(), Self::Error> {
-        self.reject(id)
-    }
-    fn withdraw(&self, id: &String) -> Result<(), Self::Error> {
-        self.withdraw(id)
     }
 }

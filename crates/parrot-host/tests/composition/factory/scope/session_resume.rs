@@ -48,12 +48,10 @@ async fn spawn(
 }
 
 async fn finish(scope: &Arc<Scope<Security>>, text: &str) {
-    let sent = bounded(
-        scope
-            .get_service::<RuntimeSession<Security>>()
-            .unwrap()
-            .send_text_message(text.into(), Arc::new(NeverCancelled)),
-    )
+    let sent = bounded(send_text(
+        &scope.get_service::<RuntimeSession<Security>>().unwrap(),
+        text,
+    ))
     .await
     .unwrap();
     bounded(sent.execution.join()).await.unwrap();
@@ -1085,12 +1083,10 @@ async fn actual_resumed_provider_tool_sends_to_another_restored_owned_execution_
             .lock()
             .unwrap()
             .insert(marker.into(), barrier.clone());
-        let _sent = bounded(
-            scope
-                .get_service::<RuntimeSession<Security>>()
-                .unwrap()
-                .send_text_message(marker.into(), Arc::new(NeverCancelled)),
-        )
+        let _sent = bounded(send_text(
+            &scope.get_service::<RuntimeSession<Security>>().unwrap(),
+            marker,
+        ))
         .await
         .unwrap();
         bounded(barrier.entered.notified()).await;
@@ -1253,11 +1249,10 @@ async fn actual_damaged_referenced_snapshots_fail_before_any_resumed_provider_re
             .lock()
             .unwrap()
             .insert("held-root-recovery".into(), barrier.clone());
-        let _sent = bounded(
-            root.get_service::<RuntimeSession<Security>>()
-                .unwrap()
-                .send_text_message("held-root-recovery".into(), Arc::new(NeverCancelled)),
-        )
+        let _sent = bounded(send_text(
+            &root.get_service::<RuntimeSession<Security>>().unwrap(),
+            "held-root-recovery",
+        ))
         .await
         .unwrap();
         bounded(barrier.entered.notified()).await;
@@ -1546,11 +1541,10 @@ async fn actual_unstarted_full_fork_does_not_activate_inherited_unfinished_paren
         .lock()
         .unwrap()
         .insert("parent unfinished context".into(), barrier.clone());
-    let _sent = bounded(
-        root.get_service::<RuntimeSession<Security>>()
-            .unwrap()
-            .send_text_message("parent unfinished context".into(), Arc::new(NeverCancelled)),
-    )
+    let _sent = bounded(send_text(
+        &root.get_service::<RuntimeSession<Security>>().unwrap(),
+        "parent unfinished context",
+    ))
     .await
     .unwrap();
     bounded(barrier.entered.notified()).await;
@@ -1634,14 +1628,10 @@ async fn actual_cold_canceled_consumed_input_does_not_restart_from_answerable_hi
         .lock()
         .unwrap()
         .insert("cold canceled consumed input".into(), barrier.clone());
-    let _sent = bounded(
-        root.get_service::<RuntimeSession<Security>>()
-            .unwrap()
-            .send_text_message(
-                "cold canceled consumed input".into(),
-                Arc::new(NeverCancelled),
-            ),
-    )
+    let _sent = bounded(send_text(
+        &root.get_service::<RuntimeSession<Security>>().unwrap(),
+        "cold canceled consumed input",
+    ))
     .await
     .unwrap();
     bounded(barrier.entered.notified()).await;

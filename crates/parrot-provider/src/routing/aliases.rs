@@ -276,16 +276,6 @@ impl ResolvedModelSelection {
             .and_then(|alias| alias.context_limit.as_ref())
             .or(self.routing_snapshot.context_limit.as_ref())
     }
-    pub fn canonical_base(&self) -> String {
-        format!(
-            "{}/{}",
-            self.canonical_model.provider.id(),
-            self.canonical_model.model.id
-        )
-    }
-    pub fn alias_snapshot(&self) -> &Arc<ModelAliasSnapshot> {
-        &self.routing_snapshot.aliases
-    }
 }
 pub struct ModelRouter {
     registry: Arc<ProviderRegistry>,
@@ -294,9 +284,6 @@ pub struct ModelRouter {
 impl ModelRouter {
     pub fn new(registry: Arc<ProviderRegistry>, routing: Arc<ModelRouting>) -> Self {
         Self { registry, routing }
-    }
-    pub fn routing_revision(&self) -> i64 {
-        self.routing.capture().revision
     }
     pub fn resolve(&self, selector: &str) -> Result<ResolvedModelSelection, Error> {
         self.resolve_from(self.routing.capture(), selector)

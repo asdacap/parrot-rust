@@ -1,7 +1,6 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::sessions::{
-    Completion, Error, Event, EventStream, Request, Session,
-    diagnostic_session::{DiagnosticSession, RequestTraceStream},
+    Completion, Error, Event, EventStream, Request, Session, diagnostic_session::DiagnosticSession,
     diagnostics::*,
 };
 use std::{
@@ -99,18 +98,13 @@ impl Session for Fake {
             return Err(error.clone());
         }
         trace.dump_prepared_body(b"synthetic prepared request");
-        Ok(Box::new(RequestTraceStream::new(
-            Box::new(FakeStream {
-                counts: self.counts.clone(),
-                step: 0,
-                read_error: self.read_error.clone(),
-                close_error: self.close_error.clone(),
-                closed: false,
-            }),
-            trace,
-            "synthetic".into(),
-            "request-1".into(),
-        )))
+        Ok(Box::new(FakeStream {
+            counts: self.counts.clone(),
+            step: 0,
+            read_error: self.read_error.clone(),
+            close_error: self.close_error.clone(),
+            closed: false,
+        }))
     }
     fn try_fall_back_to_http(&self) -> BoxFuture<'_, Result<bool, Error>> {
         self.counts.fallbacks.fetch_add(1, Ordering::SeqCst);
@@ -243,19 +237,17 @@ async fn lazy_call_forwards_wrapped_events_tokens_retries_and_request_context() 
             .collect::<Vec<_>>(),
         [
             "call_started",
-            "request_started",
             "call_retry",
             "input_tokens",
             "cached_input_tokens",
             "output_tokens",
-            "request_finished",
             "call_finished",
         ]
     );
-    assert_eq!(entries[2].count, Some(2));
-    assert_eq!(entries[2].duration_milliseconds, Some(400));
+    assert_eq!(entries[1].count, Some(2));
+    assert_eq!(entries[1].duration_milliseconds, Some(400));
     assert_eq!(
-        entries[3..6].iter().map(|e| e.count).collect::<Vec<_>>(),
+        entries[2..5].iter().map(|e| e.count).collect::<Vec<_>>(),
         [Some(11), Some(3), Some(7)]
     );
     assert!(
@@ -264,77 +256,6 @@ async fn lazy_call_forwards_wrapped_events_tokens_retries_and_request_context() 
             .all(|e| e.correlation_id == entries[0].correlation_id)
     );
     assert_eq!(counts.closes.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn owning_cancellation_finishes_nested_request_before_call_while_suspended() {
-    let (session, sink, counts) = fixture(None, None);
-    let token = Arc::new(Token::default());
-    let weak = Arc::downgrade(&token);
-    let mut stream = session.call_cancellable(request(), token.clone()).unwrap();
-    stream.next(&Token::default()).await.unwrap();
-    token.cancel();
-    // No next or close: the watcher owns cancellation while the consumer pauses.
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while sink.terminals().is_empty() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_terminal(&sink, "cancelled", Some("cancelled"));
-    let entries = sink.entries();
-    let terminal_ops = entries
-        .iter()
-        .filter(|e| e.operation.ends_with("finished"))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        terminal_ops
-            .iter()
-            .map(|e| e.operation.as_str())
-            .collect::<Vec<_>>(),
-        ["request_finished", "call_finished"]
-    );
-    assert!(
-        terminal_ops
-            .iter()
-            .all(|e| e.outcome.as_deref() == Some("cancelled"))
-    );
-    assert_eq!(counts.closes.load(Ordering::SeqCst), 0);
-    stream.close().await.unwrap();
-    stream.close().await.unwrap();
-    drop(token);
-    assert!(
-        weak.upgrade().is_none(),
-        "close joins watcher and releases owning token"
-    );
-    assert_eq!(counts.closes.load(Ordering::SeqCst), 1);
-    assert_terminal(&sink, "cancelled", Some("cancelled"));
-}
-
-#[tokio::test]
-async fn immediate_cancellation_then_close_is_single_terminal_and_preserves_cancel_over_dispose_failure()
- {
-    let (session, sink, _) = fixture(None, Some(Error::Io("SECRET dispose".into())));
-    let token = Arc::new(Token::default());
-    let mut stream = session.call_cancellable(request(), token.clone()).unwrap();
-    stream.next(&Token::default()).await.unwrap();
-    token.cancel(); // deliberately no scheduling point before close
-    assert_eq!(
-        stream.close().await.unwrap_err(),
-        Error::Io("SECRET dispose".into())
-    );
-    assert_terminal(&sink, "cancelled", Some("cancelled"));
-    assert!(!format!("{:?}", sink.entries()).contains("SECRET"));
-    assert_eq!(
-        sink.entries()
-            .iter()
-            .find(|e| e.operation == "request_finished")
-            .unwrap()
-            .outcome
-            .as_deref(),
-        Some("cancelled")
-    );
 }
 
 #[tokio::test]
@@ -429,16 +350,7 @@ async fn ordinary_call_observes_per_pull_cancellation_and_delegates_session_life
 }
 
 #[tokio::test]
-async fn completion_joins_watcher_and_construction_failure_is_lazy() {
-    let (session, sink, _) = fixture(None, None);
-    let token = Arc::new(Token::default());
-    let weak = Arc::downgrade(&token);
-    let mut stream = session.call_cancellable(request(), token.clone()).unwrap();
-    drop(token);
-    while stream.next(&Token::default()).await.unwrap().is_some() {}
-    assert!(weak.upgrade().is_none());
-    assert_terminal(&sink, "completed", None);
-
+async fn construction_failure_is_lazy() {
     let sink = Arc::new(Sink::default());
     let counts = Arc::new(Counts::default());
     let session = DiagnosticSession::new(
@@ -475,7 +387,7 @@ async fn typed_failures_produce_allowlisted_codes_without_error_messages() {
     };
     let secret = || "SECRET failure payload".to_string();
     for (error, code) in [
-        (Error::Cancellation(secret()), "cancelled"),
+        (Error::Cancelled, "cancelled"),
         (Error::Io(secret()), "io"),
         (Error::Provider(secret()), "unexpected"),
         (Error::Encode(secret()), "unexpected"),
@@ -529,10 +441,6 @@ async fn typed_failures_produce_allowlisted_codes_without_error_messages() {
             Error::Socket(WebSocketError::InvalidRequest(secret())),
             "argument",
         ),
-        (
-            Error::Socket(WebSocketError::InvalidOperation(secret())),
-            "invalid_operation",
-        ),
     ] {
         let (session, sink, _) = fixture(Some(error.clone()), None);
         let mut stream = session.call(request()).unwrap();
@@ -549,180 +457,6 @@ async fn typed_failures_produce_allowlisted_codes_without_error_messages() {
         );
         assert!(!format!("{:?}", sink.entries()).contains("SECRET"));
     }
-}
-
-#[tokio::test]
-async fn generic_request_trace_starts_before_body_events_and_dispose_failure_wins_exhaustion() {
-    struct BodyEvents {
-        events: std::collections::VecDeque<Event>,
-        sink: Arc<Sink>,
-        fail_close: bool,
-    }
-    impl EventStream for BodyEvents {
-        fn next<'a>(
-            &'a mut self,
-            _: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, Result<Option<Event>, Error>> {
-            Box::pin(async move {
-                assert!(
-                    self.sink
-                        .entries()
-                        .iter()
-                        .any(|e| e.operation == "request_started")
-                );
-                Ok(self.events.pop_front())
-            })
-        }
-        fn close(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-            Box::pin(async move {
-                if self.fail_close {
-                    Err(Error::Io("SECRET dispose".into()))
-                } else {
-                    Ok(())
-                }
-            })
-        }
-    }
-    for fail_close in [false, true] {
-        let sink = Arc::new(Sink::default());
-        let call = Arc::new(CallTrace::start(
-            sink.clone(),
-            Arc::new(Clock),
-            CallContext {
-                agent_session_id: "agent".into(),
-                correlation_id: "call".into(),
-                provider_id: "provider".into(),
-                model_id: "model".into(),
-            },
-            None,
-        ));
-        let events = vec![
-            Event::HttpRequestStarted.with_text("request text"),
-            Event::HttpResponseHeadersReceived,
-            completed(),
-        ];
-        let mut stream = RequestTraceStream::new(
-            Box::new(BodyEvents {
-                events: events.clone().into(),
-                sink: sink.clone(),
-                fail_close,
-            }),
-            call.clone(),
-            "synthetic".into(),
-            "request-1".into(),
-        );
-        assert_eq!(sink.entries().len(), 1);
-        for event in events {
-            assert_eq!(stream.next(&Token::default()).await.unwrap(), Some(event));
-        }
-        assert_eq!(
-            sink.entries().len(),
-            2,
-            "Completed event does not finish a request"
-        );
-        let result = stream.next(&Token::default()).await;
-        if fail_close {
-            assert_eq!(result.unwrap_err(), Error::Io("SECRET dispose".into()));
-        } else {
-            assert_eq!(result.unwrap(), None);
-        }
-        stream.close().await.unwrap();
-        let entries = sink.entries();
-        assert_eq!(
-            entries
-                .iter()
-                .map(|e| e.operation.as_str())
-                .collect::<Vec<_>>(),
-            ["call_started", "request_started", "request_finished"]
-        );
-        assert_eq!(
-            entries[2].outcome.as_deref(),
-            Some(if fail_close { "failed" } else { "completed" })
-        );
-        assert_eq!(
-            entries[2].error_code.as_deref(),
-            if fail_close { Some("io") } else { None }
-        );
-        assert!(!format!("{entries:?}").contains("SECRET"));
-        call.finish(TraceOutcome::Completed);
-    }
-}
-
-#[tokio::test]
-async fn dropping_stream_aborts_watcher_and_releases_token() {
-    let (session, sink, _) = fixture(None, None);
-    let token = Arc::new(Token::default());
-    let weak = Arc::downgrade(&token);
-    let mut stream = session.call_cancellable(request(), token.clone()).unwrap();
-    stream.next(&Token::default()).await.unwrap();
-    drop(token);
-    drop(stream);
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while weak.upgrade().is_some() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_terminal(&sink, "disposed", None);
-}
-
-#[tokio::test]
-async fn request_trace_in_flight_custom_cancellation_preserves_native_error_and_attempt_observation()
- {
-    let token = Arc::new(Token::default());
-    let sink = Arc::new(Sink::default());
-    let observed_errors = Arc::new(AtomicUsize::new(0));
-    let closes = Arc::new(AtomicUsize::new(0));
-    let failure = Error::Cancellation("synthetic auth cancelled".into());
-    let call = Arc::new(CallTrace::start(
-        sink.clone(),
-        Arc::new(Clock),
-        CallContext {
-            agent_session_id: "agent".into(),
-            correlation_id: "call".into(),
-            provider_id: "provider".into(),
-            model_id: "model".into(),
-        },
-        None,
-    ));
-    let mut stream = RequestTraceStream::new(
-        Box::new(CustomCancellationStream {
-            token: token.clone(),
-            observed_errors: observed_errors.clone(),
-            closes: closes.clone(),
-            failure: failure.clone(),
-            closed: false,
-        }),
-        call.clone(),
-        "synthetic".into(),
-        "request-1".into(),
-    );
-    let result = tokio::time::timeout(Duration::from_secs(1), stream.next(token.as_ref()))
-        .await
-        .expect("cooperative request cancellation read must settle promptly");
-    assert_eq!(
-        (result, observed_errors.load(Ordering::SeqCst)),
-        (Err(failure), 1)
-    );
-    assert_eq!(closes.load(Ordering::SeqCst), 1);
-    tokio::time::timeout(Duration::from_secs(1), stream.close())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(closes.load(Ordering::SeqCst), 1);
-    let entries = sink.entries();
-    assert_eq!(
-        entries
-            .iter()
-            .map(|entry| entry.operation.as_str())
-            .collect::<Vec<_>>(),
-        ["call_started", "request_started", "request_finished"]
-    );
-    assert_eq!(entries[2].outcome.as_deref(), Some("cancelled"));
-    assert_eq!(entries[2].error_code.as_deref(), Some("cancelled"));
-    assert!(!format!("{entries:?}").contains("synthetic auth cancelled"));
-    call.finish(TraceOutcome::Cancelled);
 }
 
 struct CustomCancellationSession {
@@ -797,57 +531,47 @@ impl EventStream for CustomCancellationStream {
 }
 #[tokio::test]
 async fn in_flight_custom_cancellation_preserves_native_error_and_attempt_observation() {
-    for owning in [false, true] {
-        let token = Arc::new(Token::default());
-        let sink = Arc::new(Sink::default());
-        let observed_errors = Arc::new(AtomicUsize::new(0));
-        let closes = Arc::new(AtomicUsize::new(0));
-        let failure = Error::Cancellation("synthetic auth cancelled".into());
-        let session = DiagnosticSession::new(
-            Arc::new(CustomCancellationSession {
-                token: token.clone(),
-                observed_errors: observed_errors.clone(),
-                closes: closes.clone(),
-                failure: failure.clone(),
-            }),
-            sink.clone(),
-            Arc::new(Clock),
-            "synthetic-agent".into(),
-            "synthetic-provider".into(),
-            None,
-        );
-        let mut stream = if owning {
-            session.call_cancellable(request(), token.clone()).unwrap()
-        } else {
-            session.call(request()).unwrap()
-        };
-        let result = tokio::time::timeout(Duration::from_secs(1), stream.next(token.as_ref()))
-            .await
-            .expect("cooperative cancellation read must settle promptly");
-        assert_eq!(
-            (result, observed_errors.load(Ordering::SeqCst)),
-            (Err(failure.clone()), 1)
-        );
-        assert_eq!(failure.to_string(), "synthetic auth cancelled");
-        assert!(
-            std::error::Error::source(&failure).is_none(),
-            "native cancellation has no fabricated cause"
-        );
-        assert_eq!(closes.load(Ordering::SeqCst), 1);
-        assert_terminal(&sink, "cancelled", Some("cancelled"));
-        assert_eq!(
-            sink.entries()
-                .iter()
-                .filter(|event| event.operation == "call_started")
-                .count(),
-            1
-        );
-        assert!(!format!("{:?}", sink.entries()).contains("synthetic auth cancelled"));
-        tokio::time::timeout(Duration::from_secs(1), stream.close())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(closes.load(Ordering::SeqCst), 1);
-        assert_terminal(&sink, "cancelled", Some("cancelled"));
-    }
+    use parrot_provider::http_stream::HttpError;
+    let token = Arc::new(Token::default());
+    let sink = Arc::new(Sink::default());
+    let observed_errors = Arc::new(AtomicUsize::new(0));
+    let closes = Arc::new(AtomicUsize::new(0));
+    let failure = Error::Http(HttpError::Cancelled);
+    let session = DiagnosticSession::new(
+        Arc::new(CustomCancellationSession {
+            token: token.clone(),
+            observed_errors: observed_errors.clone(),
+            closes: closes.clone(),
+            failure: failure.clone(),
+        }),
+        sink.clone(),
+        Arc::new(Clock),
+        "synthetic-agent".into(),
+        "synthetic-provider".into(),
+        None,
+    );
+    let mut stream = session.call(request()).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(1), stream.next(token.as_ref()))
+        .await
+        .expect("cooperative cancellation read must settle promptly");
+    assert_eq!(
+        (result, observed_errors.load(Ordering::SeqCst)),
+        (Err(failure.clone()), 1)
+    );
+    assert_eq!(closes.load(Ordering::SeqCst), 1);
+    assert_terminal(&sink, "cancelled", Some("cancelled"));
+    assert_eq!(
+        sink.entries()
+            .iter()
+            .filter(|event| event.operation == "call_started")
+            .count(),
+        1
+    );
+    assert!(!format!("{:?}", sink.entries()).contains("operation cancelled"));
+    tokio::time::timeout(Duration::from_secs(1), stream.close())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(closes.load(Ordering::SeqCst), 1);
+    assert_terminal(&sink, "cancelled", Some("cancelled"));
 }

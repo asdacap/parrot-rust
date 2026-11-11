@@ -78,3 +78,43 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+#[derive(Debug, PartialEq)]
+struct ConversationState {
+    snapshot: Option<parrot_storage::conversation::CompactionSnapshot>,
+    items: Vec<parrot_storage::conversation::ConversationHistoryItem>,
+    checkpoint_sequences: Vec<i64>,
+}
+async fn conversation_state(
+    repository: &ConversationRepository,
+    agent: &str,
+) -> Result<ConversationState, parrot_storage::events::EventError> {
+    let snapshot = repository.compaction(agent.into()).await?;
+    let watermark = snapshot.as_ref().map_or(0, |snapshot| snapshot.watermark);
+    Ok(ConversationState {
+        items: repository
+            .read_conversation_tail(agent.into(), watermark)
+            .await?,
+        checkpoint_sequences: repository
+            .active_checkpoint_assistant_sequences(agent.into())
+            .await?
+            .into_iter()
+            .collect(),
+        snapshot,
+    })
+}
+async fn messages(repository: &ConversationRepository, agent: &str) -> Vec<String> {
+    repository
+        .conversation(agent.into())
+        .await
+        .unwrap()
+        .iter()
+        .map(|item| {
+            format!(
+                "{}: {}",
+                item.message.role.as_str(),
+                parrot_storage::events::content(&item.message.parts)
+            )
+        })
+        .collect()
+}

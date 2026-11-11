@@ -1,10 +1,14 @@
 use std::sync::{Arc, Mutex};
 
-use parrot_cli::presenters::{EnhancedSessionPresenter, SessionReplayContext};
+use parrot_cli::presenters::{
+    EnhancedSessionPresenter, SessionReplayContext, ToolPresenterRegistry,
+    tools::read::SkillReadPathFormatter,
+};
 use parrot_domain::protocol::messages::parrot::{self as wire, event::Payload};
 use protobuf::MessageField;
 
 use super::session::queue_event;
+use super::support::SessionHarness;
 use super::turn::{child, commits, completed, ended, event, start, text};
 
 #[test]
@@ -166,7 +170,7 @@ fn history_and_live(failed: bool) -> Vec<wire::Event> {
     ]
 }
 fn enhanced_replay_case(failed: bool) {
-    let mut presenter = EnhancedSessionPresenter::new(160, false, true);
+    let mut presenter = SessionHarness::new(160, false, true);
     let mut output = String::new();
     let mut errors = String::new();
     let mut live_plans = Vec::new();
@@ -221,7 +225,15 @@ fn presenter_consumes_the_same_external_replay_context_without_duplicate_complet
         .lock()
         .unwrap()
         .set_completion(Arc::new(move |busy| captured.lock().unwrap().push(busy)));
-    let mut presenter = EnhancedSessionPresenter::with_replay_context(80, false, context.clone());
+    let mut presenter = SessionHarness::external(EnhancedSessionPresenter::with_registry(
+        80,
+        false,
+        context.clone(),
+        Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
+            Vec::new(),
+            Arc::new(SkillReadPathFormatter::default()),
+        )),
+    ));
     let root = start("root");
     context.lock().unwrap().observe(&root);
     let historical = presenter.observe(&root).unwrap();
@@ -258,7 +270,7 @@ fn ask_and_reply_completed_content_matches_live_during_history_replay() {
         ),
     ] {
         for replaying in [false, true] {
-            let mut presenter = EnhancedSessionPresenter::new(160, false, replaying);
+            let mut presenter = SessionHarness::new(160, false, replaying);
             let mut output = String::new();
             for published in [
                 start("root"),

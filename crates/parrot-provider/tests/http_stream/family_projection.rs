@@ -29,10 +29,7 @@ pub fn source_error(error: &HttpError) -> Value {
         HttpError::Wire(message) => {
             json!({"category": "Parrot.Llm.Wire.WireProtocolException", "message": message})
         }
-        HttpError::RequestCancelled(message) => {
-            json!({"category":"System.Threading.Tasks.TaskCanceledException","message":message})
-        }
-        HttpError::ProviderHttp(message) | HttpError::Http(message) => json!({
+        HttpError::ProviderHttp(message) => json!({
             "category": "Parrot.Llm.Wire.ProviderHttpException", "message": message,
             "status": 0, "type": "", "code": "", "detail": "", "response_body": "",
         }),

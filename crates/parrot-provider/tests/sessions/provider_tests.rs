@@ -184,16 +184,23 @@ async fn compatible_is_lazy_and_refreshes_key_for_each_request() {
     let provider =
         OpenAICompatibleProvider::new(options(key.clone()), transport.clone(), Arc::new(NoSocket))
             .unwrap();
-    let mut first = provider.call(request()).unwrap();
+    let mut first = provider.open_session().unwrap().call(request()).unwrap();
     assert_eq!(key.calls.load(Ordering::SeqCst), 0);
     assert!(transport.requests.lock().unwrap().is_empty());
     let events = drain(first.as_mut()).await.unwrap();
     assert_eq!(events[0], Event::HttpRequestStarted);
     assert_eq!(events[1], Event::HttpResponseHeadersReceived);
     *key.value.lock().unwrap() = "second".into();
-    drain(provider.call(request()).unwrap().as_mut())
-        .await
-        .unwrap();
+    drain(
+        provider
+            .open_session()
+            .unwrap()
+            .call(request())
+            .unwrap()
+            .as_mut(),
+    )
+    .await
+    .unwrap();
     let requests = transport.requests.lock().unwrap();
     assert_eq!(
         requests[0].endpoint.as_str(),
@@ -204,8 +211,8 @@ async fn compatible_is_lazy_and_refreshes_key_for_each_request() {
     assert_eq!(key.calls.load(Ordering::SeqCst), 2);
 }
 #[tokio::test]
-async fn session_ids_are_random_per_open_session_and_stable_per_direct_provider() {
-    let transport = Transport::new(CHAT, 5);
+async fn session_ids_are_random_per_open_session() {
+    let transport = Transport::new(CHAT, 3);
     let mut opts = options(Key::new("key"));
     opts.session_header = "X-Session".into();
     let provider =
@@ -215,12 +222,6 @@ async fn session_ids_are_random_per_open_session_and_stable_per_direct_provider(
     drain(one.call(request()).unwrap().as_mut()).await.unwrap();
     drain(one.call(request()).unwrap().as_mut()).await.unwrap();
     drain(two.call(request()).unwrap().as_mut()).await.unwrap();
-    drain(provider.call(request()).unwrap().as_mut())
-        .await
-        .unwrap();
-    drain(provider.call(request()).unwrap().as_mut())
-        .await
-        .unwrap();
     let ids: Vec<_> = transport
         .requests
         .lock()
@@ -230,8 +231,6 @@ async fn session_ids_are_random_per_open_session_and_stable_per_direct_provider(
         .collect();
     assert_eq!(ids[0], ids[1]);
     assert_ne!(ids[0], ids[2]);
-    assert_eq!(ids[3], ids[4]);
-    assert_ne!(ids[0], ids[3]);
     assert!(ids.iter().all(|id| {
         id.len() == 32
             && id
@@ -251,7 +250,9 @@ async fn configured_preferences_replace_request_and_preserve_opaque_numbers() {
         OpenAICompatibleProvider::new(opts, transport.clone(), Arc::new(NoSocket)).unwrap();
     let mut req = request();
     req.provider_preferences = "{\"route\":\"request\"}".into();
-    drain(provider.call(req).unwrap().as_mut()).await.unwrap();
+    drain(provider.open_session().unwrap().call(req).unwrap().as_mut())
+        .await
+        .unwrap();
     let requests = transport.requests.lock().unwrap();
     let body = String::from_utf8_lossy(&requests[0].body);
     assert!(body.contains("123456789012345678901234567890"));
@@ -266,9 +267,16 @@ async fn missing_api_key_stops_before_transport_but_after_encode() {
     let provider =
         OpenAICompatibleProvider::new(options(key.clone()), transport.clone(), Arc::new(NoSocket))
             .unwrap();
-    let error = drain(provider.call(request()).unwrap().as_mut())
-        .await
-        .unwrap_err();
+    let error = drain(
+        provider
+            .open_session()
+            .unwrap()
+            .call(request())
+            .unwrap()
+            .as_mut(),
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.to_string(), "provider: \"test\" has no API key");
     let mut invalid = request();
     invalid.tools.push(Tool {
@@ -277,9 +285,16 @@ async fn missing_api_key_stops_before_transport_but_after_encode() {
         ..Default::default()
     });
     assert!(matches!(
-        drain(provider.call(invalid).unwrap().as_mut())
-            .await
-            .unwrap_err(),
+        drain(
+            provider
+                .open_session()
+                .unwrap()
+                .call(invalid)
+                .unwrap()
+                .as_mut()
+        )
+        .await
+        .unwrap_err(),
         Error::Encode(_)
     ));
     assert_eq!(key.calls.load(Ordering::SeqCst), 1);
@@ -313,9 +328,16 @@ async fn request_byte_limit_is_actual_encoded_body_limit() {
     let provider =
         OpenAICompatibleProvider::new(opts, transport.clone(), Arc::new(NoSocket)).unwrap();
     assert!(matches!(
-        drain(provider.call(request()).unwrap().as_mut())
-            .await
-            .unwrap_err(),
+        drain(
+            provider
+                .open_session()
+                .unwrap()
+                .call(request())
+                .unwrap()
+                .as_mut()
+        )
+        .await
+        .unwrap_err(),
         Error::Http(HttpError::RequestTooLarge(1))
     ));
     assert!(transport.requests.lock().unwrap().is_empty());
@@ -330,10 +352,11 @@ async fn chatgpt_has_fixed_headers_endpoints_and_omits_max_output_tokens() {
         Arc::new(NoSocket),
     )
     .unwrap();
-    let mut stream = provider.call(request()).unwrap();
+    let session = provider.open_session().unwrap();
+    let mut stream = session.call(request()).unwrap();
     assert_eq!(tokens.calls.load(Ordering::SeqCst), 0);
     drain(stream.as_mut()).await.unwrap();
-    drain(provider.call(request()).unwrap().as_mut())
+    drain(session.call(request()).unwrap().as_mut())
         .await
         .unwrap();
     let requests = transport.requests.lock().unwrap();
@@ -369,22 +392,12 @@ async fn chatgpt_requires_token_before_encoding_even_for_http_session() {
         parameters_json: "{bad".into(),
         ..Default::default()
     });
-    for session in [false, true] {
-        let mut stream = if session {
-            provider
-                .open_session()
-                .unwrap()
-                .call(invalid.clone())
-                .unwrap()
-        } else {
-            provider.call(invalid.clone()).unwrap()
-        };
-        assert_eq!(
-            drain(stream.as_mut()).await.unwrap_err().to_string(),
-            "provider: ChatGPT credential requires an access token"
-        );
-    }
-    assert_eq!(tokens.calls.load(Ordering::SeqCst), 2);
+    let mut stream = provider.open_session().unwrap().call(invalid).unwrap();
+    assert_eq!(
+        drain(stream.as_mut()).await.unwrap_err().to_string(),
+        "provider: ChatGPT credential requires an access token"
+    );
+    assert_eq!(tokens.calls.load(Ordering::SeqCst), 1);
     assert!(transport.requests.lock().unwrap().is_empty());
 }
 #[tokio::test]
@@ -642,9 +655,16 @@ async fn api_key_is_resolved_for_each_request_and_missing_keys_fail_before_http(
     ]);
     let provider = auth_provider("https://example.test/v1", source, transport.clone());
     let listed = provider.list_models(&Never).await.unwrap();
-    let events = drain(provider.call(auth_request()).unwrap().as_mut())
-        .await
-        .unwrap();
+    let events = drain(
+        provider
+            .open_session()
+            .unwrap()
+            .call(auth_request())
+            .unwrap()
+            .as_mut(),
+    )
+    .await
+    .unwrap();
     assert_eq!(listed.len(), 1);
     assert!(matches!(events.last(), Some(Event::Completed(_))));
     {
@@ -657,7 +677,15 @@ async fn api_key_is_resolved_for_each_request_and_missing_keys_fail_before_http(
         Err(Error::Provider(_))
     ));
     assert!(matches!(
-        drain(provider.call(auth_request()).unwrap().as_mut()).await,
+        drain(
+            provider
+                .open_session()
+                .unwrap()
+                .call(auth_request())
+                .unwrap()
+                .as_mut()
+        )
+        .await,
         Err(Error::Provider(_))
     ));
     assert_eq!(transport.requests.lock().unwrap().len(), 2);
@@ -840,9 +868,16 @@ async fn non_success_responses_preserve_their_body() {
         RecordingKeys::new(&["key"]),
         transport,
     );
-    let error = drain(provider.call(auth_request()).unwrap().as_mut())
-        .await
-        .unwrap_err();
+    let error = drain(
+        provider
+            .open_session()
+            .unwrap()
+            .call(auth_request())
+            .unwrap()
+            .as_mut(),
+    )
+    .await
+    .unwrap_err();
     let Error::Http(HttpError::Response(failure)) = error else {
         panic!("expected structured ProviderHttpException equivalent");
     };
@@ -1024,44 +1059,38 @@ async fn poll_pending<T>(future: std::pin::Pin<&mut impl std::future::Future<Out
 
 #[tokio::test]
 async fn dropped_http_initialization_observer_resumes_one_credential_attempt() {
-    for session_call in [false, true] {
-        let credentials = PendingCredential::new();
-        let transport = Transport::new(CHAT, 1);
-        let provider = OpenAICompatibleProvider::new(
-            CompatibleOptions::new("test", "https://unit.test/v1", credentials.clone()),
-            transport.clone(),
-            Arc::new(NoSocket),
-        )
-        .unwrap();
-        let session = provider.open_session().unwrap();
-        let mut stream = if session_call {
-            session.call(request()).unwrap()
-        } else {
-            provider.call(request()).unwrap()
-        };
-        {
-            let observer = stream.next(&Never);
-            tokio::pin!(observer);
-            poll_pending(observer.as_mut()).await;
-        }
-        assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
-        assert_eq!(credentials.active.load(Ordering::SeqCst), 1);
-        assert_eq!(credentials.dropped.load(Ordering::SeqCst), 0);
-        {
-            let observer = stream.next(&Never);
-            tokio::pin!(observer);
-            poll_pending(observer.as_mut()).await;
-            assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
-            credentials.release();
-            assert_eq!(observer.await.unwrap(), Some(Event::HttpRequestStarted));
-        }
-        drain(stream.as_mut()).await.unwrap();
-        assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
-        assert_eq!(credentials.active.load(Ordering::SeqCst), 0);
-        assert_eq!(credentials.dropped.load(Ordering::SeqCst), 1);
-        assert_eq!(transport.requests.lock().unwrap().len(), 1);
-        session.close().await.unwrap();
+    let credentials = PendingCredential::new();
+    let transport = Transport::new(CHAT, 1);
+    let provider = OpenAICompatibleProvider::new(
+        CompatibleOptions::new("test", "https://unit.test/v1", credentials.clone()),
+        transport.clone(),
+        Arc::new(NoSocket),
+    )
+    .unwrap();
+    let session = provider.open_session().unwrap();
+    let mut stream = session.call(request()).unwrap();
+    {
+        let observer = stream.next(&Never);
+        tokio::pin!(observer);
+        poll_pending(observer.as_mut()).await;
     }
+    assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(credentials.active.load(Ordering::SeqCst), 1);
+    assert_eq!(credentials.dropped.load(Ordering::SeqCst), 0);
+    {
+        let observer = stream.next(&Never);
+        tokio::pin!(observer);
+        poll_pending(observer.as_mut()).await;
+        assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
+        credentials.release();
+        assert_eq!(observer.await.unwrap(), Some(Event::HttpRequestStarted));
+    }
+    drain(stream.as_mut()).await.unwrap();
+    assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(credentials.active.load(Ordering::SeqCst), 0);
+    assert_eq!(credentials.dropped.load(Ordering::SeqCst), 1);
+    assert_eq!(transport.requests.lock().unwrap().len(), 1);
+    session.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -1075,7 +1104,7 @@ async fn pending_http_initialization_cancels_closes_and_drops_without_detached_w
             Arc::new(NoSocket),
         )
         .unwrap();
-        let mut stream = provider.call(request()).unwrap();
+        let mut stream = provider.open_session().unwrap().call(request()).unwrap();
         let caller = CallerCancellation::default();
         {
             let observer = stream.next(&caller);
@@ -1112,7 +1141,7 @@ impl ApiKeySource for CancelledCredential {
     fn api_key<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<String, Error>> {
         Box::pin(async {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(Error::Cancellation("AUTH_SECRET_CANARY".into()))
+            Err(Error::Cancelled)
         })
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
@@ -1207,12 +1236,7 @@ async fn websocket_credential_cancellation_returns_original_without_retry_or_sec
     let provider = Arc::new(
         OpenAICompatibleProvider::new(options, transport.clone(), Arc::new(NoSocket)).unwrap(),
     );
-    websocket_auth_failure(
-        provider,
-        Error::Cancellation("AUTH_SECRET_CANARY".into()),
-        "cancelled",
-    )
-    .await;
+    websocket_auth_failure(provider, Error::Cancelled, "cancelled").await;
     assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
     assert!(transport.requests.lock().unwrap().is_empty());
 }
@@ -1243,36 +1267,30 @@ fn chatgpt_usage_reporter_identity_is_retained_and_forwarded_by_retry() {
 }
 
 #[tokio::test]
-async fn already_cancelled_ready_key_preserves_first_start_for_direct_and_stateless_calls() {
-    for session_call in [false, true] {
-        let credentials = Key::new("key");
-        let transport = Transport::new(CHAT, 0);
-        let provider = OpenAICompatibleProvider::new(
-            options(credentials.clone()),
-            transport.clone(),
-            Arc::new(NoSocket),
-        )
-        .unwrap();
-        let session = provider.open_session().unwrap();
-        let mut stream = if session_call {
-            session.call(request()).unwrap()
-        } else {
-            provider.call(request()).unwrap()
-        };
-        let caller = CallerCancellation::default();
-        caller.cancelled.store(true, Ordering::SeqCst);
-        assert_eq!(
-            stream.next(&caller).await.unwrap(),
-            Some(Event::HttpRequestStarted)
-        );
-        assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
-        assert!(transport.requests.lock().unwrap().is_empty());
-        assert_eq!(stream.next(&caller).await.unwrap_err(), Error::Cancelled);
-        assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
-        assert!(transport.requests.lock().unwrap().is_empty());
-        stream.close().await.unwrap();
-        session.close().await.unwrap();
-    }
+async fn already_cancelled_ready_key_preserves_first_start_for_stateless_calls() {
+    let credentials = Key::new("key");
+    let transport = Transport::new(CHAT, 0);
+    let provider = OpenAICompatibleProvider::new(
+        options(credentials.clone()),
+        transport.clone(),
+        Arc::new(NoSocket),
+    )
+    .unwrap();
+    let session = provider.open_session().unwrap();
+    let mut stream = session.call(request()).unwrap();
+    let caller = CallerCancellation::default();
+    caller.cancelled.store(true, Ordering::SeqCst);
+    assert_eq!(
+        stream.next(&caller).await.unwrap(),
+        Some(Event::HttpRequestStarted)
+    );
+    assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
+    assert!(transport.requests.lock().unwrap().is_empty());
+    assert_eq!(stream.next(&caller).await.unwrap_err(), Error::Cancelled);
+    assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
+    assert!(transport.requests.lock().unwrap().is_empty());
+    stream.close().await.unwrap();
+    session.close().await.unwrap();
 }
 
 #[derive(Default)]
@@ -1301,33 +1319,27 @@ impl ApiKeySource for CancellationAwareCredential {
     }
 }
 #[tokio::test]
-async fn already_cancelled_aware_key_observes_cancellation_for_direct_and_stateless_calls() {
-    for session_call in [false, true] {
-        let credentials = Arc::new(CancellationAwareCredential::default());
-        let transport = Transport::new(CHAT, 0);
-        let provider = OpenAICompatibleProvider::new(
-            CompatibleOptions::new("test", "https://unit.test/v1", credentials.clone()),
-            transport.clone(),
-            Arc::new(NoSocket),
-        )
-        .unwrap();
-        let session = provider.open_session().unwrap();
-        let mut stream = if session_call {
-            session.call(request()).unwrap()
-        } else {
-            provider.call(request()).unwrap()
-        };
-        let caller = CallerCancellation::default();
-        caller.cancelled.store(true, Ordering::SeqCst);
-        assert_eq!(stream.next(&caller).await.unwrap_err(), Error::Cancelled);
-        assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
-        assert!(credentials.cancelled_seen.load(Ordering::SeqCst));
-        assert!(transport.requests.lock().unwrap().is_empty());
-        assert_eq!(stream.next(&caller).await.unwrap(), None);
-        assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
-        stream.close().await.unwrap();
-        session.close().await.unwrap();
-    }
+async fn already_cancelled_aware_key_observes_cancellation_for_stateless_calls() {
+    let credentials = Arc::new(CancellationAwareCredential::default());
+    let transport = Transport::new(CHAT, 0);
+    let provider = OpenAICompatibleProvider::new(
+        CompatibleOptions::new("test", "https://unit.test/v1", credentials.clone()),
+        transport.clone(),
+        Arc::new(NoSocket),
+    )
+    .unwrap();
+    let session = provider.open_session().unwrap();
+    let mut stream = session.call(request()).unwrap();
+    let caller = CallerCancellation::default();
+    caller.cancelled.store(true, Ordering::SeqCst);
+    assert_eq!(stream.next(&caller).await.unwrap_err(), Error::Cancelled);
+    assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
+    assert!(credentials.cancelled_seen.load(Ordering::SeqCst));
+    assert!(transport.requests.lock().unwrap().is_empty());
+    assert_eq!(stream.next(&caller).await.unwrap(), None);
+    assert_eq!(credentials.calls.load(Ordering::SeqCst), 1);
+    stream.close().await.unwrap();
+    session.close().await.unwrap();
 }
 
 fn compatible_catalog_input(case_id: &str) -> serde_json::Value {
@@ -1433,7 +1445,7 @@ compatible_catalog_shape!(compatible_catalog_malformed, "malformed", "encode");
 compatible_catalog_shape!(compatible_catalog_valid, "valid", "success");
 
 fn legacy_standard_catalog(id: &str, body: &str) -> Result<Vec<Model>, CatalogError> {
-    StandardModelDecoder::decode(id, body)
+    StandardModelDecoder::decode_typed(id, body).map_err(|error| CatalogError(error.to_string()))
 }
 
 #[tokio::test]
@@ -1479,9 +1491,16 @@ async fn chatgpt_fast_mode_preserves_oauth_and_requests_priority_only_when_enabl
             summary: "auto".into(),
         });
         request.instructions = "unchanged instructions".into();
-        drain(provider.call(request).unwrap().as_mut())
-            .await
-            .unwrap();
+        drain(
+            provider
+                .open_session()
+                .unwrap()
+                .call(request)
+                .unwrap()
+                .as_mut(),
+        )
+        .await
+        .unwrap();
     }
     let requests = transport.requests.lock().unwrap();
     for (index, expected) in [None, Some("priority")].into_iter().enumerate() {
@@ -1527,9 +1546,16 @@ async fn compatible_providers_ignore_chatgpt_fast_mode() {
             OpenAICompatibleProvider::new(options, transport.clone(), Arc::new(NoSocket)).unwrap();
         let mut request = request();
         request.fast_mode = true;
-        drain(provider.call(request).unwrap().as_mut())
-            .await
-            .unwrap();
+        drain(
+            provider
+                .open_session()
+                .unwrap()
+                .call(request)
+                .unwrap()
+                .as_mut(),
+        )
+        .await
+        .unwrap();
         let requests = transport.requests.lock().unwrap();
         let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
         assert!(body.get("service_tier").is_none());

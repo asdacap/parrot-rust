@@ -5,9 +5,7 @@ use parrot_storage::conversation::{HistoryForkBoundary, HistoryForkSelection};
 
 async fn finish_turn(scope: &Arc<Scope<Security>>, text: &str) {
     let runtime = scope.get_service::<RuntimeSession<Security>>().unwrap();
-    let sent = bounded(runtime.send_text_message(text.into(), Arc::new(NeverCancelled)))
-        .await
-        .unwrap();
+    let sent = bounded(send_text(&runtime, text)).await.unwrap();
     bounded(sent.execution.join()).await.unwrap();
     assert!(runtime.is_idle());
 }

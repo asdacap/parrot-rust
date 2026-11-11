@@ -2149,12 +2149,12 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                 .broker
                 .listen(
                     cursor.as_deref(),
-                    move || async move {
+                    move |cursor| async move {
                         replay_core
                             .services
                             .lease
                             .events
-                            .replay()
+                            .replay_after(&cursor)
                             .await
                             .map_err(internal)
                     },

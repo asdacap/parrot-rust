@@ -124,6 +124,17 @@ impl EventRepository {
             .map(|row| row.event)
             .collect())
     }
+    /// Events after the first stored occurrence of the cursor id, or every
+    /// stored event when the cursor id was never recorded.
+    pub async fn replay_after(&self, cursor: &str) -> Result<Vec<Event>, EventError> {
+        let cursor = cursor.to_string();
+        Ok(self
+            .transaction(move |tx| read_events_after(tx, &cursor))
+            .await?
+            .into_iter()
+            .map(|row| row.event)
+            .collect())
+    }
     pub async fn notices(
         &self,
         agent: String,
@@ -150,25 +161,9 @@ impl EventRepository {
 
 pub use parrot_core::NeverCancelled;
 
-/// Insert, never upsert/deduplicate. Explicit raw bytes are parsed and retained
-/// verbatim; callers cannot supply conflicting envelope/key metadata.
-pub fn record(
-    tx: &Transaction<'_>,
-    event: &Event,
-    raw: Option<&[u8]>,
-    at: &str,
-) -> Result<StoredEvent, EventError> {
-    let bytes = match raw {
-        Some(bytes) => {
-            if !statistics::events_semantically_equal(&Event::parse_from_bytes(bytes)?, event) {
-                return Err(EventError::Invalid(
-                    "raw event does not match the supplied event".into(),
-                ));
-            }
-            bytes.to_vec()
-        }
-        None => event.write_to_bytes()?,
-    };
+/// Insert, never upsert/deduplicate.
+pub fn record(tx: &Transaction<'_>, event: &Event, at: &str) -> Result<StoredEvent, EventError> {
+    let bytes = event.write_to_bytes()?;
     let (request, call) = extract_usage_keys(event);
     tx.execute("INSERT INTO event (id, agent_session, payload, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",rusqlite::params![event.id,event.agent_session_id,bytes,at,request,call])?;
     let sequence = tx.last_insert_rowid();
@@ -184,6 +179,34 @@ pub fn read_events(
 ) -> Result<Vec<StoredEvent>, EventError> {
     let mut read=tx.prepare("SELECT sequence, payload FROM event WHERE ?1 IS NULL OR agent_session = ?1 ORDER BY sequence")?;
     let rows = read.query_map([agent], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+    })?;
+    rows.map(|row| {
+        let (sequence, raw) = row?;
+        Ok(StoredEvent {
+            sequence,
+            event: Event::parse_from_bytes(&raw)?,
+            raw,
+        })
+    })
+    .collect()
+}
+
+pub fn read_events_after(
+    tx: &Transaction<'_>,
+    cursor: &str,
+) -> Result<Vec<StoredEvent>, EventError> {
+    let start: Option<i64> = tx.query_row(
+        "SELECT MIN(sequence) FROM event WHERE id = ?1",
+        [cursor],
+        |row| row.get(0),
+    )?;
+    let Some(start) = start else {
+        return read_events(tx, None);
+    };
+    let mut read =
+        tx.prepare("SELECT sequence, payload FROM event WHERE sequence > ?1 ORDER BY sequence")?;
+    let rows = read.query_map([start], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
     })?;
     rows.map(|row| {

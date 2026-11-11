@@ -68,11 +68,9 @@ async fn actual_catalog_progress_uses_the_scoped_file_blocker_and_snapshot_owner
             Some(finish_gate.clone()),
         );
         let session = root.get_service::<RuntimeSession<Security>>().unwrap();
-        let sent = bounded(
-            session.send_text_message("progress-catalog-marker".into(), Arc::new(NeverCancelled)),
-        )
-        .await
-        .unwrap();
+        let sent = bounded(send_text(&session, "progress-catalog-marker"))
+            .await
+            .unwrap();
         let event = bounded(async {
             loop {
                 let event = subscription.next(&NeverCancelled).await.unwrap().unwrap();
@@ -273,24 +271,14 @@ fn progress_obeys_existing_profile_allowlists_and_disabled_tools() {
         &BTreeMap::from([("HOME".into(), "/synthetic-progress-policy".into())]),
     )
     .unwrap();
-    let profile = &configuration.runtime.profiles["worker"];
-    let allowed =
-        MaterializedModeProfile::new("worker".into(), profile, &[], Arc::new(Security)).unwrap();
-    assert!(allowed.is_tool_permitted("progress"));
-    let disabled = MaterializedModeProfile::new(
-        "worker".into(),
-        profile,
-        &["progress".into()],
-        Arc::new(Security),
-    )
-    .unwrap();
-    assert!(!disabled.is_tool_permitted("progress"));
-    let thinker = MaterializedModeProfile::new(
-        "thinker".into(),
-        &configuration.runtime.profiles["thinker"],
-        &[],
-        Arc::new(Security),
-    )
-    .unwrap();
-    assert!(!thinker.is_tool_permitted("progress"));
+    let profile =
+        |id: &str, disabled_tools: Vec<String>| parrot_runtime::agent_turn::services::TurnProfile {
+            id: id.into(),
+            maximum_requests: configuration.runtime.profiles[id].max_turns,
+            allowed_tools: configuration.runtime.profiles[id].allowed_tools.clone(),
+            disabled_tools,
+        };
+    assert!(profile("worker", vec![]).is_tool_permitted("progress"));
+    assert!(!profile("worker", vec!["progress".into()]).is_tool_permitted("progress"));
+    assert!(!profile("thinker", vec![]).is_tool_permitted("progress"));
 }

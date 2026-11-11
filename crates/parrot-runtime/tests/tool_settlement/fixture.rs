@@ -357,9 +357,6 @@ impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.call_impl(request)
-    }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(self.clone()))
     }

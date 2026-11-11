@@ -2,7 +2,6 @@
 mod active_shutdown;
 mod admission_boundaries;
 mod admission_publisher;
-mod child_gate;
 mod completion;
 mod completion_bound;
 mod diagnostics;

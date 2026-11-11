@@ -7,7 +7,6 @@ pub mod compaction;
 mod image_repository;
 mod image_store;
 
-pub mod agent_output_file;
 pub mod output_blobs;
 
 pub use image_repository::ImageArtifactRepository;

@@ -6,7 +6,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct TempDirectory(PathBuf);
 
@@ -70,12 +69,11 @@ fn session_records_are_bounded_escaped_correlated_and_appended() {
         .join("selected-session")
         .join("diagnostics.log");
     let warnings = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let log = FileDiagnosticLog::open_session_with_clock(
+    let log = FileDiagnosticLog::open_session(
         &path,
         "instance-one",
         "session-test",
         warning_collector(Arc::clone(&warnings)),
-        || UNIX_EPOCH,
     )
     .unwrap();
     let mut first = DiagnosticEvent::new("tools", "finished", DiagnosticSeverity::Error);
@@ -102,12 +100,11 @@ fn session_records_are_bounded_escaped_correlated_and_appended() {
     assert!(!visible_before_drop.contains("/private/credential-path-canary"));
     drop(log);
 
-    let resumed = FileDiagnosticLog::open_session_with_clock(
+    let resumed = FileDiagnosticLog::open_session(
         &path,
         "instance-two",
         "session-test",
         warning_collector(Arc::clone(&warnings)),
-        || UNIX_EPOCH,
     )
     .unwrap();
     resumed.write(&event("resumed"));
@@ -116,7 +113,9 @@ fn session_records_are_bounded_escaped_correlated_and_appended() {
     let lines: Vec<_> = text.lines().collect();
     assert_eq!(lines.len(), 2);
     assert!(warnings.lock().unwrap().is_empty());
-    assert!(lines[0].starts_with("1970-01-01T00:00:00.0000000+00:00 ERROR"));
+    let (timestamp, record) = lines[0].split_once(' ').unwrap();
+    assert!(timestamp.ends_with("+00:00"));
+    assert!(record.starts_with("ERROR"));
     assert!(
         lines[0].contains("session=\"session-test\" agent=\"agent-one\" correlation=\"call-one\"")
     );
@@ -135,35 +134,10 @@ fn session_records_are_bounded_escaped_correlated_and_appended() {
 }
 
 #[test]
-fn timestamps_keep_utc_offsets_seven_fraction_digits_and_gregorian_dates() {
-    let directory = TempDirectory::new("timestamp");
-    let path = directory.path().join("diagnostics.log");
-    let fixed = UNIX_EPOCH + Duration::new(951_782_400, 123_456_700);
-    let log = FileDiagnosticLog::open_session_with_clock(
-        &path,
-        "instance",
-        "timestamp",
-        |_| {},
-        move || fixed,
-    )
-    .unwrap();
-    log.write(&event("clock"));
-    let output = fs::read_to_string(path).unwrap();
-    assert!(output.starts_with("2000-02-29T00:00:00.1234567+00:00 INFO"));
-}
-
-#[test]
 fn byte_counts_preserve_zero_large_values_and_omit_unknown_sizes() {
     let directory = TempDirectory::new("bytes");
     let path = directory.path().join("diagnostics.log");
-    let log = FileDiagnosticLog::open_session_with_clock(
-        &path,
-        "instance",
-        "byte-counts",
-        |_| {},
-        || UNIX_EPOCH,
-    )
-    .unwrap();
+    let log = FileDiagnosticLog::open_session(&path, "instance", "byte-counts", |_| {}).unwrap();
     let mut large = event("request_size");
     large.request_bytes = Some(4_294_967_296);
     log.write(&large);
@@ -242,7 +216,6 @@ fn concurrent_global_writers_have_distinct_files_intact_lines_and_collision_safe
         warning_counter(Arc::clone(&warning_count)),
     )
     .unwrap();
-    assert!(collision.is_disabled());
     collision.write(&event("must-not-overwrite"));
     assert_eq!(warning_count.load(std::sync::atomic::Ordering::SeqCst), 1);
     let first_path = directory.path().join(format!("parrot-{first_id}.log"));
@@ -257,14 +230,7 @@ fn rotation_preserves_order_and_disables_nonfatally_on_failure() {
     fs::write(path.with_extension("log.1"), "previous-one").unwrap();
     fs::write(path.with_extension("log.2"), "previous-two").unwrap();
     fs::write(path.with_extension("log.3"), "retired").unwrap();
-    let log = FileDiagnosticLog::open_session_with_clock(
-        &path,
-        "instance",
-        "rotation",
-        |_| {},
-        || UNIX_EPOCH,
-    )
-    .unwrap();
+    let log = FileDiagnosticLog::open_session(&path, "instance", "rotation", |_| {}).unwrap();
     log.write(&event("first"));
     log.write(&event("second"));
     let text = fs::read_to_string(&path).unwrap();
@@ -286,17 +252,15 @@ fn rotation_preserves_order_and_disables_nonfatally_on_failure() {
     fs::write(&obstructed, vec![b'x'; 10 * 1024 * 1024]).unwrap();
     fs::create_dir(obstructed.with_extension("log.3")).unwrap();
     let warning_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let blocked = FileDiagnosticLog::open_session_with_clock(
+    let blocked = FileDiagnosticLog::open_session(
         &obstructed,
         "instance",
         "rotation-obstructed",
         warning_counter(Arc::clone(&warning_count)),
-        || UNIX_EPOCH,
     )
     .unwrap();
     blocked.write(&event("first"));
     blocked.write(&event("second"));
-    assert!(blocked.is_disabled());
     assert_eq!(warning_count.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(fs::metadata(&obstructed).unwrap().len(), 10 * 1024 * 1024);
 
@@ -305,17 +269,15 @@ fn rotation_preserves_order_and_disables_nonfatally_on_failure() {
     fs::write(&obstructed_one, vec![b'x'; 10 * 1024 * 1024]).unwrap();
     fs::create_dir(obstructed_one.with_extension("log.1")).unwrap();
     let warning_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let blocked = FileDiagnosticLog::open_session_with_clock(
+    let blocked = FileDiagnosticLog::open_session(
         &obstructed_one,
         "instance",
         "rotation-obstructed-one",
         warning_counter(Arc::clone(&warning_count)),
-        || UNIX_EPOCH,
     )
     .unwrap();
     blocked.write(&event("first"));
     blocked.write(&event("second"));
-    assert!(blocked.is_disabled());
     assert_eq!(warning_count.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(
         fs::metadata(&obstructed_one).unwrap().len(),
@@ -339,7 +301,6 @@ fn open_and_write_failures_are_nonfatal_and_warn_once_without_paths() {
     .unwrap();
     failed.write(&event("first"));
     failed.write(&event("second"));
-    assert!(failed.is_disabled());
     assert_eq!(warning_count.load(std::sync::atomic::Ordering::SeqCst), 1);
     #[cfg(unix)]
     {
@@ -356,7 +317,6 @@ fn open_and_write_failures_are_nonfatal_and_warn_once_without_paths() {
         .unwrap();
         failed.write(&event("first"));
         failed.write(&event("second"));
-        assert!(failed.is_disabled());
         assert_eq!(
             write_warning_count.load(std::sync::atomic::Ordering::SeqCst),
             1
@@ -368,14 +328,8 @@ fn open_and_write_failures_are_nonfatal_and_warn_once_without_paths() {
 fn operation_outcomes_log_only_metadata_not_payload_or_exception_text() {
     let directory = TempDirectory::new("outcomes");
     let path = directory.path().join("diagnostics.log");
-    let log = FileDiagnosticLog::open_session_with_clock(
-        &path,
-        "test",
-        "user-session-diagnostics",
-        |_| {},
-        SystemTime::now,
-    )
-    .unwrap();
+    let log =
+        FileDiagnosticLog::open_session(&path, "test", "user-session-diagnostics", |_| {}).unwrap();
     for (outcome, expected) in [
         ("completed", "completed"),
         ("failed", "failed"),
@@ -411,14 +365,8 @@ fn user_session_scope_overrides_untrusted_event_session_and_stays_on_selected_tr
     let directory = TempDirectory::new("selected-tree");
     let current = directory.path().join("parrotrust").join("session.log");
     let legacy = directory.path().join("parrotdotnet").join("session.log");
-    let log = FileDiagnosticLog::open_session_with_clock(
-        &legacy,
-        "test",
-        "selected-legacy-session",
-        |_| {},
-        || UNIX_EPOCH,
-    )
-    .unwrap();
+    let log = FileDiagnosticLog::open_session(&legacy, "test", "selected-legacy-session", |_| {})
+        .unwrap();
     let mut entry = event("partial_initialization_failed");
     entry.user_session_id = Some("duplicate-new-root-session".into());
     let factory_failure = DiagnosticFailure {

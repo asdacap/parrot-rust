@@ -176,15 +176,17 @@ struct HttpEvents {
     sent: bool,
 }
 impl ws::HttpEvents for HttpEvents {
-    fn next<'a>(
+    fn next_event<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<responses::ResponsesEvent>, Error>> {
+    ) -> BoxFuture<'a, Result<Option<ws::SessionEvent>, Error>> {
         let event = if self.sent {
             None
         } else {
             self.sent = true;
-            Some(responses::ResponsesEvent::TextDelta("http".into()))
+            Some(ws::SessionEvent::Response(
+                responses::ResponsesEvent::TextDelta("http".into()),
+            ))
         };
         Box::pin(async move { Ok(event) })
     }
@@ -193,21 +195,13 @@ impl ws::HttpEvents for HttpEvents {
     }
 }
 impl ws::HttpFallback for Http {
-    fn open<'a>(
+    fn open_unprepared<'a>(
         &'a self,
-        _: Vec<u8>,
         _: String,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Box<dyn ws::HttpEvents>, Error>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(Box::new(HttpEvents { sent: false }) as Box<dyn ws::HttpEvents>) })
-    }
-    fn open_unprepared<'a>(
-        &'a self,
-        state: String,
-        cancel: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn ws::HttpEvents>, Error>> {
-        self.open(Vec::new(), state, cancel)
     }
 }
 struct Factory {
@@ -748,10 +742,7 @@ async fn websocket_auth_trace_classifies_original_error_without_consuming_it() {
             Error::Provider("secret-auth-configuration".into()),
             "unexpected",
         ),
-        (
-            Error::Cancellation("secret-auth-cancellation".into()),
-            "cancelled",
-        ),
+        (Error::Cancelled, "cancelled"),
         (Error::Io("secret-auth-io".into()), "io"),
     ] {
         let wire = Arc::new(Wire::default());

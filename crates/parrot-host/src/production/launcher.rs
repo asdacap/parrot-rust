@@ -3,7 +3,7 @@
 use super::policy::{ProductionAccessRule, ProductionPolicy};
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation},
-    paths::{ReadOrigin, ResolvedRead},
+    paths::ResolvedRead,
     security::AccessSnapshot,
 };
 use parrot_runtime::tool_settlement::SharedSecurity;
@@ -33,14 +33,6 @@ pub struct ProductionLauncher {
 }
 
 impl ProductionLauncher {
-    pub fn new(
-        gate: Arc<SandboxGate>,
-        launch_directory: PathBuf,
-        session_root: PathBuf,
-    ) -> io::Result<Self> {
-        Self::with_device_paths(gate, launch_directory, session_root, Vec::new())
-    }
-
     pub fn with_device_paths(
         gate: Arc<SandboxGate>,
         launch_directory: PathBuf,
@@ -59,10 +51,6 @@ impl ProductionLauncher {
             launch_directory,
             session_root,
         })
-    }
-
-    pub fn sandbox_available(&self) -> bool {
-        self.runner.sandbox_available()
     }
 }
 
@@ -100,7 +88,6 @@ impl CapturedProcessLauncher for ProductionLauncher {
                 .check_read(&ResolvedRead::new(
                     self.launch_directory.clone(),
                     actual_directory,
-                    ReadOrigin::Explicit,
                 ))
                 .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error))?;
             let resources = ProcessResources::new(self.launch_directory.clone(), scratch.clone());
@@ -303,10 +290,11 @@ mod tests {
             materializer.for_agent(&raw, &self.scratch).unwrap()
         }
         fn launcher(&self, enabled: bool) -> ProductionLauncher {
-            ProductionLauncher::new(
+            ProductionLauncher::with_device_paths(
                 Arc::new(SandboxGate::new(enabled)),
                 self.work.clone(),
                 self.session.clone(),
+                Vec::new(),
             )
             .unwrap()
         }

@@ -1,8 +1,17 @@
 //! Shared helpers for exact source-assertion translations; no template-engine substitute.
-use parrot_foundation::config::{Configuration, Result};
+use parrot_foundation::config::{
+    Configuration, Result, configuration::ModelConfigurationTransaction,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+pub fn transact(
+    configuration: &mut Configuration,
+    update: impl FnOnce(&mut ModelConfigurationTransaction<'_>) -> Result<()>,
+) -> Result<()> {
+    configuration.model_configuration_transaction(update)?
+}
 
 pub struct Context {
     pub directory: PathBuf,

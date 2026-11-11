@@ -115,10 +115,7 @@ fn native(error: &Error) -> Value {
     json!({"rust_type":std::any::type_name::<Error>(),"variant":format!("{error:?}"),"message":error.to_string()})
 }
 fn semantic(error: &Error) -> Value {
-    if matches!(
-        error,
-        Error::Cancelled | Error::Cancellation(_) | Error::Http(HttpError::Cancelled)
-    ) {
+    if matches!(error, Error::Cancelled | Error::Http(HttpError::Cancelled)) {
         return json!({"classification":"cancellation"});
     }
     let kind = error_category(error);
@@ -133,10 +130,7 @@ fn error_category(error: &Error) -> &'static str {
     match error {
         Error::Provider(_) | Error::ProviderWithCause { .. } => "LLMProviderException",
         Error::Authentication(_) => "AuthException",
-        Error::Cancelled | Error::Cancellation(_) | Error::Http(HttpError::Cancelled) => {
-            "OperationCanceledException"
-        }
-        Error::HeaderTimeout(_) => "HeaderTimeoutException",
+        Error::Cancelled | Error::Http(HttpError::Cancelled) => "OperationCanceledException",
         Error::Wire(_) | Error::Http(HttpError::Wire(_)) => "WireProtocolException",
         Error::Http(HttpError::Response(_)) => "ProviderHttpException",
         Error::Response(ResponsesError::ProviderResponse { .. }) => "ProviderResponseException",
@@ -307,11 +301,6 @@ impl ImageTransport for Transport {
             } else if self.kind == "bucket" {
                 if ct.is_cancelled() {
                     return Err(Error::Cancelled);
-                }
-                if s(&self.c, "mode") == "timeout" {
-                    return Err(Error::Cancellation(
-                        "synthetic dispatch cancellation".into(),
-                    ));
                 }
                 let configured = n(&self.c, "status") as u16;
                 if configured == 0 {
@@ -931,7 +920,6 @@ fn failure(kind: &str) -> Option<Error> {
     };
     match kind {
         "visible" => Some(http(400, "", "late")),
-        "timeout" => Some(Error::HeaderTimeout("timed out".into())),
         "permanent" => Some(Error::Provider("no key".into())),
         "overload" => Some(http(503, "", "busy")),
         "usage" => Some(Error::Response(ResponsesError::ProviderResponse {
@@ -946,7 +934,7 @@ fn failure(kind: &str) -> Option<Error> {
 }
 fn error_pointer(error: &Error) -> Option<usize> {
     match error {
-        Error::Provider(message) | Error::HeaderTimeout(message) => Some(message.as_ptr() as usize),
+        Error::Provider(message) => Some(message.as_ptr() as usize),
         Error::Http(HttpError::Response(error)) => Some(error.detail.as_ptr() as usize),
         Error::Response(ResponsesError::ProviderResponse { detail, .. }) => {
             Some(detail.as_ptr() as usize)
@@ -1034,9 +1022,6 @@ impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(self.scripted_call(request))
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
     }
@@ -1092,9 +1077,6 @@ impl Provider for Unsupported {
     fn id(&self) -> &str {
         "unsupported"
     }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        panic!("unsupported generation must not call chat")
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(false) })
     }
@@ -1122,7 +1104,7 @@ impl Session for ScriptSession {
         Box::pin(async { Ok(()) })
     }
     fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.inner.call(request)
+        Ok(self.inner.scripted_call(request))
     }
     fn try_fall_back_to_http(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async { Ok(false) })
@@ -1240,17 +1222,13 @@ async fn consume(
     collected: &mut Collected,
     provider: &ImageLinkingProvider,
     scripted: &Scripted,
-    use_session: bool,
     request: Request,
     token: &dyn Cancellation,
 ) -> Result<(), Error> {
     let session = provider.open_session()?;
-    let stream = if use_session {
-        session.call(request)?
-    } else {
-        provider.call(request)?
-    };
-    collected.collect(stream, token, scripted).await?;
+    collected
+        .collect(session.call(request)?, token, scripted)
+        .await?;
     session.close().await
 }
 async fn linking(c: &Value) -> Result<(Value, Value), Error> {
@@ -1334,7 +1312,6 @@ async fn linking(c: &Value) -> Result<(Value, Value), Error> {
                 &mut collected,
                 &provider,
                 &scripted,
-                b(c, "session"),
                 scripted.input(&request, false),
                 token.as_ref(),
             )
@@ -1343,7 +1320,6 @@ async fn linking(c: &Value) -> Result<(Value, Value), Error> {
                 &mut collected,
                 &provider,
                 &scripted,
-                !b(c, "session"),
                 scripted.input(&request, false),
                 token.as_ref(),
             )
@@ -1352,7 +1328,6 @@ async fn linking(c: &Value) -> Result<(Value, Value), Error> {
                 &mut collected,
                 &provider,
                 &scripted,
-                b(c, "session"),
                 scripted.input(&text_only, true),
                 token.as_ref(),
             )
@@ -1385,7 +1360,9 @@ async fn linking(c: &Value) -> Result<(Value, Value), Error> {
                 .await?;
             collected
                 .collect(
-                    provider.call(scripted.input(&request, false))?,
+                    provider
+                        .open_session()?
+                        .call(scripted.input(&request, false))?,
                     token.as_ref(),
                     &scripted,
                 )
@@ -1417,7 +1394,6 @@ async fn linking(c: &Value) -> Result<(Value, Value), Error> {
                 &mut collected,
                 &provider,
                 &scripted,
-                b(c, "session"),
                 scripted.input(&request, false),
                 token.as_ref(),
             )

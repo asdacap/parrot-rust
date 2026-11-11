@@ -347,7 +347,7 @@ mod tests {
         let errors = [
             TurnError::Cancelled,
             TurnError::Service("cancelled is only message text".into()),
-            TurnError::Provider(sessions::Error::Cancellation("typed cancellation".into())),
+            TurnError::Provider(sessions::Error::Cancelled),
             TurnError::Planning(crate::compaction::PlanningError::InputLimitExceeded),
             TurnError::ProviderCall(provider_call::ProviderCallError::Output(
                 std::io::Error::from(std::io::ErrorKind::PermissionDenied),

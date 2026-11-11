@@ -1027,7 +1027,7 @@ fn both_task_tools_use_configured_definitions_are_sequential_and_disabled_after_
         (TaskToolKind::Get, "get_agent_tasks", "Get tasks"),
     ] {
         let tool = fixture.tool(kind);
-        assert_eq!(tool.name(), name);
+        assert_eq!(kind.name(), name);
         assert_eq!(
             tool.definition(),
             &ConfiguredToolDefinition::new(description, "{}")

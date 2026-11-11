@@ -292,7 +292,6 @@ async fn actual_file_observer_flushes_completion_and_preserves_event_metadata() 
     let fixture = Fixture::new("a\nb\npartial".as_bytes(), true);
     let sink = Sink::default();
     let mut monitor = ShellProcessMonitor::new(Duration::from_secs(60));
-    assert!(monitor.blocks_turn());
     monitor
         .observe(
             &fixture.identity,
@@ -301,10 +300,6 @@ async fn actual_file_observer_flushes_completion_and_preserves_event_metadata() 
             &fixture.lifetime,
         )
         .await;
-    assert_eq!(
-        monitor.activity_kind(),
-        ShellProcessActivityKind::SHELL_PROCESS_ACTIVITY_KIND_MONITOR
-    );
     assert_eq!(monitor.report.events, 3);
     assert_eq!(monitor.report.exit_code, "3");
     let events = sink.events.lock().unwrap();
@@ -316,7 +311,8 @@ async fn actual_file_observer_flushes_completion_and_preserves_event_metadata() 
     assert_eq!(events[0].activity_description, "monitor watch event");
     drop(events);
     assert_eq!(
-        monitor.complete(&fixture.identity, &sink).unwrap(),
+        sink.render_completion(&fixture.identity, monitor.report())
+            .unwrap(),
         "Monitor watch (ticks) exited with code 3. Events delivered: 3."
     );
     assert_eq!(
@@ -700,7 +696,8 @@ async fn real_t40_stdout_batches_exclude_stderr_and_report_actual_exit() {
     assert_eq!(monitor.report.reason, MonitorReason::Exited);
     assert_eq!(monitor.report.timeout_ms, "300000");
     assert_eq!(
-        monitor.complete(&fixture.identity, &sink).unwrap(),
+        sink.render_completion(&fixture.identity, monitor.report())
+            .unwrap(),
         "Monitor watch (ticks) exited with code 3. Events delivered: 3."
     );
     execution.0.settle().await.unwrap();
@@ -726,7 +723,8 @@ async fn real_t40_timeout_signals_and_joins_the_actual_process() {
     assert!(execution.0.is_completed());
     assert_eq!(monitor.report.timeout_ms, "1000");
     assert_eq!(
-        monitor.complete(&fixture.identity, &sink).unwrap(),
+        sink.render_completion(&fixture.identity, monitor.report())
+            .unwrap(),
         "Monitor watch (idle) reached its 1000ms timeout and was stopped; start it again if you still need the watch. Events delivered: 0."
     );
     execution.0.settle().await.unwrap();
@@ -753,7 +751,8 @@ async fn real_t40_flood_batch_is_suppressed_and_actual_process_is_stopped() {
     assert_eq!(result.stdout.lines().count(), 500);
     assert_eq!(monitor.report.timeout_ms, "300000");
     assert_eq!(
-        monitor.complete(&fixture.identity, &sink).unwrap(),
+        sink.render_completion(&fixture.identity, monitor.report())
+            .unwrap(),
         "Monitor watch (flood) produced too many events and was stopped; start it again with a tighter filter. Events delivered: 0."
     );
     execution.0.settle().await.unwrap();
@@ -787,7 +786,8 @@ async fn real_t40_external_interrupt_keeps_monitor_reason_exited() {
         "Monitor watch (ready):\nready"
     );
     assert_eq!(
-        monitor.complete(&fixture.identity, &sink).unwrap(),
+        sink.render_completion(&fixture.identity, monitor.report())
+            .unwrap(),
         "Monitor watch (ready) exited with code 143. Events delivered: 1."
     );
     execution.0.settle().await.unwrap();

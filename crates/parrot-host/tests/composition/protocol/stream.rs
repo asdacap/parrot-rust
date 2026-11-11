@@ -1,11 +1,119 @@
-use parrot_domain::{contracts::async_ops::Cancellation, protocol::messages::parrot::Event};
+//! The in-process client channel used by protocol tests: capacity four, Wait full mode.
+use parrot_domain::{
+    contracts::async_ops::{BoxFuture, Cancellation},
+    protocol::messages::parrot::{self as wire, Event},
+};
 use parrot_host::composition::protocol::{
-    RpcCode, SessionEventStream, stream::bounded_client_stream,
+    Result, RpcCode, RpcError, SessionEventStream, UploadStream,
 };
 use parrot_runtime::agent_turn::lifecycle::Signal;
 use parrot_storage::events::NeverCancelled;
 use protobuf::Message;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::sync::{mpsc, watch};
+
+struct Shared<T> {
+    sender: Mutex<Option<mpsc::Sender<T>>>,
+    stopped: watch::Sender<bool>,
+}
+pub struct ClientStreamWriter<T> {
+    shared: Arc<Shared<T>>,
+}
+impl<T> Clone for ClientStreamWriter<T> {
+    fn clone(&self) -> Self {
+        Self {
+            shared: self.shared.clone(),
+        }
+    }
+}
+pub struct ClientStreamReader<T> {
+    receiver: mpsc::Receiver<T>,
+    stopped: watch::Receiver<bool>,
+}
+
+pub fn bounded_client_stream<T>() -> (ClientStreamWriter<T>, ClientStreamReader<T>) {
+    let (sender, receiver) = mpsc::channel(4);
+    let (stopped, stop_receiver) = watch::channel(false);
+    let shared = Arc::new(Shared {
+        sender: Mutex::new(Some(sender)),
+        stopped,
+    });
+    (
+        ClientStreamWriter { shared },
+        ClientStreamReader {
+            receiver,
+            stopped: stop_receiver,
+        },
+    )
+}
+impl<T: Send> ClientStreamWriter<T> {
+    pub async fn write(&self, message: T, cancellation: &dyn Cancellation) -> Result<()> {
+        cancellation.check().map_err(|_| RpcError::cancelled())?;
+        let mut stopped = self.shared.stopped.subscribe();
+        let sender = self
+            .shared
+            .sender
+            .lock()
+            .expect("stream sender poisoned")
+            .clone()
+            .ok_or_else(closed)?;
+        if *stopped.borrow() {
+            return Err(closed());
+        }
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(RpcError::cancelled()),
+            _ = stopped.changed() => Err(closed()),
+            sent = sender.send(message) => sent.map_err(|_| closed()),
+        }
+    }
+    pub fn stop(&self) {
+        let mut sender = self.shared.sender.lock().expect("stream sender poisoned");
+        if sender.take().is_some() {
+            self.shared.stopped.send_replace(true);
+        }
+    }
+}
+impl<T: Send> ClientStreamReader<T> {
+    pub async fn next(&mut self, cancellation: &dyn Cancellation) -> Result<Option<T>> {
+        cancellation.check().map_err(|_| RpcError::cancelled())?;
+        loop {
+            if *self.stopped.borrow() {
+                self.receiver.close();
+            }
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(RpcError::cancelled()),
+                _ = self.stopped.changed(), if !self.receiver.is_closed() => {
+                    self.receiver.close();
+                }
+                message = self.receiver.recv() => return Ok(message),
+            }
+        }
+    }
+}
+impl UploadStream for ClientStreamReader<wire::AttachmentUploadFrame> {
+    fn next<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<wire::AttachmentUploadFrame>>> {
+        Box::pin(ClientStreamReader::next(self, cancellation))
+    }
+}
+impl SessionEventStream for ClientStreamReader<wire::Event> {
+    fn next<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<wire::Event>>> {
+        Box::pin(ClientStreamReader::next(self, cancellation))
+    }
+}
+fn closed() -> RpcError {
+    RpcError::new(RpcCode::Internal, "The channel has been closed.")
+}
 
 #[tokio::test]
 async fn bounded_source_channel_blocks_the_fifth_write_until_a_read() {

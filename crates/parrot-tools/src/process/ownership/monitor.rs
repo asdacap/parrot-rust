@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Clock};
-use parrot_domain::protocol::messages::parrot::ShellProcessActivityKind;
 
 use crate::process::execution::output::Utf8Decoder;
 
@@ -128,24 +127,8 @@ impl ShellProcessMonitor {
         }
     }
 
-    pub fn blocks_turn(&self) -> bool {
-        true
-    }
-
-    pub fn activity_kind(&self) -> ShellProcessActivityKind {
-        ShellProcessActivityKind::SHELL_PROCESS_ACTIVITY_KIND_MONITOR
-    }
-
     pub fn report(&self) -> &MonitorReport {
         &self.report
-    }
-
-    pub fn complete(
-        &self,
-        identity: &MonitorIdentity,
-        sink: &dyn MonitorSink,
-    ) -> io::Result<String> {
-        sink.render_completion(identity, &self.report)
     }
 
     pub async fn observe(

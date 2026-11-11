@@ -16,6 +16,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
     task::Poll,
+    time::Duration,
 };
 use tokio::sync::watch;
 
@@ -73,9 +74,6 @@ impl Provider for ScriptProvider {
                 .map_or_else(|| Ok(self.live.clone()), Err)
         })
     }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(Box::new(Empty))
-    }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(Empty))
     }
@@ -120,12 +118,12 @@ pub fn injected_failure(name: &str) -> Option<Error> {
             detail: "synthetic HTTP failure".into(),
             response_body: String::new(),
         })),
-        "header" => Error::HeaderTimeout("synthetic header failure".into()),
+        "header" => Error::Http(HttpError::HeaderTimeout(Duration::from_secs(1))),
         "wire" => Error::Wire("synthetic wire failure".into()),
         "auth" => Error::Authentication(AuthError::Message("synthetic auth failure")),
         "io" => Error::Io("synthetic IO failure".into()),
         "transport" => Error::Http(HttpError::Transport("synthetic transport failure".into())),
-        "cancelled" => Error::Cancellation("synthetic cancellation".into()),
+        "cancelled" => Error::Cancelled,
         "unexpected" => Error::InvalidOperation("synthetic unexpected failure".into()),
         other => {
             return Some(Error::InvalidOperation(format!(

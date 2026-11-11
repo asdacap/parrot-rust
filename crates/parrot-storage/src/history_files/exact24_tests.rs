@@ -2,7 +2,7 @@
 //! The scratch/blob-directory literal is intentionally not imitated by a path join:
 //! its real API belongs to parrot-foundation, absent from this crate's dependencies.
 use super::AgentHistoryFile;
-use super::json::{deserialize_entry, serialize_entry};
+use super::json::serialize_entry;
 use crate::conversation::{
     AgentHistoryEntry, AgentHistoryView, CompactionSnapshot, ConversationMessage, ConversationPart,
     ConversationRepository, HistoryForkBoundary, HistoryForkSelection, MessageRole, ToolCall,
@@ -120,7 +120,13 @@ async fn delegated24_concurrent_exact_jsonl_cleanup_and_isolation() {
     let wrong = repository
         .bind_agent_history("second".into(), first_file.clone())
         .unwrap();
-    assert!(wrong.cleanup_fork().await.is_err());
+    assert!(
+        wrong
+            .repository()
+            .cleanup_forked_agent_history(wrong.agent_session_id().into())
+            .await
+            .is_err()
+    );
     assert_eq!(
         repository
             .conversation("second".into())
@@ -129,7 +135,11 @@ async fn delegated24_concurrent_exact_jsonl_cleanup_and_isolation() {
             .len(),
         12
     );
-    first.cleanup_fork().await.unwrap();
+    first
+        .repository()
+        .cleanup_forked_agent_history(first.agent_session_id().into())
+        .await
+        .unwrap();
     assert!(fs::read(first_file.path()).unwrap().is_empty());
     assert!(
         fs::read_to_string(second_file.path())
@@ -195,8 +205,10 @@ async fn delegated24_named_checkpoint_fork_jsonl_literals() {
         .unwrap()
         .sequence;
     child
-        .initialize_fork(
+        .repository()
+        .initialize_forked_agent_history(
             "agent".into(),
+            child.agent_session_id().into(),
             HistoryForkBoundary::BeforeToolBatch {
                 assistant_sequence: spawn_assistant,
                 tool_call_id: "spawn".into(),
@@ -230,7 +242,10 @@ async fn delegated24_cleanup_jsonl_durable_then_empty() {
         .unwrap();
     append(&view, "message", "durable").await;
     assert!(fs::read_to_string(file.path()).unwrap().contains("durable"));
-    view.cleanup_fork().await.unwrap();
+    view.repository()
+        .cleanup_forked_agent_history(view.agent_session_id().into())
+        .await
+        .unwrap();
     assert_eq!(fs::read_to_string(file.path()).unwrap(), "");
     repository.events().database().close().await.unwrap();
 }
@@ -286,8 +301,10 @@ async fn delegated24_promoted_input_compaction_and_destination_fork_jsonl() {
     let parent_text = fs::read_to_string(parent_file.path()).unwrap();
     assert!(parent_text.contains("saved summary"));
     child
-        .initialize_fork(
+        .repository()
+        .initialize_forked_agent_history(
             "parent".into(),
+            child.agent_session_id().into(),
             HistoryForkBoundary::AfterCompletedHistory,
             HistoryForkSelection::parse("full"),
             None,
@@ -299,7 +316,11 @@ async fn delegated24_promoted_input_compaction_and_destination_fork_jsonl() {
             .unwrap()
             .contains("saved summary")
     );
-    child.cleanup_fork().await.unwrap();
+    child
+        .repository()
+        .cleanup_forked_agent_history(child.agent_session_id().into())
+        .await
+        .unwrap();
     assert!(fs::read_to_string(child_file.path()).unwrap().is_empty());
     assert_eq!(fs::read_to_string(parent_file.path()).unwrap(), parent_text);
     repository.events().database().close().await.unwrap();
@@ -432,10 +453,9 @@ async fn request_round_trip(effort: Option<&str>, _parameter: &str) {
         .filter(|entry| matches!(entry, AgentHistoryEntry::Request { .. }))
         .collect();
     assert_eq!(requests.len(), 1);
-    let history = &requests[0];
-    let serialized = serialize_entry(history).unwrap();
-    let restored = deserialize_entry(&serialized).unwrap();
-    assert_eq!(&restored, history);
+    let serialized: serde_json::Value =
+        serde_json::from_slice(&serialize_entry(&requests[0]).unwrap()).unwrap();
+    assert_eq!(serialized["effort"], serde_json::json!(effort));
     let file = fixture.projection("grandchild", &["grandchild"]);
     repository
         .bind_agent_history("grandchild".into(), file.clone())

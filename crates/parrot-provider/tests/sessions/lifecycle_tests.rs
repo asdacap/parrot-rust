@@ -183,45 +183,39 @@ async fn drain(stream: &mut dyn EventStream) -> Result<Vec<Event>, Error> {
 }
 
 #[tokio::test]
-async fn http_phases_precede_headers_and_body_and_dispose_response_for_all_six_compositions() {
+async fn http_phases_precede_headers_and_body_and_dispose_response_for_all_dialects() {
     for dialect in ["chatgpt", "responses", "chat"] {
-        for use_session in [false, true] {
-            let transport = Transport::new("", false, true);
-            let provider = provider(dialect, transport.clone());
-            let session = provider.open_session().unwrap();
-            let request = Request {
-                model: "model".into(),
-                ..Request::default()
-            };
-            let mut stream = if use_session {
-                session.call(request).unwrap()
-            } else {
-                provider.call(request).unwrap()
-            };
-            assert_eq!(
-                stream.next(&Never).await.unwrap(),
-                Some(Event::HttpRequestStarted),
-                "{dialect}/{use_session}"
-            );
-            assert!(transport.bodies.lock().unwrap().is_empty());
-            let next = tokio::spawn(async move {
-                let result = stream.next(&Never).await;
-                (stream, result)
-            });
-            transport.entered.acquire().await.unwrap().forget();
-            assert!(
-                !next.is_finished(),
-                "headers must still be blocked: {dialect}/{use_session}"
-            );
-            transport.release.add_permits(1);
-            let (mut stream, event) = next.await.unwrap();
-            assert_eq!(event.unwrap(), Some(Event::HttpResponseHeadersReceived));
-            assert_eq!(transport.reads.load(Ordering::SeqCst), 0);
-            assert!(!transport.disposed.load(Ordering::SeqCst));
-            stream.close().await.unwrap();
-            assert!(transport.disposed.load(Ordering::SeqCst));
-            session.close().await.unwrap();
-        }
+        let transport = Transport::new("", false, true);
+        let provider = provider(dialect, transport.clone());
+        let session = provider.open_session().unwrap();
+        let request = Request {
+            model: "model".into(),
+            ..Request::default()
+        };
+        let mut stream = session.call(request).unwrap();
+        assert_eq!(
+            stream.next(&Never).await.unwrap(),
+            Some(Event::HttpRequestStarted),
+            "{dialect}"
+        );
+        assert!(transport.bodies.lock().unwrap().is_empty());
+        let next = tokio::spawn(async move {
+            let result = stream.next(&Never).await;
+            (stream, result)
+        });
+        transport.entered.acquire().await.unwrap().forget();
+        assert!(
+            !next.is_finished(),
+            "headers must still be blocked: {dialect}"
+        );
+        transport.release.add_permits(1);
+        let (mut stream, event) = next.await.unwrap();
+        assert_eq!(event.unwrap(), Some(Event::HttpResponseHeadersReceived));
+        assert_eq!(transport.reads.load(Ordering::SeqCst), 0);
+        assert!(!transport.disposed.load(Ordering::SeqCst));
+        stream.close().await.unwrap();
+        assert!(transport.disposed.load(Ordering::SeqCst));
+        session.close().await.unwrap();
     }
 }
 
@@ -237,9 +231,16 @@ async fn compatible_http_replays_reasoning_by_default_across_model_changes() {
         messages: vec![Message::user("hello")],
         ..Request::default()
     };
-    let events = drain(provider.call(first.clone()).unwrap().as_mut())
-        .await
-        .unwrap();
+    let events = drain(
+        provider
+            .open_session()
+            .unwrap()
+            .call(first.clone())
+            .unwrap()
+            .as_mut(),
+    )
+    .await
+    .unwrap();
     let completion = events
         .iter()
         .find_map(|event| {
@@ -260,9 +261,16 @@ async fn compatible_http_replays_reasoning_by_default_across_model_changes() {
         ],
         ..Request::default()
     };
-    drain(provider.call(continued).unwrap().as_mut())
-        .await
-        .unwrap();
+    drain(
+        provider
+            .open_session()
+            .unwrap()
+            .call(continued)
+            .unwrap()
+            .as_mut(),
+    )
+    .await
+    .unwrap();
     let bodies = transport.bodies.lock().unwrap();
     assert_eq!(bodies.len(), 2);
     let body: serde_json::Value = serde_json::from_slice(&bodies[1]).unwrap();

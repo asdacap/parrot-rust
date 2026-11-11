@@ -8,13 +8,13 @@ use parrot_domain::{
 use parrot_provider::{
     catalogs::Model,
     routing::{
-        aliases::{ModelAliasCatalog, ModelAliasDefinition, ModelRouter, ModelRouting},
+        aliases::{
+            ModelAliasCatalog, ModelAliasDefinition, ModelRouter, ModelRouting,
+            ResolvedModelSelection,
+        },
         registry::{ProviderModel, ProviderRegistry},
     },
-    sessions::{
-        Completion, Content, Error, EventStream, Message, Provider, Request, Session, Tool,
-        ToolCall,
-    },
+    sessions::{Completion, Content, Error, Message, Provider, Session, Tool, ToolCall},
 };
 use parrot_runtime::compaction::*;
 use std::{
@@ -32,9 +32,6 @@ struct ImageProvider {
 impl Provider for ImageProvider {
     fn id(&self) -> &str {
         "provider"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        panic!("planning must not call a provider")
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         panic!("no credentials")
@@ -69,6 +66,20 @@ fn model(context: i32) -> ProviderModel {
         model: value,
         variant: None,
     }
+}
+fn select(selected: &ProviderModel) -> ResolvedModelSelection {
+    let registry = Arc::new(
+        ProviderRegistry::new(
+            vec![selected.provider.clone()],
+            BTreeMap::from([("provider".into(), vec![selected.model.clone()])]),
+        )
+        .unwrap(),
+    );
+    let catalog = Arc::new(ModelAliasCatalog::new(registry.clone(), []).unwrap());
+    let routing = Arc::new(ModelRouting::new(catalog, "provider/model"));
+    ModelRouter::new(registry, routing)
+        .resolve("provider/model")
+        .unwrap()
 }
 fn planner(trigger: i32, target: i32, input: i32) -> CompactionPlanner {
     CompactionPlanner::new(
@@ -194,11 +205,15 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
         let mut selected = model(context);
         selected.model.max_output_tokens = output;
         let snapshot = planner(100, 30, 60000)
-            .estimate_context(&selected, "", &[], &[])
+            .estimate_selected_context(&select(&selected), "", &[], &[])
             .unwrap();
         let trigger = snapshot.trigger_tokens.unwrap();
         let budget = ProviderTokenBudget::default();
-        let requested = selected.model.requested_output_tokens();
+        let requested = if output > 0 {
+            output.min(32 * 1024)
+        } else {
+            32 * 1024
+        };
         assert_eq!(
             budget.calculate_maximum_output_tokens("provider/model", trigger, &selected.model),
             Ok(requested)
@@ -251,7 +266,7 @@ fn original_context_usage_rows_strict_boundary() {
         (-10, "", 4, None, false),
     ] {
         let snapshot = planner(50, 30, 60000)
-            .estimate_context(&model(limit), instructions, &[], &[])
+            .estimate_selected_context(&select(&model(limit)), instructions, &[], &[])
             .unwrap();
         assert_eq!(snapshot.estimated_tokens, estimate);
         assert_eq!(snapshot.context_limit, limit);
@@ -301,39 +316,13 @@ fn actual_selected_policy_and_override_preserve_total_window() {
     let selected = ModelRouter::new(registry, routing)
         .resolve("small")
         .unwrap();
-    let planner = planner(90, 30, 60000);
-    let policy = planner.resolve_policy(&selected, None);
-    assert_eq!(policy.trigger_tokens, Some(400));
-    assert_eq!(policy.target_tokens, Some(120));
-    assert_eq!(
-        planner
-            .resolve_policy(&selected, Some(&ContextSize::parse("10%").unwrap()))
-            .target_tokens,
-        Some(100)
-    );
-    let snapshot = planner
+    let snapshot = planner(90, 30, 60000)
         .estimate_selected_context(&selected, "", &[], &[])
         .unwrap();
     assert_eq!(snapshot.context_limit, 1000);
     assert_eq!(snapshot.input_limit, 1000);
     assert_eq!(snapshot.trigger_percent, 40);
     assert!(snapshot.has_context_limit_override);
-    let history = [Message::user("first"), Message::user("retained")];
-    let groups = group_messages(&history);
-    let fixed = Message::user("fixed");
-    let input = PlanningInput {
-        instructions: "",
-        tools: &[],
-        groups: &groups,
-        base_watermark: 0,
-        fixed_message: &fixed,
-    };
-    let plan = planner
-        .plan_selected(&selected, None, &input)
-        .unwrap()
-        .unwrap();
-    assert_eq!(plan.keep_group_from, 1);
-    assert_eq!(plan.input_budget, 1000);
 }
 
 #[test]
@@ -351,149 +340,10 @@ fn groups_only_capture_contiguous_tool_results_and_keep_order() {
         vec![3, 1, 1]
     );
     assert!(groups[0].is_complete);
-    assert!(is_eligible_for_spill(&groups[0]));
     assert_eq!(groups[0].messages[1].tool_call_id, "b");
     assert_eq!(groups[2].end_watermark, 3);
     let incomplete = group_messages(&history[..2]);
     assert!(!incomplete[0].is_complete);
-    assert!(!is_eligible_for_spill(&incomplete[0]));
-}
-#[test]
-fn checkpoint_cut_and_incomplete_group_never_split_causal_history() {
-    let selected = model(1000);
-    let history = [
-        Message::user("a"),
-        Message::user("b"),
-        Message::user("c"),
-        Message::user("d"),
-    ];
-    let mut groups = group_messages(&history);
-    groups[1].has_checkpoint_before = true;
-    let fixed = Message::user("fixed");
-    let planner = planner(90, 30, 600);
-    let input = PlanningInput {
-        instructions: "",
-        tools: &[],
-        groups: &groups,
-        base_watermark: 0,
-        fixed_message: &fixed,
-    };
-    assert_eq!(
-        planner
-            .plan(&selected, Some(100), &input)
-            .unwrap()
-            .unwrap()
-            .keep_group_from,
-        1
-    );
-    let mut incomplete = group_messages(&history);
-    incomplete[1].is_complete = false;
-    let mut input = PlanningInput {
-        groups: &incomplete,
-        ..input
-    };
-    let plan = planner.plan(&selected, Some(100), &input).unwrap().unwrap();
-    assert_eq!(plan.keep_group_from, 1);
-    assert_eq!(plan.watermark, 1);
-    input.base_watermark = 1;
-    assert!(
-        planner
-            .plan(&selected, Some(100), &input)
-            .unwrap()
-            .is_none()
-    );
-    let mut earliest_incomplete = group_messages(&history);
-    earliest_incomplete[0].is_complete = false;
-    let input = PlanningInput {
-        groups: &earliest_incomplete,
-        base_watermark: 0,
-        ..input
-    };
-    assert!(
-        planner
-            .plan(&selected, Some(100), &input)
-            .unwrap()
-            .is_none()
-    );
-}
-#[test]
-fn checkpoint_fallback_only_uses_input_limit_when_required_suffix_exceeds_target() {
-    let selected = model(1000);
-    let history = [
-        Message::user("a"),
-        Message::user("b"),
-        Message::user("x".repeat(200)),
-        Message::user("y".repeat(200)),
-    ];
-    let mut groups = group_messages(&history);
-    groups[1].has_checkpoint_before = true;
-    let fixed = Message::user("fixed");
-    let input = PlanningInput {
-        instructions: "",
-        tools: &[],
-        groups: &groups,
-        base_watermark: 0,
-        fixed_message: &fixed,
-    };
-    assert_eq!(
-        planner(90, 30, 600)
-            .plan(&selected, Some(10), &input)
-            .unwrap()
-            .unwrap()
-            .keep_group_from,
-        1
-    );
-    // Required suffix fits 100, but checkpoint suffix costs 140: no fallback.
-    assert_eq!(
-        planner(90, 30, 600)
-            .plan(&selected, Some(100), &input)
-            .unwrap()
-            .unwrap()
-            .keep_group_from,
-        3
-    );
-    assert_eq!(
-        planner(90, 30, 600)
-            .plan(&selected, Some(140), &input)
-            .unwrap()
-            .unwrap()
-            .keep_group_from,
-        1
-    );
-}
-#[test]
-fn spill_plans_only_complete_assistant_tool_groups_and_preserves_watermark() {
-    let selected = model(1000);
-    let history = [
-        Message::assistant("", vec![call("a")]),
-        Message::tool_result("a", "x".repeat(1000)),
-        Message::user("tail"),
-    ];
-    let groups = group_messages(&history);
-    let fixed = Message::user("fixed");
-    let input = PlanningInput {
-        instructions: "",
-        tools: &[],
-        groups: &groups,
-        base_watermark: 0,
-        fixed_message: &fixed,
-    };
-    let plan = planner(90, 30, 100)
-        .plan(&selected, Some(300), &input)
-        .unwrap()
-        .unwrap();
-    assert_eq!(plan.spill_groups, vec![0]);
-    assert_eq!(plan.watermark, 1);
-    let non_tool = [Message::user("x".repeat(1000)), Message::user("tail")];
-    let non_tool_groups = group_messages(&non_tool);
-    let input = PlanningInput {
-        groups: &non_tool_groups,
-        ..input
-    };
-    assert_eq!(
-        planner(90, 30, 100).plan(&selected, Some(300), &input),
-        Err(PlanningError::GroupExceedsBudget)
-    );
 }
 #[test]
 fn retained_budget_preserves_reservation_lifecycle() {
@@ -526,55 +376,6 @@ fn original_retained_budget_exact_once_pending_commit_rollback_release() {
     let final_reservation = budget.reserve().unwrap();
     final_reservation.rollback();
     replacement.release();
-}
-
-#[test]
-fn long_history_retains_every_message_after_first_incomplete_group() {
-    let history: Vec<_> = (0..200)
-        .map(|index| Message::user(format!("message {index}")))
-        .collect();
-    let mut groups = group_messages(&history);
-    groups[150].is_complete = false;
-    let fixed = Message::user("fixed");
-    let input = PlanningInput {
-        instructions: "",
-        tools: &[],
-        groups: &groups,
-        base_watermark: 0,
-        fixed_message: &fixed,
-    };
-    let plan = planner(90, 30, 60_000)
-        .plan(&model(100_000), Some(1000), &input)
-        .unwrap()
-        .unwrap();
-    assert_eq!(plan.keep_group_from, 150);
-    assert_eq!(plan.watermark, 150);
-    let retained: Vec<_> = groups[plan.keep_group_from..]
-        .iter()
-        .flat_map(|group| group.messages)
-        .collect();
-    assert_eq!(retained.len(), 50);
-    assert!(
-        retained
-            .iter()
-            .zip(&history[150..])
-            .all(|(actual, expected)| std::ptr::eq(*actual, expected))
-    );
-}
-
-#[test]
-fn completeness_uses_source_ordinal_ids_not_result_count_or_assistant_text() {
-    let duplicate_calls = [
-        Message::assistant("", vec![call("A"), call("A")]),
-        Message::tool_result("A", "result"),
-    ];
-    assert!(is_complete(&duplicate_calls));
-    let wrong_case = [
-        Message::assistant("", vec![call("A")]),
-        Message::tool_result("a", "result"),
-    ];
-    assert!(!is_complete(&wrong_case));
-    assert!(is_complete(&[Message::tool_result("orphan", "result")]));
 }
 
 #[test]
@@ -611,59 +412,17 @@ fn o200k_base_text_totals_preserve_image_and_request_overhead() {
             .unwrap(),
         4 + (1 + 6 + 1 + 12) + 164 + 4
     );
+    let selection = select(&selected);
     let planner = planner(50, 30, 600);
     let boundary = planner
-        .estimate_context(&selected, "Hello, world!", &tools, &history)
+        .estimate_selected_context(&selection, "Hello, world!", &tools, &history)
         .unwrap();
     assert_eq!(boundary.estimated_tokens, 192);
     assert_eq!(boundary.trigger_tokens, Some(192));
     assert!(!boundary.exceeds_trigger());
     let above = planner
-        .estimate_context(&selected, "Hello, world! Hello", &tools, &history)
+        .estimate_selected_context(&selection, "Hello, world! Hello", &tools, &history)
         .unwrap();
     assert_eq!(above.estimated_tokens, 193);
     assert!(above.exceeds_trigger());
-}
-
-#[test]
-fn o200k_base_retention_keeps_checkpoint_tool_group_only_when_it_fits() {
-    let selected = model(1000);
-    let history = [
-        Message::user("old"),
-        Message::assistant("", vec![call("call")]),
-        Message::tool_result("call", "🙂".repeat(200)),
-        Message::user("tail"),
-    ];
-    let mut groups = group_messages(&history);
-    groups[1].has_checkpoint_before = true;
-    assert_eq!(groups[1].messages.len(), 2);
-    assert!(groups[1].is_complete);
-    let fixed = Message::user("fixed");
-    let input = PlanningInput {
-        instructions: "",
-        tools: &[],
-        groups: &groups,
-        base_watermark: 0,
-        fixed_message: &fixed,
-    };
-    let target =
-        CompactionPlanner::estimate_input_tokens(&selected, "", &[], std::slice::from_ref(&fixed))
-            .unwrap()
-            + CompactionPlanner::estimate_tokens(&selected, &history[1..]).unwrap()
-            + 1;
-    let planner = planner(90, 30, 600);
-    let fits = planner
-        .plan(&selected, Some(target), &input)
-        .unwrap()
-        .unwrap();
-    assert_eq!(fits.keep_group_from, 1);
-    assert_eq!(fits.watermark, 1);
-    assert!(fits.spill_groups.is_empty());
-    let below = planner
-        .plan(&selected, Some(target - 1), &input)
-        .unwrap()
-        .unwrap();
-    assert_eq!(below.keep_group_from, 2);
-    assert_eq!(below.watermark, 2);
-    assert!(below.spill_groups.is_empty());
 }

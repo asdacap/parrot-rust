@@ -5,9 +5,6 @@ impl Provider for AmbiguousAfterRefresh {
     fn id(&self) -> &str {
         "unused"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        UnusedProvider.call(request)
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
     }

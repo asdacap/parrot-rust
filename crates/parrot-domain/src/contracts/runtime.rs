@@ -78,32 +78,3 @@ pub trait TaskController: Send + Sync {
 
     fn snapshot(&self, query: Self::Query) -> BoxFuture<'_, Result<Self::Snapshot, Self::Error>>;
 }
-
-pub trait SessionControl: Send + Sync {
-    type ReminderRequest: Send + 'static;
-    type ReminderResult: Send + 'static;
-    type ClearReminderRequest: Send + 'static;
-    type ClearReminderResult: Send + 'static;
-    type CompactRequest: Send + 'static;
-    type CompactResult: Send + 'static;
-    type Status: Send + 'static;
-    type Error: Send + Sync + 'static;
-
-    fn compact<'a>(
-        &'a self,
-        request: Self::CompactRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::CompactResult, OperationError<Self::Error>>>;
-
-    fn set_reminder(
-        &self,
-        request: Self::ReminderRequest,
-    ) -> Result<Self::ReminderResult, Self::Error>;
-
-    fn clear_reminder(
-        &self,
-        request: Self::ClearReminderRequest,
-    ) -> Result<Self::ClearReminderResult, Self::Error>;
-
-    fn status(&self) -> Result<Self::Status, Self::Error>;
-}

@@ -1,4 +1,4 @@
-//! Selected session identity and pure path/fallback policy, never filesystem lookup.
+//! Selected session identity and pure path policy, never filesystem lookup.
 
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
@@ -98,47 +98,6 @@ impl SessionResourcePath {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReadPurpose {
-    ApplicationState,
-    ApplicationData,
-    SessionInternal,
-    Configuration,
-    Credentials,
-    UserFile,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PrimaryReadFailure {
-    Absent,
-    PermissionDenied,
-    Corrupt,
-    Other,
-}
-
-/// Only absent application state/data may use enabled legacy fallback.
-/// Historical app-root classification belongs to the actual resolver.
-pub fn allows_legacy_fallback(
-    enabled: bool,
-    purpose: ReadPurpose,
-    failure: PrimaryReadFailure,
-) -> bool {
-    enabled
-        && matches!(
-            purpose,
-            ReadPurpose::ApplicationState | ReadPurpose::ApplicationData
-        )
-        && failure == PrimaryReadFailure::Absent
-}
-
-/// How a general read target was selected, independent of session-root ownership.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReadOrigin {
-    Primary,
-    LegacyFallback,
-    Explicit,
-}
-
 /// A resolver's report, not an authorization token. T10/T36 must resolve and
 /// authorize the actual physical target, including symlinks. Constructing this
 /// report confers no security and performs no filesystem lookup.
@@ -146,16 +105,11 @@ pub enum ReadOrigin {
 pub struct ResolvedRead {
     requested: PathBuf,
     actual: PathBuf,
-    origin: ReadOrigin,
 }
 
 impl ResolvedRead {
-    pub fn new(requested: PathBuf, actual: PathBuf, origin: ReadOrigin) -> Self {
-        Self {
-            requested,
-            actual,
-            origin,
-        }
+    pub fn new(requested: PathBuf, actual: PathBuf) -> Self {
+        Self { requested, actual }
     }
 
     pub fn requested_path(&self) -> &Path {
@@ -164,9 +118,5 @@ impl ResolvedRead {
 
     pub fn actual_path(&self) -> &Path {
         &self.actual
-    }
-
-    pub fn origin(&self) -> ReadOrigin {
-        self.origin
     }
 }

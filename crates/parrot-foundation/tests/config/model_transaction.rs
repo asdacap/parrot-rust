@@ -1,4 +1,7 @@
-use crate::{fixtures, support::Context};
+use crate::{
+    fixtures,
+    support::{Context, transact},
+};
 use parrot_domain::values::context::ContextSize;
 use parrot_foundation::config::{
     Configuration, Result,
@@ -61,65 +64,12 @@ fn token_update(transaction: &mut ModelConfigurationTransaction<'_>, kind: usize
     }
 }
 
-fn direct_update(configuration: &mut Configuration, kind: usize) -> Result<()> {
+fn competing_update(configuration: &mut Configuration, kind: usize) -> Result<()> {
     match kind {
-        0 => configuration.set_model_alias("low_llm", "p/alias"),
-        1 => configuration.set_model_aliases(&defaults()),
-        2 => configuration.set_model_preset("Work", &preset()),
-        3 => configuration.set_model_routing_with_limits(
-            "p/routed",
-            &BTreeMap::from([("low_llm".into(), "p/routed-alias".into())]),
-            Some(&limits()),
-        ),
-        4 => configuration.set_context_limit(ContextSize::parse("24k").unwrap()),
         5 => configuration.set_model("p/direct"),
         6 => configuration.set_skill_enabled("/workspace/skills/example", true),
-        _ => unreachable!(),
+        _ => transact(configuration, |transaction| token_update(transaction, kind)),
     }
-}
-
-#[test]
-fn transaction_mutations_match_direct_setters_entire_yaml_and_snapshots() {
-    let direct_context = Context::new();
-    let transaction_context = Context::new();
-    let initial = "model: p/original\nunknown:\n  keep: true\n";
-    let mut direct = direct_context.configured(initial).unwrap();
-    let mut transactional = transaction_context.configured(initial).unwrap();
-    for kind in 0..5 {
-        direct_update(&mut direct, kind).unwrap();
-        let snapshot = transactional
-            .model_configuration_transaction(|transaction| {
-                token_update(transaction, kind).unwrap();
-                transaction.snapshot()
-            })
-            .unwrap();
-        assert_eq!(snapshot, direct.model_configuration());
-        assert_eq!(transaction_context.saved(), direct_context.saved());
-    }
-    let before = transaction_context.saved();
-    let missing = transactional
-        .model_configuration_transaction(|transaction| {
-            transaction.set_model_alias("missing", "p/new")
-        })
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(
-        missing,
-        direct.set_model_alias("missing", "p/new").unwrap_err()
-    );
-    let invalid = transactional
-        .model_configuration_transaction(|transaction| {
-            transaction.set_model_routing_with_limits("not a selector", &BTreeMap::new(), None)
-        })
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(
-        invalid,
-        direct
-            .set_model_routing_with_limits("not a selector", &BTreeMap::new(), None)
-            .unwrap_err()
-    );
-    assert_eq!(transaction_context.saved(), before);
 }
 
 #[test]
@@ -145,7 +95,7 @@ fn transaction_reenters_separate_normalized_handles_and_excludes_every_direct_wr
                     let done = done.clone();
                     workers.push(std::thread::spawn(move || {
                         ready.send(()).unwrap();
-                        direct_update(&mut configuration, kind).unwrap();
+                        competing_update(&mut configuration, kind).unwrap();
                         done.send(kind).unwrap();
                     }));
                 }
@@ -216,7 +166,10 @@ fn transaction_reload_synchronize_and_explicit_rollback_keep_caller_error_inside
                     .unwrap();
                 worker = Some(std::thread::spawn(move || {
                     ready.send(()).unwrap();
-                    competitor.set_model_alias("low_llm", "p/after").unwrap();
+                    transact(&mut competitor, |transaction| {
+                        transaction.set_model_alias("low_llm", "p/after")
+                    })
+                    .unwrap();
                     done.send(()).unwrap();
                 }));
                 started.recv_timeout(Duration::from_secs(5)).unwrap();

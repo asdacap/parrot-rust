@@ -49,11 +49,6 @@ pub trait ProcessDiagnostics: Send + Sync {
     fn write(&self, event: ProcessDiagnostic);
 }
 
-pub struct NoProcessDiagnostics;
-impl ProcessDiagnostics for NoProcessDiagnostics {
-    fn write(&self, _: ProcessDiagnostic) {}
-}
-
 /// Reports process activity and completion without owning its execution.
 pub trait ProcessReport: Send + Sync {
     fn blocks_turn(&self) -> bool;
@@ -93,17 +88,6 @@ impl ProcessReport for CompletionReport {
             state.name
         ))
     }
-}
-
-/// Current state of this physical managed instance, without claiming it or
-/// advancing its output cursor.
-#[derive(Clone, Debug)]
-pub struct ManagedProcessSnapshot {
-    pub process: ActiveShellProcessState,
-    pub completed: bool,
-    pub retired: bool,
-    pub stdout_path: Option<std::path::PathBuf>,
-    pub stderr_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -221,26 +205,6 @@ impl ManagedShellProcess {
 
     pub fn name(&self) -> &str {
         &self.state.name
-    }
-    pub(crate) fn is_cancelled(&self) -> bool {
-        self.lifetime.is_cancelled()
-    }
-    pub fn snapshot(&self) -> io::Result<ManagedProcessSnapshot> {
-        let state = self
-            .inner
-            .lock()
-            .map_err(|_| io::Error::other("The process state lock is poisoned."))?;
-        let execution = self
-            .execution
-            .lock()
-            .map_err(|_| io::Error::other("The process execution lock is poisoned."))?;
-        Ok(ManagedProcessSnapshot {
-            process: self.state.clone(),
-            completed: state.completed.is_some(),
-            retired: state.retired,
-            stdout_path: execution.as_ref().and_then(|process| process.stdout_path()),
-            stderr_path: execution.as_ref().and_then(|process| process.stderr_path()),
-        })
     }
     pub fn completed(&self) -> bool {
         self.inner

@@ -84,50 +84,6 @@ impl ToolConversation {
             .map_err(TurnError::Core)
     }
 
-    pub fn begin_execution(
-        &mut self,
-        sequence: i64,
-        calls: Vec<ToolCall>,
-    ) -> Result<(), TurnError> {
-        self.settlement
-            .begin_execution(sequence, calls)
-            .map_err(TurnError::Core)
-    }
-
-    pub async fn record_results(
-        &mut self,
-        conversation: &mut AgentConversation,
-        results: &[ToolResult],
-    ) -> Result<(), TurnError> {
-        self.settlement
-            .record_results(
-                &mut ToolState {
-                    backing: &mut self.backing,
-                    conversation,
-                },
-                results,
-            )
-            .await
-            .map_err(TurnError::Core)
-    }
-
-    pub async fn complete_execution(
-        &mut self,
-        conversation: &mut AgentConversation,
-        results: &[ToolResult],
-    ) -> Result<(), TurnError> {
-        self.settlement
-            .complete_execution(
-                &mut ToolState {
-                    backing: &mut self.backing,
-                    conversation,
-                },
-                results,
-            )
-            .await
-            .map_err(TurnError::Core)
-    }
-
     pub async fn read_recovery(&self) -> Result<Option<ToolRecovery>, TurnError> {
         self.backing.read_recovery().await
     }

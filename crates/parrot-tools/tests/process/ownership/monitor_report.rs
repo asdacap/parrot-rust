@@ -4,11 +4,18 @@ use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
 use parrot_domain::values::identifiers::Identifier;
 
 use crate::process::execution::{LaunchSpec, ShellProcessExecution};
-use crate::process::ownership::managed::{CompletionMessage, CompletionSink, NoProcessDiagnostics};
+use crate::process::ownership::managed::{
+    CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
+};
 use crate::process::ownership::monitor::{
     MonitorDelivery, MonitorEvent, MonitorInputSource, MonitorReason,
 };
 use crate::process::ownership::owner::{ProcessAgent, ProcessStart, ShellProcessOwner};
+
+struct NoProcessDiagnostics;
+impl ProcessDiagnostics for NoProcessDiagnostics {
+    fn write(&self, _: ProcessDiagnostic) {}
+}
 
 #[derive(Default)]
 struct RecordingSink {
@@ -134,7 +141,7 @@ async fn actual_owner_monitor_blocks_turn_until_terminal_delivery() {
     assert_eq!(yielded.activity_kind, ActivityKind::Monitor);
     assert!(yielded.stdout_path.as_ref().unwrap().is_absolute());
     assert!(yielded.stderr_path.as_ref().unwrap().is_absolute());
-    let active = owner.active().await;
+    let active = owner.observe_active();
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].id, "agent-id/watch");
     assert_eq!(active[0].name, "watch");
@@ -146,7 +153,7 @@ async fn actual_owner_monitor_blocks_turn_until_terminal_delivery() {
         }
     })
     .await;
-    let active_after_completion = owner.active().await;
+    let active_after_completion = owner.observe_active();
     // Always join the actual child, report, delivery and inventory lifetimes.
     let disposed = owner.dispose().await;
     completed.unwrap();

@@ -215,7 +215,6 @@ async fn responses_is_pull_driven_uses_actual_prepared_bytes_and_retains_turn_st
     };
     assert_eq!((completion.input_tokens, completion.output_tokens), (7, 2));
     assert_eq!(stream.next(&cancel).await.unwrap(), None);
-    assert_eq!(stream.response_bytes(), (TEXT.len() + DONE.len()) as u64);
     assert_eq!(wire.reads.load(Ordering::SeqCst), 2);
     assert_eq!(wire.drops.load(Ordering::SeqCst), 1);
 }
@@ -473,16 +472,17 @@ async fn already_cancelled_call_keeps_source_start_marker_without_sending() {
 async fn owner_can_cancel_request_trace_while_consumer_is_between_pulls() {
     let (transport, wire) = transport(200, &[TEXT]);
     let sink = Arc::new(Sink::default());
+    let call = trace(sink.clone(), None);
     let mut stream = driver(
         transport,
         Protocol::Responses,
         b"{}".to_vec(),
         2,
-        Some(trace(sink.clone(), None)),
+        Some(call.clone()),
     );
     stream.next(&Cancel::never()).await.unwrap();
     stream.next(&Cancel::never()).await.unwrap();
-    assert!(stream.request_trace().unwrap().cancel());
+    assert!(call.cancel());
     {
         let events = sink.0.lock().unwrap();
         let terminal = events
@@ -594,6 +594,8 @@ async fn composed_chat_parse_failures_retry_before_visible_output_then_complete(
     for malformed in [MALFORMED_CHAT, INVALID_CHAT_INTEGER] {
         let (provider, wire) = retrying_chat(VecDeque::from([malformed, VALID_CHAT]));
         let mut stream = provider
+            .open_session()
+            .unwrap()
             .call(Request {
                 model: "m".into(),
                 messages: vec![Message::user("hello")],
@@ -629,6 +631,8 @@ async fn composed_chat_parse_failures_exhaust_five_stream_retries() {
     for malformed in [MALFORMED_CHAT, INVALID_CHAT_INTEGER] {
         let (provider, wire) = retrying_chat(vec![malformed; 6].into());
         let mut stream = provider
+            .open_session()
+            .unwrap()
             .call(Request {
                 model: "m".into(),
                 ..Request::default()
@@ -760,7 +764,6 @@ async fn cancellation_snapshots_bytes_consumed_during_pending_partial_sse() {
         }
         // Discard only the pending observer before closing its still-owning stream.
         drop(observer);
-        assert_eq!(stream.response_bytes(), 6);
         assert_eq!(wire.drops.load(Ordering::SeqCst), 0);
         stream.close().await.unwrap();
         stream.close().await.unwrap();
@@ -854,95 +857,6 @@ fn diagnostic_retrying_http(
     );
     (session, wire, sink)
 }
-async fn assert_typed_request_cancelled(protocol: Protocol, body_failure: bool) {
-    let message = "synthetic request transport cancelled independently of caller";
-    let original = HttpError::RequestCancelled(message.into());
-    let (session, wire, sink) = diagnostic_retrying_http(protocol, original.clone(), body_failure);
-    let mut stream = session
-        .call(Request {
-            model: "m".into(),
-            messages: vec![Message::user("hello")],
-            ..Request::default()
-        })
-        .unwrap();
-    let cancel = Cancel::never();
-    let failure = loop {
-        match stream.next(&cancel).await {
-            Ok(Some(event)) => {
-                assert!(
-                    !matches!(event, Event::Retry { .. }),
-                    "typed cancellation must not retry"
-                );
-                assert!(!event.is_visible_output());
-            }
-            Err(error) => break error,
-            Ok(None) => panic!("typed cancellation unexpectedly succeeded"),
-        }
-    };
-    assert!(!cancel.is_cancelled());
-    assert_eq!(failure, Error::Http(original.clone()));
-    assert_eq!(failure.to_string(), message);
-    assert_eq!(
-        std::error::Error::source(&failure)
-            .unwrap()
-            .downcast_ref::<HttpError>(),
-        Some(&original)
-    );
-    stream.close().await.unwrap();
-    session.close().await.unwrap();
-    assert_eq!(wire.requests.lock().unwrap().len(), 1);
-    assert_eq!(wire.drops.load(Ordering::SeqCst), usize::from(body_failure));
-    let events = sink.0.lock().unwrap();
-    println!("{protocol:?} body_failure={body_failure}: {events:#?}");
-    let terminals: Vec<_> = events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.operation.as_str(),
-                "request_finished" | "call_finished"
-            )
-        })
-        .collect();
-    assert_eq!(terminals.len(), 2);
-    // Check the already-correct outer terminal before the reviewed request terminal.
-    for operation in ["call_finished", "request_finished"] {
-        let terminal = terminals
-            .iter()
-            .find(|event| event.operation == operation)
-            .unwrap();
-        assert_eq!(
-            terminal.outcome.as_deref(),
-            Some("cancelled"),
-            "{operation}"
-        );
-        assert_eq!(
-            terminal.severity,
-            DiagnosticSeverity::Information,
-            "{operation}"
-        );
-        assert_eq!(
-            terminal.error_code.as_deref(),
-            Some("cancelled"),
-            "{operation}"
-        );
-    }
-}
-#[tokio::test]
-async fn typed_request_cancelled_send_chat_has_two_cancelled_terminals() {
-    assert_typed_request_cancelled(Protocol::ChatCompletions, false).await;
-}
-#[tokio::test]
-async fn typed_request_cancelled_body_chat_has_two_cancelled_terminals() {
-    assert_typed_request_cancelled(Protocol::ChatCompletions, true).await;
-}
-#[tokio::test]
-async fn typed_request_cancelled_send_responses_has_two_cancelled_terminals() {
-    assert_typed_request_cancelled(Protocol::Responses, false).await;
-}
-#[tokio::test]
-async fn typed_request_cancelled_body_responses_has_two_cancelled_terminals() {
-    assert_typed_request_cancelled(Protocol::Responses, true).await;
-}
 #[test]
 fn fieldless_conversion_maps_only_fieldless_http_cancellation() {
     let converted = Error::from(HttpError::Cancelled);
@@ -958,11 +872,7 @@ fn fieldless_conversion_maps_only_fieldless_http_cancellation() {
 #[test]
 fn fieldless_conversion_preserves_every_payload_and_other_http_variant() {
     let failures = [
-        HttpError::Http("operation cancelled: HTTP request failure".into()),
         HttpError::ProviderHttp("operation cancelled: provider HTTP failure".into()),
-        HttpError::RequestCancelled("transport's exact cancellation message".into()),
-        HttpError::RequestCancelled("The operation was canceled.".into()),
-        HttpError::RequestCancelled(" \ttransport cancellation\n".into()),
         HttpError::Provider("operation cancelled: provider failure".into()),
         HttpError::Response(HttpFailure {
             status: 503,

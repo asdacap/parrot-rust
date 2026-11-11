@@ -11,9 +11,8 @@ use parrot_domain::contracts::events::{
     EventPublisher, EventSubscription, RetentionClass, SubscriptionLimits,
 };
 use parrot_domain::contracts::paths::*;
-use parrot_domain::contracts::providers::ProviderSession;
 use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext, SecurityProvider};
-use parrot_domain::contracts::storage::{AdmissionError, Committed, SessionTransactions};
+use parrot_domain::contracts::storage::Committed;
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 
 fn root(origin: RootOrigin) -> SelectedSessionRoot {
@@ -25,17 +24,6 @@ fn root(origin: RootOrigin) -> SelectedSessionRoot {
         origin,
     )
     .unwrap()
-}
-fn command(key: u64, turn: u64, terminal: bool) -> Command {
-    Command {
-        key,
-        turn,
-        payload: vec![0, 255, key as u8],
-        delivery: Delivery::Foreground,
-        usage: 17,
-        terminal,
-        fail_projection: false,
-    }
 }
 fn event(key: u64) -> Event {
     Event {
@@ -114,57 +102,16 @@ fn selected_root_is_immutable_internal_resources_never_mix_trees() {
 }
 
 #[test]
-fn fallback_matrix_is_only_enabled_absent_application_state_or_data() {
-    // T11 owns the actual default-on configuration; this contract consumer's
-    // default-on invocation is explicit rather than a fake configuration port.
-    let default_enabled = true;
-    let purposes = [
-        ReadPurpose::ApplicationState,
-        ReadPurpose::ApplicationData,
-        ReadPurpose::SessionInternal,
-        ReadPurpose::Configuration,
-        ReadPurpose::Credentials,
-        ReadPurpose::UserFile,
-    ];
-    let failures = [
-        PrimaryReadFailure::Absent,
-        PrimaryReadFailure::PermissionDenied,
-        PrimaryReadFailure::Corrupt,
-        PrimaryReadFailure::Other,
-    ];
-    for enabled in [false, default_enabled] {
-        for purpose in purposes {
-            for failure in failures {
-                assert_eq!(
-                    allows_legacy_fallback(enabled, purpose, failure),
-                    enabled
-                        && matches!(
-                            purpose,
-                            ReadPurpose::ApplicationState | ReadPurpose::ApplicationData
-                        )
-                        && failure == PrimaryReadFailure::Absent
-                );
-            }
-        }
-    }
-}
-
-#[test]
 fn actual_resolved_target_and_per_invocation_owned_snapshots_control_tools() {
     let policy = Policy::default();
     *policy.0.lock().unwrap() = vec!["/allowed".into()];
     let first = policy.capture();
     *policy.0.lock().unwrap() = vec!["/legacy".into()];
     let second = policy.capture();
-    let fallback = ResolvedRead::new(
-        "/allowed/missing".into(),
-        "/legacy/actual".into(),
-        ReadOrigin::LegacyFallback,
-    );
+    let fallback = ResolvedRead::new("/allowed/missing".into(), "/legacy/actual".into());
     assert_eq!(first.check_read(&fallback), Err(Fault::Denied));
     assert_eq!(second.check_read(&fallback), Ok(()));
     assert_eq!(fallback.requested_path(), Path::new("/allowed/missing"));
-    assert_eq!(fallback.origin(), ReadOrigin::LegacyFallback);
     let cancel = Cancel::default();
     let tool = FakeTool::default();
     let port: &dyn Tool<
@@ -222,104 +169,6 @@ fn actual_resolved_target_and_per_invocation_owned_snapshots_control_tools() {
         )),
         Err(OperationError::Cancelled)
     );
-}
-
-#[test]
-fn storage_admission_cancellation_observer_drop_and_atomic_rollback() {
-    let store = Store::new(root(RootOrigin::Legacy));
-    let port: &dyn SessionTransactions<Command = Command, Error = Fault> = &store;
-    assert_eq!(port.selected_root(), &root(RootOrigin::Legacy));
-    let cancelled = Cancel::default();
-    cancelled.cancel();
-    assert!(matches!(
-        ready(port.admit(command(1, 1, false), &cancelled)),
-        Err(AdmissionError::Cancelled)
-    ));
-    assert_eq!(store.pending(), 0);
-    assert!(store.durable().events.is_empty());
-    let cancel = Cancel::default();
-    let admitted = ready(port.admit(command(1, 1, false), &cancel)).unwrap();
-    assert_eq!(admitted.key(), &1);
-    let mut observation = admitted.into_completion();
-    assert!(step(observation.as_mut()).is_pending());
-    cancel.cancel();
-    drop(observation);
-    assert_eq!(store.pending(), 1);
-    assert!(store.durable().events.is_empty());
-    // Actor execution occurs on a different worker after the observer is gone.
-    std::thread::scope(|scope| scope.spawn(|| store.drive_one().unwrap()).join().unwrap());
-    assert_eq!(store.durable().events.len(), 1);
-    assert_eq!(store.durable().projection.get(&1), Some(&17));
-    let retry_cancel = Cancel::default();
-    let retry = ready(port.admit(command(1, 1, false), &retry_cancel)).unwrap();
-    let receipt = ready(retry.into_completion()).unwrap();
-    assert_eq!(receipt.value().key(), &1);
-    assert_eq!(receipt.value().output(), &store.durable().events[0]);
-    assert_eq!(store.pending(), 0);
-    let mut conflict = command(1, 1, false);
-    conflict.payload.push(99);
-    assert!(matches!(
-        ready(port.admit(conflict, &retry_cancel)),
-        Err(AdmissionError::Rejected(Fault::Conflict))
-    ));
-    let mut failed = command(2, 2, false);
-    failed.fail_projection = true;
-    let ticket = ready(port.admit(failed, &retry_cancel)).unwrap();
-    assert_eq!(store.drive_one(), Err(Fault::Rollback));
-    assert_eq!(ready(ticket.into_completion()), Err(Fault::Rollback));
-    assert_eq!(store.durable().events.len(), 1);
-    assert_eq!(store.durable().projection.get(&2), None);
-    assert_eq!(store.durable().closed.get(&2), None);
-}
-
-#[test]
-fn exact_retries_during_admission_share_one_whole_command_and_conflicts_fail() {
-    let store = Store::new(root(RootOrigin::Current));
-    let cancel = Cancel::default();
-    let a = ready(store.admit(command(9, 9, false), &cancel)).unwrap();
-    let b = ready(store.admit(command(9, 9, false), &cancel)).unwrap();
-    let mut changed = command(9, 9, false);
-    changed.usage += 1;
-    assert!(matches!(
-        ready(store.admit(changed, &cancel)),
-        Err(AdmissionError::Rejected(Fault::Conflict))
-    ));
-    assert_eq!(store.pending(), 1);
-    store.drive_one().unwrap();
-    assert_eq!(ready(a.into_completion()), ready(b.into_completion()));
-    assert_eq!(store.durable().events.len(), 1);
-}
-
-#[test]
-fn exact_delivery_conflicts_are_rejected_queued_committed_and_after_restart() {
-    let store = Store::new(root(RootOrigin::Current));
-    let cancel = Cancel::default();
-    let original = command(44, 44, false);
-    let mut changed = original.clone();
-    changed.delivery = Delivery::Background;
-    let ticket = ready(store.admit(original.clone(), &cancel)).unwrap();
-    assert!(matches!(
-        ready(store.admit(changed.clone(), &cancel)),
-        Err(AdmissionError::Rejected(Fault::Conflict))
-    ));
-    assert_eq!(store.pending(), 1);
-    store.drive_one().unwrap();
-    let receipt = ready(ticket.into_completion()).unwrap();
-    assert_eq!(receipt.value().output().delivery, Delivery::Foreground);
-    assert_eq!(store.durable().events[0].delivery, Delivery::Foreground);
-    assert!(matches!(
-        ready(store.admit(changed.clone(), &cancel)),
-        Err(AdmissionError::Rejected(Fault::Conflict))
-    ));
-    let restarted = Store::restart(root(RootOrigin::Current), store.durable());
-    assert!(matches!(
-        ready(restarted.admit(changed, &cancel)),
-        Err(AdmissionError::Rejected(Fault::Conflict))
-    ));
-    let retry = ready(restarted.admit(original, &cancel)).unwrap();
-    assert_eq!(ready(retry.into_completion()), Ok(receipt));
-    assert_eq!(restarted.pending(), 0);
-    assert_eq!(restarted.durable().events.len(), 1);
 }
 
 #[derive(Clone)]
@@ -457,64 +306,6 @@ impl EventSubscription for Broker {
 }
 
 #[test]
-fn a003_model_terminal_commit_closes_turn_before_cancelled_publication_and_replay() {
-    // A003 CONTRACT MODEL ONLY. This is not SQLite/AgentSession integration and
-    // does not claim T17/T46/T54's real terminal-race correction is implemented.
-    let store = Store::new(root(RootOrigin::Current));
-    let cancel = Cancel::default();
-    let first = ready(store.admit(command(10, 7, true), &cancel)).unwrap();
-    store.drive_one().unwrap();
-    // Simulate losing the original terminal receipt after commit, before poll.
-    drop(first);
-    let recovered = ready(store.admit(command(10, 7, true), &cancel)).unwrap();
-    assert_eq!(store.pending(), 0);
-    let committed = ready(recovered.into_completion()).unwrap();
-    let durable = store.durable();
-    assert_eq!(durable.events.len(), 1); // Actual list, never deduped/normalized.
-    assert_eq!(durable.closed.get(&7), Some(&true));
-    assert_eq!(durable.projection.get(&7), Some(&17));
-    let published = Committed::after_commit(committed.value().output().clone());
-    let broker = Broker::new(SubscriptionLimits::default());
-    cancel.cancel();
-    assert_eq!(
-        ready(broker.publish_committed(&published, &cancel)),
-        Err(OperationError::Cancelled)
-    );
-    assert_eq!(store.durable().events.len(), 1);
-    let live = Cancel::default();
-    // Lost receipt and retries reuse the committed command, without admission.
-    let lost = ready(store.admit(command(10, 7, true), &live)).unwrap();
-    drop(lost);
-    let retried = ready(store.admit(command(10, 7, true), &live)).unwrap();
-    assert_eq!(ready(retried.into_completion()), Ok(committed.clone()));
-    assert_eq!(store.pending(), 0);
-    // A distinct attempted second terminal fails at the actor's completion.
-    let duplicate = ready(store.admit(command(11, 7, true), &live)).unwrap();
-    assert_eq!(store.drive_one(), Err(Fault::TurnClosed));
-    assert_eq!(ready(duplicate.into_completion()), Err(Fault::TurnClosed));
-    assert_eq!(store.durable().events.len(), 1);
-    // Simulated crash loses volatile queues/publication, keeps committed image.
-    let restarted = Store::restart(root(RootOrigin::Current), store.durable());
-    let retry = ready(restarted.admit(command(10, 7, true), &live)).unwrap();
-    assert_eq!(ready(retry.into_completion()), Ok(committed));
-    assert_eq!(restarted.pending(), 0);
-    assert_eq!(restarted.durable().events.len(), 1);
-    let duplicate_after_restart = ready(restarted.admit(command(12, 7, true), &live)).unwrap();
-    assert_eq!(restarted.drive_one(), Err(Fault::TurnClosed));
-    assert_eq!(
-        ready(duplicate_after_restart.into_completion()),
-        Err(Fault::TurnClosed)
-    );
-    assert_eq!(restarted.durable().events.len(), 1);
-    for replayed in restarted.durable().events {
-        ready(broker.publish_committed(&Committed::after_commit(replayed), &live)).unwrap();
-    }
-    broker.complete().unwrap();
-    assert_eq!(ready(broker.next(&live)), Ok(Some(published.into_value())));
-    assert_eq!(ready(broker.next(&live)), Ok(None));
-}
-
-#[test]
 fn retention_classes_are_independent_nonblocking_and_complete_drains() {
     assert_eq!(
         SubscriptionLimits::default(),
@@ -619,91 +410,13 @@ fn inventory_replacement_is_by_kind_owner_and_batches_stay_contiguous() {
     assert_eq!(ready(broker.next(&cancel)).unwrap().unwrap().key, 7);
 }
 
-fn content(known: &str, unknown: &[u8]) -> Content {
-    Content {
-        known: known.into(),
-        unknown: unknown.into(),
-    }
-}
-#[test]
-fn provider_owns_complete_content_and_idle_deadline_starts_before_first_read() {
-    let clock = FakeClock::default();
-    let provider = Provider::new(clock.clone(), Duration::from_secs(10));
-    let request = content("request", &[255, 0]);
-    let expected = content("answer", &[128, 17, 42]);
-    provider.configure(request.clone(), vec![(Duration::from_secs(11), expected)]);
-    let port: &dyn ProviderSession<Request = Content, Event = Content, Error = Fault> = &provider;
-    let cancel = Cancel::default();
-    assert!(matches!(
-        ready(port.send(content("request", &[]), &cancel)),
-        Err(OperationError::Failed(Fault::Unconfigured))
-    ));
-    let stream = ready(port.send(request, &cancel)).unwrap();
-    clock.advance(Duration::from_secs(10)); // No first read has happened yet.
-    assert_eq!(
-        ready(stream.next(&cancel)),
-        Err(OperationError::Failed(Fault::IdleTimeout))
-    );
-    ready(port.close()).unwrap();
-    assert!(matches!(
-        ready(port.send(content("request", &[255, 0]), &cancel)),
-        Err(OperationError::Failed(Fault::Closed))
-    ));
-}
-
-#[test]
-fn provider_read_activity_resets_idle_not_total_request_deadline() {
-    let clock = FakeClock::default();
-    let provider = Provider::new(clock.clone(), Duration::from_secs(10));
-    let request = content("request", &[0, 250]);
-    let first = content("first", &[17, 0, 255]);
-    let second = content("second", &[23, 11, 128]);
-    provider.configure(
-        request.clone(),
-        vec![
-            (Duration::from_secs(7), first.clone()),
-            (Duration::from_secs(14), second.clone()),
-        ],
-    );
-    let cancel = Cancel::default();
-    let stream = ready(provider.send(request, &cancel)).unwrap();
-    let mut next = stream.next(&cancel);
-    assert!(step(next.as_mut()).is_pending());
-    clock.advance(Duration::from_secs(7));
-    assert_eq!(step(next.as_mut()), Poll::Ready(Ok(Some(first))));
-    drop(next);
-    clock.advance(Duration::from_secs(7));
-    assert_eq!(ready(stream.next(&cancel)), Ok(Some(second)));
-    assert_eq!(ready(stream.next(&cancel)), Ok(None));
-    cancel.cancel();
-    assert_eq!(ready(stream.next(&cancel)), Err(OperationError::Cancelled));
-}
-
 #[test]
 fn typed_bindings_preserve_exact_instances_and_isolate_scopes() {
-    let (storage, provider, tool, clock) = components();
-    let first = Bindings {
-        storage,
-        provider,
-        tool,
-        clock,
-    };
-    let (storage, provider, tool, clock) = components();
-    let second = Bindings {
-        storage,
-        provider,
-        tool,
-        clock,
-    };
-    assert!(std::ptr::eq(first.storage(), &first.storage));
-    assert!(!std::ptr::eq(&first.storage, &second.storage));
-    assert!(!std::ptr::eq(&first.provider, &second.provider));
-    let cancel = Cancel::default();
-    let ticket = ready(first.storage().admit(command(1, 1, false), &cancel)).unwrap();
-    first.storage.drive_one().unwrap();
-    assert_eq!(ready(ticket.into_completion()).unwrap().value().key(), &1);
-    assert_eq!(first.storage.durable().events.len(), 1);
-    assert!(second.storage.durable().events.is_empty());
+    let (tool, clock) = components();
+    let first = Bindings { tool, clock };
+    let (tool, clock) = components();
+    let second = Bindings { tool, clock };
+    assert!(!std::ptr::eq(&first.tool, &second.tool));
     first.clock.advance(Duration::from_secs(8));
     assert_eq!(
         first.clock.utc_now(),

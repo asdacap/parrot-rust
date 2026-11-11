@@ -228,7 +228,7 @@ impl BudgetRuntime {
         .unwrap();
         let context =
             ContextController::new(compactor, fixture.history.clone(), blobs, templates.clone());
-        let backend = RuntimeBackend::new(RuntimeConfig {
+        let runtime_config = RuntimeConfig {
             tool_execution: tool_execution_config(
                 &fixture.history,
                 templates.clone(),
@@ -265,7 +265,11 @@ impl BudgetRuntime {
             parent_completion: Arc::new(Parent(trace)),
             ancestors: vec![],
             event_id: Arc::new(id),
-        })
+        };
+        let backend = RuntimeBackend::with_sessions(
+            runtime_config,
+            parrot_provider::sessions::ProviderSessions::new(),
+        )
         .await
         .unwrap();
         Self {
@@ -423,8 +427,8 @@ async fn actual_reported_usage_triggers_compaction_before_consuming_reserved_out
             .controller()
             .compactor()
             .planner()
-            .estimate_context(
-                &selected.model.canonical_model,
+            .estimate_selected_context(
+                &selected.model,
                 &final_request.instructions,
                 &final_request.tools,
                 &final_request.messages,

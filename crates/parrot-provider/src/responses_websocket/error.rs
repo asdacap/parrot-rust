@@ -6,7 +6,6 @@ pub enum SocketErrorCode {
     NotAWebSocket,
     ConnectionClosedPrematurely,
     Faulted,
-    Other,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,7 +31,6 @@ pub enum WebSocketError {
     MessageTooLarge,
     Response(ResponsesError),
     InvalidRequest(String),
-    InvalidOperation(String),
     Disposed,
 }
 impl fmt::Display for WebSocketError {
@@ -44,8 +42,7 @@ impl fmt::Display for WebSocketError {
             | Self::Socket { message, .. }
             | Self::Transport(message)
             | Self::Wire(message)
-            | Self::InvalidRequest(message)
-            | Self::InvalidOperation(message) => f.write_str(message),
+            | Self::InvalidRequest(message) => f.write_str(message),
             Self::RequestTooLarge { maximum } => {
                 write!(f, "provider: request exceeds {maximum} bytes")
             }

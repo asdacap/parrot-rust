@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::{Context, transact};
 use parrot_foundation::config::models::ProviderModelAliasDefaults;
 
 #[test]
@@ -13,7 +13,11 @@ fn source_assertions() {
         high_model_string: "other/high".into(),
         xhigh_model_string: "chatgpt/xhigh".into(),
     };
-    assert!(configuration.set_model_aliases(&defaults).is_err());
+    assert!(
+        transact(&mut configuration, |transaction| transaction
+            .set_model_aliases(&defaults))
+        .is_err()
+    );
     assert!(
         configuration.models.model_aliases["low_llm"]
             .model_string

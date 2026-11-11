@@ -1,4 +1,4 @@
-use super::{PromptError, PromptResult, StaticSystemPrompt, TemplateSystemPromptProvider, render};
+use super::{PromptError, PromptResult, TemplateSystemPromptProvider};
 use parrot_domain::values::project_workspace::ProjectWorkspace;
 use parrot_foundation::{
     paths::{AgentScratchDirectory, UserSessionResources},
@@ -141,18 +141,4 @@ pub fn native_platform_identifier() -> String {
         architecture => architecture,
     };
     format!("{os}-{architecture}")
-}
-
-pub fn git_repository_prompt(
-    workspace: &ProjectWorkspace,
-    templates: &PromptTemplateCatalog,
-) -> PromptResult<StaticSystemPrompt> {
-    Ok(StaticSystemPrompt(render(
-        templates,
-        "context.git-repository",
-        &[(
-            "is_repository".into(),
-            workspace.is_git_repository().to_string().into(),
-        )],
-    )?))
 }

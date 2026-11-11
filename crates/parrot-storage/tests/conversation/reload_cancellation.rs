@@ -55,7 +55,6 @@ async fn dropped_pending_reload_preserves_live_messages_and_subsequent_reload_wo
     let mut conversation = AgentConversation::new(history).await.unwrap();
     let live = conversation.read_view();
     let before = conversation.messages().to_vec();
-    assert!(conversation.is_answerable());
     let (entered_send, entered) = tokio::sync::oneshot::channel();
     let (release, blocked) = std::sync::mpsc::channel();
     let ticket = repo
@@ -74,7 +73,6 @@ async fn dropped_pending_reload_preserves_live_messages_and_subsequent_reload_wo
     drop(reload);
     assert_eq!(conversation.messages(), before);
     assert_eq!(live.messages(), before);
-    assert!(conversation.is_answerable());
     release.send(()).unwrap();
     ticket.into_completion().await.unwrap();
     conversation.reload().await.unwrap();
@@ -112,7 +110,6 @@ async fn completed_restore_failure_preserves_source_empty_after_clear_behavior()
     );
     assert!(conversation.is_empty());
     assert!(live.messages().is_empty());
-    assert!(!conversation.is_answerable());
     assert_eq!(repo.conversation("agent".into()).await.unwrap().len(), 2);
     repo.events().database().close().await.unwrap();
 }

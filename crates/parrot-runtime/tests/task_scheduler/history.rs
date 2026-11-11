@@ -80,8 +80,14 @@ async fn manual_retained_worker_reuses_original_selection_scope_delivery_history
     complete(&root).await;
     assert!(h.factory.router.selectors.lock().unwrap().is_empty());
     assert_eq!(
-        manual.selection().current().unwrap().model.canonical_base(),
-        original.model.canonical_base()
+        manual
+            .selection()
+            .current()
+            .unwrap()
+            .model
+            .canonical_model
+            .selector(),
+        original.model.canonical_model.selector()
     );
     assert_eq!(
         manual.selection().current().unwrap().profile.id,

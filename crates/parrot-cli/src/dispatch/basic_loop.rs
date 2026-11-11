@@ -1286,6 +1286,22 @@ mod tests {
         const KEPT: &str = "before-discovery-failure";
         const RECOVERED: &str = "after-discovery-recovery";
 
+        fn text_prompt() -> PreparePrompt {
+            Arc::new(|_, session, _, prompt, delivery, _, _| {
+                Box::pin(async move {
+                    Ok(Some(wire::SendMessageRequest {
+                        user_session_id: session.into(),
+                        delivery: delivery.into(),
+                        parts: vec![wire::MessageContentPart {
+                            content: Some(wire::message_content_part::Content::Text(prompt.into())),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }))
+                })
+            })
+        }
+
         struct DiscoveryState {
             progress: tokio::sync::watch::Sender<usize>,
             release_second: Signal,
@@ -1690,14 +1706,7 @@ mod tests {
                 loaded: true,
                 ..Default::default()
             };
-            let prepare: PreparePrompt = Arc::new(|_, session, _, prompt, delivery, error, c| {
-                Box::pin(async move {
-                    Ok(crate::dispatch::prompt::prepare_without_read_backend(
-                        session, prompt, delivery, error, c,
-                    )
-                    .expect("text-only owned fixture prompt"))
-                })
-            });
+            let prepare = text_prompt();
             let mut basic = BasicCli::new(
                 client,
                 interrupts.clone(),
@@ -1920,14 +1929,7 @@ mod tests {
                 id: SESSION.into(),
                 ..Default::default()
             };
-            let prepare: PreparePrompt = Arc::new(|_, session, _, prompt, delivery, error, c| {
-                Box::pin(async move {
-                    Ok(crate::dispatch::prompt::prepare_without_read_backend(
-                        session, prompt, delivery, error, c,
-                    )
-                    .expect("text-only owned fixture prompt"))
-                })
-            });
+            let prepare = text_prompt();
             let mut basic = BasicCli::new(
                 client,
                 interrupts,

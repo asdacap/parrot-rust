@@ -260,10 +260,6 @@ fn valid_user_session_id(value: &str) -> bool {
 pub struct Identifier;
 
 impl Identifier {
-    pub fn user_session() -> Result<UserSessionId, io::Error> {
-        UserSessionId::generate()
-    }
-
     pub fn agent_session() -> Result<String, io::Error> {
         Self::compose("agent-session")
     }

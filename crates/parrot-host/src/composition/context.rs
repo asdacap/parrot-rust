@@ -3,7 +3,6 @@
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
-        runtime::SessionControl,
         security::{AccessSnapshot, InvocationContext},
         tools::Tool,
     },
@@ -15,11 +14,7 @@ use parrot_domain::{
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{routing::aliases::ResolvedModelSelection, sessions};
 use parrot_runtime::{
-    agent_turn::{
-        engine::RuntimeBackend,
-        lifecycle::AgentSession,
-        services::{TurnError, TurnSelection},
-    },
+    agent_turn::services::{TurnError, TurnSelection},
     compaction::{CompactionPlanner, ContextCompactionResult, EpochInput, provider_message},
     tool_settlement::{
         BorrowedTool, BorrowedToolContext, SharedSecurity, ToolFailure, ToolInvocation,
@@ -31,7 +26,7 @@ use parrot_tools::{
     catalog,
     session::{Compaction, Failure, FailureKind, SessionServices},
 };
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
 fn failure(message: impl Into<String>) -> Failure {
@@ -147,167 +142,24 @@ impl EstimateSnapshot {
     }
 }
 
-enum CompactRoute {
-    Inline(InlineRoute),
-    External(Arc<dyn Cancellation>),
-}
-/// The frozen control's concrete request. An inline capability can only be
-/// constructed while a borrowed invocation is being driven below.
-pub struct CompactRequest {
-    target: Option<ContextSize>,
-    route: CompactRoute,
-}
-impl CompactRequest {
-    pub fn external(target: Option<ContextSize>, cancellation: Arc<dyn Cancellation>) -> Self {
-        Self {
-            target,
-            route: CompactRoute::External(cancellation),
-        }
-    }
-}
-
-type ExternalCompact = dyn Fn(
-        Option<ContextSize>,
-        Arc<dyn Cancellation>,
-    ) -> BoxFuture<'static, OperationResult<Compaction, Failure>>
-    + Send
-    + Sync;
-
-/// Adds concrete compact routing to an existing scoped SessionControl. All
-/// unrelated operations retain the injected control's types and behavior.
-pub struct ContextControl<C: SessionControl> {
-    ancillary: Arc<C>,
-    external: OnceLock<Arc<ExternalCompact>>,
-}
-impl<C: SessionControl> ContextControl<C> {
-    pub fn new(ancillary: Arc<C>) -> Self {
-        Self {
-            ancillary,
-            external: OnceLock::new(),
-        }
-    }
-    /// Bind once after the real session is constructed. The weak edge avoids a
-    /// session -> retained tool -> control -> session ownership cycle.
-    pub fn bind_session<S>(
-        &self,
-        session: Weak<AgentSession<RuntimeBackend<S>>>,
-    ) -> Result<(), Failure>
-    where
-        S: AccessSnapshot + 'static,
-    {
-        self.external
-            .set(Arc::new(move |target, cancellation| {
-                let session = session.clone();
-                Box::pin(async move {
-                    let session = session.upgrade().ok_or_else(|| {
-                        OperationError::Failed(failure("The session has closed."))
-                    })?;
-                    session
-                        .compact_context(target, cancellation)
-                        .await
-                        .map(compact_result)
-                        .map_err(turn_failure)
-                })
-            }))
-            .map_err(|_| failure("The context control is already bound."))
-    }
-    pub fn is_bound(&self) -> bool {
-        self.external.get().is_some()
-    }
-}
-impl<C> SessionControl for ContextControl<C>
-where
-    C: SessionControl<Error = Failure>,
-{
-    type ReminderRequest = C::ReminderRequest;
-    type ReminderResult = C::ReminderResult;
-    type ClearReminderRequest = C::ClearReminderRequest;
-    type ClearReminderResult = C::ClearReminderResult;
-    type CompactRequest = CompactRequest;
-    type CompactResult = Compaction;
-    type Status = C::Status;
-    type Error = Failure;
-
-    fn compact<'a>(
-        &'a self,
-        request: CompactRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Compaction, Failure>> {
-        Box::pin(async move {
-            cancellation
-                .check()
-                .map_err(|_| OperationError::Cancelled)?;
-            match request.route {
-                CompactRoute::Inline(route) => {
-                    let (reply, response) = oneshot::channel();
-                    route
-                        .sender
-                        .send(InlineRequest::Compact {
-                            target: request.target,
-                            reply,
-                        })
-                        .await
-                        .map_err(|_| {
-                            OperationError::Failed(failure("The compact invocation has ended."))
-                        })?;
-                    // The borrowed invocation owns and joins the mutation. Do not
-                    // abandon its response after admission on caller cancellation.
-                    response.await.map_err(|_| {
-                        OperationError::Failed(failure("The compact invocation has ended."))
-                    })?
-                }
-                CompactRoute::External(caller) => {
-                    let external = self.external.get().ok_or_else(|| {
-                        OperationError::Failed(failure(
-                            "The context control has not been bound to its session.",
-                        ))
-                    })?;
-                    external(request.target, caller).await
-                }
-            }
-        })
-    }
-    fn set_reminder(
-        &self,
-        request: Self::ReminderRequest,
-    ) -> Result<Self::ReminderResult, Failure> {
-        self.ancillary.set_reminder(request)
-    }
-    fn clear_reminder(
-        &self,
-        request: Self::ClearReminderRequest,
-    ) -> Result<Self::ClearReminderResult, Failure> {
-        self.ancillary.clear_reminder(request)
-    }
-    fn status(&self) -> Result<Self::Status, Failure> {
-        self.ancillary.status()
-    }
-}
-
 /// The retained SessionTool uses this service object for its entire scope.
 /// Noncompact operations are delegated without defaults or placeholder results.
-pub struct ContextServices<S: AccessSnapshot, O: SessionServices, C: SessionControl> {
+pub struct ContextServices<S: AccessSnapshot, O: SessionServices> {
     ancillary: Arc<O>,
-    control: Arc<ContextControl<C>>,
     marker: std::marker::PhantomData<fn() -> S>,
 }
-impl<S: AccessSnapshot, O: SessionServices, C: SessionControl> ContextServices<S, O, C> {
-    pub fn new(ancillary: Arc<O>, control: Arc<ContextControl<C>>) -> Self {
+impl<S: AccessSnapshot, O: SessionServices> ContextServices<S, O> {
+    pub fn new(ancillary: Arc<O>) -> Self {
         Self {
             ancillary,
-            control,
             marker: std::marker::PhantomData,
         }
     }
-    pub fn control(&self) -> &Arc<ContextControl<C>> {
-        &self.control
-    }
 }
-impl<S, O, C> SessionServices for ContextServices<S, O, C>
+impl<S, O> SessionServices for ContextServices<S, O>
 where
     S: AccessSnapshot + 'static,
     O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>>,
-    C: SessionControl<Error = Failure>,
 {
     type Security = SharedSecurity<S>;
     type Selection = ContextSelection<S>;
@@ -361,15 +213,22 @@ where
             let route = selection.route.clone().ok_or_else(|| OperationError::Failed(failure(
                 "A retained compact tool requires its active invocation route; external controls use CompactRequest::external.",
             )))?;
-            SessionControl::compact(
-                self.control.as_ref(),
-                CompactRequest {
-                    target,
-                    route: CompactRoute::Inline(route),
-                },
-                cancellation,
-            )
-            .await
+            cancellation
+                .check()
+                .map_err(|_| OperationError::Cancelled)?;
+            let (reply, response) = oneshot::channel();
+            route
+                .sender
+                .send(InlineRequest::Compact { target, reply })
+                .await
+                .map_err(|_| {
+                    OperationError::Failed(failure("The compact invocation has ended."))
+                })?;
+            // The borrowed invocation owns and joins the mutation. Do not
+            // abandon its response after admission on caller cancellation.
+            response
+                .await
+                .map_err(|_| OperationError::Failed(failure("The compact invocation has ended.")))?
         })
     }
     fn estimate_after_tool_result(

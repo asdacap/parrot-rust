@@ -1,6 +1,6 @@
 mod regressions;
 
-use parrot_domain::contracts::paths::{ReadOrigin, ReadPurpose, RootOrigin};
+use parrot_domain::contracts::paths::RootOrigin;
 use parrot_domain::values::identifiers::UserSessionId;
 use parrot_foundation::paths::{
     AgentScratchDirectory, ApplicationRoots, StatePaths, UserSessionResources,
@@ -47,50 +47,6 @@ fn write(path: &Path, contents: &str) {
 }
 
 #[test]
-fn read_candidate_origin_distinguishes_primary_and_explicit_plans() {
-    let roots = ApplicationRoots::resolve(&HashMap::from([(
-        "HOME".to_owned(),
-        "/home/parrot-origin".to_owned(),
-    )]));
-    for requested in [
-        roots.current().state().join("reports/run.json"),
-        roots.legacy().state().join("reports/run.json"),
-    ] {
-        let plan = roots
-            .read_candidates(
-                &requested,
-                ReadPurpose::ApplicationState,
-                true,
-                Path::new("/"),
-            )
-            .unwrap();
-        assert_eq!(plan.origin(), ReadOrigin::Primary);
-        assert_eq!(
-            plan.primary_path(),
-            roots.current().state().join("reports/run.json")
-        );
-        assert_eq!(
-            plan.fallback_path(),
-            Some(roots.legacy().state().join("reports/run.json").as_path())
-        );
-    }
-    for (requested, purpose) in [
-        (
-            PathBuf::from("/outside/report.json"),
-            ReadPurpose::ApplicationState,
-        ),
-        (roots.current().config_file(), ReadPurpose::Configuration),
-    ] {
-        let plan = roots
-            .read_candidates(&requested, purpose, true, Path::new("/"))
-            .unwrap();
-        assert_eq!(plan.origin(), ReadOrigin::Explicit);
-        assert_eq!(plan.primary_path(), requested);
-        assert_eq!(plan.fallback_path(), None);
-    }
-}
-
-#[test]
 fn current_and_legacy_roots_use_only_current_home_xdg_without_content_rewrites() {
     for use_xdg in [false, true] {
         let mut environment =
@@ -125,10 +81,6 @@ fn current_and_legacy_roots_use_only_current_home_xdg_without_content_rewrites()
         assert_eq!(
             roots.current().credentials_file(),
             roots.current().config().join("credentials.json")
-        );
-        assert_eq!(
-            roots.current().credential_preset_directory(),
-            roots.current().config().join("credential_presets")
         );
         assert_eq!(
             roots.current().skills_directory(),
@@ -249,9 +201,7 @@ fn selected_legacy_resources_never_mix_even_after_flag_changes_or_duplicate_crea
         RootOrigin::Current
     );
     assert_eq!(resources.root(), legacy);
-    assert_eq!(resources.database_path(), legacy.join("session.db"));
     assert_eq!(resources.socket_path(), legacy.join("parrot.sock"));
-    assert_eq!(resources.log_path(), legacy.join("session.log"));
     assert_eq!(resources.scratch_directory(), legacy.join("scratch"));
     assert_eq!(
         root.resolve_internal("artifacts/output.txt")
@@ -259,7 +209,7 @@ fn selected_legacy_resources_never_mix_even_after_flag_changes_or_duplicate_crea
             .path(),
         legacy.join("artifacts/output.txt")
     );
-    assert!(!resources.artifact_directory().join("output.txt").exists());
+    assert!(!legacy.join("artifacts/output.txt").exists());
     write(&resources.metadata_path(), "legacy write remains in place");
     assert!(!current.join("meta.json").exists());
     let scratch = resources.agent_scratch(&["main", "child"]).unwrap();
@@ -293,149 +243,6 @@ fn present_bad_current_session_does_not_discover_valid_legacy_session() {
     assert_eq!(
         selected.resolve_internal("meta.json").unwrap().path(),
         current.join("meta.json")
-    );
-}
-
-#[test]
-fn general_reads_redirect_only_application_components_and_only_when_enabled() {
-    let fixture = Fixture::new();
-    let roots = fixture.roots();
-    let relative = Path::new("history/parrotdotnet-literal.txt");
-    let current = roots.current().state().join(relative);
-    let legacy = roots.legacy().state().join(relative);
-    write(&current, "new");
-    write(&legacy, "old");
-    for requested in [&current, &legacy] {
-        let plan = roots
-            .read_candidates(requested, ReadPurpose::ApplicationState, true, &fixture.0)
-            .unwrap();
-        assert_eq!(plan.primary_path(), current);
-        assert_eq!(plan.fallback_path(), Some(legacy.as_path()));
-        let value = plan
-            .read_with(|resolved| fs::read_to_string(resolved.actual_path()))
-            .unwrap();
-        assert_eq!(value.value, "new");
-        assert_eq!(value.resolution.origin(), ReadOrigin::Primary);
-    }
-    let explicit = roots
-        .read_candidates(&legacy, ReadPurpose::ApplicationState, false, &fixture.0)
-        .unwrap();
-    assert_eq!(explicit.fallback_path(), None);
-    assert_eq!(
-        explicit
-            .read_with(|resolved| fs::read_to_string(resolved.actual_path()))
-            .unwrap()
-            .value,
-        "old"
-    );
-    fs::remove_file(&current).unwrap();
-    let plan = roots
-        .read_candidates(&current, ReadPurpose::ApplicationState, true, &fixture.0)
-        .unwrap();
-    let value = plan
-        .read_with(|resolved| fs::read_to_string(resolved.actual_path()))
-        .unwrap();
-    assert_eq!(value.value, "old");
-    assert_eq!(value.resolution.origin(), ReadOrigin::LegacyFallback);
-}
-
-#[test]
-fn denied_corrupt_canceled_and_other_primary_read_errors_do_not_fall_back() {
-    let fixture = Fixture::new();
-    let roots = fixture.roots();
-    let current = roots.current().data().join("skills/SKILL.md");
-    let legacy = roots.legacy().data().join("skills/SKILL.md");
-    write(&current, "bad");
-    write(&legacy, "good");
-    let plan = roots
-        .read_candidates(&current, ReadPurpose::ApplicationData, true, &fixture.0)
-        .unwrap();
-    for kind in [
-        io::ErrorKind::PermissionDenied,
-        io::ErrorKind::InvalidData,
-        io::ErrorKind::Interrupted,
-        io::ErrorKind::Other,
-    ] {
-        let mut called = Vec::new();
-        let result: io::Result<_> = plan.read_with(|resolved| {
-            called.push(resolved.actual_path().to_path_buf());
-            Err::<(), _>(io::Error::new(kind, "controlled primary failure"))
-        });
-        assert_eq!(result.unwrap_err().kind(), kind);
-        assert_eq!(called, std::slice::from_ref(&current));
-    }
-}
-
-#[test]
-fn configuration_credentials_presets_internal_and_user_paths_never_use_compatibility_lookup() {
-    let fixture = Fixture::new();
-    let roots = fixture.roots();
-    let cases = [
-        (
-            roots.current().config_file(),
-            roots.legacy().config_file(),
-            ReadPurpose::Configuration,
-        ),
-        (
-            roots.current().predefined_config_file(),
-            roots.legacy().predefined_config_file(),
-            ReadPurpose::Configuration,
-        ),
-        (
-            roots.current().credentials_file(),
-            roots.legacy().credentials_file(),
-            ReadPurpose::Credentials,
-        ),
-        (
-            roots
-                .current()
-                .credential_preset_directory()
-                .join("work.json"),
-            roots
-                .legacy()
-                .credential_preset_directory()
-                .join("work.json"),
-            ReadPurpose::Credentials,
-        ),
-        (
-            roots.current().state().join("sessions/id/artifacts/a"),
-            roots.legacy().state().join("sessions/id/artifacts/a"),
-            ReadPurpose::SessionInternal,
-        ),
-        (
-            roots.current().state().join("history.txt"),
-            roots.legacy().state().join("history.txt"),
-            ReadPurpose::UserFile,
-        ),
-    ];
-    for (current, legacy, purpose) in cases {
-        write(&legacy, "must not be read implicitly");
-        let plan = roots
-            .read_candidates(&current, purpose, true, &fixture.0)
-            .unwrap();
-        assert_eq!(plan.fallback_path(), None);
-        let mut callbacks = 0;
-        let result = plan.read_with(|_| {
-            callbacks += 1;
-            Ok(())
-        });
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::NotFound);
-        assert_eq!(callbacks, 0);
-    }
-    let unrelated = fixture.0.join("parrotdotnet/history.txt");
-    assert_eq!(
-        roots
-            .read_candidates(&unrelated, ReadPurpose::ApplicationState, true, &fixture.0)
-            .unwrap()
-            .primary_path(),
-        unrelated
-    );
-    assert_eq!(
-        roots
-            .read_candidates(&unrelated, ReadPurpose::ApplicationState, true, &fixture.0)
-            .unwrap()
-            .fallback_path(),
-        None
     );
 }
 
@@ -509,24 +316,6 @@ fn resource_names_are_contained_and_reserved_names_are_only_for_children() {
     assert_eq!(fs::read(&output).unwrap(), b"live agent output");
     assert!(
         resources
-            .owns(&resources.metadata_path(), &fixture.0)
-            .unwrap()
-    );
-    assert!(
-        !resources
-            .owns(
-                &resources.root().with_file_name("session-test-other"),
-                &fixture.0
-            )
-            .unwrap()
-    );
-    assert!(
-        !resources
-            .owns(&resources.root().join("../other"), &fixture.0)
-            .unwrap()
-    );
-    assert!(
-        resources
             .selected_root()
             .resolve_internal("../other")
             .is_err()
@@ -594,8 +383,7 @@ fn scratch_provisioning_is_private_repeatable_lazy_and_rejects_files_and_final_l
 
 #[cfg(unix)]
 #[test]
-fn home_aliases_materialize_selected_roots_and_read_authorization_receives_actual_symlink_targets()
-{
+fn home_aliases_materialize_selected_roots_and_reject_symlinked_session_directories() {
     use std::os::unix::fs::symlink;
     let fixture = Fixture::new();
     let physical = fixture.0.join("physical");
@@ -614,29 +402,6 @@ fn home_aliases_materialize_selected_roots_and_read_authorization_receives_actua
             .path()
             .starts_with(&physical)
     );
-    let outside = fixture.0.join("outside.txt");
-    write(&outside, "not implicitly authorized");
-    let current = roots.current().data().join("file.txt");
-    fs::create_dir_all(current.parent().unwrap()).unwrap();
-    symlink(&outside, &current).unwrap();
-    write(
-        &roots.legacy().data().join("file.txt"),
-        "legacy also not granted",
-    );
-    let plan = roots
-        .read_candidates(&current, ReadPurpose::ApplicationData, true, &fixture.0)
-        .unwrap();
-    let mut attempts = 0;
-    let result = plan.read_with(|resolved| {
-        attempts += 1;
-        assert_eq!(resolved.actual_path(), outside);
-        Err::<(), _>(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "actual target denied",
-        ))
-    });
-    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
-    assert_eq!(attempts, 1);
     let session_link = roots
         .current()
         .state()

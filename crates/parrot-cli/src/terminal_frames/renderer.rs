@@ -1,14 +1,12 @@
-use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::io::{self, Write};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 use super::surface::TerminalSurface;
 use super::{
-    CancellationToken, ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRenderContext,
-    LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext, TerminalFrame,
-    TerminalLine, TerminalStyle,
+    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRenderContext, LiveBufferRetention,
+    ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext, TerminalFrame, TerminalLine,
+    TerminalStyle,
 };
 use crate::terminal_layout::TerminalText;
 
@@ -18,68 +16,10 @@ const SHOW: &str = "\x1b[?7h\x1b[?25h";
 /// Owns an inline terminal frame and serializes complete render/write operations.
 pub struct TerminalFrameRenderer<W: Write + Send> {
     state: Mutex<State<W>>,
-    gate: AdmissionGate,
     color: bool,
     max_live_rows: usize,
     max_input_rows: usize,
     inline_diff: bool,
-}
-
-#[derive(Default)]
-struct Admission {
-    next: u64,
-    active: bool,
-    waiting: VecDeque<u64>,
-}
-
-#[derive(Default)]
-struct AdmissionGate {
-    state: Mutex<Admission>,
-    changed: Condvar,
-}
-
-struct AdmissionGuard<'a>(&'a AdmissionGate);
-
-impl AdmissionGate {
-    fn enter(&self, cancel: &CancellationToken) -> io::Result<AdmissionGuard<'_>> {
-        cancel.check()?;
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| io::Error::other("Drawing gate poisoned."))?;
-        let ticket = state.next;
-        state.next = state.next.wrapping_add(1);
-        state.waiting.push_back(ticket);
-        loop {
-            if let Err(error) = cancel.check() {
-                state.waiting.retain(|value| *value != ticket);
-                self.changed.notify_all();
-                return Err(error);
-            }
-            if !state.active && state.waiting.front() == Some(&ticket) {
-                state.waiting.pop_front();
-                state.active = true;
-                return Ok(AdmissionGuard(self));
-            }
-            state = self
-                .changed
-                .wait_timeout(state, Duration::from_millis(10))
-                .map_err(|_| io::Error::other("Drawing gate poisoned."))?
-                .0;
-        }
-    }
-}
-
-impl Drop for AdmissionGuard<'_> {
-    fn drop(&mut self) {
-        let mut state = self
-            .0
-            .state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        state.active = false;
-        self.0.changed.notify_all();
-    }
 }
 
 struct State<W> {
@@ -122,7 +62,6 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
                 rendered_height: 0,
                 rendered_width: 0,
             }),
-            gate: AdmissionGate::default(),
             color,
             max_live_rows: max_live_rows.max(1) as usize,
             max_input_rows: max_input_rows.max(1) as usize,
@@ -135,9 +74,7 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
         items: &[Arc<dyn LiveBufferItem>],
         columns: isize,
         rows: isize,
-        cancel: &CancellationToken,
     ) -> io::Result<()> {
-        let _admission = self.gate.enter(cancel)?;
         let mut state = self
             .state
             .lock()
@@ -163,9 +100,7 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
         items: &[Arc<dyn LiveBufferItem>],
         columns: isize,
         rows: isize,
-        cancel: &CancellationToken,
     ) -> io::Result<()> {
-        let _admission = self.gate.enter(cancel)?;
         let mut state = self
             .state
             .lock()
@@ -209,8 +144,7 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
         Ok(())
     }
 
-    pub fn clear(&self, cancel: &CancellationToken) -> io::Result<()> {
-        let _admission = self.gate.enter(cancel)?;
+    pub fn clear(&self) -> io::Result<()> {
         let mut state = self
             .state
             .lock()
@@ -529,58 +463,5 @@ impl<W: Write> State<W> {
             self.output.write_all(pending.as_bytes())?;
         }
         self.output.flush()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::Instant;
-
-    #[test]
-    fn admission_is_fifo_and_cancelled_waiter_is_removed_before_release() {
-        let gate = Arc::new(AdmissionGate::default());
-        let initial = gate.enter(&CancellationToken::new()).unwrap();
-        let (admitted_tx, admitted_rx) = mpsc::channel();
-        let (cancelled_tx, cancelled_rx) = mpsc::channel();
-        let mut workers = Vec::new();
-        let mut cancellation = None;
-        for index in 0..3 {
-            let cancel = CancellationToken::new();
-            if index == 1 {
-                cancellation = Some(cancel.clone());
-            }
-            let worker_gate = gate.clone();
-            let admitted = admitted_tx.clone();
-            let cancelled = cancelled_tx.clone();
-            workers.push(thread::spawn(move || match worker_gate.enter(&cancel) {
-                Ok(_guard) => admitted.send(index).unwrap(),
-                Err(error) => cancelled.send((index, error.kind())).unwrap(),
-            }));
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while gate.state.lock().unwrap().waiting.len() != index + 1 {
-                assert!(Instant::now() < deadline, "waiter did not enqueue");
-                thread::yield_now();
-            }
-        }
-        cancellation.unwrap().cancel();
-        assert_eq!(
-            cancelled_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            (1, io::ErrorKind::Interrupted)
-        );
-        assert_eq!(gate.state.lock().unwrap().waiting.len(), 2);
-        drop(initial);
-        assert_eq!(admitted_rx.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
-        assert_eq!(admitted_rx.recv_timeout(Duration::from_secs(5)).unwrap(), 2);
-        for worker in workers {
-            worker.join().unwrap();
-        }
-        assert!(!gate.state.lock().unwrap().active);
-        let cancelled = CancellationToken::new();
-        cancelled.cancel();
-        assert!(gate.enter(&cancelled).is_err());
-        assert!(gate.state.lock().unwrap().waiting.is_empty());
     }
 }

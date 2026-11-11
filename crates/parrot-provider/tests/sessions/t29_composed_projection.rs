@@ -128,11 +128,12 @@ impl ws::Socket for Socket {
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ws::ReceivedFrame, ws::WebSocketError>> {
         Box::pin(async move {
-            let frame = self.frames.pop_front().ok_or_else(|| {
-                ws::WebSocketError::InvalidOperation("unexpected fixture receive".into())
-            })?;
+            let frame = self
+                .frames
+                .pop_front()
+                .ok_or_else(|| ws::WebSocketError::Wire("unexpected fixture receive".into()))?;
             if frame.len() > bytes.len() {
-                return Err(ws::WebSocketError::InvalidOperation(
+                return Err(ws::WebSocketError::Wire(
                     "fixture frame exceeds receive buffer".into(),
                 ));
             }
@@ -197,7 +198,7 @@ impl ws::Connector for Connector {
                     }),
                     response_headers: Vec::new(),
                 }),
-                None => Err(ws::WebSocketError::InvalidOperation(
+                None => Err(ws::WebSocketError::Wire(
                     "unexpected fixture connection".into(),
                 )),
             }
@@ -563,7 +564,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
                     message: SENTINEL.into(),
                 },
                 "websocket" => ws::WebSocketError::Socket {
-                    code: ws::SocketErrorCode::Other,
+                    code: ws::SocketErrorCode::Faulted,
                     message: SENTINEL.into(),
                 },
                 "wire_protocol" => ws::WebSocketError::Wire(SENTINEL.into()),

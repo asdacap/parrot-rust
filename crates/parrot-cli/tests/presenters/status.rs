@@ -1,10 +1,10 @@
-use parrot_cli::presenters::EnhancedSessionPresenter;
 use parrot_domain::protocol::messages::parrot::{self as wire, event::Payload};
 
+use super::support::SessionHarness;
 use super::turn::{event, live, start};
 
 fn countdown_case(columns: usize) {
-    let mut presenter = EnhancedSessionPresenter::new(columns, false, false);
+    let mut presenter = SessionHarness::new(columns, false, false);
     presenter
         .set_session("build", "provider/model", false)
         .unwrap();
@@ -27,7 +27,7 @@ fn countdown_display_80_columns() {
 }
 
 fn awaiting_question_case(remaining: Option<i64>) {
-    let mut presenter = EnhancedSessionPresenter::new(160, false, false);
+    let mut presenter = SessionHarness::new(160, false, false);
     presenter
         .set_session("build", "provider/model", false)
         .unwrap();
@@ -66,7 +66,7 @@ fn awaiting_question_with_countdown_hides_spinner_then_restores_activity() {
 
 #[test]
 fn fast_mode_indicator_tracks_session_settings_before_usage_context() {
-    let mut presenter = EnhancedSessionPresenter::new(160, false, false);
+    let mut presenter = SessionHarness::new(160, false, false);
     presenter
         .observe(&event(
             "",
@@ -94,7 +94,7 @@ fn fast_mode_indicator_tracks_session_settings_before_usage_context() {
 
 #[test]
 fn modeline_is_before_selected_countdown_and_ready_clears_preparing_activity() {
-    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    let mut presenter = SessionHarness::new(80, false, false);
     presenter
         .set_session("build", "provider/model", false)
         .unwrap();

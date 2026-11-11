@@ -1,7 +1,6 @@
 use parrot_domain::protocol::messages::parrot as wire;
-use parrot_domain::values::identifiers::Identifier;
 
-use super::{InteractionError, InteractionErrorKind, PendingPermission, PermissionDecision};
+use super::{PendingPermission, PermissionDecision};
 
 /// Presentation of an already captured target, not a resolved or approved path.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,20 +64,4 @@ pub fn map_pending_permission<T>(
         })
         .collect();
     result
-}
-
-/// Builds the single event that a session event adapter must append and then
-/// publish. It neither persists nor publishes the event itself. In particular,
-/// callers must not build a second event between append and publication.
-pub fn permission_pending_event<T>(
-    pending: &PendingPermission<T>,
-    describe: impl FnMut(&T) -> PermissionTargetDescription,
-) -> Result<wire::Event, InteractionError> {
-    let mut event = wire::Event::new();
-    event.id = Identifier::event_id().map_err(|error| {
-        InteractionError::new(InteractionErrorKind::Identifier, error.to_string())
-    })?;
-    event.agent_session_id.clone_from(&pending.agent_session_id);
-    event.set_permission_pending(map_pending_permission(pending, describe));
-    Ok(event)
 }

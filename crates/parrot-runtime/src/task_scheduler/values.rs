@@ -31,51 +31,6 @@ fn same_payload_definition(left: &TaskPayload, right: &TaskPayload) -> bool {
         _ => false,
     }
 }
-pub fn has_same_visibility(left: &Task, right: &Task) -> bool {
-    left.hidden == right.hidden
-        && match (&left.payload, &right.payload) {
-            (TaskPayload::Instruction(_), TaskPayload::Instruction(_)) => true,
-            (TaskPayload::Tasks(left), TaskPayload::Tasks(right)) => {
-                left.len() == right.len()
-                    && left
-                        .iter()
-                        .zip(right)
-                        .all(|(left, right)| has_same_visibility(left, right))
-            }
-            _ => false,
-        }
-}
-pub fn apply_visibility_changes(current: &Task, previous: &Task, incoming: &Task) -> Task {
-    let mut updated = current.clone();
-    if previous.hidden != incoming.hidden {
-        updated.hidden = incoming.hidden;
-    }
-    if let (
-        TaskPayload::Tasks(current),
-        TaskPayload::Tasks(previous),
-        TaskPayload::Tasks(incoming),
-    ) = (&current.payload, &previous.payload, &incoming.payload)
-    {
-        updated.payload = TaskPayload::Tasks(
-            current
-                .iter()
-                .map(|task| {
-                    previous
-                        .iter()
-                        .zip(incoming)
-                        .find(|(_, after)| after.name == task.name)
-                        .filter(|(_, after)| has_same_definition(task, after))
-                        .map_or_else(
-                            || task.clone(),
-                            |(before, after)| apply_visibility_changes(task, before, after),
-                        )
-                })
-                .collect(),
-        );
-    }
-    updated
-}
-
 /// The source serializes an ordered object with Utf8JsonWriter's default encoder.
 /// This is only task prompt serialization; parsing belongs to the injected parser.
 pub(crate) fn serialize_tasks(tasks: &[Task]) -> String {

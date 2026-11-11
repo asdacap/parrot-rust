@@ -1,6 +1,7 @@
 use super::claim::WorkingDirectoryClaim;
 use super::runtime::{fingerprint_host, random_id};
 use super::types::*;
+use super::{OwnershipRoots, SessionAdmissions};
 use parrot_domain::values::identifiers::UserSessionId;
 use std::{
     fs,
@@ -22,28 +23,56 @@ impl Fixture {
         fs::create_dir_all(&workspace).unwrap();
         Self { root, workspace }
     }
+    fn runtime(host: &str, status: ProcessIdentityStatus, start: Option<&str>) -> RuntimeIdentity {
+        let start = start.map(str::to_owned);
+        RuntimeIdentity::new(
+            fingerprint_host(host),
+            "boot".into(),
+            4312,
+            "start".into(),
+            random_id().unwrap(),
+            Arc::new(move |_| ProcessIdentity {
+                status,
+                process_start_token: start.clone(),
+            }),
+        )
+        .with_proven_comparable_process_start_tokens()
+    }
     fn claim(
         &self,
         host: &str,
         status: ProcessIdentityStatus,
         start: Option<&str>,
     ) -> WorkingDirectoryClaim {
-        let start = start.map(str::to_owned);
-        WorkingDirectoryClaim::new(
-            &self.root,
-            RuntimeIdentity::new(
-                fingerprint_host(host),
-                "boot".into(),
-                4312,
-                "start".into(),
-                random_id().unwrap(),
-                Arc::new(move |_| ProcessIdentity {
-                    status,
-                    process_start_token: start.clone(),
-                }),
-            )
-            .with_proven_comparable_process_start_tokens(),
+        WorkingDirectoryClaim::new(&self.root, Self::runtime(host, status, start))
+    }
+    fn admissions(&self, runtime: RuntimeIdentity) -> SessionAdmissions {
+        SessionAdmissions::new(
+            OwnershipRoots::new(self.root.clone(), self.root.join("legacy")).unwrap(),
+            runtime,
+            false,
         )
+    }
+    fn legacy_owner(&self, session: &str, start: &str) -> PathBuf {
+        let ledger = self
+            .root
+            .join("owners")
+            .join(WorkingDirectoryClaim::fingerprint(&self.canonical()));
+        fs::create_dir_all(&ledger).unwrap();
+        let path = ledger.join("v1.json");
+        write(
+            &path,
+            &OwnerRecord {
+                version: Some(1),
+                session_id: Some(session.into()),
+                working_directory: Some(self.workspace.to_string_lossy().into_owned()),
+                host_key: Some("host".into()),
+                process_id: Some(4312),
+                process_start_token: Some(start.into()),
+                ..Default::default()
+            },
+        );
+        path
     }
     fn canonical(&self) -> String {
         WorkingDirectoryClaim::canonicalize(&self.workspace).unwrap()
@@ -167,9 +196,7 @@ fn admission_safety_uses_any_legacy_id_unless_target_v2_supersedes_it() {
     let claim = f.claim("host", ProcessIdentityStatus::Found, Some("start"));
     let target = id("user-session-target");
     let canonical = f.canonical();
-    claim
-        .claim(&f.workspace, &id("user-session-legacy"), |_| false)
-        .unwrap();
+    f.legacy_owner("user-session-legacy", "start");
     assert_eq!(
         claim.activation_status(&target, &canonical).unwrap(),
         (ActivationStatus::Inactive, false)
@@ -273,10 +300,15 @@ fn default_open_resumes_and_ordinally_selects_inactive_associations() {
         let opened = claim.create_fresh(&f.workspace, &id(value)).unwrap();
         opened.activation_lease.unwrap().release().unwrap();
     }
-    let discovery = claim.discover_latest(&f.workspace).unwrap();
+    let admissions = f.admissions(Fixture::runtime(
+        "host",
+        ProcessIdentityStatus::Missing,
+        None,
+    ));
+    let discovery = admissions.discover_latest(&f.workspace).unwrap().admission;
     assert_eq!(discovery.session_id.unwrap().value(), "user-session-one");
     assert!(discovery.activation_lease.is_none());
-    let resumed = claim.open_default(&f.workspace).unwrap();
+    let resumed = admissions.open_default(&f.workspace).unwrap().admission;
     assert_eq!(resumed.disposition, ClaimDisposition::Resumed);
     assert_eq!(resumed.session_id.unwrap().value(), "user-session-one");
 }
@@ -288,7 +320,15 @@ fn live_candidate_is_never_taken_over() {
     let session = id("user-session-one");
     let first = claim.create_fresh(&f.workspace, &session).unwrap();
     assert_eq!(first.disposition, ClaimDisposition::Fresh);
-    let second = claim.open_default(&f.workspace).unwrap();
+    let second = f
+        .admissions(Fixture::runtime(
+            "host",
+            ProcessIdentityStatus::Found,
+            Some("start"),
+        ))
+        .open_default(&f.workspace)
+        .unwrap()
+        .admission;
     assert_eq!(second.disposition, ClaimDisposition::Live);
     assert_eq!(second.session_id.as_ref(), Some(&session));
     assert!(second.activation_lease.is_none());
@@ -326,7 +366,7 @@ fn foreign_host_does_not_inspect_pid_and_requires_explicit_takeover() {
         )
         .with_proven_comparable_process_start_tokens(),
     );
-    let result = local.open_default(&f.workspace).unwrap();
+    let result = local.resume(&f.workspace, &session, false).unwrap();
     assert_eq!(result.disposition, ClaimDisposition::Live);
     assert_eq!(result.session_id.as_ref(), Some(&session));
     let takeover = local.resume(&f.workspace, &session, true).unwrap();
@@ -351,7 +391,7 @@ fn reused_pid_with_exact_original_session_id_is_inactive() {
     let session = id("user-session-reused-pid");
     let owner = first.create_fresh(&f.workspace, &session).unwrap();
     let second = f.claim("host", ProcessIdentityStatus::Found, Some("new-start"));
-    let result = second.open_default(&f.workspace).unwrap();
+    let result = second.resume(&f.workspace, &session, false).unwrap();
     assert_eq!(result.disposition, ClaimDisposition::Resumed);
     assert_eq!(result.session_id.as_ref(), Some(&session));
     drop(owner);
@@ -450,8 +490,15 @@ fn legacy_owner_preserves_exact_id_and_nullable_fields() {
             ..Default::default()
         },
     );
-    let claim = f.claim("host", ProcessIdentityStatus::Missing, None);
-    let opened = claim.open_default(&f.workspace).unwrap();
+    let opened = f
+        .admissions(Fixture::runtime(
+            "host",
+            ProcessIdentityStatus::Missing,
+            None,
+        ))
+        .open_default(&f.workspace)
+        .unwrap()
+        .admission;
     assert_eq!(opened.disposition, ClaimDisposition::Resumed);
     assert_eq!(
         opened.session_id.unwrap().value(),
@@ -589,7 +636,15 @@ fn corrupt_association_activation_and_metadata_fail_closed() {
                 fs::write(directory.join("meta.json"), "bad").unwrap();
             }
         }
-        let discovered = claim.open_default(&f.workspace).unwrap();
+        let discovered = f
+            .admissions(Fixture::runtime(
+                "host",
+                ProcessIdentityStatus::Unreadable,
+                None,
+            ))
+            .open_default(&f.workspace)
+            .unwrap()
+            .admission;
         assert_eq!(discovered.disposition, ClaimDisposition::Corrupt);
         assert!(discovered.activation_lease.is_none());
         drop(first);
@@ -630,7 +685,15 @@ fn discovery_uses_successful_open_recency_without_activation() {
                 .create_fresh(&other_workspace, &id("user-session-other"))
                 .unwrap(),
         );
-        let discovered = claim.discover_latest(&f.workspace).unwrap();
+        let discovered = f
+            .admissions(Fixture::runtime(
+                "host",
+                ProcessIdentityStatus::Missing,
+                None,
+            ))
+            .discover_latest(&f.workspace)
+            .unwrap()
+            .admission;
         assert_eq!(
             discovered.disposition,
             if count == 0 {
@@ -659,7 +722,15 @@ fn unreadable_owner_with_and_without_corrupt_metadata_is_not_activated() {
             fs::create_dir_all(&directory).unwrap();
             fs::write(directory.join("meta.json"), "not-json").unwrap();
         }
-        let result = claim.open_default(&f.workspace).unwrap();
+        let result = f
+            .admissions(Fixture::runtime(
+                "host",
+                ProcessIdentityStatus::Unreadable,
+                None,
+            ))
+            .open_default(&f.workspace)
+            .unwrap()
+            .admission;
         assert_eq!(
             result.disposition,
             if corrupt {
@@ -721,7 +792,15 @@ fn canonical_workspace_identity_matches_final_symbolic_link_only() {
             .create_fresh(&alias, &id("user-session-linked"))
             .unwrap(),
     );
-    let resumed = claim.open_default(&f.workspace).unwrap();
+    let resumed = f
+        .admissions(Fixture::runtime(
+            "host",
+            ProcessIdentityStatus::Missing,
+            None,
+        ))
+        .open_default(&f.workspace)
+        .unwrap()
+        .admission;
     assert_eq!(resumed.disposition, ClaimDisposition::Resumed);
     assert_eq!(resumed.session_id.unwrap().value(), "user-session-linked");
     assert_eq!(
@@ -754,37 +833,10 @@ fn blocked_version_exhausts_activation_retries_without_leaving_staging() {
 }
 
 #[test]
-fn legacy_claim_returns_live_then_reclaims_exact_session() {
-    let f = Fixture::new();
-    let claim = f.claim("host", ProcessIdentityStatus::Missing, None);
-    let first = claim
-        .claim(&f.workspace, &id("user-session-Original.id"), |_| false)
-        .unwrap();
-    assert_eq!(first.disposition, ClaimDisposition::Fresh);
-    let live = claim
-        .claim(&f.workspace, &id("user-session-other"), |_| true)
-        .unwrap();
-    assert_eq!(live.disposition, ClaimDisposition::Live);
-    assert_eq!(live.session_id, first.session_id);
-    let reclaimed = claim
-        .claim(&f.workspace, &id("user-session-other"), |_| false)
-        .unwrap();
-    assert_eq!(reclaimed.disposition, ClaimDisposition::Reclaimed);
-    assert_eq!(reclaimed.session_id, first.session_id);
-}
-
-#[test]
 fn default_inactive_candidate_is_rechecked_live_before_any_activation_write() {
     let f = Fixture::new();
     let session = id("user-session-recheck");
-    f.claim("host", ProcessIdentityStatus::Missing, None)
-        .claim(&f.workspace, &session, |_| false)
-        .unwrap();
-    let ledger = f
-        .root
-        .join("owners")
-        .join(WorkingDirectoryClaim::fingerprint(&f.canonical()))
-        .join("v1.json");
+    let ledger = f.legacy_owner(session.value(), "start");
     let before = fs::read(&ledger).unwrap();
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let inspected = calls.clone();
@@ -803,9 +855,11 @@ fn default_inactive_candidate_is_rechecked_live_before_any_activation_write() {
             process_start_token: Some("different-reader-start".into()),
         }),
     );
-    let refused = WorkingDirectoryClaim::new(&f.root, runtime)
+    let refused = f
+        .admissions(runtime)
         .open_default(&f.workspace)
-        .unwrap();
+        .unwrap()
+        .admission;
     assert_eq!(refused.disposition, ClaimDisposition::Live);
     assert!(refused.activation_lease.is_none());
     assert_eq!(calls.load(Ordering::SeqCst), 2);

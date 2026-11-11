@@ -1,12 +1,10 @@
-//! Application roots, immutable session resources, and compatibility read planning.
+//! Application roots and immutable session resources.
 
-mod reads;
 mod resources;
 mod roots;
 mod state;
 mod workspace;
 
-pub use reads::{ReadCandidates, ReadValue};
 pub use resources::{AgentScratchDirectory, UserSessionResources};
 pub use roots::ApplicationRoots;
 pub use state::StatePaths;

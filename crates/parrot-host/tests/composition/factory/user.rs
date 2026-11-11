@@ -16,7 +16,7 @@ use parrot_provider::{
         aliases::{ModelAliasCatalog, ModelRouting},
         registry::ProviderRegistry,
     },
-    sessions::{Content, Error, EventStream, Provider, Request, Session},
+    sessions::{Content, Error, Provider, Session},
 };
 use parrot_runtime::prompt_context::{AgentIdentityDescription, SkillDiscoveryContext};
 use std::{
@@ -42,7 +42,7 @@ fn stream(
         let subscription = broker
             .listen(
                 cursor.as_deref(),
-                move || async move { Ok::<_, RpcError>(replay) },
+                move |_cursor| async move { Ok::<_, RpcError>(replay) },
                 move || async move { Ok::<_, RpcError>(initial) },
             )
             .await?;
@@ -65,7 +65,7 @@ async fn actual_broker_listen_replays_then_snapshots_then_deduplicated_live_and_
         let subscription = captured
             .listen(
                 Some("anchor"),
-                move || async move {
+                move |_cursor| async move {
                     during_replay.publish_retained(&event("replayed"));
                     during_replay.publish_retained(&event("live"));
                     Ok::<_, RpcError>(vec![event("anchor"), event("replayed")])
@@ -134,7 +134,7 @@ async fn canceled_next_preserves_pending_initialization_and_subscription_lifetim
         let subscription = input
             .listen(
                 None,
-                || async { Ok::<_, RpcError>(Vec::new()) },
+                |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
                 || async { Ok::<_, RpcError>(vec![event("initial")]) },
             )
             .await?;
@@ -225,11 +225,6 @@ struct LocalProvider;
 impl Provider for LocalProvider {
     fn id(&self) -> &str {
         "local"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        Err(Error::InvalidOperation(
-            "no provider call in this test".into(),
-        ))
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(false) })
@@ -831,7 +826,7 @@ async fn actual_permission_adapter_publishes_exact_durably_stored_event() {
     let subscription = broker
         .listen(
             None,
-            || async { Ok::<_, RpcError>(Vec::new()) },
+            |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
             || async { Ok::<_, RpcError>(Vec::new()) },
         )
         .await
@@ -900,7 +895,7 @@ async fn dropped_request_observer_keeps_actual_append_publication_and_pending_cl
     let subscription = broker
         .listen(
             None,
-            || async { Ok::<_, RpcError>(Vec::new()) },
+            |_cursor| async { Ok::<_, RpcError>(Vec::new()) },
             || async { Ok::<_, RpcError>(Vec::new()) },
         )
         .await

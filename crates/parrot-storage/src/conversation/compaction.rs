@@ -80,7 +80,7 @@ impl ConversationRepository {
         let appended = self.events.transaction(move |tx| {
             if already_saved(tx, &published.agent_session_id, snapshot.watermark)? { return Ok(false); }
             let summary_sequence = save_snapshot(tx, &published.agent_session_id, &snapshot, &(context.timestamp)())?;
-            record(tx, &published, None, &(context.timestamp)())?;
+            record(tx, &published, &(context.timestamp)())?;
             let status = projection::project(tx, &published.agent_session_id, &ConversationMessage::text(MessageRole::System, content), &(context.timestamp)())?;
             tx.execute("UPDATE conversation_item SET compaction_status_sequence = ?1 WHERE sequence = ?2;", params![status.sequence, summary_sequence])?;
             // Drop the context reminder standing hash, so a qualifying reminder

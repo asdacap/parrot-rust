@@ -193,16 +193,6 @@ impl EventBroker {
         }
     }
 
-    pub fn with_limits(limits: SubscriptionLimits) -> Result<Self, BrokerError> {
-        if limits.retained == 0 || limits.transient == 0 {
-            return Err(BrokerError::InvalidCapacity);
-        }
-        Ok(Self {
-            state: Mutex::new(BrokerState::default()),
-            limits,
-        })
-    }
-
     /// Eagerly admits the listener before returning, including before its first
     /// read. Subscribing after broker completion returns a completed listener.
     pub fn subscribe(&self) -> Subscription {
@@ -222,9 +212,11 @@ impl EventBroker {
     }
 
     /// Subscribes before reading persistence. `None` disables replay, whereas
-    /// `Some("")` still requests a real replay. Current snapshots are captured
-    /// only when the caller has consumed the persisted suffix, then live reads
-    /// begin. This preserves snapshot freshness for a slow replay consumer.
+    /// `Some(cursor)` invokes the loader with the cursor, and the returned
+    /// events become the persisted suffix to scan for that cursor. Current
+    /// snapshots are captured only when the caller has consumed the persisted
+    /// suffix, then live reads begin. This preserves snapshot freshness for a
+    /// slow replay consumer.
     ///
     /// The caller supplies actual storage and registry/usage operations. A
     /// failed replay load or dropping this future releases its eager listener;
@@ -237,14 +229,17 @@ impl EventBroker {
         capture_initial: I,
     ) -> Result<ListeningSubscription<I, IF>, E>
     where
-        R: FnOnce() -> RF,
+        R: FnOnce(String) -> RF,
         RF: Future<Output = Result<Vec<Event>, E>>,
         I: FnOnce() -> IF,
         IF: Future<Output = Result<Vec<Event>, E>>,
     {
         let subscription = self.subscribe();
         let replay = match cursor {
-            Some(cursor) => subscription.replay_after(cursor, load_replay().await?),
+            Some(cursor) => {
+                let persisted = load_replay(cursor.to_owned()).await?;
+                subscription.replay_after(cursor, persisted)
+            }
             None => subscription.replay_after("", Vec::new()),
         };
         Ok(ListeningSubscription {

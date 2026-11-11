@@ -153,9 +153,16 @@ async fn suspension_reopens_original_admitted_prompt_and_restores_wait_and_paren
             parent.clone(),
         )
         .await;
-    let result = bounded(resumed.session.recover_owned().unwrap().join())
-        .await
-        .unwrap();
+    let result = bounded(
+        resumed
+            .session
+            .recover_owned_reserved()
+            .unwrap()
+            .execution
+            .join(),
+    )
+    .await
+    .unwrap();
     assert_eq!(result, Execution::succeeded("resumed answer"));
     assert_eq!(
         resumed
@@ -307,9 +314,16 @@ async fn image_execution_metadata_survives_suspend_reopen_and_recovery() {
         )
         .await;
     assert_eq!(
-        bounded(resumed.session.recover_owned().unwrap().join())
-            .await
-            .unwrap(),
+        bounded(
+            resumed
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join()
+        )
+        .await
+        .unwrap(),
         Execution::succeeded("image recovered")
     );
     let checkpoint = restarted
@@ -347,7 +361,13 @@ async fn completed_and_never_started_recovery_stays_idle_and_retains_results() {
         .recovered_runtime(provider.clone(), store.clone(), parent.clone())
         .await;
     assert_eq!(
-        idle.session.recover_owned().unwrap().join().await.unwrap(),
+        idle.session
+            .recover_owned_reserved()
+            .unwrap()
+            .execution
+            .join()
+            .await
+            .unwrap(),
         Execution::succeeded("")
     );
     assert!(idle.session.wait(0, &NeverCancelled).await.is_err());
@@ -396,8 +416,9 @@ async fn completed_and_never_started_recovery_stays_idle_and_retains_results() {
     assert_eq!(
         resumed
             .session
-            .recover_owned()
+            .recover_owned_reserved()
             .unwrap()
+            .execution
             .join()
             .await
             .unwrap(),
@@ -473,9 +494,16 @@ async fn committed_assistant_before_execution_checkpoint_is_consumed_after_norma
         )
         .await;
     assert_eq!(
-        bounded(resumed.session.recover_owned().unwrap().join())
-            .await
-            .unwrap(),
+        bounded(
+            resumed
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join()
+        )
+        .await
+        .unwrap(),
         Execution::succeeded("durable response")
     );
     assert!(provider.requests.lock().unwrap().is_empty());
@@ -534,9 +562,16 @@ async fn intent_before_admission_recovers_once_and_existing_admission_is_not_dup
                 .unwrap();
         }
         assert_eq!(
-            bounded(runtime.session.recover_owned().unwrap().join())
-                .await
-                .unwrap(),
+            bounded(
+                runtime
+                    .session
+                    .recover_owned_reserved()
+                    .unwrap()
+                    .execution
+                    .join()
+            )
+            .await
+            .unwrap(),
             Execution::succeeded("intent answer")
         );
         assert_eq!(provider.requests.lock().unwrap().len(), 1);
@@ -614,8 +649,9 @@ async fn explicit_interruption_remains_terminal_on_reopen() {
     assert_eq!(
         resumed
             .session
-            .recover_owned()
+            .recover_owned_reserved()
             .unwrap()
+            .execution
             .join()
             .await
             .unwrap()
@@ -679,8 +715,9 @@ async fn pending_parent_admission_retries_without_changing_execution_outcome() {
     assert_eq!(
         resumed
             .session
-            .recover_owned()
+            .recover_owned_reserved()
             .unwrap()
+            .execution
             .join()
             .await
             .unwrap(),
@@ -899,9 +936,16 @@ async fn restored_output_and_error_keep_the_original_bounds_and_notification_ide
             )
             .await;
         assert_eq!(
-            bounded(resumed.session.recover_owned().unwrap().join())
-                .await
-                .unwrap(),
+            bounded(
+                resumed
+                    .session
+                    .recover_owned_reserved()
+                    .unwrap()
+                    .execution
+                    .join()
+            )
+            .await
+            .unwrap(),
             expected
         );
         assert_eq!(
@@ -998,7 +1042,7 @@ async fn recovery_reservation_preserves_interrupt_or_suspension_during_snapshot_
                 Arc::new(RecoveryParent::default()),
             )
             .await;
-        let recovered = runtime.session.recover_owned().unwrap();
+        let recovered = runtime.session.recover_owned_reserved().unwrap().execution;
         gate.entered().await;
         let stopping = if suspend {
             runtime.session.suspend_handle()
@@ -1240,10 +1284,17 @@ async fn canceled_intent_clears_only_its_exact_admitted_input() {
         .await
         .unwrap();
     assert_eq!(
-        bounded(runtime.session.recover_owned().unwrap().join())
-            .await
-            .unwrap()
-            .status,
+        bounded(
+            runtime
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join()
+        )
+        .await
+        .unwrap()
+        .status,
         ExecutionStatus::Canceled
     );
     assert!(fixture.history.has_pending_inputs().await.unwrap());
@@ -1270,9 +1321,16 @@ async fn corrupted_recovery_state_reports_error_without_running_or_replacing_it(
         .recovered_runtime(provider.clone(), store, Arc::new(RecoveryParent::default()))
         .await;
     assert!(
-        bounded(runtime.session.recover_owned().unwrap().join())
-            .await
-            .is_err()
+        bounded(
+            runtime
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join()
+        )
+        .await
+        .is_err()
     );
     assert!(runtime.session.wait(0, &NeverCancelled).await.is_err());
     assert!(runtime.session.is_idle());
@@ -1328,9 +1386,16 @@ async fn separate_pending_input_recovery_preserves_retained_wait_result_or_unsta
         let resumed = restarted
             .recovered_runtime(provider.clone(), restarted.recovery_store().await, parent)
             .await;
-        let restored = bounded(resumed.session.recover_owned().unwrap().join())
-            .await
-            .unwrap();
+        let restored = bounded(
+            resumed
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             restored,
             Execution::succeeded(if previously_started {
@@ -1551,9 +1616,16 @@ async fn owned_result_reference_is_not_replaced_by_later_input_or_raw_response()
             )
             .await;
         assert_eq!(
-            bounded(resumed.session.recover_owned().unwrap().join())
-                .await
-                .unwrap(),
+            bounded(
+                resumed
+                    .session
+                    .recover_owned_reserved()
+                    .unwrap()
+                    .execution
+                    .join()
+            )
+            .await
+            .unwrap(),
             Execution::succeeded("original owned answer")
         );
         assert!(fresh_provider.requests.lock().unwrap().is_empty());

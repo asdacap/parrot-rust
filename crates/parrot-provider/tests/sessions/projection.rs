@@ -139,9 +139,6 @@ impl Provider for Script {
     fn usage_reporter(&self) -> Option<Arc<dyn UsageReporter>> {
         self.reporter.clone()
     }
-    fn call(&self, r: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(self.stream(r))
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async {
             self.state.lock().unwrap().credential_checks += 1;
@@ -186,20 +183,6 @@ impl Session for ScriptSession {
     }
     fn call(&self, r: Request) -> Result<Box<dyn EventStream>, Error> {
         Ok(self.script.stream(r))
-    }
-    fn call_with_trace(
-        &self,
-        r: Request,
-        trace: Arc<parrot_provider::sessions::diagnostics::CallTrace>,
-    ) -> Result<Box<dyn EventStream>, Error> {
-        Ok(Box::new(
-            parrot_provider::sessions::diagnostic_session::RequestTraceStream::new(
-                self.script.stream(r),
-                trace,
-                "synthetic".into(),
-                "synthetic-request".into(),
-            ),
-        ))
     }
     fn try_fall_back_to_http(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async {
@@ -354,7 +337,7 @@ fn script_failure(name: &str) -> Error {
     };
     match name {
         "protocol" => Error::Wire("synthetic protocol failure".into()),
-        "headers" => Error::HeaderTimeout("synthetic headers timeout".into()),
+        "headers" => Error::Http(HttpError::HeaderTimeout(Duration::from_secs(1))),
         "http503" => http(503, "", "synthetic unavailable"),
         "http429" => http(429, "", "synthetic rate limit"),
         "http400" => http(400, "", "synthetic bad request"),
@@ -367,7 +350,7 @@ fn script_failure(name: &str) -> Error {
             "Requested token count exceeds the model's maximum context length of 1200 tokens. You requested a total of 1500 tokens: 1000 tokens from the input messages and 500 tokens for the completion.",
         ),
         "configuration" => Error::Provider("synthetic missing configuration".into()),
-        "cancelled" => Error::Cancellation("synthetic cancellation".into()),
+        "cancelled" => Error::Cancelled,
         "websocket" => Error::Socket(WebSocketError::Transport("synthetic websocket drop".into())),
         "upgrade429" => Error::Socket(WebSocketError::Upgrade {
             status: 429,
@@ -403,21 +386,17 @@ fn event(e: &Event) -> Value {
 }
 fn error(e: &Error) -> Value {
     let kind = match e {
-        Error::Http(HttpError::Response(_) | HttpError::Http(_) | HttpError::ProviderHttp(_)) => {
-            "ProviderHttpException"
-        }
+        Error::Http(HttpError::Response(_) | HttpError::ProviderHttp(_)) => "ProviderHttpException",
         Error::Http(HttpError::RequestTooLarge(_)) => "ProviderRequestTooLargeException",
         Error::Http(HttpError::Provider(_)) => "LLMProviderException",
-        Error::HeaderTimeout(_)
-        | Error::Http(HttpError::HeaderTimeout(_))
-        | Error::HeaderRetryLimit { .. } => "HeaderTimeoutException",
+        Error::Http(HttpError::HeaderTimeout(_)) | Error::HeaderRetryLimit { .. } => {
+            "HeaderTimeoutException"
+        }
         Error::Response(ResponsesError::ProviderResponse { .. }) | Error::ChatProvider(_) => {
             "ProviderResponseException"
         }
         Error::Wire(_) => "WireProtocolException",
-        Error::Cancellation(_) | Error::Cancelled | Error::Http(HttpError::Cancelled) => {
-            "OperationCanceledException"
-        }
+        Error::Cancelled | Error::Http(HttpError::Cancelled) => "OperationCanceledException",
         Error::Io(_) => "IOException",
         Error::InvalidOperation(_) => "InvalidOperationException",
         Error::Disposed => "ObjectDisposedException",
@@ -457,15 +436,10 @@ async fn retry(c: &Case) -> Value {
     let p = Script::new(c.clone());
     let sleeper = Arc::new(RecordingSleeper::default());
     let wrapper = RetryingProvider::with_sleeper(p.clone(), c.header_retries, sleeper.clone());
-    let (events, failure, _elapsed) = if c.mode == "session" {
-        let session = wrapper.open_session().unwrap();
-        session.begin_turn().await.unwrap();
-        let result = drain(session.call(request()).unwrap()).await;
-        session.close().await.unwrap();
-        result
-    } else {
-        drain(wrapper.call(request()).unwrap()).await
-    };
+    let session = wrapper.open_session().unwrap();
+    session.begin_turn().await.unwrap();
+    let (events, failure, _elapsed) = drain(session.call(request()).unwrap()).await;
+    session.close().await.unwrap();
     let s = p.state.lock().unwrap();
     json!({"events":events,"error":failure,"calls":s.calls,"opens":s.opens,"begin_turns":s.turns,"disposals":s.disposals,"enumerator_disposals":s.enumerator_disposals,"fallback_calls":s.fallback_calls,"requests_max_output_tokens":s.requests,"timer_delays_ms":*sleeper.0.lock().unwrap(),"trace":s.trace})
 }
@@ -584,7 +558,7 @@ async fn usage() -> Value {
     let seed = wrapper.seed_models();
     let session = wrapper.open_session().unwrap();
     session.begin_turn().await.unwrap();
-    let (events, failure, _) = drain(wrapper.call(request()).unwrap()).await;
+    let (events, failure, _) = drain(session.call(request()).unwrap()).await;
     let exposed = wrapper.usage_reporter().unwrap();
     let quota = exposed.usage(&Never).await.unwrap();
     let result = {
@@ -700,7 +674,7 @@ impl Connector for NoSocket {
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ConnectedSocket, WebSocketError>> {
         Box::pin(async {
-            Err(WebSocketError::InvalidOperation(
+            Err(WebSocketError::Wire(
                 "unexpected WebSocket attempt in HTTP-only probe".into(),
             ))
         })
@@ -890,35 +864,6 @@ impl parrot_provider::sessions::diagnostics::DiagnosticClock for Clock {
         0
     }
 }
-#[derive(Default)]
-struct Cancel {
-    value: std::sync::atomic::AtomicBool,
-    notify: tokio::sync::Notify,
-}
-impl Cancel {
-    fn cancel(&self) {
-        self.value.store(true, std::sync::atomic::Ordering::SeqCst);
-        self.notify.notify_waiters()
-    }
-}
-impl Cancellation for Cancel {
-    fn is_cancelled(&self) -> bool {
-        self.value.load(std::sync::atomic::Ordering::SeqCst)
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async {
-            loop {
-                let notified = self.notify.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if self.is_cancelled() {
-                    return;
-                }
-                notified.await
-            }
-        })
-    }
-}
 async fn diagnostic(c: &Case) -> Value {
     let p = Script::new(c.clone());
     let log = Arc::new(Log::default());
@@ -930,19 +875,14 @@ async fn diagnostic(c: &Case) -> Value {
         "synthetic-provider".into(),
         None,
     );
-    let cancel = Arc::new(Cancel::default());
-    let mut stream = session.call_cancellable(request(), cancel.clone()).unwrap();
+    let mut stream = session.call(request()).unwrap();
     let mut events = Vec::new();
     let mut failure = None;
-    if c.mode == "early-disposal" || c.mode == "cancelled" {
+    if c.mode == "early-disposal" {
         match stream.next(&Never).await {
             Ok(Some(e)) => events.push(event(&e)),
             Ok(None) => {}
             Err(e) => failure = Some(error(&e)),
-        }
-        if c.mode == "cancelled" {
-            cancel.cancel();
-            tokio::task::yield_now().await;
         }
     } else {
         loop {

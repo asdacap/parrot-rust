@@ -5,7 +5,6 @@ use super::TempRoot;
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::values::identifiers::{InvalidUserSessionId, UserSessionId};
 use parrot_foundation::paths::{StatePaths, UserSessionResources};
-use parrot_storage::conversation::{AgentHistoryEntry, ConversationPart, ToolCall};
 use parrot_storage::history_files::{
     AgentHistoryFile, ErrorKind, SessionCatalog, SessionCatalogState, SessionIndex, SessionMeta,
 };
@@ -99,35 +98,23 @@ fn session_resource_descriptors_are_contained_and_disjoint() {
     let fixture = Fixture::new();
     let first = fixture.resources("session-one");
     let second = fixture.resources("session-two");
-    assert!(
-        first
-            .owns(&first.metadata_path(), &fixture.workspace)
-            .unwrap()
-    );
+    assert!(first.metadata_path().starts_with(first.root()));
     let first_scratch = first.agent_scratch(&["agent-one"]).unwrap();
     let second_scratch = second.agent_scratch(&["agent-two"]).unwrap();
+    assert!(first_scratch.root().starts_with(first.root()));
     assert!(
-        first
-            .owns(first_scratch.root(), &fixture.workspace)
-            .unwrap()
+        first_scratch
+            .blob_directory()
+            .starts_with(first_scratch.root())
     );
     assert!(
         first_scratch
-            .contains(&first_scratch.blob_directory(), &fixture.workspace)
-            .unwrap()
+            .plan_directory()
+            .starts_with(first_scratch.root())
     );
-    assert!(
-        first_scratch
-            .contains(&first_scratch.plan_directory(), &fixture.workspace)
-            .unwrap()
-    );
-    assert!(
-        !first_scratch
-            .contains(second_scratch.root(), &fixture.workspace)
-            .unwrap()
-    );
-    assert!(!first.owns(second.root(), &fixture.workspace).unwrap());
-    assert!(!second.owns(first.root(), &fixture.workspace).unwrap());
+    assert!(!second_scratch.root().starts_with(first_scratch.root()));
+    assert!(!second.root().starts_with(first.root()));
+    assert!(!first.root().starts_with(second.root()));
     assert_eq!(
         first_scratch.root().parent().unwrap(),
         first.agents_directory()
@@ -165,7 +152,7 @@ fn agent_queue_directories_are_contained_beneath_their_owning_agent() {
         let scratch = resources.agent_scratch(&names).unwrap();
         let queue = scratch.queue_directory();
         assert_eq!(queue, scratch.root().join("queues"));
-        assert!(resources.owns(&queue, &fixture.workspace).unwrap());
+        assert!(queue.starts_with(resources.root()));
     }
     assert!(!resources.root().join("queues").exists());
 }
@@ -245,57 +232,11 @@ fn agent_history_files_are_isolated_under_the_session_agents_root() {
             .agents_directory()
             .join("main/child/history.jsonl")
     );
-    assert!(resources.owns(history.path(), &fixture.workspace).unwrap());
+    assert!(history.path().starts_with(resources.root()));
     assert_eq!(
         history.path().strip_prefix(resources.root()).unwrap(),
         PathBuf::from("root-agents/main/child/history.jsonl")
     );
-}
-
-#[tokio::test]
-async fn agent_history_projection_writes_discriminated_lowercase_json_lines() {
-    let fixture = Fixture::new();
-    let resources = fixture.resources("session-one");
-    let history = fixture.history(&resources, &["main"]);
-    history
-        .replace_entries(vec![AgentHistoryEntry::Compaction {
-            sequence: 7,
-            summary: "summary".into(),
-            watermark: 4,
-        }])
-        .await
-        .unwrap();
-    assert_eq!(
-        fs::read_to_string(history.path()).unwrap(),
-        "{\"type\":\"compaction\",\"summary\":\"summary\",\"watermark\":4,\"sequence\":7}\n"
-    );
-}
-
-#[tokio::test]
-async fn agent_history_projection_writes_structured_message_records() {
-    let fixture = Fixture::new();
-    let resources = fixture.resources("session-one");
-    let history = fixture.history(&resources, &["main"]);
-    history
-        .replace_entries(vec![AgentHistoryEntry::Message {
-            sequence: 2,
-            conversation_sequence: 9,
-            origin: "model".into(),
-            role: "assistant".into(),
-            parts: vec![ConversationPart::Text("hello".into())],
-            tool_calls: vec![ToolCall {
-                id: "call".into(),
-                name: "read".into(),
-                arguments_json: "{}".into(),
-            }],
-            tool_call_id: String::new(),
-        }])
-        .await
-        .unwrap();
-    let text = fs::read_to_string(history.path()).unwrap();
-    assert!(text.contains("\"type\":\"message\""));
-    assert!(text.contains("\"conversation_sequence\":9"));
-    assert!(text.contains("\"arguments_json\":\"{}\""));
 }
 
 #[test]

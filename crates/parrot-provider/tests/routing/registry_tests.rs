@@ -5,7 +5,7 @@ use parrot_provider::{
     responses::ResponsesError,
     responses_websocket::WebSocketError,
     routing::registry::ProviderRegistry,
-    sessions::{Content, Error, EventStream, Provider, Request, Session},
+    sessions::{Content, Error, Provider, Session},
 };
 use std::{
     collections::BTreeMap,
@@ -59,9 +59,6 @@ impl FakeProvider {
 impl Provider for FakeProvider {
     fn id(&self) -> &str {
         &self.id
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        Err(Error::InvalidOperation("unused call".into()))
     }
     fn has_credential<'a>(
         &'a self,
@@ -297,7 +294,7 @@ async fn available_models_skips_uncredentialed_providers_and_keeps_seed_on_refre
 }
 
 #[test]
-fn list_all_models_and_default_use_source_ordinal_order_and_original_provider_references() {
+fn list_and_default_use_source_ordinal_order_and_original_provider_references() {
     let a = provider("a");
     let z = provider("z");
     let registry = ProviderRegistry::new(
@@ -311,7 +308,6 @@ fn list_all_models_and_default_use_source_ordinal_order_and_original_provider_re
     .unwrap();
     assert!(Arc::ptr_eq(&registry.list()[0], &a));
     assert!(Arc::ptr_eq(&registry.list()[1], &z));
-    assert_eq!(selectors(registry.all_models()), ["a/z", "a/a", "z/m"]);
     assert_eq!(
         registry.resolve_default_canonical().unwrap().selector(),
         "a/a"
@@ -322,12 +318,6 @@ fn list_all_models_and_default_use_source_ordinal_order_and_original_provider_re
     ));
     assert!(registry.models("missing").is_empty());
     assert_eq!(registry.models("orphan")[0].id, "hidden");
-    assert!(
-        registry
-            .all_models()
-            .iter()
-            .all(|m| m.reasoning().is_none())
-    );
     let supplementary = provider("\u{10000}");
     let bmp = provider("\u{e000}");
     let unicode = ProviderRegistry::new(
@@ -456,10 +446,8 @@ async fn refresh_runs_concurrently_and_joins_other_refreshes_before_propagating_
 async fn refresh_catches_only_source_failure_classes_at_both_provider_boundaries() {
     let swallowed = vec![
         Error::Provider("provider".into()),
-        Error::HeaderTimeout("timeout".into()),
         Error::Wire("wire".into()),
         Error::Io("io".into()),
-        Error::Http(HttpError::Http("request".into())),
         Error::Http(HttpError::ProviderHttp("provider policy".into())),
         Error::Http(HttpError::Transport("transport".into())),
         Error::Http(HttpError::Provider("provider".into())),
@@ -483,14 +471,10 @@ async fn refresh_catches_only_source_failure_classes_at_both_provider_boundaries
     ];
     let propagated = vec![
         Error::Cancelled,
-        Error::Cancellation("custom cancellation".into()),
         Error::InvalidOperation("bug".into()),
         Error::Disposed,
         Error::Encode("json".into()),
         Error::Http(HttpError::Cancelled),
-        Error::Http(HttpError::RequestCancelled(
-            "The operation was canceled.".into(),
-        )),
         Error::Http(HttpError::Disposed),
         Error::Http(HttpError::InvalidJsonString("json".into())),
         Error::Response(ResponsesError::Json("json".into())),

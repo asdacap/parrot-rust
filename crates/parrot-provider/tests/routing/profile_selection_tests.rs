@@ -86,7 +86,6 @@ fn alias_default_and_slash_effort_selection_feed_canonical_selector_to_domain_pr
             selection.canonical_model.reasoning().unwrap().effort,
             "xhigh"
         );
-        assert_eq!(selection.canonical_base(), "p/vendor/model");
         assert_eq!(
             profiles.resolve(&selection.canonical_model.selector()),
             expected_variant,
@@ -172,18 +171,17 @@ fn alias_retarget_changes_future_profile_selection_but_captured_snapshot_keeps_o
     let current = router.resolve("preferred").unwrap();
     let current_profile = profiles.resolve(&current.canonical_model.selector());
     assert_eq!(captured.canonical_model.selector(), "p/vendor/old/high");
-    assert_eq!(captured.canonical_base(), "p/vendor/old");
     assert_eq!(captured.routing_snapshot.revision, 0);
     assert_eq!(
         captured
-            .alias_snapshot()
+            .routing_snapshot
+            .aliases
             .find("preferred")
             .unwrap()
             .model_string,
         "p/vendor/old/high"
     );
     assert_eq!(current.canonical_model.selector(), "p/vendor/new/low");
-    assert_eq!(current.canonical_base(), "p/vendor/new");
     assert_eq!(current.routing_snapshot.revision, 1);
     assert_eq!(
         old_profile,

@@ -140,10 +140,6 @@ impl Compactor {
         &self.planner
     }
 
-    pub fn planner_handle(&self) -> Arc<CompactionPlanner> {
-        self.planner.clone()
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub async fn compact(
         &self,
@@ -224,17 +220,6 @@ impl Compactor {
 
 impl From<core::CompactionResult> for CompactionResult {
     fn from(result: core::CompactionResult) -> Self {
-        Self {
-            history: result.history.into_iter().map(Into::into).collect(),
-            summary: result.summary.into(),
-            retained_messages: result.retained_messages,
-            watermark: result.watermark,
-        }
-    }
-}
-
-impl From<CompactionResult> for core::CompactionResult {
-    fn from(result: CompactionResult) -> Self {
         Self {
             history: result.history.into_iter().map(Into::into).collect(),
             summary: result.summary.into(),

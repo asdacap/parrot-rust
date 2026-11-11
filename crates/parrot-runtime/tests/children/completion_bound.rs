@@ -37,16 +37,19 @@ async fn actual_automatic_completion_bounds_oversized_multibyte_terminal_error_t
             )
             .unwrap();
         publication.entered().await;
-        let pending = h
-            .histories
-            .repository
-            .events()
-            .inputs_for_next_promotion(root.identity().session.session_id.clone())
-            .await
-            .unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].parts.len(), 1);
-        let ConversationPart::Text(notification) = &pending[0].parts[0] else {
+        let events = h.histories.repository.events();
+        let session = root.identity().session.session_id.clone();
+        assert_eq!(
+            events
+                .capture_pending_input_ids(session.clone())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let pending = events.peek_pending_input(session).await.unwrap().unwrap();
+        assert_eq!(pending.parts.len(), 1);
+        let ConversationPart::Text(notification) = &pending.parts[0] else {
             panic!("completion must be one text part")
         };
         assert!(notification.contains("Status: failed"));

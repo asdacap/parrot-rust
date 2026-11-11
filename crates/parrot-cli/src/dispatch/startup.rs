@@ -14,7 +14,7 @@ use parrot_domain::{
 };
 use parrot_foundation::paths::{ApplicationRoots, UserSessionResources};
 use parrot_host::{
-    composition::factory::user::{SessionEventLoadProgress, ordinary_workspace_resolver},
+    composition::factory::user::SessionEventLoadProgress,
     grpc::{
         address::TransportAddress,
         transport::{AttachError, GrpcTransportClient},
@@ -30,7 +30,6 @@ use parrot_storage::{
 use std::{
     fmt,
     io::{self, Write},
-    path::Path,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -237,37 +236,6 @@ impl LocalChatStartup {
     pub fn with_legacy_path_read_fallback(mut self, enabled: bool) -> Self {
         self.legacy_path_read_fallback = enabled;
         self
-    }
-
-    /// Ordinary discovery for callers that have not resolved the workspace yet.
-    /// Reuse `workspace()` for subsequent factory/router construction.
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_working_directory(
-        roots: ApplicationRoots,
-        working_directory: &Path,
-        runtime: RuntimeIdentity,
-        error: StartupProgress,
-        diagnostics: Arc<FileDiagnosticLog>,
-        open_local_client: OpenLocalClient,
-        configure_fresh: ConfigureFresh,
-        take_over: bool,
-    ) -> Result<Self, Status> {
-        let workspace = ordinary_workspace_resolver()(working_directory)
-            .map_err(|failure| Status::invalid_argument(failure.message))?;
-        Ok(Self::new(
-            roots,
-            workspace,
-            runtime,
-            error,
-            diagnostics,
-            open_local_client,
-            configure_fresh,
-            take_over,
-        ))
-    }
-
-    pub fn workspace(&self) -> &ProjectWorkspace {
-        &self.workspace
     }
 
     pub async fn open(

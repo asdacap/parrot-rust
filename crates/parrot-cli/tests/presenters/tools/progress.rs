@@ -58,8 +58,10 @@ fn progress_success_is_quiet_and_errors_remain_visible_even_with_invalid_argumen
 
 #[test]
 fn standard_registry_uses_the_quiet_progress_presenter() {
-    let registry = ToolPresenterRegistry::standard(Vec::new());
-    assert!(registry.registered_names().any(|name| name == "progress"));
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(
+        Vec::new(),
+        std::sync::Arc::new(tools::read::SkillReadPathFormatter::default()),
+    );
     assert!(
         registry
             .present_terminal(

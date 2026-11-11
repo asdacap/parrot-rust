@@ -1,15 +1,6 @@
 //! Whole-command admission is distinct from observation and durable completion.
 
-use super::async_ops::{BoxFuture, Cancellation};
-use super::paths::SelectedSessionRoot;
-
-/// An entire repository transaction, never an individual SQL statement.
-pub trait TransactionCommand: Send + 'static {
-    type Key: Clone + Eq + Send + Sync + 'static;
-    type Output: Send + 'static;
-
-    fn key(&self) -> &Self::Key;
-}
+use super::async_ops::BoxFuture;
 
 /// A fully durable value, distinct from an uncommitted event.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,27 +78,3 @@ pub enum AdmissionError<E> {
     Cancelled,
     Rejected(E),
 }
-
-/// Session-scoped transaction actor. Retries reuse the same key, preserve exact
-/// payload conflict detection, and never duplicate durable admission.
-pub trait SessionTransactions: Send + Sync {
-    type Command: TransactionCommand;
-    type Error: Send + Sync + 'static;
-
-    fn selected_root(&self) -> &SelectedSessionRoot;
-
-    /// Cancellation can reject only before the actor owns the whole command.
-    /// Later failures belong to completion; observation never owns execution.
-    fn admit<'a>(
-        &'a self,
-        command: Self::Command,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<TransactionTicket<Self>, AdmissionError<Self::Error>>>;
-}
-
-/// The strongly typed ticket for a transaction actor's command.
-pub type TransactionTicket<T> = CommitTicket<
-    <<T as SessionTransactions>::Command as TransactionCommand>::Key,
-    <<T as SessionTransactions>::Command as TransactionCommand>::Output,
-    <T as SessionTransactions>::Error,
->;

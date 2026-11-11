@@ -309,7 +309,7 @@ async fn build(
     (registry, clients)
 }
 async fn drain(provider: &dyn Provider, request: Request) -> Result<(), Error> {
-    let mut stream = provider.call(request)?;
+    let mut stream = provider.open_session()?.call(request)?;
     while stream.next(&ACTIVE).await?.is_some() {}
     stream.close().await
 }
@@ -480,7 +480,7 @@ async fn chatgpt_call_omits_max_output_tokens() {
     let transport = Transport::new(Mode::ChatGptCall);
     let provider = configured_provider(
         "chatgpt",
-        "",
+        "providers:\n  chatgpt:\n    disable_websocket: true\n",
         &Credentials(
             [(String::from("chatgpt"), String::from("token"))]
                 .into_iter()

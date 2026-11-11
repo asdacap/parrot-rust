@@ -270,13 +270,6 @@ impl parrot_provider::sessions::Provider for UnusedProvider {
     fn id(&self) -> &str {
         "fixture"
     }
-    fn call(
-        &self,
-        _: parrot_provider::sessions::Request,
-    ) -> Result<Box<dyn parrot_provider::sessions::EventStream>, parrot_provider::sessions::Error>
-    {
-        panic!("no provider calls")
-    }
     fn has_credential<'a>(
         &'a self,
         _: &'a dyn parrot_domain::contracts::async_ops::Cancellation,

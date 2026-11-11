@@ -66,10 +66,6 @@ impl<S: AccessSnapshot + 'static> CatalogAdapter<S> {
             .collect::<Result<_, _>>()?;
         Ok(Self { catalog, tools })
     }
-
-    pub fn catalog(&self) -> &ScopedCatalog<S> {
-        &self.catalog
-    }
 }
 impl<S: AccessSnapshot + 'static> ToolFactory<S> for CatalogAdapter<S> {
     fn materialize(&self) -> Result<ToolInventory<S>, TurnError> {
@@ -249,9 +245,7 @@ fn error_to_runtime(error: catalog::Error) -> ToolFailure {
                     FailureKind::AccessDenied
                 }
                 session::FailureKind::Io => FailureKind::Io,
-                session::FailureKind::InvalidOperation | session::FailureKind::InputConflict => {
-                    FailureKind::InvalidOperation
-                }
+                session::FailureKind::InvalidOperation => FailureKind::InvalidOperation,
                 session::FailureKind::Network => FailureKind::Http,
                 _ => FailureKind::Unexpected,
             },

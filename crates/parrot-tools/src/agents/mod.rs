@@ -201,9 +201,6 @@ impl<R, M> AgentTool<R, M> {
             status: StatusFormatter::default(),
         }
     }
-    pub fn name(&self) -> &'static str {
-        self.kind.name()
-    }
     fn text(&self, text: &str) -> Result<String, AgentToolError> {
         render(
             self.templates.as_deref(),

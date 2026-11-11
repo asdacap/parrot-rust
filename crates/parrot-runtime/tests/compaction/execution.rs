@@ -68,9 +68,6 @@ impl Provider for FakeProvider {
     fn id(&self) -> &str {
         "provider"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        FakeSession(self.0.clone()).call(request)
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         panic!("no credential access")
     }
@@ -1267,10 +1264,6 @@ async fn provider_response_body_stays_concrete_and_does_not_traverse_wrapped_cau
             "",
         ),
         (Error::Io("ordinary failure".into()), ""),
-        (
-            Error::HeaderTimeout("provider headers timed out".into()),
-            "",
-        ),
         (
             Error::Http(HttpError::Transport("provider stream idle timeout".into())),
             "",

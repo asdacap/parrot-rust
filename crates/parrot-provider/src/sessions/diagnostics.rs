@@ -313,12 +313,6 @@ impl CallTrace {
         }
         self.finish(TraceOutcome::Cancelled)
     }
-
-    pub fn observe_cancellation(&self, is_cancelled: bool) {
-        if is_cancelled {
-            self.cancel();
-        }
-    }
 }
 
 /// One transport attempt. Header receipt initializes response bytes to zero;

@@ -2,7 +2,7 @@ use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::{
     catalogs::Model,
     routing::{aliases::*, registry::ProviderRegistry},
-    sessions::{Content, Error, EventStream, Provider, Request, Session},
+    sessions::{Content, Error, Provider, Session},
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -10,9 +10,6 @@ struct FakeProvider;
 impl Provider for FakeProvider {
     fn id(&self) -> &str {
         "p"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        Err(Error::InvalidOperation("not called".into()))
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
@@ -66,7 +63,6 @@ fn resolve_preserves_requested_alias_identity_and_canonical_slash_model_route() 
     assert_eq!(selection.requested_selector.value, "preferred");
     assert_eq!(selection.alias.as_ref().unwrap().name, "preferred");
     assert_eq!(selection.canonical_model.selector(), "p/vendor/model");
-    assert_eq!(selection.canonical_base(), "p/vendor/model");
 }
 #[test]
 fn resolve_uses_default_alias_and_accepts_unlisted_alias_target() {
@@ -122,7 +118,8 @@ fn replace_retargets_future_resolutions_while_captured_snapshot_keeps_old_alias(
     assert_eq!(before.canonical_model.selector(), "p/old");
     assert_eq!(
         before
-            .alias_snapshot()
+            .routing_snapshot
+            .aliases
             .find("preferred")
             .unwrap()
             .model_string,
@@ -131,7 +128,8 @@ fn replace_retargets_future_resolutions_while_captured_snapshot_keeps_old_alias(
     assert_eq!(after.canonical_model.selector(), "p/new");
     assert_eq!(
         after
-            .alias_snapshot()
+            .routing_snapshot
+            .aliases
             .find("preferred")
             .unwrap()
             .model_string,
@@ -290,7 +288,7 @@ fn snapshots_preserve_metadata_context_precedence_and_explicit_revision() {
         Some(parrot_domain::values::context::ContextSize::parse("100k").unwrap());
     routing.publish(Arc::new(prepared));
     let selected = router.resolve("").unwrap();
-    assert_eq!(router.routing_revision(), 41);
+    assert_eq!(selected.routing_snapshot.revision, 41);
     assert_eq!(selected.context_limit().unwrap().to_string(), "20%");
     assert_eq!(
         selected.alias.unwrap().icon.unwrap().color,

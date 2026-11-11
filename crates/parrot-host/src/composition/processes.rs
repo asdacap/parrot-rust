@@ -20,10 +20,6 @@ impl ScopedProcessStatus {
     pub fn new(owner: Arc<ShellProcessOwner>) -> Self {
         Self { owner }
     }
-
-    pub fn owner(&self) -> &Arc<ShellProcessOwner> {
-        &self.owner
-    }
 }
 
 impl ProcessStatusSource for ScopedProcessStatus {

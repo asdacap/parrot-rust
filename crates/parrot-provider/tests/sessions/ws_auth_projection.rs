@@ -185,7 +185,7 @@ impl ApiKeySource for Keys {
                 KeyScript::Missing => Ok(String::new()),
                 KeyScript::Cancel => {
                     self.caller.cancel();
-                    Err(Error::Cancellation("synthetic auth cancelled".into()))
+                    Err(Error::Cancelled)
                 }
             }
         })
@@ -261,9 +261,6 @@ impl Provider for CountedProvider {
     fn id(&self) -> &str {
         self.inner.id()
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.inner.call(request)
-    }
     fn has_credential<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
@@ -319,14 +316,6 @@ impl Session for CountedSession {
     ) -> Result<Box<dyn EventStream>, Error> {
         self.counts.physical_calls.fetch_add(1, Ordering::SeqCst);
         Ok(self.count(self.inner.call_with_trace(request, trace)?))
-    }
-    fn call_with_retry_observation(
-        &self,
-        request: Request,
-        observe: Arc<dyn Fn(i32, Duration) + Send + Sync>,
-    ) -> Result<Box<dyn EventStream>, Error> {
-        self.counts.physical_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(self.count(self.inner.call_with_retry_observation(request, observe)?))
     }
     fn try_fall_back_to_http(&self) -> BoxFuture<'_, Result<bool, Error>> {
         self.counts.fallback_calls.fetch_add(1, Ordering::SeqCst);
@@ -428,9 +417,7 @@ fn counterpart(error: &Error) -> Result<(&'static str, &'static str), Error> {
             Ok(("Parrot.Auth.AuthException", "unexpected"))
         }
         Error::Provider(_) => Ok(("Parrot.Llm.LLMProviderException", "unexpected")),
-        Error::Cancelled | Error::Cancellation(_) => {
-            Ok(("System.OperationCanceledException", "cancelled"))
-        }
+        Error::Cancelled => Ok(("System.OperationCanceledException", "cancelled")),
         Error::Io(_) => Ok(("System.IO.IOException", "io")),
         Error::InvalidOperation(_) => Ok(("System.InvalidOperationException", "invalid_operation")),
         _ => Err(Error::InvalidOperation(
@@ -613,11 +600,7 @@ async fn run_case(
         .map_or(raw.as_ref(), |session| session as &dyn Session);
     session.begin_turn().await?;
     let request = collaborators.request.build()?;
-    let mut stream = if let Some(session) = &diagnostic_session {
-        session.call_cancellable(request, caller.clone())?
-    } else {
-        session.call(request)?
-    };
+    let mut stream = session.call(request)?;
     let mut events = Vec::new();
     let mut terminal = None;
     loop {
@@ -728,7 +711,6 @@ mod tests {
                 "unexpected",
             ),
             (Error::Io("unchanged".into()), "io"),
-            (Error::Cancellation("unchanged".into()), "cancelled"),
             (
                 Error::InvalidOperation("unchanged".into()),
                 "invalid_operation",

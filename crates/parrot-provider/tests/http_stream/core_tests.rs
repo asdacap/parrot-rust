@@ -547,7 +547,7 @@ fn provider_policy_errors_are_distinct_from_native_http_errors() {
         validate_headers(&[("Authorization".into(), "synthetic".into())]).unwrap_err(),
     ] {
         assert!(
-            !matches!(error, HttpError::Http(_) | HttpError::Transport(_)),
+            !matches!(error, HttpError::Transport(_)),
             "provider policy must retain its typed origin: {error:?}"
         );
     }

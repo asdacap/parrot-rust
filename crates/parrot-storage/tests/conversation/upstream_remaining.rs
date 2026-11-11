@@ -256,7 +256,7 @@ async fn safe_fallback(has_incomplete_history: bool) {
     // source-line:594
     assert!(
         repo.events()
-            .tool_terminals("child".into())
+            .tool_terminals_of_calls("child".into(), vec!["launch".into(), "unfinished".into()])
             .await
             .unwrap()
             .is_empty()
@@ -399,16 +399,23 @@ async fn original_bound_concurrent_counts_and_cross_agent_mutation() {
         blocked_directory: None,
     });
     // source-line:718
+    let mismatched = repo
+        .bind_agent_history("second".into(), first_projection)
+        .unwrap();
     assert!(matches!(
-        repo.bind_agent_history("second".into(), first_projection)
-            .unwrap()
-            .cleanup_fork()
+        mismatched
+            .repository()
+            .cleanup_forked_agent_history(mismatched.agent_session_id().into())
             .await,
         Err(EventError::Invalid(_))
     ));
     // source-line:719
     assert_eq!(repo.conversation("second".into()).await.unwrap().len(), 12);
-    first.cleanup_fork().await.unwrap();
+    first
+        .repository()
+        .cleanup_forked_agent_history(first.agent_session_id().into())
+        .await
+        .unwrap();
     repo.events().database().close().await.unwrap();
 }
 
@@ -456,8 +463,10 @@ async fn original_named_checkpoint_fork_remaps_settlement() {
     )
     .await;
     child_view
-        .initialize_fork(
+        .repository()
+        .initialize_forked_agent_history(
             "agent".into(),
+            child_view.agent_session_id().into(),
             HistoryForkBoundary::BeforeToolBatch {
                 assistant_sequence: spawn,
                 tool_call_id: "spawn".into(),
@@ -490,7 +499,14 @@ async fn original_named_checkpoint_fork_remaps_settlement() {
     assert_eq!(text(&child[2]), "between");
     // source-line:270
     assert_eq!(
-        single(&repo.events().tool_terminals("child".into()).await.unwrap()).tool_name,
+        single(
+            &repo
+                .events()
+                .tool_terminals_of_calls("child".into(), vec!["checkpoint".into(), "spawn".into()])
+                .await
+                .unwrap()
+        )
+        .tool_name,
         "set_checkpoint"
     );
     // source-line:272
@@ -518,7 +534,11 @@ async fn original_cleanup_fork_sqlite_empty() {
         )
         .await
         .unwrap();
-    history.cleanup_fork().await.unwrap();
+    history
+        .repository()
+        .cleanup_forked_agent_history(history.agent_session_id().into())
+        .await
+        .unwrap();
     // source-line:829
     assert!(history.conversation().await.unwrap().is_empty());
     repo.events().database().close().await.unwrap();
@@ -698,7 +718,12 @@ async fn original_safe_prefix_excludes_crossing_complete_batches() {
     // source-line:535
     assert_eq!(
         repo.events()
-            .tool_terminals("child".into())
+            .tool_terminals_of_calls(
+                "child".into(),
+                ["checkpoint", "early", "later", "incomplete"]
+                    .map(String::from)
+                    .to_vec()
+            )
             .await
             .unwrap()
             .iter()

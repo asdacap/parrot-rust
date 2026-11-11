@@ -77,9 +77,6 @@ impl Provider for FakeProvider {
     fn id(&self) -> &str {
         "fake"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        FakeSession(self.0.clone()).call(request)
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         self.0.credentials.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(true) })
@@ -404,10 +401,8 @@ fn typed_nested_errors_keep_provider_classification_fields() {
     );
 }
 #[tokio::test(start_paused = true)]
-async fn direct_provider_retry_does_not_open_a_session_and_forwards_capabilities() {
+async fn retrying_provider_forwards_capabilities() {
     let state = Arc::new(State::default());
-    *state.attempts.lock().unwrap() =
-        vec![VecDeque::from(vec![Err(wire())]), VecDeque::new()].into();
     let provider = RetryingProvider::new(Arc::new(FakeProvider(state.clone())), 5);
     let cancel = Cancel::default();
     assert!(provider.has_credential(&cancel).await.unwrap());
@@ -420,36 +415,6 @@ async fn direct_provider_retry_does_not_open_a_session_and_forwards_capabilities
         ),
         42
     );
-    let mut stream = provider.call(req()).unwrap();
-    retry(stream.next(&cancel).await.unwrap());
-    assert_eq!(stream.next(&cancel).await.unwrap(), None);
-    assert_eq!(state.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(state.requests.lock().unwrap().len(), 2);
-}
-#[tokio::test(start_paused = true)]
-async fn direct_provider_fallback_reports_source_invalid_operation() {
-    let state = Arc::new(State::default());
-    *state.attempts.lock().unwrap() = vec![
-        VecDeque::from(vec![Err(Error::Socket(
-            WebSocketError::Transport("closed".into())
-        ))]);
-        6
-    ]
-    .into();
-    let provider = RetryingProvider::new(Arc::new(FakeProvider(state.clone())), 5);
-    let mut stream = provider.call(req()).unwrap();
-    let cancel = Cancel::default();
-    for _ in 0..5 {
-        retry(stream.next(&cancel).await.unwrap());
-    }
-    assert_eq!(
-        stream.next(&cancel).await,
-        Err(Error::InvalidOperation(
-            "A stateless provider cannot select HTTP fallback.".into()
-        ))
-    );
-    assert_eq!(state.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(state.fallbacks.load(Ordering::SeqCst), 0);
 }
 #[tokio::test(start_paused = true)]
 async fn retries_preserve_attached_call_trace_identity() {
@@ -483,7 +448,7 @@ async fn retries_preserve_attached_call_trace_identity() {
 #[tokio::test]
 async fn cancelled_or_nonretryable_failures_retain_the_exact_original_error() {
     let errors = vec![
-        Error::Cancellation("cancel detail".into()),
+        Error::Cancelled,
         Error::Provider("missing key".into()),
         Error::Http(HttpError::Response(HttpFailure {
             status: 401,
@@ -556,7 +521,7 @@ async fn injected_sleeper_records_exact_requested_delays_only_after_retry_pull()
         vec![vec![Err(wire())], vec![Err(wire())], vec![]],
         sleeper.clone(),
     );
-    let mut stream = provider.call(req()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(req()).unwrap();
     let cancellation = Cancel::default();
     let started = tokio::time::Instant::now();
     assert_eq!(
@@ -579,7 +544,6 @@ async fn injected_sleeper_records_exact_requested_delays_only_after_retry_pull()
         vec![Duration::from_millis(200), Duration::from_millis(400)]
     );
     assert_eq!(started.elapsed(), Duration::ZERO);
-    assert_eq!(state.opens.load(Ordering::SeqCst), 0);
 }
 #[tokio::test(start_paused = true)]
 async fn session_retries_use_injected_sleeper_and_check_cancellation_before_timer_creation() {
@@ -632,7 +596,7 @@ async fn cancellation_during_injected_sleep_does_not_start_another_attempt() {
         ..Default::default()
     });
     let (state, provider) = provider_with_sleeper(vec![vec![Err(wire())], vec![]], sleeper.clone());
-    let mut stream = provider.call(req()).unwrap();
+    let mut stream = provider.open_session().unwrap().call(req()).unwrap();
     let cancellation = Cancel::default();
     retry(stream.next(&cancellation).await.unwrap());
     let result = tokio::join!(stream.next(&cancellation), async {
@@ -688,9 +652,11 @@ async fn usage_capability_is_transparent_and_never_observes_completed_tokens() {
     let retrying = RetryingProvider::new(provider, 5);
     assert_eq!(retrying.id(), "fake");
     assert!(Arc::ptr_eq(&retrying.usage_reporter().unwrap(), &reporter));
-    let mut direct = retrying.call(req()).unwrap();
+    let session = retrying.open_session().unwrap();
+    assert_eq!(state.opens.load(Ordering::SeqCst), 1);
+    let mut stream = session.call(req()).unwrap();
     assert!(matches!(
-        direct.next(&Cancel::default()).await.unwrap(),
+        stream.next(&Cancel::default()).await.unwrap(),
         Some(Event::Completed(Completion {
             input_tokens: 11,
             cached_input_tokens: 3,
@@ -699,9 +665,7 @@ async fn usage_capability_is_transparent_and_never_observes_completed_tokens() {
         }))
     ));
     assert_eq!(reporter_impl.0.load(Ordering::SeqCst), 0);
-    direct.close().await.unwrap();
-    let session = retrying.open_session().unwrap();
-    assert_eq!(state.opens.load(Ordering::SeqCst), 1);
+    stream.close().await.unwrap();
     assert_eq!(
         reporter.usage(&Cancel::default()).await.unwrap().plan_type,
         "quota"
@@ -769,17 +733,8 @@ fn canonical_fixture(
     );
     (state, provider, sleeper)
 }
-fn canonical_stream(
-    provider: &dyn Provider,
-    session: &Arc<dyn Session>,
-    use_session: bool,
-    request: Request,
-) -> Box<dyn EventStream> {
-    if use_session {
-        session.call(request).unwrap()
-    } else {
-        provider.call(request).unwrap()
-    }
+fn canonical_stream(session: &Arc<dyn Session>, request: Request) -> Box<dyn EventStream> {
+    session.call(request).unwrap()
 }
 async fn canonical_drain(
     mut stream: Box<dyn EventStream>,
@@ -820,535 +775,434 @@ fn canonical_kind(event: &Event) -> &'static str {
 }
 #[tokio::test]
 async fn canonical_idle_timeout_after_visible_output_is_not_retried() {
-    for use_session in [false, true] {
-        for event in canonical_visible().into_iter().take(3) {
-            let failure =
-                Error::Wire("provider: idle timeout waiting for HTTP/SSE response bytes".into());
-            let (state, provider, _) =
-                canonical_fixture(vec![vec![Ok(Some(event.clone())), Err(failure.clone())]], 5);
-            let session = provider.open_session().unwrap();
-            let (events, result) = canonical_drain(
-                canonical_stream(&provider, &session, use_session, canonical_request()),
-                &Cancel::default(),
-            )
-            .await;
-            assert_eq!(result, Err(failure));
-            assert_eq!(canonical_calls(&state), 1);
-            assert_eq!(events, vec![event]);
-            session.close().await.unwrap();
-        }
+    for event in canonical_visible().into_iter().take(3) {
+        let failure =
+            Error::Wire("provider: idle timeout waiting for HTTP/SSE response bytes".into());
+        let (state, provider, _) =
+            canonical_fixture(vec![vec![Ok(Some(event.clone())), Err(failure.clone())]], 5);
+        let session = provider.open_session().unwrap();
+        let (events, result) = canonical_drain(
+            canonical_stream(&session, canonical_request()),
+            &Cancel::default(),
+        )
+        .await;
+        assert_eq!(result, Err(failure));
+        assert_eq!(canonical_calls(&state), 1);
+        assert_eq!(events, vec![event]);
+        session.close().await.unwrap();
     }
 }
 #[tokio::test]
 async fn canonical_encrypted_reasoning_metadata_preserves_retry_eligibility() {
-    for use_session in [false, true] {
+    let failure = Error::Wire("provider: idle timeout waiting for HTTP/SSE response bytes".into());
+    let (state, provider, _) = canonical_fixture(
+        vec![
+            vec![Ok(Some(Event::EncryptedReasoningReceived)), Err(failure)],
+            vec![
+                Ok(Some(Event::EncryptedReasoningReceived)),
+                Ok(Some(canonical_completed(1, 1, "answer"))),
+            ],
+        ],
+        5,
+    );
+    let session = provider.open_session().unwrap();
+    let (events, result) = canonical_drain(
+        canonical_stream(&session, canonical_request()),
+        &Cancel::default(),
+    )
+    .await;
+    result.unwrap();
+    assert_eq!(canonical_calls(&state), 2);
+    assert_eq!(
+        events
+            .iter()
+            .map(canonical_kind)
+            .collect::<Vec<_>>()
+            .join(","),
+        "EncryptedReasoningReceived,Retry,EncryptedReasoningReceived,Completed"
+    );
+    assert!(!events[0].is_visible_output());
+    assert!(!events[2].is_visible_output());
+    session.close().await.unwrap();
+}
+#[tokio::test]
+async fn canonical_idle_timeout_before_output_retries_with_bounded_exhaustion() {
+    for exhausted in [false, true] {
         let failure =
             Error::Wire("provider: idle timeout waiting for HTTP/SSE response bytes".into());
+        let mut attempts = vec![
+            vec![
+                Ok(Some(Event::HttpRequestStarted)),
+                Ok(Some(Event::HttpResponseHeadersReceived)),
+                Err(failure.clone())
+            ];
+            if exhausted { 6 } else { 1 }
+        ];
+        if !exhausted {
+            attempts.push(vec![Ok(Some(canonical_completed(1, 1, "answer")))]);
+        }
+        let (state, provider, _) = canonical_fixture(attempts, 5);
+        let session = provider.open_session().unwrap();
+        let (events, result) = canonical_drain(
+            canonical_stream(&session, canonical_request()),
+            &Cancel::default(),
+        )
+        .await;
+        if exhausted {
+            assert_eq!(result, Err(failure));
+        } else {
+            result.unwrap();
+            assert_eq!(canonical_kind(events.last().unwrap()), "Completed");
+        }
+        assert_eq!(canonical_calls(&state), if exhausted { 6 } else { 2 });
+        assert_eq!(
+            canonical_retry_count(&events),
+            if exhausted { 5 } else { 1 }
+        );
+        session.close().await.unwrap();
+    }
+}
+#[tokio::test]
+async fn canonical_header_timeout_retry_can_succeed_or_be_cancelled() {
+    for cancel_retry in [false, true] {
+        let (state, provider, sleeper) = canonical_fixture(
+            vec![
+                vec![Err(Error::Http(HttpError::HeaderTimeout(
+                    Duration::from_secs(60),
+                )))],
+                vec![Ok(Some(canonical_completed(0, 0, "")))],
+            ],
+            1,
+        );
+        let session = provider.open_session().unwrap();
+        let cancellation = Cancel::default();
+        let mut stream = canonical_stream(&session, canonical_request());
+        assert_eq!(
+            canonical_kind(&stream.next(&cancellation).await.unwrap().unwrap()),
+            "Retry"
+        );
+        if cancel_retry {
+            cancellation.cancel();
+            assert_eq!(stream.next(&cancellation).await, Err(Error::Cancelled));
+            assert_eq!(canonical_calls(&state), 1);
+            assert!(sleeper.delays.lock().unwrap().is_empty());
+        } else {
+            assert_eq!(
+                canonical_kind(&stream.next(&cancellation).await.unwrap().unwrap()),
+                "Completed"
+            );
+            assert_eq!(stream.next(&cancellation).await.unwrap(), None);
+            assert_eq!(canonical_calls(&state), 2);
+        }
+        stream.close().await.unwrap();
+        session.close().await.unwrap();
+    }
+}
+#[tokio::test]
+async fn canonical_http_lifecycle_events_do_not_prevent_retry() {
+    for received_headers in [false, true] {
+        let mut first = vec![Ok(Some(Event::HttpRequestStarted))];
+        if received_headers {
+            first.push(Ok(Some(Event::HttpResponseHeadersReceived)));
+        }
+        first.push(Err(Error::Http(HttpError::HeaderTimeout(
+            Duration::from_secs(60),
+        ))));
         let (state, provider, _) = canonical_fixture(
             vec![
-                vec![Ok(Some(Event::EncryptedReasoningReceived)), Err(failure)],
+                first,
                 vec![
-                    Ok(Some(Event::EncryptedReasoningReceived)),
+                    Ok(Some(Event::HttpRequestStarted)),
+                    Ok(Some(Event::HttpResponseHeadersReceived)),
                     Ok(Some(canonical_completed(1, 1, "answer"))),
                 ],
             ],
-            5,
+            1,
         );
         let session = provider.open_session().unwrap();
         let (events, result) = canonical_drain(
-            canonical_stream(&provider, &session, use_session, canonical_request()),
+            canonical_stream(&session, canonical_request()),
             &Cancel::default(),
         )
         .await;
         result.unwrap();
-        assert_eq!(canonical_calls(&state), 2);
         assert_eq!(
             events
                 .iter()
                 .map(canonical_kind)
                 .collect::<Vec<_>>()
                 .join(","),
-            "EncryptedReasoningReceived,Retry,EncryptedReasoningReceived,Completed"
+            if received_headers {
+                "HttpRequestStarted,HttpResponseHeadersReceived,Retry,HttpRequestStarted,HttpResponseHeadersReceived,Completed"
+            } else {
+                "HttpRequestStarted,Retry,HttpRequestStarted,HttpResponseHeadersReceived,Completed"
+            }
         );
-        assert!(!events[0].is_visible_output());
-        assert!(!events[2].is_visible_output());
+        assert_eq!(canonical_calls(&state), 2);
+        assert_eq!(events.last().unwrap(), &canonical_completed(1, 1, "answer"));
         session.close().await.unwrap();
     }
 }
 #[tokio::test]
-async fn canonical_idle_timeout_before_output_retries_with_bounded_exhaustion() {
-    for use_session in [false, true] {
-        for exhausted in [false, true] {
-            let failure =
-                Error::Wire("provider: idle timeout waiting for HTTP/SSE response bytes".into());
-            let mut attempts = vec![
-                vec![
-                    Ok(Some(Event::HttpRequestStarted)),
-                    Ok(Some(Event::HttpResponseHeadersReceived)),
-                    Err(failure.clone())
-                ];
-                if exhausted { 6 } else { 1 }
-            ];
-            if !exhausted {
-                attempts.push(vec![Ok(Some(canonical_completed(1, 1, "answer")))]);
-            }
-            let (state, provider, _) = canonical_fixture(attempts, 5);
-            let session = provider.open_session().unwrap();
-            let (events, result) = canonical_drain(
-                canonical_stream(&provider, &session, use_session, canonical_request()),
-                &Cancel::default(),
-            )
-            .await;
-            if exhausted {
-                assert_eq!(result, Err(failure));
-            } else {
-                result.unwrap();
-                assert_eq!(canonical_kind(events.last().unwrap()), "Completed");
-            }
-            assert_eq!(canonical_calls(&state), if exhausted { 6 } else { 2 });
-            assert_eq!(
-                canonical_retry_count(&events),
-                if exhausted { 5 } else { 1 }
-            );
-            session.close().await.unwrap();
-        }
-    }
-}
-#[tokio::test]
-async fn canonical_header_timeout_retry_can_succeed_or_be_cancelled() {
-    for use_session in [false, true] {
-        for cancel_retry in [false, true] {
-            let (state, provider, sleeper) = canonical_fixture(
-                vec![
-                    vec![Err(Error::HeaderTimeout(
-                        "Exception of type 'Parrot.Llm.Wire.HeaderTimeoutException' was thrown."
-                            .into(),
-                    ))],
-                    vec![Ok(Some(canonical_completed(0, 0, "")))],
-                ],
-                1,
-            );
-            let session = provider.open_session().unwrap();
-            let cancellation = Cancel::default();
-            let mut stream =
-                canonical_stream(&provider, &session, use_session, canonical_request());
-            assert_eq!(
-                canonical_kind(&stream.next(&cancellation).await.unwrap().unwrap()),
-                "Retry"
-            );
-            if cancel_retry {
-                cancellation.cancel();
-                assert_eq!(stream.next(&cancellation).await, Err(Error::Cancelled));
-                assert_eq!(canonical_calls(&state), 1);
-                assert!(sleeper.delays.lock().unwrap().is_empty());
-            } else {
-                assert_eq!(
-                    canonical_kind(&stream.next(&cancellation).await.unwrap().unwrap()),
-                    "Completed"
-                );
-                assert_eq!(stream.next(&cancellation).await.unwrap(), None);
-                assert_eq!(canonical_calls(&state), 2);
-            }
-            stream.close().await.unwrap();
-            session.close().await.unwrap();
-        }
-    }
-}
-#[tokio::test]
-async fn canonical_http_lifecycle_events_do_not_prevent_retry() {
-    for use_session in [false, true] {
-        for received_headers in [false, true] {
-            let mut first = vec![Ok(Some(Event::HttpRequestStarted))];
-            if received_headers {
-                first.push(Ok(Some(Event::HttpResponseHeadersReceived)));
-            }
-            first.push(Err(Error::HeaderTimeout(
-                "Exception of type 'Parrot.Llm.Wire.HeaderTimeoutException' was thrown.".into(),
-            )));
-            let (state, provider, _) = canonical_fixture(
-                vec![
-                    first,
-                    vec![
-                        Ok(Some(Event::HttpRequestStarted)),
-                        Ok(Some(Event::HttpResponseHeadersReceived)),
-                        Ok(Some(canonical_completed(1, 1, "answer"))),
-                    ],
-                ],
-                1,
-            );
-            let session = provider.open_session().unwrap();
-            let (events, result) = canonical_drain(
-                canonical_stream(&provider, &session, use_session, canonical_request()),
-                &Cancel::default(),
-            )
-            .await;
-            result.unwrap();
-            assert_eq!(
-                events
-                    .iter()
-                    .map(canonical_kind)
-                    .collect::<Vec<_>>()
-                    .join(","),
-                if received_headers {
-                    "HttpRequestStarted,HttpResponseHeadersReceived,Retry,HttpRequestStarted,HttpResponseHeadersReceived,Completed"
-                } else {
-                    "HttpRequestStarted,Retry,HttpRequestStarted,HttpResponseHeadersReceived,Completed"
-                }
-            );
-            assert_eq!(canonical_calls(&state), 2);
-            assert_eq!(events.last().unwrap(), &canonical_completed(1, 1, "answer"));
-            session.close().await.unwrap();
-        }
-    }
-}
-#[tokio::test]
 async fn canonical_header_timeout_retries_stop_at_the_configured_limit() {
-    for use_session in [false, true] {
-        for maximum_retries in [0, 1, 5] {
-            let timeout = Error::HeaderTimeout("private-sentinel".into());
-            let (state, provider, _) = canonical_fixture(
-                vec![vec![Err(timeout.clone())]; maximum_retries as usize + 1],
-                maximum_retries,
-            );
-            let session = provider.open_session().unwrap();
-            let (events, result) = canonical_drain(
-                canonical_stream(&provider, &session, use_session, canonical_request()),
-                &Cancel::default(),
-            )
-            .await;
-            assert_eq!(canonical_calls(&state), maximum_retries as usize + 1);
-            assert_eq!(events.len(), maximum_retries as usize);
-            assert_eq!(
-                events
-                    .iter()
-                    .map(|event| match event {
-                        Event::Retry { attempt, .. } => *attempt,
-                        _ => panic!("unexpected event"),
-                    })
-                    .collect::<Vec<_>>(),
-                (1..=maximum_retries as i32).collect::<Vec<_>>()
-            );
-            let exhausted = result.unwrap_err();
-            assert_eq!(
-                exhausted.to_string(),
-                format!(
-                    "Provider header timeout retry limit exceeded ({maximum_retries} retries, {} attempts).",
-                    maximum_retries + 1
-                )
-            );
-            assert_eq!(
-                std::error::Error::source(&exhausted)
-                    .unwrap()
-                    .downcast_ref::<Error>(),
-                Some(&timeout)
-            );
-            session.close().await.unwrap();
-        }
-    }
-}
-#[tokio::test]
-async fn canonical_retry_events_preserve_output_without_duplicate_observation() {
-    for observer_fails in [false, true] {
-        let completed = canonical_completed(1, 2, "private-sentinel");
+    for maximum_retries in [0, 1, 5] {
+        let timeout = Error::Http(HttpError::HeaderTimeout(Duration::from_secs(60)));
         let (state, provider, _) = canonical_fixture(
-            vec![
-                vec![Err(Error::Io("private-sentinel".into()))],
-                vec![Ok(Some(completed.clone()))],
-            ],
-            5,
+            vec![vec![Err(timeout.clone())]; maximum_retries as usize + 1],
+            maximum_retries,
         );
         let session = provider.open_session().unwrap();
-        let observed = Arc::new(Mutex::new(vec![]));
-        let capture = observed.clone();
-        let stream = session
-            .call_with_retry_observation(
-                canonical_request(),
-                Arc::new(move |attempt, delay| {
-                    capture.lock().unwrap().push((attempt, delay));
-                    assert!(!observer_fails, "private-sentinel");
-                }),
-            )
-            .unwrap();
-        let (events, result) = canonical_drain(stream, &Cancel::default()).await;
-        result.unwrap();
-        assert_eq!(canonical_calls(&state), 2);
-        assert_eq!(&events[1..], &[completed]);
-        assert!(observed.lock().unwrap().is_empty());
+        let (events, result) = canonical_drain(
+            canonical_stream(&session, canonical_request()),
+            &Cancel::default(),
+        )
+        .await;
+        assert_eq!(canonical_calls(&state), maximum_retries as usize + 1);
+        assert_eq!(events.len(), maximum_retries as usize);
         assert_eq!(
-            events[0],
-            Event::Retry {
-                attempt: 1,
-                retry_after: Duration::from_millis(200),
-                reason: "Provider connection or protocol failure. Retrying.".into()
-            }
+            events
+                .iter()
+                .map(|event| match event {
+                    Event::Retry { attempt, .. } => *attempt,
+                    _ => panic!("unexpected event"),
+                })
+                .collect::<Vec<_>>(),
+            (1..=maximum_retries as i32).collect::<Vec<_>>()
+        );
+        let exhausted = result.unwrap_err();
+        assert_eq!(
+            exhausted.to_string(),
+            format!(
+                "Provider header timeout retry limit exceeded ({maximum_retries} retries, {} attempts).",
+                maximum_retries + 1
+            )
+        );
+        assert_eq!(
+            std::error::Error::source(&exhausted)
+                .unwrap()
+                .downcast_ref::<Error>(),
+            Some(&timeout)
         );
         session.close().await.unwrap();
     }
 }
 #[tokio::test]
 async fn canonical_transient_failures_emit_safe_retry_events_before_waiting() {
-    for use_session in [false, true] {
-        for (kind, expected_ms) in [
-            ("headers", 2000),
-            ("http429", 200),
-            ("http500", 200),
-            ("http503", 2000),
-            ("upgrade429", 200),
-            ("upgrade502", 200),
-            ("websocket", 200),
-            ("network", 200),
-        ] {
-            let failure = match kind {
-                "headers" => Error::HeaderTimeout("private-sentinel".into()),
-                "http429" => canonical_http(429, "", "", "private-sentinel"),
-                "http500" => canonical_http(500, "", "", "private-sentinel"),
-                "http503" => canonical_http(503, "", "", "private-sentinel"),
-                "upgrade429" => Error::Socket(WebSocketError::Upgrade {
-                    status: 429,
-                    message: "private-sentinel".into(),
-                }),
-                "upgrade502" => Error::Socket(WebSocketError::Upgrade {
-                    status: 502,
-                    message: "private-sentinel".into(),
-                }),
-                "websocket" => Error::Socket(WebSocketError::Transport("private-sentinel".into())),
-                _ => Error::Io("private-sentinel".into()),
-            };
-            let (state, provider, sleeper) = canonical_fixture(vec![vec![Err(failure)]], 5);
-            let session = provider.open_session().unwrap();
-            let mut stream =
-                canonical_stream(&provider, &session, use_session, canonical_request());
-            let event = stream.next(&Cancel::default()).await.unwrap().unwrap();
-            assert_eq!(canonical_calls(&state), 1);
-            match event {
-                Event::Retry {
-                    attempt,
-                    retry_after,
-                    reason,
-                } => {
-                    assert_eq!(attempt, 1);
-                    assert_eq!(retry_after, Duration::from_millis(expected_ms));
-                    assert!(!reason.trim().is_empty());
-                    assert!(!reason.contains("private-sentinel"));
-                }
-                _ => panic!("not retry: {kind}"),
-            }
-            assert!(sleeper.delays.lock().unwrap().is_empty());
-            stream.close().await.unwrap();
-            session.close().await.unwrap();
-        }
-    }
-}
-#[tokio::test]
-async fn canonical_visible_retry_is_not_also_reported_to_the_silent_observer() {
-    let (state, provider, _) = canonical_fixture(
-        vec![vec![Err(canonical_http(
-            503,
-            "",
-            "",
-            "Service Unavailable",
-        ))]],
-        5,
-    );
-    let session = provider.open_session().unwrap();
-    let observations = Arc::new(AtomicUsize::new(0));
-    let capture = observations.clone();
-    let mut stream = session
-        .call_with_retry_observation(
-            canonical_request(),
-            Arc::new(move |_, _| {
-                capture.fetch_add(1, Ordering::SeqCst);
+    for (kind, expected_ms) in [
+        ("headers", 2000),
+        ("http429", 200),
+        ("http500", 200),
+        ("http503", 2000),
+        ("upgrade429", 200),
+        ("upgrade502", 200),
+        ("websocket", 200),
+        ("network", 200),
+    ] {
+        let failure = match kind {
+            "headers" => Error::Http(HttpError::HeaderTimeout(Duration::from_secs(60))),
+            "http429" => canonical_http(429, "", "", "private-sentinel"),
+            "http500" => canonical_http(500, "", "", "private-sentinel"),
+            "http503" => canonical_http(503, "", "", "private-sentinel"),
+            "upgrade429" => Error::Socket(WebSocketError::Upgrade {
+                status: 429,
+                message: "private-sentinel".into(),
             }),
-        )
-        .unwrap();
-    assert_eq!(
-        canonical_kind(&stream.next(&Cancel::default()).await.unwrap().unwrap()),
-        "Retry"
-    );
-    assert_eq!(observations.load(Ordering::SeqCst), 0);
-    assert_eq!(canonical_calls(&state), 1);
-    stream.close().await.unwrap();
-    session.close().await.unwrap();
+            "upgrade502" => Error::Socket(WebSocketError::Upgrade {
+                status: 502,
+                message: "private-sentinel".into(),
+            }),
+            "websocket" => Error::Socket(WebSocketError::Transport("private-sentinel".into())),
+            _ => Error::Io("private-sentinel".into()),
+        };
+        let (state, provider, sleeper) = canonical_fixture(vec![vec![Err(failure)]], 5);
+        let session = provider.open_session().unwrap();
+        let mut stream = canonical_stream(&session, canonical_request());
+        let event = stream.next(&Cancel::default()).await.unwrap().unwrap();
+        assert_eq!(canonical_calls(&state), 1);
+        match event {
+            Event::Retry {
+                attempt,
+                retry_after,
+                reason,
+            } => {
+                assert_eq!(attempt, 1);
+                assert_eq!(retry_after, Duration::from_millis(expected_ms));
+                assert!(!reason.trim().is_empty());
+                assert!(!reason.contains("private-sentinel"));
+            }
+            _ => panic!("not retry: {kind}"),
+        }
+        assert!(sleeper.delays.lock().unwrap().is_empty());
+        stream.close().await.unwrap();
+        session.close().await.unwrap();
+    }
 }
 #[tokio::test]
 async fn canonical_context_budget_recovery_is_bounded_and_preserves_the_request() {
     const DETAIL: &str = "litellm.BadRequestError: OpenAIException - Requested token count exceeds the model's maximum context length of 180000 tokens. You requested a total of 180514 tokens: 147746 tokens from the input messages and 32768 tokens for the completion. Please reduce your prompt.";
     const SECOND: &str = "Requested token count exceeds the model's maximum context length of 180000 tokens. You requested a total of 180001 tokens: 155135 tokens from the input messages and 24866 tokens for the completion.";
-    for use_session in [false, true] {
-        for fails_again in [false, true] {
-            for stream_error in [false, true] {
-                let failure = if stream_error {
-                    canonical_response("null", "400", DETAIL)
-                } else {
-                    canonical_http(
-                        400,
-                        "null",
-                        "400",
-                        &format!("{DETAIL} Fallback failed: {DETAIL}"),
-                    )
-                };
-                let second = if stream_error {
-                    canonical_response("null", "400", SECOND)
-                } else {
-                    canonical_http(400, "null", "400", SECOND)
-                };
-                let (state, provider, _) = canonical_fixture(
-                    vec![
-                        vec![Err(failure)],
-                        if fails_again {
-                            vec![Err(second.clone())]
-                        } else {
-                            vec![Ok(Some(canonical_completed(147746, 1, "reply")))]
-                        },
-                    ],
-                    5,
-                );
-                let session = provider.open_session().unwrap();
-                let request = Request {
-                    max_output_tokens: 32768,
-                    instructions: "preserve".into(),
-                    include_router_metadata: true,
-                    ..canonical_request()
-                };
-                let (events, result) = canonical_drain(
-                    canonical_stream(&provider, &session, use_session, request.clone()),
-                    &Cancel::default(),
+    for fails_again in [false, true] {
+        for stream_error in [false, true] {
+            let failure = if stream_error {
+                canonical_response("null", "400", DETAIL)
+            } else {
+                canonical_http(
+                    400,
+                    "null",
+                    "400",
+                    &format!("{DETAIL} Fallback failed: {DETAIL}"),
                 )
-                .await;
-                if fails_again {
-                    assert_eq!(result, Err(second));
-                    assert_eq!(events.len(), 1);
-                } else {
-                    result.unwrap();
-                    assert_eq!(canonical_kind(events.last().unwrap()), "Completed");
-                }
-                assert_eq!(canonical_calls(&state), 2);
-                assert_eq!(
-                    events[0],
-                    Event::Retry {
-                        attempt: 1,
-                        retry_after: Duration::ZERO,
-                        reason:
-                            "Context limit exceeded. Retrying with a reduced output token budget."
-                                .into()
-                    }
-                );
-                assert_eq!(
-                    *state.requests.lock().unwrap(),
-                    vec![
-                        request.clone(),
-                        Request {
-                            max_output_tokens: 24866,
-                            ..request.clone()
-                        }
-                    ]
-                );
-                assert_eq!(request.max_output_tokens, 32768);
-                session.close().await.unwrap();
+            };
+            let second = if stream_error {
+                canonical_response("null", "400", SECOND)
+            } else {
+                canonical_http(400, "null", "400", SECOND)
+            };
+            let (state, provider, _) = canonical_fixture(
+                vec![
+                    vec![Err(failure)],
+                    if fails_again {
+                        vec![Err(second.clone())]
+                    } else {
+                        vec![Ok(Some(canonical_completed(147746, 1, "reply")))]
+                    },
+                ],
+                5,
+            );
+            let session = provider.open_session().unwrap();
+            let request = Request {
+                max_output_tokens: 32768,
+                instructions: "preserve".into(),
+                include_router_metadata: true,
+                ..canonical_request()
+            };
+            let (events, result) = canonical_drain(
+                canonical_stream(&session, request.clone()),
+                &Cancel::default(),
+            )
+            .await;
+            if fails_again {
+                assert_eq!(result, Err(second));
+                assert_eq!(events.len(), 1);
+            } else {
+                result.unwrap();
+                assert_eq!(canonical_kind(events.last().unwrap()), "Completed");
             }
+            assert_eq!(canonical_calls(&state), 2);
+            assert_eq!(
+                events[0],
+                Event::Retry {
+                    attempt: 1,
+                    retry_after: Duration::ZERO,
+                    reason: "Context limit exceeded. Retrying with a reduced output token budget."
+                        .into()
+                }
+            );
+            assert_eq!(
+                *state.requests.lock().unwrap(),
+                vec![
+                    request.clone(),
+                    Request {
+                        max_output_tokens: 24866,
+                        ..request.clone()
+                    }
+                ]
+            );
+            assert_eq!(request.max_output_tokens, 32768);
+            session.close().await.unwrap();
         }
     }
 }
 #[tokio::test]
 async fn canonical_context_errors_without_output_capacity_are_not_retried() {
-    for use_session in [false, true] {
-        for (input, total) in [("180001", "212769"), ("171429", "204197")] {
-            let failure = canonical_http(
-                400,
-                "null",
-                "400",
-                &format!(
-                    "Requested token count exceeds the model's maximum context length of 180000 tokens. You requested a total of {total} tokens: {input} tokens from the input messages and 32768 tokens for the completion."
-                ),
-            );
-            let (state, provider, _) = canonical_fixture(vec![vec![Err(failure.clone())]], 5);
-            let session = provider.open_session().unwrap();
-            let (_, result) = canonical_drain(
-                canonical_stream(
-                    &provider,
-                    &session,
-                    use_session,
-                    Request {
-                        max_output_tokens: 32768,
-                        ..canonical_request()
-                    },
-                ),
-                &Cancel::default(),
-            )
-            .await;
-            assert_eq!(result, Err(failure));
-            assert_eq!(canonical_calls(&state), 1);
-            session.close().await.unwrap();
-        }
+    for (input, total) in [("180001", "212769"), ("171429", "204197")] {
+        let failure = canonical_http(
+            400,
+            "null",
+            "400",
+            &format!(
+                "Requested token count exceeds the model's maximum context length of 180000 tokens. You requested a total of {total} tokens: {input} tokens from the input messages and 32768 tokens for the completion."
+            ),
+        );
+        let (state, provider, _) = canonical_fixture(vec![vec![Err(failure.clone())]], 5);
+        let session = provider.open_session().unwrap();
+        let (_, result) = canonical_drain(
+            canonical_stream(
+                &session,
+                Request {
+                    max_output_tokens: 32768,
+                    ..canonical_request()
+                },
+            ),
+            &Cancel::default(),
+        )
+        .await;
+        assert_eq!(result, Err(failure));
+        assert_eq!(canonical_calls(&state), 1);
+        session.close().await.unwrap();
     }
 }
 #[tokio::test]
 async fn canonical_context_errors_after_visible_output_are_not_retried() {
-    for use_session in [false, true] {
-        for event in canonical_visible() {
-            let failure = canonical_http(
-                400,
-                "null",
-                "400",
-                "Requested token count exceeds the model's maximum context length of 180000 tokens. You requested a total of 180514 tokens: 147746 tokens from the input messages and 32768 tokens for the completion.",
-            );
-            let (state, provider, _) =
-                canonical_fixture(vec![vec![Ok(Some(event)), Err(failure.clone())]], 5);
-            let session = provider.open_session().unwrap();
-            let (_, result) = canonical_drain(
-                canonical_stream(
-                    &provider,
-                    &session,
-                    use_session,
-                    Request {
-                        max_output_tokens: 32768,
-                        ..canonical_request()
-                    },
-                ),
-                &Cancel::default(),
-            )
-            .await;
-            assert_eq!(result, Err(failure));
-            assert_eq!(canonical_calls(&state), 1);
-            session.close().await.unwrap();
-        }
-    }
-}
-#[tokio::test]
-async fn inner_invalid_operation_retries_in_direct_and_session_calls() {
-    for use_session in [false, true] {
-        let failure = Error::InvalidOperation("private-sentinel".into());
-        assert_eq!(classify_failure(&failure), Failure::Protocol);
-        let completed = canonical_completed(1, 1, "reply");
-        let (state, provider, sleeper) = canonical_fixture(
-            vec![vec![Err(failure)], vec![Ok(Some(completed.clone()))]],
-            5,
+    for event in canonical_visible() {
+        let failure = canonical_http(
+            400,
+            "null",
+            "400",
+            "Requested token count exceeds the model's maximum context length of 180000 tokens. You requested a total of 180514 tokens: 147746 tokens from the input messages and 32768 tokens for the completion.",
         );
+        let (state, provider, _) =
+            canonical_fixture(vec![vec![Ok(Some(event)), Err(failure.clone())]], 5);
         let session = provider.open_session().unwrap();
-        let (events, result) = canonical_drain(
-            canonical_stream(&provider, &session, use_session, canonical_request()),
+        let (_, result) = canonical_drain(
+            canonical_stream(
+                &session,
+                Request {
+                    max_output_tokens: 32768,
+                    ..canonical_request()
+                },
+            ),
             &Cancel::default(),
         )
         .await;
-        result.unwrap();
-        assert_eq!(
-            events,
-            vec![
-                Event::Retry {
-                    attempt: 1,
-                    retry_after: Duration::from_millis(200),
-                    reason: "Provider connection or protocol failure. Retrying.".into(),
-                },
-                completed
-            ]
-        );
-        assert_eq!(canonical_calls(&state), 2);
-        assert_eq!(
-            *sleeper.delays.lock().unwrap(),
-            vec![Duration::from_millis(200)]
-        );
+        assert_eq!(result, Err(failure));
+        assert_eq!(canonical_calls(&state), 1);
         session.close().await.unwrap();
     }
+}
+#[tokio::test]
+async fn inner_invalid_operation_retries_in_session_calls() {
+    let failure = Error::InvalidOperation("private-sentinel".into());
+    assert_eq!(classify_failure(&failure), Failure::Protocol);
+    let completed = canonical_completed(1, 1, "reply");
+    let (state, provider, sleeper) = canonical_fixture(
+        vec![vec![Err(failure)], vec![Ok(Some(completed.clone()))]],
+        5,
+    );
+    let session = provider.open_session().unwrap();
+    let (events, result) = canonical_drain(
+        canonical_stream(&session, canonical_request()),
+        &Cancel::default(),
+    )
+    .await;
+    result.unwrap();
+    assert_eq!(
+        events,
+        vec![
+            Event::Retry {
+                attempt: 1,
+                retry_after: Duration::from_millis(200),
+                reason: "Provider connection or protocol failure. Retrying.".into(),
+            },
+            completed
+        ]
+    );
+    assert_eq!(canonical_calls(&state), 2);
+    assert_eq!(
+        *sleeper.delays.lock().unwrap(),
+        vec![Duration::from_millis(200)]
+    );
+    session.close().await.unwrap();
 }
 #[tokio::test]
 async fn canonical_a_drop_before_any_output_reconnects() {
@@ -1363,7 +1217,11 @@ async fn canonical_a_drop_before_any_output_reconnects() {
         5,
     );
     let (events, result) = canonical_drain(
-        provider.call(canonical_request()).unwrap(),
+        provider
+            .open_session()
+            .unwrap()
+            .call(canonical_request())
+            .unwrap(),
         &Cancel::default(),
     )
     .await;
@@ -1393,7 +1251,11 @@ async fn canonical_a_drop_after_output_is_not_retried() {
         5,
     );
     let (events, result) = canonical_drain(
-        provider.call(canonical_request()).unwrap(),
+        provider
+            .open_session()
+            .unwrap()
+            .call(canonical_request())
+            .unwrap(),
         &Cancel::default(),
     )
     .await;
@@ -1415,7 +1277,11 @@ async fn canonical_a_permanent_failure_is_not_retried() {
         };
         let (state, provider, _) = canonical_fixture(vec![vec![Err(failure.clone())]], 5);
         let (_, result) = canonical_drain(
-            provider.call(canonical_request()).unwrap(),
+            provider
+                .open_session()
+                .unwrap()
+                .call(canonical_request())
+                .unwrap(),
             &Cancel::default(),
         )
         .await;
@@ -1435,7 +1301,11 @@ async fn canonical_service_unavailable_uses_the_visible_overload_retry() {
             ))]],
             5,
         );
-        let mut stream = provider.call(canonical_request()).unwrap();
+        let mut stream = provider
+            .open_session()
+            .unwrap()
+            .call(canonical_request())
+            .unwrap();
         assert_eq!(
             stream.next(&Cancel::default()).await.unwrap(),
             Some(Event::Retry {
@@ -1460,7 +1330,11 @@ async fn canonical_a_terminal_stream_error_surfaces() {
     let failure = canonical_response("insufficient_quota", "", "spent");
     let (state, provider, _) = canonical_fixture(vec![vec![Err(failure.clone())]], 5);
     let (_, result) = canonical_drain(
-        provider.call(canonical_request()).unwrap(),
+        provider
+            .open_session()
+            .unwrap()
+            .call(canonical_request())
+            .unwrap(),
         &Cancel::default(),
     )
     .await;
@@ -1472,7 +1346,11 @@ async fn canonical_a_structured_stream_context_error_is_not_retried() {
     let failure = canonical_response("", "context_window_exceeded", "too long");
     let (state, provider, _) = canonical_fixture(vec![vec![Err(failure.clone())]], 5);
     let (_, result) = canonical_drain(
-        provider.call(canonical_request()).unwrap(),
+        provider
+            .open_session()
+            .unwrap()
+            .call(canonical_request())
+            .unwrap(),
         &Cancel::default(),
     )
     .await;

@@ -12,6 +12,8 @@ use parrot_cli::{
     terminal_layout::TerminalText,
 };
 
+use crate::support::animate;
+
 fn context(columns: usize, color: bool) -> ScrollbackRenderContext {
     ScrollbackRenderContext {
         columns,
@@ -154,7 +156,7 @@ fn live_rendering_uses_source_spinner_styles_and_real_timer_closure_on_clone() {
                 .text()
                 .contains(&format!("({timer})"))
         );
-        let animated = item.animate(index);
+        let animated = animate(&item, index);
         let rendered = LiveBufferItem::render(
             &animated,
             LiveBufferRenderContext {
