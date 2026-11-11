@@ -18,9 +18,8 @@ impl EventRepository {
     where
         F: FnOnce(&AdmittedInput) -> Result<Event, EventError> + Send + 'static,
     {
-        let context = self.context().clone();
         self.admit((agent.clone(), message.clone()), cancellation, move |tx| {
-            inputs::admit_parts(tx, &context, &agent, &message, parts, delivery, compose)
+            inputs::admit_parts(tx, &agent, &message, parts, delivery, compose)
         })
     }
     pub fn admit_steer_if_idle<F>(
@@ -34,9 +33,8 @@ impl EventRepository {
     where
         F: FnOnce(&AdmittedInput) -> Result<Event, EventError> + Send + 'static,
     {
-        let context = self.context().clone();
         self.admit((agent.clone(), message.clone()), cancellation, move |tx| {
-            inputs::admit_steer_if_idle(tx, &context, &agent, &message, content, compose)
+            inputs::admit_steer_if_idle(tx, &agent, &message, content, compose)
         })
     }
     pub async fn cancel_pending_input<F>(
@@ -48,8 +46,7 @@ impl EventRepository {
     where
         F: FnOnce() -> Result<Event, EventError> + Send + 'static,
     {
-        let context = self.context().clone();
-        self.transaction(move |tx| inputs::cancel_pending(tx, &context, &agent, &input, compose))
+        self.transaction(move |tx| inputs::cancel_pending(tx, &agent, &input, compose))
             .await
     }
     pub async fn promote_steers<F>(
@@ -60,9 +57,8 @@ impl EventRepository {
     where
         F: FnMut(&AdmittedInput) -> Result<Event, EventError> + Send + 'static,
     {
-        let context = self.context().clone();
         self.transaction(move |tx| {
-            inputs::promote(tx, &context, &agent, Delivery::DELIVERY_STEER, -1, compose)
+            inputs::promote(tx, &agent, Delivery::DELIVERY_STEER, -1, compose)
         })
         .await
     }
@@ -74,9 +70,8 @@ impl EventRepository {
     where
         F: FnMut(&AdmittedInput) -> Result<Event, EventError> + Send + 'static,
     {
-        let context = self.context().clone();
         self.transaction(move |tx| {
-            inputs::promote(tx, &context, &agent, Delivery::DELIVERY_QUEUE, 1, compose)
+            inputs::promote(tx, &agent, Delivery::DELIVERY_QUEUE, 1, compose)
         })
         .await
     }
@@ -125,7 +120,6 @@ impl EventRepository {
                 "correlated event must describe an execution lifecycle boundary".into(),
             ));
         }
-        let context = self.context().clone();
         self.transaction(move |tx| {
             let bytes: Option<Vec<u8>> = tx
                 .query_row(
@@ -156,7 +150,7 @@ impl EventRepository {
                 }
                 return Ok(None);
             }
-            record(tx, &event, None, &(context.timestamp)())?;
+            record(tx, &event, None, &timestamp())?;
             Ok(Some(event))
         })
         .await
@@ -170,9 +164,8 @@ impl EventRepository {
         message: Option<ConversationMessage>,
         cancellation: &dyn Cancellation,
     ) -> Result<CommitTicket<String, AppendOutcome, EventError>, AdmissionError<EventError>> {
-        let context = self.context().clone();
         self.admit(event.id.clone(), cancellation, move |tx| {
-            append(tx, &context, &event, raw.as_deref(), message.as_ref())
+            append(tx, &event, raw.as_deref(), message.as_ref())
         })
     }
     pub async fn append(
@@ -197,11 +190,8 @@ impl EventRepository {
         Ok(ticket.into_completion().await?.into_value().into_output())
     }
     pub async fn append_usage_fact(&self, event: Event) -> Result<i64, EventError> {
-        let context = self.context().clone();
-        self.transaction(move |tx| {
-            statistics::append_usage_fact(tx, &event, context.timestamp.as_ref())
-        })
-        .await
+        self.transaction(move |tx| statistics::append_usage_fact(tx, &event, &timestamp))
+            .await
     }
     pub async fn find_request_usage(
         &self,
@@ -230,15 +220,8 @@ impl EventRepository {
         assistant_sequence: i64,
         terminal: ToolExecutionTerminal,
     ) -> Result<Option<ConversationItem>, EventError> {
-        let context = self.context().clone();
         self.transaction(move |tx| {
-            tools::append_tool_settlement(
-                tx,
-                &event,
-                assistant_sequence,
-                &terminal,
-                context.timestamp.as_ref(),
-            )
+            tools::append_tool_settlement(tx, &event, assistant_sequence, &terminal, &timestamp)
         })
         .await
     }
@@ -248,15 +231,8 @@ impl EventRepository {
         assistant_sequence: i64,
         parts: Vec<ConversationPart>,
     ) -> Result<Option<ConversationItem>, EventError> {
-        let context = self.context().clone();
         self.transaction(move |tx| {
-            tools::append_tool_synthetic(
-                tx,
-                &event,
-                assistant_sequence,
-                &parts,
-                context.timestamp.as_ref(),
-            )
+            tools::append_tool_synthetic(tx, &event, assistant_sequence, &parts, &timestamp)
         })
         .await
     }
@@ -292,16 +268,13 @@ pub struct AppendOutcome {
 }
 pub fn append(
     tx: &Transaction<'_>,
-    context: &RepositoryContext,
     event: &Event,
     raw: Option<&[u8]>,
     message: Option<&ConversationMessage>,
 ) -> Result<AppendOutcome, EventError> {
-    let stored = record(tx, event, raw, &(context.timestamp)())?;
+    let stored = record(tx, event, raw, &timestamp())?;
     let conversation = message
-        .map(|message| {
-            projection::project(tx, &event.agent_session_id, message, &(context.timestamp)())
-        })
+        .map(|message| projection::project(tx, &event.agent_session_id, message, &timestamp()))
         .transpose()?;
     Ok(AppendOutcome {
         stored,

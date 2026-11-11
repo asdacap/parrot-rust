@@ -3,7 +3,7 @@ use super::{ClaimDisposition, SessionActivationLease, SessionAdmission, SessionA
 use crate::artifacts::{ImageArtifactRepository, ImageArtifactStore};
 use crate::database::{DatabaseError, SessionDatabase};
 use crate::diagnostics::{DiagnosticEvent, DiagnosticSeverity, FileDiagnosticLog};
-use crate::events::{EventRepository, RepositoryContext};
+use crate::events::{EventRepository, timestamp};
 use crate::history_files::{SessionCatalogEntry, SessionIndex, SessionMeta};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::paths::SelectedSessionRoot;
@@ -697,7 +697,7 @@ impl SessionStore {
             router,
             workspace,
             global,
-            clock: RepositoryContext::default().timestamp,
+            clock: Arc::new(timestamp),
         }
     }
     pub fn with_clock(mut self, clock: Arc<dyn Fn() -> String + Send + Sync>) -> Self {

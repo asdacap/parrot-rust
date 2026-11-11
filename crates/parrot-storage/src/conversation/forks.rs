@@ -1,6 +1,6 @@
 //! Checkpoints and fork copies execute inside one selected-session transaction.
 use super::{ConversationRepository, EventError, compaction, reads, types::*};
-use crate::events::projection;
+use crate::events::{projection, timestamp};
 use parrot_core::{HistoryGroupMember, assemble_history_groups};
 use rusqlite::{Transaction, params};
 use std::collections::{BTreeMap, BTreeSet};
@@ -130,11 +130,12 @@ impl ConversationRepository {
             return Ok(());
         }
         self.validate(&destination)?;
-        let clock = self.events.context().timestamp.clone();
         let target = destination.clone();
         self.events
             .transact(move |tx| {
-                initialize_fork(tx, source, &target, boundary, &selection, fallback, &*clock)
+                initialize_fork(
+                    tx, source, &target, boundary, &selection, fallback, &timestamp,
+                )
             })
             .await?;
         self.rebuild_agent_history(&destination)

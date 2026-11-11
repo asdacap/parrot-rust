@@ -48,15 +48,13 @@ impl EventRepository {
                     })
                     .await?;
                 let database = self.database().clone();
-                let context = self.context().clone();
                 let runtime = tokio::runtime::Handle::try_current()
                     .map_err(|error| EventError::Invalid(error.to_string()))?;
                 Ok::<_, EventError>(Arc::new(UserSessionStatistics::new(replay, move |event| {
                     let event = event.clone();
-                    let context = context.clone();
                     let ticket = database
                         .admit_with_error((), &NeverCancelled, move |tx| {
-                            statistics::append_usage_fact(tx, &event, context.timestamp.as_ref())
+                            statistics::append_usage_fact(tx, &event, &timestamp)
                         })
                         .map_err(|error| -> StatisticsError {
                             Box::new(match error {

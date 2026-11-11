@@ -1,5 +1,7 @@
 use super::*;
-use crate::events::{Admission, AdmittedInput, NeverCancelled, Promotion, ToolExecutionTerminal};
+use crate::events::{
+    Admission, AdmittedInput, NeverCancelled, Promotion, ToolExecutionTerminal, timestamp,
+};
 use parrot_core::StatusStanding;
 use parrot_domain::protocol::messages::parrot::{Delivery, Event, RequestUsageRecorded};
 
@@ -59,18 +61,12 @@ impl ConversationRepository {
     ) -> Result<ConversationItem, EventError> {
         self.validate(&event.agent_session_id)?;
         let agent = event.agent_session_id.clone();
-        let context = self.events.context().clone();
         let projected_agent = agent.clone();
         let item = self
             .events
             .transaction(move |tx| {
-                crate::events::record(tx, &event, None, &(context.timestamp)())?;
-                crate::events::projection::project(
-                    tx,
-                    &projected_agent,
-                    &message,
-                    &(context.timestamp)(),
-                )
+                crate::events::record(tx, &event, None, &timestamp())?;
+                crate::events::projection::project(tx, &projected_agent, &message, &timestamp())
             })
             .await?;
         self.refresh_agent_history(&agent).await?;

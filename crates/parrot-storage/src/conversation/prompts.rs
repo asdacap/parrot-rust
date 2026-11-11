@@ -3,14 +3,13 @@ use super::{
     ConversationItem, ConversationMessage, ConversationOrigin, ConversationRepository, EventError,
     MessageRole,
 };
-use crate::events::{RepositoryContext, projection, record};
+use crate::events::{projection, record, timestamp};
 use parrot_core::StatusStanding;
 use parrot_domain::protocol::messages::parrot::Event;
 use rusqlite::{OptionalExtension, Transaction, params};
 
 fn project_system(
     tx: &Transaction<'_>,
-    context: &RepositoryContext,
     agent: &str,
     content: String,
 ) -> Result<ConversationItem, EventError> {
@@ -18,7 +17,7 @@ fn project_system(
         tx,
         agent,
         &ConversationMessage::text(MessageRole::System, content),
-        &(context.timestamp)(),
+        &timestamp(),
     )
 }
 impl ConversationRepository {
@@ -59,11 +58,10 @@ impl ConversationRepository {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
         let refresh_agent = agent.clone();
-        let context = self.events.context().clone();
         let record = standing_record(&standing)?;
         self.events
             .transaction(move |tx| {
-                let item = project_system(tx, &context, &agent, content)?;
+                let item = project_system(tx, &agent, content)?;
                 tx.execute(
                     "UPDATE conversation_item SET status_slots = ?1 WHERE sequence = ?2;",
                     params![record, item.sequence],
@@ -81,9 +79,8 @@ impl ConversationRepository {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
         let refresh_agent = agent.clone();
-        let context = self.events.context().clone();
         self.events
-            .transaction(move |tx| project_system(tx, &context, &agent, content))
+            .transaction(move |tx| project_system(tx, &agent, content))
             .await?;
         self.refresh_agent_history(&refresh_agent).await
     }
@@ -95,18 +92,12 @@ impl ConversationRepository {
     ) -> Result<(), EventError> {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id.clone();
-        let context = self.events.context().clone();
         self.events
             .transaction(move |tx| {
-                record(tx, &published, None, &(context.timestamp)())?;
+                record(tx, &published, None, &timestamp())?;
                 assistant.origin = ConversationOrigin::Model;
-                projection::project(
-                    tx,
-                    &published.agent_session_id,
-                    &assistant,
-                    &(context.timestamp)(),
-                )?;
-                project_system(tx, &context, &published.agent_session_id, reminder)?;
+                projection::project(tx, &published.agent_session_id, &assistant, &timestamp())?;
+                project_system(tx, &published.agent_session_id, reminder)?;
                 Ok(())
             })
             .await?;
@@ -120,14 +111,13 @@ impl ConversationRepository {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
         let refresh_agent = agent.clone();
-        let context = self.events.context().clone();
         let appended = self
             .events
             .transaction(move |tx| {
                 if projection::read_latest_final_phase(tx, &agent)? {
                     return Ok(false);
                 }
-                let item = project_system(tx, &context, &agent, content)?;
+                let item = project_system(tx, &agent, content)?;
                 tx.execute(
                     "UPDATE conversation_item SET final_phase = 1 WHERE sequence = ?1;",
                     [item.sequence],
@@ -148,14 +138,13 @@ impl ConversationRepository {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
         let refresh_agent = agent.clone();
-        let context = self.events.context().clone();
         let appended = self
             .events
             .transaction(move |tx| {
                 if !projection::read_latest_final_phase(tx, &agent)? {
                     return Ok(false);
                 }
-                let item = project_system(tx, &context, &agent, content)?;
+                let item = project_system(tx, &agent, content)?;
                 tx.execute(
                     "UPDATE conversation_item SET final_phase = 0 WHERE sequence = ?1;",
                     [item.sequence],
