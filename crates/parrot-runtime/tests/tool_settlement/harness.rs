@@ -1,3 +1,5 @@
+use parrot_storage::conversation::ConversationOrigin;
+
 use super::*;
 
 pub struct ContextPublisher(pub AgentHistoryView);
@@ -34,7 +36,9 @@ impl ContextEvents for ContextPublisher {
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, ContextResult<()>> {
         Box::pin(async move {
-            self.0.append(event, None, None).await?;
+            self.0
+                .append_message(event, None, ConversationOrigin::Model)
+                .await?;
             Ok(())
         })
     }

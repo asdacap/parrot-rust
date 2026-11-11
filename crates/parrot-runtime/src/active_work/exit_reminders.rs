@@ -9,7 +9,7 @@ use parrot_domain::contracts::storage::Committed;
 use parrot_domain::protocol::messages::parrot::{AgentNotice, Event, ExitReminderChanged};
 use parrot_domain::values::identifiers::Identifier;
 use parrot_foundation::{config::ConfigError, template_catalog::PromptTemplateCatalog};
-use parrot_storage::conversation::{AgentHistoryView, EventError};
+use parrot_storage::conversation::{AgentHistoryView, ConversationOrigin, EventError};
 use parrot_storage::events::NeverCancelled;
 use protobuf::Message;
 use tokio::sync::Mutex;
@@ -235,7 +235,7 @@ impl<P: EventPublisher<Event = Event> + ?Sized> ExitReminders<P> {
         // EventRepository actor transaction's durable completion and does not
         // perform a derived-file projection afterward. Only then attest commit.
         self.history
-            .append(event.clone(), None, None)
+            .append_message(event.clone(), None, ConversationOrigin::Model)
             .await
             .map_err(ReminderError::Storage)?;
         Ok(Committed::after_commit(event))

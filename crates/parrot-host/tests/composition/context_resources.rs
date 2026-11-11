@@ -1,6 +1,6 @@
 use super::*;
 use parrot_runtime::agent_turn::usage::SessionUsageRecorder;
-use parrot_storage::conversation::AgentConversation;
+use parrot_storage::conversation::{AgentConversation, ConversationOrigin};
 
 pub(super) struct BorrowedContextResources {
     pub snapshot: ToolSnapshot<Security>,
@@ -100,7 +100,9 @@ impl ContextEvents for ContextPublisher {
     ) -> BoxFuture<'a, ContextResult<()>> {
         Box::pin(async move {
             cancellation.check().map_err(|_| ContextError::Cancelled)?;
-            self.history.append(event.clone(), None, None).await?;
+            self.history
+                .append_message(event.clone(), None, ConversationOrigin::Model)
+                .await?;
             self.publish_committed(Committed::after_commit(event), cancellation)
                 .await
         })

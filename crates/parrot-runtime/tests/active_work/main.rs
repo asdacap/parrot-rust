@@ -30,7 +30,7 @@ use parrot_runtime::active_work::exit_reminders::{
     CHANGED_NOTICE_KIND, ExitReminders, ReminderError,
 };
 use parrot_runtime::event_broker::{BrokerError, EventBroker};
-use parrot_storage::conversation::{AgentHistoryView, ConversationRepository};
+use parrot_storage::conversation::{AgentHistoryView, ConversationOrigin, ConversationRepository};
 use parrot_storage::database::SessionDatabase;
 use parrot_storage::events::{EventRepository, NeverCancelled};
 use parrot_storage::history_files::{AgentHistoryFile, SessionIndex, SessionMeta};
@@ -205,7 +205,10 @@ async fn append_notice(
         data,
         ..AgentNotice::new()
     });
-    repository.append(event, None, None).await.unwrap();
+    repository
+        .append_message(event, None, ConversationOrigin::Model)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

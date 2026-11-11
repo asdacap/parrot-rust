@@ -3,6 +3,7 @@
 use super::*;
 use parrot_domain::values::accounting::AgentUsageTotals;
 use parrot_provider::catalogs::ModelMetadataFields;
+use parrot_storage::conversation::ConversationOrigin;
 
 #[derive(Clone)]
 struct ReminderBindings {
@@ -58,7 +59,9 @@ impl CompletionStateSource for ReminderCompletion {
                 notice: feedback.message.clone(),
                 ..Default::default()
             });
-            self.history.append(event.clone(), None, None).await?;
+            self.history
+                .append_message(event.clone(), None, ConversationOrigin::Model)
+                .await?;
             publisher
                 .publish_committed(&Committed::after_commit(event), cancellation)
                 .await

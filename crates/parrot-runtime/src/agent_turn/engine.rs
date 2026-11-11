@@ -357,7 +357,9 @@ where
         }
     }
     async fn emit(&self, event: Event, cancellation: &dyn Cancellation) -> Result<(), TurnError> {
-        self.history.append(event.clone(), None, None).await?;
+        self.history
+            .append_message(event.clone(), None, ConversationOrigin::Model)
+            .await?;
         self.publish(event, cancellation).await
     }
     async fn publish(
@@ -542,7 +544,9 @@ impl<'a> ContextEmitter<'a> {
         }
     }
     async fn emit(&self, event: Event, cancellation: &dyn Cancellation) -> Result<(), TurnError> {
-        self.history.append(event.clone(), None, None).await?;
+        self.history
+            .append_message(event.clone(), None, ConversationOrigin::Model)
+            .await?;
         self.publisher
             .publish_committed(&Committed::after_commit(event), cancellation)
             .await

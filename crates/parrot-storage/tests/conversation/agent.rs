@@ -539,21 +539,10 @@ async fn bound_views_share_actual_statistics_cache_and_do_not_refresh_for_unproj
         .unwrap();
     assert!(Arc::ptr_eq(&base, &bound));
     history
-        .append(event("fact", "agent"), None, None)
+        .append_message(event("fact", "agent"), None, ConversationOrigin::Model)
         .await
         .unwrap();
     assert!(projection.entries_seen.lock().unwrap().is_empty());
-    assert_eq!(repo.events().replay().await.unwrap().len(), 1);
-    assert!(
-        history
-            .append(
-                event("invalid-role", "agent"),
-                Some("tool".into()),
-                Some("text".into())
-            )
-            .await
-            .is_err()
-    );
     assert_eq!(repo.events().replay().await.unwrap().len(), 1);
     repo.events().database().close().await.unwrap();
 }
